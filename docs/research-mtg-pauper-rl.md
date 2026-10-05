@@ -61,6 +61,45 @@ The literature is thinner than for Go, poker or Hearthstone. Most work covers dr
 - Deckbuilding with a genetic algorithm, Master's thesis, NTNU (2017).
 - Vieira, Chaimowicz & Tavares, *Reinforcement Learning in Collectible Card Games: Preliminary Results on Legends of Code and Magic* (SBGames 2019). [PDF](https://www.sbgames.org/sbgames2019/files/papers/ComputacaoShort/198299.pdf)
 
+### Beyond MTG: methods for the roadmap
+Grouped by the open problems in this project (search targets, expensive `fork()`, masked PPO, bigger trunk). ★ = read first.
+
+**Search under hidden information** (for `view.determinize()` + search targets)
+- Long, Sturtevant, Buro & Furtak (2010), *Understanding the Success of Perfect Information Monte Carlo Sampling in Game Tree Search*, AAAI. Explains when determinization breaks (strategy fusion, non-locality).
+- Cowling, Powley & Whitehouse (2012), *Information Set Monte Carlo Tree Search*, IEEE TCIAIG. The standard successor to ensemble determinization.
+- ★ Brown, Bakhtin, Lerer & Gong (2020), *Combining Deep Reinforcement Learning and Search for Imperfect-Information Games* (ReBeL). [arXiv:2007.13544](https://arxiv.org/abs/2007.13544)
+- Schmid et al. (2023), *Student of Games*, Science. [arXiv:2112.03178](https://arxiv.org/abs/2112.03178)
+
+**Sample-efficient search distillation** (cheap search when `fork()` is expensive)
+- Anthony, Tian & Barber (2017), *Thinking Fast and Slow with Deep Learning and Tree Search* (Expert Iteration). [arXiv:1705.08439](https://arxiv.org/abs/1705.08439)
+- ★ Danihelka, Guez, Schrittwieser & Silver (2022), *Policy Improvement by Planning with Gumbel* (Gumbel MuZero), ICLR. [OpenReview](https://openreview.net/forum?id=bERaNdoegnO) — guaranteed policy improvement with very few simulations.
+- Hubert et al. (2021), *Learning and Planning in Complex Action Spaces* (Sampled MuZero). [arXiv:2104.06303](https://arxiv.org/abs/2104.06303)
+
+**Card games with large action spaces**
+- Zha et al. (2021), *DouZero: Mastering DouDizhu with Self-Play Deep RL*, ICML. [arXiv:2106.06135](https://arxiv.org/abs/2106.06135) — action encoding comparable to `Option.key`.
+- ★ Guan et al. (2022), *PerfectDou: Dominating DouDizhu with Perfect Information Distillation*. [arXiv:2203.16406](https://arxiv.org/abs/2203.16406) — critic sees hidden cards during training only; cheap win for the value head.
+- Li et al. (2020), *Suphx: Mastering Mahjong with Deep RL* (oracle guiding). [arXiv:2003.13590](https://arxiv.org/abs/2003.13590)
+- *Learning to Beat ByteRL: Exploitability of Collectible Card Game Agents* (2024). [arXiv:2404.16689](https://arxiv.org/abs/2404.16689) — exploitability as an evaluation lens.
+
+**PPO practice**
+- Huang & Ontañón (2020), *A Closer Look at Invalid Action Masking in Policy Gradient Algorithms*. [arXiv:2006.14171](https://arxiv.org/abs/2006.14171)
+- Huang et al. (2022), *The 37 Implementation Details of Proximal Policy Optimization*, ICLR Blog Track. [blog](https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/)
+- Andrychowicz et al. (2021), *What Matters in On-Policy RL? A Large-Scale Empirical Study*. [arXiv:2006.05990](https://arxiv.org/abs/2006.05990)
+
+**Self-play populations, opponent modelling, architecture**
+- Vinyals et al. (2019), *Grandmaster level in StarCraft II using multi-agent RL* (AlphaStar), Nature — league training; transformer entity encoder.
+- Berner et al. (2019), *Dota 2 with Large Scale Deep RL* (OpenAI Five). [arXiv:1912.06680](https://arxiv.org/abs/1912.06680)
+- Heinrich & Silver (2016), *Deep RL from Self-Play in Imperfect-Information Games* (NFSP). [arXiv:1603.01121](https://arxiv.org/abs/1603.01121)
+- Lanctot et al. (2017), *A Unified Game-Theoretic Approach to Multiagent RL* (PSRO). [arXiv:1711.00832](https://arxiv.org/abs/1711.00832)
+- He et al. (2016), *Opponent Modeling in Deep RL* (DRON). [arXiv:1609.05559](https://arxiv.org/abs/1609.05559) — background for the opponent-action head.
+
+**Talks** (no substantive MTG-specific RL videos found)
+- ★ Noam Brown, *ReBeL* (Simons Institute). [YouTube](https://www.youtube.com/watch?v=-b33wavGOOw)
+- David Silver, UCL RL course — [L7 Policy Gradient](https://www.youtube.com/watch?v=KHZVXao4qXs), [L8 Integrating Learning and Planning](https://www.youtube.com/watch?v=ItMutbeOHtc), [L10 Classic Games](https://www.youtube.com/watch?v=kZ_AUmFcZtk) ([playlist](https://www.youtube.com/playlist?list=PLqYmG7hTraZDM-OYHWgPebj2MfCFzFObQ)).
+- *PPO Implementation: 11 Core Implementation Details*. [YouTube](https://www.youtube.com/watch?v=MEt6rrxH8W4)
+- *MuZero* paper walkthrough. [YouTube](https://www.youtube.com/watch?v=We20YSAJZSE)
+- AlphaStar league training [explainer](https://www.youtube.com/watch?v=BTLCdge7uSQ); Oriol Vinyals, *From AlphaGo to AlphaStar and beyond* [Part I](https://www.youtube.com/watch?v=IjZLZSZxvIs).
+
 ### Assessment of the two most promising sources
 - **MTG-Causal-RL:** use as a **blueprint**, not as the engine. Copy:
   - action design (478 actions across 16 categories, typically ~15 legal at a time, masked),
