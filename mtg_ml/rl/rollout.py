@@ -9,16 +9,17 @@ Each (game, seat) carries its own recurrent state and the events it saw
 since its last decision. Every recorded player trajectory gets terminal reward +1 / -1 / 0 plus
 optional potential-based life shaping, then GAE.
 
-Workers run on CPU with one torch thread each; checkpoints are loaded from
-disk and cached per process (pool checkpoints never change, the learner is
-keyed by its version).
+Policies are evaluated either in the worker (`inference="local"`: a CPU
+copy of each network, one torch thread; checkpoints are loaded from disk and
+cached per process, pool checkpoints never change, the learner is keyed by
+its version), or by the central GPU server (`inference="server"`,
+`rl/inference.py`), in which case the worker never imports torch and keeps
+two groups of games in flight so its CPU work overlaps the server round trip.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
-import torch
 
 from ..agents import RandomAgent
 from ..bots import make_bot
@@ -26,7 +27,6 @@ from ..backend import game_class
 from ..engine import Game
 from ..match import match_decks
 from .features import encode_event_hashes, event_hashes, featurize
-from .model import PolicyNet, collate
 
 LEARNER = "learner"
 RANDOM = "random"
@@ -34,7 +34,7 @@ BOT = "bot"
 SCRIPTED = (RANDOM, BOT)
 
 _DECKS: dict[int, tuple] = {}
-_MODELS: dict[tuple, PolicyNet] = {}
+_MODELS: dict[tuple, object] = {}
 
 
 def _decks(match_game: int = 1):
@@ -45,7 +45,11 @@ def _decks(match_game: int = 1):
     return _DECKS[key]
 
 
-def load_policy(path: str, version: int = 0) -> PolicyNet:
+def load_policy(path: str, version: int = 0):
+    import torch
+
+    from .model import PolicyNet
+
     key = (path, version)
     if key not in _MODELS:
         if version:  # drop older learner versions
@@ -60,6 +64,8 @@ def load_policy(path: str, version: int = 0) -> PolicyNet:
 
 
 def worker_init() -> None:
+    import torch
+
     torch.set_num_threads(1)
 
 
@@ -82,6 +88,8 @@ class Job:
     shaping: float = 0.0
     max_turns: int = 100
     engine: str | None = None  # None: $MTG_ENGINE, else python
+    inference: str = "local"  # "local": CPU torch in the worker; "server": the central inference server
+    groups: int = 2  # server mode: requests in flight per worker (its games are split into this many groups)
 
 
 @dataclass
@@ -155,10 +163,80 @@ def _step(g: Game, seats: tuple[_Seat, _Seat], a: int) -> None:
     g.step(a)
 
 
-@torch.no_grad()
+class _LocalEvaluator:
+    """Runs the policies in this process (CPU torch), hidden states per (game, seat)."""
+
+    def __init__(self, job: Job):
+        import torch
+
+        self.torch = torch
+        self.learner = load_policy(job.learner_path, job.learner_version)
+        self.hidden: dict = {}
+
+    def submit(self, group: int, items: list):
+        from .model import collate
+
+        torch = self.torch
+        acts_out, logp_out, val_out = [0] * len(items), [0.0] * len(items), [0.0] * len(items)
+        by_pol: dict = {}
+        for k, it in enumerate(items):
+            by_pol.setdefault(it[0], []).append(k)
+        with torch.no_grad():
+            for pol, ks in by_pol.items():
+                net = self.learner if pol == LEARNER else load_policy(pol)
+                hidden = None
+                if net.memory != "none":
+                    hs = [self.hidden.get((items[k][1], items[k][2])) for k in ks]
+                    hidden = torch.stack([net.initial_state(1)[0] if h is None else h for h in hs])
+                logits, values, hn = net(collate([items[k][3] for k in ks]), hidden)
+                dist = torch.distributions.Categorical(logits=logits)
+                acts = dist.sample()
+                logps = dist.log_prob(acts)
+                for r, k in enumerate(ks):
+                    if hn is not None:
+                        self.hidden[(items[k][1], items[k][2])] = hn[r]
+                    acts_out[k], logp_out[k], val_out[k] = int(acts[r]), float(logps[r]), float(values[r])
+        return acts_out, logp_out, val_out
+
+    def collect(self, handle):
+        return handle
+
+
+class _ServerEvaluator:
+    """Sends decisions to the central inference server (rl/inference.py)."""
+
+    def __init__(self, job: Job):
+        from .inference import client
+
+        self.client = client()
+        self.learner_key = (job.learner_path, job.learner_version)
+        self.started: set = set()
+
+    def submit(self, group: int, items: list):
+        rows = []
+        for pol, i, p, x in sorted(items, key=lambda it: it[0]):
+            key = self.learner_key if pol == LEARNER else (pol, 0)
+            fresh = (i, p) not in self.started
+            self.started.add((i, p))
+            rows.append((key, 2 * i + p, int(fresh), x[0], x[1], x[2]))
+        order = sorted(range(len(items)), key=lambda k: items[k][0])
+        return self.client.submit(group, rows), order
+
+    def collect(self, handle):
+        h, order = handle
+        acts, logps, vals = self.client.collect(h)
+        n = len(order)
+        a, lp, v = [0] * n, [0.0] * n, [0.0] * n
+        for r, k in enumerate(order):
+            a[k], lp[k], v[k] = acts[r], logps[r], vals[r]
+        return a, lp, v
+
+
 def run_job(job: Job) -> Result:
-    learner = load_policy(job.learner_path, job.learner_version)
     Game = game_class(job.engine)
+    if 2 * len(job.games) > 8192:
+        raise ValueError("a job holds at most 4096 games")
+    ev = _ServerEvaluator(job) if job.inference == "server" else _LocalEvaluator(job)
     games, trajs, mem, scripted = [], [], [], {}
     for i, spec in enumerate(job.games):
         games.append(
@@ -172,56 +250,69 @@ def run_job(job: Job) -> Result:
             elif pol == BOT:
                 scripted[(i, seat)] = make_bot(seat)
     out = Result()
-    live = [i for i, g in enumerate(games) if not g.over]
-    while live:
-        pending: dict[str, list[tuple[int, int, tuple]]] = {}
-        for i in live:
+    n_groups = max(1, min(job.groups, len(games))) if job.inference == "server" else 1
+    groups = [[i for i in range(len(games)) if i % n_groups == k] for k in range(n_groups)]
+    inflight: list = [None] * n_groups  # (handle, items) per group
+
+    def finish(i: int) -> None:
+        g, spec = games[i], job.games[i]
+        out.games.append((spec.seats, g.winner, g.end_reason, g.turn, len(g.actions), spec.seed))
+        if job.record:
+            for p in (0, 1):
+                if spec.seats[p] == LEARNER:
+                    outcome = 0.0 if g.winner is None else (1.0 if g.winner == p else -1.0)
+                    _finish(trajs[i][p], outcome, job, out)
+        trajs[i] = mem[i] = None
+
+    def prepare(k: int) -> list:
+        """Play scripted moves until each live game of group k needs a policy; featurize those."""
+        items, live = [], []
+        for i in groups[k]:
             g = games[i]
-            p = g.decision.player
-            pol = job.games[i].seats[p]
-            if pol in SCRIPTED:
+            while not g.over:
+                p = g.decision.player
+                pol = job.games[i].seats[p]
+                if pol not in SCRIPTED:
+                    break
                 _step(g, mem[i], scripted[(i, p)].act(g))
+            if g.over:
+                finish(i)
                 continue
+            live.append(i)
             seat = mem[i][p]
             state, opts = featurize(g, p)
             x = (state, opts, encode_event_hashes(seat.events))
             seat.events = []
-            pending.setdefault(pol, []).append((i, p, x))
-        for pol, items in pending.items():
-            net = learner if pol == LEARNER else load_policy(pol)
-            hs = [mem[i][p].hidden for i, p, _ in items]
-            hidden = None if net.memory == "none" else torch.stack([net.initial_state(1)[0] if h is None else h for h in hs])
-            logits, values, hn = net(collate([x for _, _, x in items]), hidden)
-            dist = torch.distributions.Categorical(logits=logits)
-            acts = dist.sample()
-            logps = dist.log_prob(acts)
-            for k, (i, p, x) in enumerate(items):
-                g, a = games[i], int(acts[k])
-                if hn is not None:
-                    mem[i][p].hidden = hn[k]
-                if job.record and pol == LEARNER:
-                    tr = trajs[i][p]
-                    tr.samples.append(x)
-                    tr.actions.append(a)
-                    tr.logps.append(float(logps[k]))
-                    tr.values.append(float(values[k]))
-                    tr.potentials.append(_potential(g, p))
-                _step(g, mem[i], a)
-        still = []
-        for i in live:
-            g = games[i]
-            if not g.over:
-                still.append(i)
-                continue
-            spec = job.games[i]
-            out.games.append((spec.seats, g.winner, g.end_reason, g.turn, len(g.actions), spec.seed))
-            if job.record:
-                for p in (0, 1):
-                    if spec.seats[p] == LEARNER:
-                        outcome = 0.0 if g.winner is None else (1.0 if g.winner == p else -1.0)
-                        _finish(trajs[i][p], outcome, job, out)
-            trajs[i] = mem[i] = None
-        live = still
+            pot = _potential(g, p) if job.record and pol == LEARNER else 0.0
+            items.append((pol, i, p, x, pot))
+        groups[k] = live
+        return items
+
+    def apply(k: int) -> None:
+        handle, items = inflight[k]
+        acts, logps, values = ev.collect(handle)
+        for (pol, i, p, x, pot), a, lp, v in zip(items, acts, logps, values):
+            if job.record and pol == LEARNER:
+                tr = trajs[i][p]
+                tr.samples.append(x)
+                tr.actions.append(a)
+                tr.logps.append(lp)
+                tr.values.append(v)
+                tr.potentials.append(pot)
+            _step(games[i], mem[i], a)
+        inflight[k] = None
+
+    while True:
+        busy = False
+        for k in range(n_groups):
+            if inflight[k] is not None:
+                apply(k)
+            items = prepare(k)
+            if items:
+                inflight[k] = (ev.submit(k, [it[:4] for it in items]), items)
+                busy = True
+        if not busy and all(f is None for f in inflight):
+            break
     return out
 
 

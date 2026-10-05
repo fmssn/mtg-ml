@@ -113,8 +113,9 @@ class PolicyNet(nn.Module):
         out, _ = pad_packed_sequence(self.gru(packed)[0], batch_first=True)
         return torch.cat([out[i, :n] for i, n in enumerate(lengths)]), None
 
-    def forward(self, b: Batch, hidden: torch.Tensor | None = None, lengths: list[int] | None = None):
-        """Returns (logits (B, max_opts), values (B,), new hidden (B, H) or None)."""
+    def forward(self, b: Batch, hidden: torch.Tensor | None = None, lengths: list[int] | None = None, max_options: int | None = None):
+        """Returns (logits (B, max_opts), values (B,), new hidden (B, H) or None).
+        `max_options` (= n_opts.max()) can be passed to avoid a device sync."""
         s = self.trunk(self.state_emb(b.s_idx, b.s_off))
         e = self.event_emb(b.e_idx, b.e_off)
         z, hn = self._memory(torch.cat([s, e], dim=-1), hidden, lengths)
@@ -122,7 +123,8 @@ class PolicyNet(nn.Module):
         a = self.option_mlp(self.option_emb(b.o_idx, b.o_off))
         cr = c[b.o_row]
         scores = self.scorer(torch.cat([cr, a, cr * a], dim=-1)).squeeze(-1)
-        logits = torch.full((c.shape[0], int(b.n_opts.max())), float("-inf"), device=c.device, dtype=scores.dtype)
+        width = int(b.n_opts.max()) if max_options is None else max_options
+        logits = torch.full((c.shape[0], width), float("-inf"), device=c.device, dtype=scores.dtype)
         logits[b.o_row, b.o_pos] = scores
         return logits, self.value_head(c).squeeze(-1), hn
 
