@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 from .mana import ManaCost
 from .objects import (
     CHOOSE_CARD,
@@ -13,6 +15,7 @@ from .objects import (
     AbilityDef,
     CardDef,
     Option,
+    SpellMode,
     TargetSpec,
     TempEffect,
     TriggerDef,
@@ -152,6 +155,7 @@ def _delver_upkeep(g, item):
 _aberration = card(
     "Insectile Aberration", None, "Creature", "Human Insect", text="Flying", power=3, toughness=2, keywords=frozenset({"flying"}), registry={}
 )
+_aberration = dataclasses.replace(_aberration, colors=frozenset({"U"}))  # blue colour indicator
 card(
     "Delver of Secrets",
     "{U}",
@@ -584,6 +588,83 @@ card(
     power=2,
     toughness=1,
     triggers=(TriggerDef("+1/+1 counter", "you_sacrifice_another", _add_counter_to_source),),
+)
+
+# ---------------------------------------------------------------------------
+# Sideboards (lean, matchup-relevant; see decks.py)
+# ---------------------------------------------------------------------------
+
+
+def _counter_target(g, item):
+    t = g.target(item)
+    if t is not None:
+        g.counter(t)
+
+
+card(
+    "Red Elemental Blast",
+    "{R}",
+    "Instant",
+    text="Choose one - Counter target blue spell; or destroy target blue permanent.",
+    modes=(
+        SpellMode("counter", (T("blue_spell"),), _counter_target),
+        SpellMode("destroy", (T("blue_permanent"),), _destroy_target),
+    ),
+)
+card(
+    "Blue Elemental Blast",
+    "{U}",
+    "Instant",
+    text="Choose one - Counter target red spell; or destroy target red permanent.",
+    modes=(
+        SpellMode("counter", (T("red_spell"),), _counter_target),
+        SpellMode("destroy", (T("red_permanent"),), _destroy_target),
+    ),
+)
+card("Go for the Throat", "{1}{B}", "Instant", text="Destroy target creature that isn't an artifact creature.", targets=(T("nonartifact_creature"),), effect=_destroy_target)
+
+
+def _duress(g, item):
+    t = g.target(item)
+    if t is None:
+        return
+    victim = g.players[t[1]]
+    for c in victim.hand:
+        c.known_to = {0, 1}
+    g._log(f"p{victim.idx} reveals {[c.name for c in victim.hand]}")
+    cands = g._dedupe_by_name(c for c in victim.hand if not c.face.is_type("Creature") and not c.face.is_type("Land"))
+    if not cands:
+        return
+    c = yield from g.ask(item.controller, CHOOSE_CARD, "Duress: choose a card to discard", [Option(f"Discard {c.name}", ("duress", c.name), c) for c in cands])
+    g.discard(c)
+
+
+card(
+    "Duress",
+    "{B}",
+    "Sorcery",
+    text="Target opponent reveals their hand. You choose a noncreature, nonland card from it. That player discards that card.",
+    targets=(T("opponent"),),
+    effect=_duress,
+)
+card("Dispel", "{U}", "Instant", text="Counter target instant spell.", targets=(T("instant_spell"),), effect=_counter_target)
+
+
+def _bounce_artifact(g, item):
+    t = g.target(item)
+    if t is not None:
+        g._move(t, "hand")
+
+
+card(
+    "Steel Sabotage",
+    "{U}",
+    "Instant",
+    text="Choose one - Counter target artifact spell; or return target artifact to its owner's hand.",
+    modes=(
+        SpellMode("counter", (T("artifact_spell"),), _counter_target),
+        SpellMode("bounce", (T("artifact"),), _bounce_artifact),
+    ),
 )
 
 # ---------------------------------------------------------------------------

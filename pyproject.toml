@@ -7,6 +7,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+rl = ["torch>=2.2"]
 
 [build-system]
 requires = ["setuptools>=68"]

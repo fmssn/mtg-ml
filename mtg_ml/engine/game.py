@@ -73,6 +73,8 @@ class Game:
         log: bool = False,
         setup: Callable[["Game"], None] | None = None,
         start_step: str = "untap",
+        mulligans: bool = True,
+        match_game: int = 1,
     ):
         from .cards import CARDS  # local import: cards module imports engine helpers
 
@@ -85,7 +87,10 @@ class Game:
             log=log,
             setup=setup,
             start_step=start_step,
+            mulligans=mulligans,
+            match_game=match_game,
         )
+        self.match_game = match_game  # 1 = preboard, 2/3 = after sideboarding
         self.cards_db = CARDS
         self.rng = random.Random(seed)
         self.auto_single = auto_single
@@ -124,6 +129,8 @@ class Game:
         else:
             setup(self)
         self._skip_first_draw = setup is None
+        self._mulligan_phase = setup is None and mulligans
+        self.mulligans_taken = [0, 0]
         self._gen = self._main(start_step)
         self._advance(None)
 
@@ -228,7 +235,42 @@ class Game:
     # Turn structure
     # ------------------------------------------------------------------
 
+    def _mulligans(self):
+        """London mulligan (CR 103.5) for a two-player game, no free mulligan.
+
+        Starting with the starting player, each player keeps or mulligans;
+        everyone who mulliganed shuffles their hand into their library, draws
+        seven and decides again. Once all have kept, each player puts one card
+        per mulligan taken on the bottom of their library."""
+        self.step_name = "mulligan"
+        order = [self.starting_player, 1 - self.starting_player]
+        deciding = list(order)
+        while deciding:
+            again = []
+            for p in deciding:
+                n = self.mulligans_taken[p]
+                options = [Option(f"Keep ({7 - n} cards)", ("mulligan", "keep"), False)]
+                if n < 6:
+                    options.append(Option(f"Mulligan (to {6 - n})", ("mulligan", "mulligan"), True))
+                if (yield from self.ask(p, O.MULLIGAN, f"Opening hand, {n} mulligan(s) taken: keep {7 - n}?", options)):
+                    again.append(p)
+            for p in again:
+                self.mulligans_taken[p] += 1
+                self._log(f"p{p} mulligans ({self.mulligans_taken[p]})")
+                for c in list(self.players[p].hand):
+                    self._move(c, "library", position="bottom")
+                self.shuffle(p)
+                self.draw(p, 7, count=False)
+            deciding = again
+        for p in order:
+            n = self.mulligans_taken[p]
+            for i in range(n):
+                c = yield from self.ask(p, O.CHOOSE_CARD, f"Mulligan: put a card on the bottom of your library ({i + 1}/{n})", self._hand_card_options(p, "bottom"))
+                self._move(c, "library", position="bottom", known_to={p})
+
     def _main(self, start_step: str):
+        if self._mulligan_phase:
+            yield from self._mulligans()
         first = True
         while True:
             self.turn += 1
@@ -360,6 +402,11 @@ class Game:
             for card in self._dedupe_by_name(c for c in pl.hand if c.face.is_type("Land")):
                 opts.append(Option(f"Play {card.name}", ("play_land", card.name), ("land", card)))
         for card in self._dedupe_by_name(pl.hand):
+            for i, sm in enumerate(card.face.modes):
+                if self._can_cast(p, card, "normal", i):
+                    opts.append(Option(f"Cast {card.name} ({sm.name})", ("cast", card.name, "hand", "normal", sm.name), ("cast", card, "normal", i)))
+            if card.face.modes:
+                continue
             for mode in ("normal", "bestow"):
                 if self._can_cast(p, card, mode):
                     label = f"Cast {card.name}" + ("" if mode == "normal" else f" ({mode})")
@@ -392,7 +439,7 @@ class Game:
             self._log(f"p{p} plays {card.name}")
             self.put_onto_battlefield(card, p)
         elif kind == "cast":
-            yield from self._cast(p, act[1], act[2])
+            yield from self._cast(p, act[1], act[2], act[3] if len(act) > 3 else None)
         elif kind == "activate":
             yield from self._activate(p, act[1], act[2])
         elif kind == "mana":
@@ -779,8 +826,10 @@ class Game:
         k = spec.kind
         if k == "player":
             return [("player", controller), ("player", 1 - controller)]
-        if k == "spell":
-            return [("stack", it.sid) for it in self.stack if it.kind == "spell" and it.sid != exclude_sid]
+        if k == "opponent":
+            return [("player", 1 - controller)]
+        if k.endswith("spell"):
+            return [("stack", it.sid) for it in self.stack if it.kind == "spell" and it.sid != exclude_sid and self._spell_matches(spec, it)]
         out = []
         for c in self.battlefield:
             if self._perm_matches(spec, c, controller):
@@ -801,16 +850,39 @@ class Game:
             return self.is_land(c)
         if k == "nonland_permanent":
             return not self.is_land(c)
+        if k == "nonartifact_creature":
+            return self.is_creature(c) and not self.is_artifact(c)
+        if k == "artifact":
+            return self.is_artifact(c)
+        if k == "blue_permanent":
+            return "U" in c.face.colors
+        if k == "red_permanent":
+            return "R" in c.face.colors
+        return False
+
+    def _spell_matches(self, spec: TargetSpec, it: StackItem) -> bool:
+        d = it.card.face
+        k = spec.kind
+        if k == "spell":
+            return True
+        if k == "blue_spell":
+            return "U" in d.colors
+        if k == "red_spell":
+            return "R" in d.colors
+        if k == "instant_spell":
+            return d.is_type("Instant")
+        if k == "artifact_spell":
+            return d.is_type("Artifact")
         return False
 
     def target_legal(self, item: StackItem, i: int) -> bool:
         spec = item.target_specs[i]
         ref = item.targets[i]
         if ref[0] == "player":
-            return spec.kind in ("player", "any")
+            return spec.kind in ("player", "any") or (spec.kind == "opponent" and ref[1] != item.controller)
         if ref[0] == "stack":
             it = self.stack_item(ref[1])
-            return it is not None and it.kind == "spell" and spec.kind == "spell"
+            return it is not None and it.kind == "spell" and spec.kind.endswith("spell") and self._spell_matches(spec, it)
         c = self.perm(ref[1])
         return c is not None and self._perm_matches(spec, c, item.controller)
 
@@ -1000,16 +1072,18 @@ class Game:
             return d.escape
         return None
 
-    def _mode_targets(self, card: Card, mode: str) -> tuple[TargetSpec, ...]:
+    def _mode_targets(self, card: Card, mode: str, choice: int | None = None) -> tuple[TargetSpec, ...]:
         if mode == "bestow":
             return (TargetSpec("creature"),)
+        if choice is not None:
+            return card.face.modes[choice].targets
         return card.face.targets
 
     def _cost_reduction(self, p: int, card: Card) -> int:
         f = card.face.cost_reduction
         return f(self, p) if f else 0
 
-    def _can_cast(self, p: int, card: Card, mode: str) -> bool:
+    def _can_cast(self, p: int, card: Card, mode: str, choice: int | None = None) -> bool:
         d = card.face
         base = self._mode_cost(card, mode)
         if base is None:
@@ -1022,7 +1096,7 @@ class Game:
             return False
         if not d.is_type("Instant") and not self.sorcery_timing(p):
             return False
-        for spec in self._mode_targets(card, mode):
+        for spec in self._mode_targets(card, mode, choice):
             if not self.target_candidates(spec, p):
                 return False
         if mode == "escape" and len(self.players[p].graveyard) - 1 < d.escape_exile:
@@ -1030,7 +1104,7 @@ class Game:
         cost = base.with_x(0).reduced(self._cost_reduction(p, card))
         return self._cost_feasible(p, RemainingCost.of(cost), d.additional_sac)
 
-    def _cast(self, p: int, card: Card, mode: str):
+    def _cast(self, p: int, card: Card, mode: str, choice: int | None = None):
         d = card.face
         from_zone = card.zone
         item = StackItem(
@@ -1038,8 +1112,8 @@ class Game:
             kind="spell",
             controller=p,
             name=card.name,
-            effect=d.effect,
-            target_specs=self._mode_targets(card, mode),
+            effect=d.effect if choice is None else d.modes[choice].effect,
+            target_specs=self._mode_targets(card, mode, choice),
             card=card,
             method=mode,
             cast_from=from_zone,

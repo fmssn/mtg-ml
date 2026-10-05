@@ -58,6 +58,7 @@ DECLARE_ATTACKER = "declare_attacker"
 DECLARE_BLOCKER = "declare_blocker"
 ASSIGN_DAMAGE = "assign_damage"
 CHOOSE_MODE = "choose_mode"  # e.g. Deem Inferior: second from top or bottom
+MULLIGAN = "mulligan"  # keep or mulligan the opening hand (London mulligan)
 
 # ---------------------------------------------------------------------------
 # Static definitions
@@ -68,10 +69,21 @@ Effect = Callable[..., Any]  # (game, item) -> generator | None
 
 @dataclass(frozen=True)
 class TargetSpec:
-    """kind is one of: creature, nonlegendary_creature, creature_you_control,
-    land, nonland_permanent, spell, player, any (creature or player)."""
+    """kind is one of: creature, nonlegendary_creature, nonartifact_creature,
+    creature_you_control, land, nonland_permanent, artifact, blue_permanent,
+    red_permanent, spell, blue_spell, red_spell, instant_spell,
+    artifact_spell, player, opponent, any (creature or player)."""
 
     kind: str
+
+
+@dataclass(frozen=True)
+class SpellMode:
+    """One choice of a modal spell ("Choose one -"): chosen as the spell is cast."""
+
+    name: str
+    targets: tuple[TargetSpec, ...]
+    effect: "Effect"
 
 
 @dataclass
@@ -128,6 +140,7 @@ class CardDef:
     enters_tapped: bool = False
     etb_x_counters: bool = False
     back: "CardDef | None" = None
+    modes: tuple[SpellMode, ...] = ()  # modal spells: one is chosen on cast
 
     def is_type(self, t: str) -> bool:
         return t in self.types

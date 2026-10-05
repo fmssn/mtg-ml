@@ -15,7 +15,7 @@ def advance(g, n, seed=0):
     for _ in range(n):
         if g.over:
             return
-        g.step(r.randrange(len(g.legal_options())))
+        g.step(0 if g.decision.kind == "mulligan" else r.randrange(len(g.legal_options())))
 
 
 def test_observe_hides_opponent_hand_and_library():

@@ -47,6 +47,7 @@ def observe(g: Game, viewer: int) -> dict:
     d = g.decision
     obs = {
         "turn": g.turn,
+        "match_game": g.match_game,
         "active": "self" if g.active == viewer else "opponent",
         "step": g.step_name,
         "over": g.over,
@@ -60,6 +61,7 @@ def observe(g: Game, viewer: int) -> dict:
             "exile": [c.name for c in me.exile],
             "pool": dict(me.pool),
             "cards_drawn_this_turn": me.cards_drawn_this_turn,
+            "mulligans": g.mulligans_taken[viewer],
         },
         "opponent": {
             "life": them.life,
@@ -70,6 +72,7 @@ def observe(g: Game, viewer: int) -> dict:
             "graveyard": [c.name for c in them.graveyard],
             "exile": [c.name for c in them.exile],
             "pool": dict(them.pool),
+            "mulligans": g.mulligans_taken[opp],
         },
         "lands_played": g.lands_played if g.active == viewer else None,
         "battlefield": [_perm_view(g, c, viewer) for c in g.battlefield],
@@ -116,7 +119,9 @@ def determinize(g: Game, viewer: int, rng: random.Random) -> Game:
         hidden = [c for c in p.library if viewer not in c.known_to]
         if p.idx != viewer:
             hidden += [c for c in p.hand if viewer not in c.known_to]
-        defs = [c.defn for c in hidden]
+        # Sort first, so the result depends only on what `viewer` knows (the
+        # multiset of hidden cards), not on where they really are.
+        defs = sorted((c.defn for c in hidden), key=lambda d: d.name)
         rng.shuffle(defs)
         for c, d in zip(hidden, defs):
             c.defn = d

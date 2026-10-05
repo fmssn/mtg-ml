@@ -410,5 +410,65 @@
   "toughness": "1",
   "keywords": [],
   "cmc": 2.0
+ },
+ {
+  "name": "Red Elemental Blast",
+  "mana_cost": "{R}",
+  "type_line": "Instant",
+  "oracle_text": "Choose one \u2014\n\u2022 Counter target blue spell.\n\u2022 Destroy target blue permanent.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Blue Elemental Blast",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Choose one \u2014\n\u2022 Counter target red spell.\n\u2022 Destroy target red permanent.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Go for the Throat",
+  "mana_cost": "{1}{B}",
+  "type_line": "Instant",
+  "oracle_text": "Destroy target creature that isn't an artifact creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Duress",
+  "mana_cost": "{B}",
+  "type_line": "Sorcery",
+  "oracle_text": "Target opponent reveals their hand. You choose a noncreature, nonland card from it. That player discards that card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Dispel",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Counter target instant spell.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Steel Sabotage",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Choose one \u2014\n\u2022 Counter target artifact spell.\n\u2022 Return target artifact to its owner's hand.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
  }
 ]

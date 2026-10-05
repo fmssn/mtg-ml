@@ -291,3 +291,91 @@ def test_bridges_enter_tapped():
     choose(g, "Play Slagwoods Bridge")
     assert find(g, "Slagwoods Bridge").tapped
     assert not has(g, "Play")  # one land per turn
+
+
+# ---------------------------------------------------------------------------
+# Audit edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_familiar_affinity_never_touches_black():
+    arts = ["Ichor Wellspring", "Nihil Spellbomb", "Lembas", "Vault of Whispers", "Drossforge Bridge"]
+    g = scenario(p0={"hand": ["Refurbished Familiar"], "battlefield": arts}, p1={"hand": ["Island"]})
+    # 5 artifacts: {3}{B} -> {B}, paid with one source
+    assert has(g, "Cast Refurbished Familiar")
+    choose(g, "Cast Refurbished Familiar")
+    pay(g)
+    assert sum(1 for c in g.battlefield if c.tapped and c.controller == 0) == 1
+
+
+def test_affinity_counts_tokens():
+    g = scenario(p0={"hand": ["Refurbished Familiar"], "battlefield": ["Swamp", "Clue", "Map", "Clue"]}, p1={"hand": ["Island"]})
+    assert has(g, "Cast Refurbished Familiar")  # {3}{B} - 3
+    g = scenario(p0={"hand": ["Refurbished Familiar"], "battlefield": ["Swamp", "Clue", "Map"]}, p1={"hand": ["Island"]})
+    assert not has(g, "Cast Refurbished Familiar")
+
+
+def test_gixian_ignores_its_own_and_opponents_sacrifices():
+    g = scenario(p0={"hand": ["Fanatical Offering"], "battlefield": ["Gixian Infiltrator", "Swamp", "Swamp"]})
+    choose(g, "Cast Fanatical Offering")
+    pay(g)
+    resolve_stack(g)  # the only fodder is Gixian itself: no counter trigger for itself
+    assert "Gixian Infiltrator" in names(g.players[0].graveyard) and not g.pending
+    g = scenario(p0={"battlefield": ["Gixian Infiltrator"]}, p1={"battlefield": ["Island"]})
+    g.sacrifice(find(g, "Island"))
+    assert not g.pending
+
+
+def test_chrysalis_grows_only_from_eldrazi():
+    g = scenario(p0={"battlefield": ["Writhing Chrysalis", "Ichor Wellspring", "Eldrazi Spawn"]})
+    ch = find(g, "Writhing Chrysalis")
+    g.sacrifice(find(g, "Ichor Wellspring"))
+    assert not any("counter" in t.tdef.name for t in g.pending)
+    g.pending.clear()
+    g.sacrifice(find(g, "Eldrazi Spawn"))
+    assert any(t.source.oid == ch.oid and "counter" in t.tdef.name for t in g.pending)
+
+
+def test_toxin_analysis_wears_off_at_end_of_turn():
+    g = scenario(p0={"hand": ["Toxin Analysis"], "battlefield": ["Gixian Infiltrator", "Swamp"]}, step="end")
+    choose(g, "Cast Toxin Analysis")
+    pay(g)
+    resolve_stack(g)
+    gix = find(g, "Gixian Infiltrator")
+    assert g.has(gix, "deathtouch") and g.has(gix, "lifelink")
+    while g.active == 0:
+        g.step(0)
+    assert not g.has(gix, "deathtouch") and not g.has(gix, "lifelink")
+
+
+def test_deathtouch_blocker_kills_terror():
+    g = scenario(
+        p0={"hand": ["Toxin Analysis"], "battlefield": ["Gixian Infiltrator", "Swamp"]},
+        p1={"battlefield": [("Tolarian Terror", {"sick": False})]},
+        active=1,
+        step="declare_attackers",
+    )
+    while g.decision.kind != O.DECLARE_ATTACKER:
+        g.step(0)
+    choose(g, "Attack with Tolarian Terror")
+    while g.decision.kind != O.DECLARE_BLOCKER:
+        g.step(0)
+    choose(g, "blocks Tolarian Terror")
+    while not (g.decision.kind == O.PRIORITY and g.decision.player == 0):
+        g.step(0)
+    choose(g, "Cast Toxin Analysis")
+    pay(g)
+    resolve_stack(g)
+    while g.step_name != "combat_damage" or g.stack:
+        g.step(0)
+    pass_priority(g)
+    assert "Tolarian Terror" not in bf(g) and "Gixian Infiltrator" not in bf(g)
+
+
+def test_krark_clan_shaman_damage_comes_from_shaman():
+    # damage is dealt by the Shaman: a deathtouch Shaman kills everything it hits
+    g = scenario(p0={"battlefield": ["Krark-Clan Shaman", "Vault of Whispers"]}, p1={"battlefield": ["Cryptic Serpent"]})
+    find(g, "Krark-Clan Shaman").temp.append(O.TempEffect(keywords=frozenset({"deathtouch"})))
+    choose(g, "Krark-Clan Shaman: 1 damage")
+    resolve_stack(g)
+    assert "Cryptic Serpent" not in bf(g)

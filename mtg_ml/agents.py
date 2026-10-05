@@ -10,7 +10,8 @@ from .engine.view import observe
 
 class RandomAgent:
     """Uniform over options, but passes priority with probability `pass_bias`
-    when passing is allowed (pure uniform play rarely finishes a turn)."""
+    when passing is allowed (pure uniform play rarely finishes a turn), and
+    always keeps its opening hand."""
 
     def __init__(self, seed: int = 0, pass_bias: float = 0.4):
         self.rng = random.Random(seed)
@@ -18,6 +19,8 @@ class RandomAgent:
 
     def act(self, game: Game) -> int:
         opts = game.legal_options()
+        if game.decision.kind == "mulligan":
+            return 0  # keep
         if opts[0].key == ("pass",) and self.rng.random() < self.pass_bias:
             return 0
         return self.rng.randrange(len(opts))

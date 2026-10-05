@@ -231,3 +231,145 @@ def test_ward_on_abilities():
     choose(g, "Makeshift Munitions: 1 damage")
     choose(g, "Target Tolarian Terror")
     assert any("ward" in it.name for it in g.stack)
+
+
+# ---------------------------------------------------------------------------
+# Audit edge cases (rules details that would quietly favour Blue if wrong)
+# ---------------------------------------------------------------------------
+
+SPELLS = ["Brainstorm", "Ponder", "Mental Note", "Thought Scour", "Counterspell", "Force Spike", "Deem Inferior", "Plunder the Trollshaws"]
+
+
+def test_serpent_reduction_never_touches_coloured_mana():
+    gy = SPELLS + ["Lorien Revealed", "Sleep of the Dead"]  # 10 spells: generic part fully paid
+    g = scenario(p1={"hand": ["Tolarian Terror"], "battlefield": ISLANDS(1), "graveyard": gy}, active=1)
+    assert has(g, "Cast Tolarian Terror")  # {U}
+    g = scenario(p1={"hand": ["Cryptic Serpent"], "battlefield": ISLANDS(1), "graveyard": gy}, active=1)
+    assert not has(g, "Cast Cryptic Serpent")  # still {U}{U}
+    g = scenario(p1={"hand": ["Cryptic Serpent"], "battlefield": ISLANDS(2), "graveyard": gy}, active=1)
+    assert has(g, "Cast Cryptic Serpent")
+
+
+def test_lands_and_creatures_in_graveyard_do_not_reduce_terror():
+    gy = ["Island", "Island", "Delver of Secrets", "Tolarian Terror", "Brainstorm"]
+    g = scenario(p1={"hand": ["Tolarian Terror"], "battlefield": ISLANDS(5), "graveyard": gy}, active=1)
+    assert not has(g, "Cast Tolarian Terror")  # {6}{U} - 1 = {5}{U}
+    g = scenario(p1={"hand": ["Tolarian Terror"], "battlefield": ISLANDS(6), "graveyard": gy}, active=1)
+    assert has(g, "Cast Tolarian Terror")
+
+
+def test_terror_cost_is_paid_in_full():
+    g = scenario(p1={"hand": ["Tolarian Terror"], "battlefield": ISLANDS(6), "graveyard": ["Brainstorm", "Ponder"]}, active=1)
+    choose(g, "Cast Tolarian Terror")
+    pay(g)
+    assert sum(1 for c in g.battlefield if c.name == "Island" and c.tapped) == 5  # {4}{U}
+
+
+def test_islandcycled_lorien_counts_for_terror():
+    g = scenario(
+        p1={"hand": ["Lorien Revealed", "Tolarian Terror"], "battlefield": ISLANDS(4), "graveyard": SPELLS[:2], "library": ["Island"] * 5},
+        active=1,
+    )
+    assert not has(g, "Cast Tolarian Terror")  # {4}{U} with 4 Islands
+    choose(g, "islandcycling")
+    pay(g)
+    resolve_stack(g)
+    choose(g, "Find Island")
+    # 3 Islands untapped, 3 spells in graveyard: {3}{U} is one short
+    assert not has(g, "Cast Tolarian Terror")
+    choose(g, "Play Island")
+    assert has(g, "Cast Tolarian Terror")
+
+
+def test_insectile_aberration_attacks_the_turn_delver_flips():
+    g = scenario(p1={"battlefield": ["Delver of Secrets"], "library": ["Ponder"] + ISLANDS(10)}, active=1, step="upkeep")
+    resolve_stack(g)
+    choose(g, "Reveal Ponder")
+    d = find(g, "Insectile Aberration")
+    assert d.transformed and g.power(d) == 3 and g.toughness(d) == 2 and g.has(d, "flying") and not d.sick
+
+
+def test_flipped_delver_has_no_upkeep_trigger():
+    g = scenario(p1={"battlefield": ["Delver of Secrets"], "library": ["Ponder", "Brainstorm"] + ISLANDS(10)}, active=1, step="upkeep")
+    resolve_stack(g)
+    choose(g, "Reveal Ponder")
+    while not (g.active == 1 and g.step_name == "upkeep" and g.turn > 1):
+        g.step(0)
+    assert not any("Delver" in it.name for it in g.stack) and find(g, "Insectile Aberration").transformed
+
+
+def test_delver_trigger_only_on_its_controllers_upkeep():
+    g = scenario(p1={"battlefield": ["Delver of Secrets"], "library": ["Ponder"] + ISLANDS(10)}, active=0, step="upkeep")
+    assert not g.stack
+
+
+def test_deem_inferior_returns_flipped_delver_as_front_face():
+    g2 = scenario(p0={"battlefield": ["Delver of Secrets"]}, p1={"hand": ["Deem Inferior"], "battlefield": ISLANDS(4)}, active=1)
+    find(g2, "Delver of Secrets").transformed = True
+    choose(g2, "Cast Deem Inferior")
+    pay(g2)
+    resolve_stack(g2)
+    choose(g2, "bottom")
+    c = g2.players[0].library[-1]
+    assert c.name == "Delver of Secrets" and not c.transformed
+
+
+def test_countering_chrysalis_keeps_the_spawn():
+    g = scenario(
+        p0={"hand": ["Writhing Chrysalis"], "battlefield": ["Slagwoods Bridge", "Mountain", "Forest", "Swamp"]},
+        p1={"hand": ["Counterspell"], "battlefield": ISLANDS(2)},
+    )
+    choose(g, "Cast Writhing Chrysalis")
+    pay(g)
+    resolve_stack(g)  # cast trigger resolves first (on top), spawns arrive
+    assert bf(g, 0).count("Eldrazi Spawn") == 2
+    g2 = scenario(
+        p0={"hand": ["Writhing Chrysalis"], "battlefield": ["Slagwoods Bridge", "Mountain", "Forest", "Swamp"]},
+        p1={"hand": ["Counterspell"], "battlefield": ISLANDS(2)},
+    )
+    choose(g2, "Cast Writhing Chrysalis")
+    pay(g2)
+    pass_priority(g2)
+    choose(g2, "Cast Counterspell")  # the only spell on the stack is targeted automatically
+    pay(g2)
+    resolve_stack(g2)
+    assert "Writhing Chrysalis" not in bf(g2) and bf(g2, 0).count("Eldrazi Spawn") == 2
+
+
+def test_force_spike_counts_floating_mana_and_spawn():
+    # Jund can pay Force Spike's {1} by sacrificing an Eldrazi Spawn
+    g = scenario(p0={"hand": ["Cast Down"], "battlefield": ["Swamp", "Swamp", "Eldrazi Spawn"]}, p1={"hand": ["Force Spike"], "battlefield": ["Delver of Secrets"] + ISLANDS(1)})
+    choose(g, "Cast Cast Down")
+    choose(g, "Target Delver of Secrets")
+    pay(g)
+    pass_priority(g)
+    choose(g, "Cast Force Spike")
+    pay(g)
+    resolve_stack(g)
+    assert g.decision.player == 0 and "Pay {1}" in labels(g)
+
+
+def test_sleep_of_the_dead_through_a_real_turn_cycle():
+    g = scenario(p0={"battlefield": [("Writhing Chrysalis", {"sick": False})]}, p1={"hand": ["Sleep of the Dead"], "battlefield": ISLANDS(1)}, active=1)
+    choose(g, "Cast Sleep of the Dead")
+    resolve_stack(g)
+    chrysalis = find(g, "Writhing Chrysalis")
+    assert chrysalis.tapped
+    # play out Blue's turn and reach Jund's main phase: still tapped
+    while not (g.active == 0 and g.step_name == "main1"):
+        g.step(0)
+    assert chrysalis.tapped
+    while not (g.active == 0 and g.turn >= 4 and g.step_name == "main1"):
+        g.step(0)
+    assert not chrysalis.tapped
+
+
+def test_brainstorm_on_opponents_turn_reduces_deem_only_that_turn():
+    g = scenario(p1={"hand": ["Brainstorm", "Deem Inferior"], "battlefield": ISLANDS(2), "library": ISLANDS(10)}, p0={"battlefield": ["Krark-Clan Shaman"]}, active=0, step="end")
+    pass_priority(g)  # Jund passes in its end step
+    choose(g, "Cast Brainstorm")
+    resolve_stack(g)
+    assert g.players[1].cards_drawn_this_turn == 3
+    while g.active != 1:
+        g.step(0)
+    assert g.players[1].cards_drawn_this_turn <= 1  # reset at Blue's turn

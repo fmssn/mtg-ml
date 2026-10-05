@@ -24,7 +24,7 @@ def to_step(g: Game, step: str) -> None:
 
 
 def test_opening_hands_and_first_turn_draw_skip():
-    g = Game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=7, auto_single=False)
+    g = Game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=7, auto_single=False, mulligans=False)
     assert [len(p.hand) for p in g.players] == [7, 7]
     assert [len(p.library) for p in g.players] == [53, 53]
     sp = g.starting_player
@@ -220,3 +220,68 @@ def test_fork_is_exact():
     assert [names(p.hand) for p in f.players] == [names(p.hand) for p in g.players]
     assert [names(p.library) for p in f.players] == [names(p.library) for p in g.players]
     assert f.rng.getstate() == g.rng.getstate()
+
+
+def _mull_game(seed=3):
+    return Game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=seed, auto_single=False)
+
+
+def test_mulligan_starting_player_decides_first_and_keep_changes_nothing():
+    g = _mull_game()
+    sp = g.starting_player
+    assert g.decision.kind == O.MULLIGAN and g.decision.player == sp
+    hands = [list(p.hand) for p in g.players]
+    choose(g, "Keep")
+    assert g.decision.kind == O.MULLIGAN and g.decision.player == 1 - sp
+    choose(g, "Keep")
+    assert g.decision.kind != O.MULLIGAN and [list(p.hand) for p in g.players] == hands
+    assert g.mulligans_taken == [0, 0]
+
+
+def test_london_mulligan_draws_seven_then_bottoms_one_per_mulligan():
+    g = _mull_game()
+    sp = g.starting_player
+    first_hand = {c.uid for c in g.players[sp].hand}
+    choose(g, "Mulligan (to 6)")
+    choose(g, "Keep")  # opponent keeps, only the mulliganing player decides again
+    assert g.decision.player == sp and g.decision.kind == O.MULLIGAN
+    assert len(g.players[sp].hand) == 7 and {c.uid for c in g.players[sp].hand} != first_hand
+    choose(g, "Mulligan (to 5)")
+    choose(g, "Keep (5 cards)")
+    assert g.decision.kind == O.CHOOSE_CARD and g.decision.player == sp
+    for _ in range(2):
+        g.step(0)
+    lib = g.players[sp].library
+    assert len(g.players[sp].hand) == 5 and len(lib) == 55
+    assert lib[-1].known_to == {sp} and lib[-2].known_to == {sp}  # bottomed cards: private
+    assert g.mulligans_taken[sp] == 2
+    assert all(len(c.known_to) == 0 for c in lib[:-2])  # shuffled library is unknown
+
+
+def test_mulligan_down_to_one_card_is_the_floor():
+    g = _mull_game()
+    sp = g.starting_player
+    mulls = 0
+    while g.decision.kind == O.MULLIGAN:
+        if g.decision.player != sp:
+            choose(g, "Keep")
+        elif has(g, "Mulligan"):
+            choose(g, "Mulligan")
+            mulls += 1
+        else:
+            assert labels(g) == ["Keep (1 cards)"]
+            choose(g, "Keep")
+    assert mulls == 6 and g.mulligans_taken[sp] == 6
+
+
+def test_mulligans_are_replayed_by_fork():
+    g = _mull_game(5)
+    choose(g, "Mulligan")
+    choose(g, "Mulligan")
+    choose(g, "Keep")
+    choose(g, "Keep")
+    while g.decision.kind == O.CHOOSE_CARD:
+        g.step(0)
+    f = g.fork()
+    assert [[c.name for c in p.hand] for p in f.players] == [[c.name for c in p.hand] for p in g.players]
+    assert f.mulligans_taken == g.mulligans_taken == [1, 1]

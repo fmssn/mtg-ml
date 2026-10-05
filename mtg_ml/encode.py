@@ -25,11 +25,12 @@ def _bucket(n: int, edges=(0, 1, 2, 3, 5, 8, 13, 20)) -> int:
 
 def state_features(game, viewer: int) -> list[str]:
     o = observe(game, viewer)
-    f = [f"step:{o['step']}", f"active:{o['active']}"]
+    f = [f"step:{o['step']}", f"active:{o['active']}", f"postboard:{o['match_game'] > 1}"]
     for side in ("self", "opponent"):
         s = o[side]
         f.append(f"{side}:life:{_bucket(s['life'])}")
         f.append(f"{side}:library:{_bucket(s['library_count'])}")
+        f.append(f"{side}:mulligans:{s['mulligans']}")
         for name in s["graveyard"]:
             f.append(f"{side}:gy:{name}")
         for c, n in s["pool"].items():
