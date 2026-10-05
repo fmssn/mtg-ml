@@ -146,7 +146,7 @@ def _delver_upkeep(g, item):
         live = g.live(item.source)
         if is_instant_or_sorcery(top) and live is not None and not live.transformed:
             live.transformed = True
-            g._log(f"{live.defn.name} transforms into {live.name}")
+            g._log(f"{live.defn.name}#{live.oid} transforms into {live.name}")
 
 
 _aberration = card(

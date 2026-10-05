@@ -571,6 +571,7 @@ class Game:
             card.sick = True
             card.tapped = tapped or card.face.enters_tapped
             self.battlefield.append(card)
+            self._log(f"enters: {card.name}#{card.oid} (p{card.controller})")
         elif to == "library":
             lib = self.players[card.owner].library
             card.known_to = set(known_to or ())
@@ -595,6 +596,7 @@ class Game:
         return card
 
     def _after_leave_battlefield(self, lki: Card, new: Card, to: str) -> None:
+        self._log(f"leaves: {lki.name}#{lki.oid} (p{lki.controller}) -> {to}")
         if to == "graveyard":
             for t in lki.face.triggers:
                 if t.event == "to_graveyard_from_battlefield":
@@ -634,7 +636,7 @@ class Game:
 
     def sacrifice(self, card: Card) -> None:
         lki = card.snapshot()
-        self._log(f"p{card.controller} sacrifices {card.name}")
+        self._log(f"p{card.controller} sacrifices {card.name}#{card.oid}")
         self._move(card, "graveyard")
         self._emit_sacrifice(lki)
 
@@ -650,6 +652,7 @@ class Game:
         c = self._new_card(TOKENS[name], p, "battlefield", token=True)
         c.sick = True
         self.battlefield.append(c)
+        self._log(f"enters: {c.name}#{c.oid} (p{p})")
         self._emit_etb(c)
         return c
 

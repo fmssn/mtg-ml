@@ -85,6 +85,7 @@ Card list and oracle text: [`mtg_ml/engine/decks.py`](mtg_ml/engine/decks.py), [
   - invariants hold: card conservation, zone consistency, no negative mana;
   - from sampled positions, every offered option can be taken without a rules error;
   - random play reaches every card, alternative cost and token ability.
+- `tools/audit_triggers.py` plays random games and re-derives from the log alone which triggers should have fired (ETB, dies, cast, sacrifice, upkeep, ward), then checks them against what the engine put on the stack. On 100 games: 1,121 triggers expected, 1,121 stacked, none missed or spurious. Run `python tools/audit_triggers.py --games 100 --out logs/` to also keep the logs.
 - `tests/test_view_env.py` checks that observations and features never depend on hidden cards and that determinization keeps a player's view intact.
 
 Throughput: about 6,000 decisions/s, or 25 random games/s, on one CPU core. That is enough for engine validation and small experiments. For large-scale training the plan is a faster port (e.g. Rust) checked against this engine by replaying the same seeds and action sequences in both.

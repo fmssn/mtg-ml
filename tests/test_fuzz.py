@@ -99,3 +99,22 @@ def test_random_play_reaches_every_card():
         ("activate", "Twisted Landscape", "cycling {B}{R}{G}"),
     ]:
         assert k in modes, k
+
+
+def test_trigger_audit_over_random_game_logs():
+    """tools/audit_triggers.py re-derives expected triggers from the log alone."""
+    import os
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+    from audit_triggers import audit
+
+    from mtg_ml.agents import RandomAgent, play_game
+
+    expected = 0
+    for s in range(25):
+        g = play_game([RandomAgent(s), RandomAgent(s + 10_000)], seed=s, log=True)
+        r = audit(g.log)
+        assert not r["missed"] and not r["spurious"] and not r["unresolved"], (s, r)
+        expected += r["expected"]
+    assert expected > 100
