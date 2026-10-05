@@ -32,6 +32,8 @@ def option_tokens(kind: str, key: tuple) -> list[str]:
 
 def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM):
     """(state indices, [option indices, ...]) for `player` at the current decision."""
+    if getattr(game, "NATIVE", False):
+        return game.featurize(player, state_dim, option_dim)
     d = game.decision
     feats = state_features(game, player)
     feats.append(f"seat:{player}")

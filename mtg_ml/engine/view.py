@@ -38,6 +38,8 @@ def _perm_view(g: Game, c, viewer: int) -> dict:
 
 
 def observe(g: Game, viewer: int) -> dict:
+    if getattr(g, "NATIVE", False):
+        return g.observe(viewer)
     opp = 1 - viewer
     me, them = g.players[viewer], g.players[opp]
 
@@ -114,6 +116,8 @@ def determinize(g: Game, viewer: int, rng: random.Random) -> Game:
     objects keep their identity (oid/uid), only their definition changes, so
     engine bookkeeping stays valid.
     """
+    if getattr(g, "NATIVE", False):
+        return g.determinize(viewer, rng)
     f = g.fork()
     for p in f.players:
         hidden = [c for c in p.library if viewer not in c.known_to]

@@ -18,6 +18,7 @@ import math
 import multiprocessing as mp
 import os
 
+from ..backend import ENV_VAR, engine_name
 from ..match import MatchResult, game_seed
 from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, run_job, split_games, worker_init
 
@@ -88,7 +89,10 @@ def main(argv=None) -> None:
     ap.add_argument("--games", type=int, default=400, help="games (or matches with --bo3)")
     ap.add_argument("--bo3", action="store_true", help="best-of-three matches with sideboarding")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
+    ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")
     args = ap.parse_args(argv)
+    if args.engine:
+        os.environ[ENV_VAR] = engine_name(args.engine)
     with mp.get_context("spawn").Pool(args.workers, initializer=worker_init) as procs:
         fn = head_to_head_bo3 if args.bo3 else head_to_head
         res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers)

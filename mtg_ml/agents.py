@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 
+from .backend import game_class
 from .engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, expand
 from .engine.view import observe
 
@@ -69,9 +70,10 @@ def render(game: Game, viewer: int) -> str:
     return "\n".join(lines)
 
 
-def play_game(agents, seed: int = 0, decks=None, **game_kw) -> Game:
+def play_game(agents, seed: int = 0, decks=None, engine: str | None = None, **game_kw) -> Game:
+    """engine: "python" / "native" (default: $MTG_ENGINE, else python)."""
     decks = decks or (expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR))
-    g = Game(decks, seed=seed, **game_kw)
+    g = game_class(engine)(decks, seed=seed, **game_kw)
     while not g.over:
         g.step(agents[g.decision.player].act(g))
     return g

@@ -31,6 +31,7 @@ from dataclasses import asdict, dataclass, field, fields
 
 import torch
 
+from ..backend import ENV_VAR, engine_name
 from .evaluate import head_to_head, head_to_head_bo3
 from .model import PolicyNet
 from .ppo import PPOConfig, ppo_update
@@ -60,12 +61,14 @@ class TrainConfig:
     max_turns: int = 100
     seed: int = 0
     device: str = "cpu"
+    engine: str = "python"  # rules engine for rollouts: python (reference) or native (Rust, mtg_ml_native)
     ppo: PPOConfig = field(default_factory=PPOConfig)
 
 
 class Trainer:
     def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
+        os.environ[ENV_VAR] = engine_name(cfg.engine)  # spawned rollout workers inherit it
         os.makedirs(os.path.join(cfg.run, "pool"), exist_ok=True)
         self.latest = os.path.join(cfg.run, "latest.pt")
         torch.manual_seed(cfg.seed)

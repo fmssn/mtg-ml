@@ -7,19 +7,21 @@ Each `step` is one decision by `current_player`. Rewards are terminal only:
 from __future__ import annotations
 
 from .encode import action_keys, encode_state
-from .engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, expand
+from .backend import game_class
+from .engine import JUND_WILDFIRE, MONO_BLUE_TERROR, expand
 from .engine.view import observe
 
 
 class MTGEnv:
-    def __init__(self, decks=None, max_turns: int = 100, auto_single: bool = True):
+    def __init__(self, decks=None, max_turns: int = 100, auto_single: bool = True, engine: str | None = None):
         self.decks = decks or (expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR))
         self.max_turns = max_turns
         self.auto_single = auto_single
-        self.game: Game | None = None
+        self.game_cls = game_class(engine)
+        self.game = None
 
     def reset(self, seed: int = 0, starting_player: int | None = None) -> dict:
-        self.game = Game(self.decks, seed=seed, starting_player=starting_player, max_turns=self.max_turns, auto_single=self.auto_single)
+        self.game = self.game_cls(self.decks, seed=seed, starting_player=starting_player, max_turns=self.max_turns, auto_single=self.auto_single)
         return self._obs()
 
     @property

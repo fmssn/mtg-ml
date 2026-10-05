@@ -22,6 +22,7 @@ import torch
 
 from ..agents import RandomAgent
 from ..bots import make_bot
+from ..backend import game_class
 from ..engine import Game
 from ..match import match_decks
 from .features import encode_events, event_tokens, featurize
@@ -80,6 +81,7 @@ class Job:
     lam: float = 0.95
     shaping: float = 0.0
     max_turns: int = 100
+    engine: str | None = None  # None: $MTG_ENGINE, else python
 
 
 @dataclass
@@ -156,6 +158,7 @@ def _step(g: Game, seats: tuple[_Seat, _Seat], a: int) -> None:
 @torch.no_grad()
 def run_job(job: Job) -> Result:
     learner = load_policy(job.learner_path, job.learner_version)
+    Game = game_class(job.engine)
     games, trajs, mem, scripted = [], [], [], {}
     for i, spec in enumerate(job.games):
         games.append(

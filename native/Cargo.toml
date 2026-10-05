@@ -1,0 +1,31 @@
+[package]
+name = "mtg_ml_native"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of the mtg-ml rules engine (bit-exact with the Python reference)"
+publish = false
+
+[lib]
+name = "mtg_ml_native"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["python"]
+python = ["dep:pyo3"]
+
+[dependencies]
+corosensei = "0.2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+crc32fast = "1"
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py311"], optional = true }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+debug = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("gil-refs"))'] }

@@ -6,6 +6,7 @@
     python -m mtg_ml.play human --opponent bot    # ... against the scripted bot
     python -m mtg_ml.play bench --games 200       # throughput and results
     python -m mtg_ml.play match --agents bot,bot --matches 200   # best-of-three with sideboards
+    python -m mtg_ml.play bench --engine native   # any command: --engine python|native (or $MTG_ENGINE)
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import collections
 import time
 
 from .agents import HumanAgent, RandomAgent, play_game
+from .backend import engine_name
 from .bots import make_bot
 from .match import play_match
 
@@ -49,16 +51,19 @@ def main(argv=None) -> None:
     m.add_argument("--matches", type=int, default=100)
     m.add_argument("--agents", default="bot,bot", help="seat0,seat1 from: random, bot, search[:playouts]")
     m.add_argument("--log", action="store_true", help="print the game logs of the first match")
+    for p in (w, h, b, m):
+        p.add_argument("--engine", default=None, help="python (reference) or native (Rust); default: $MTG_ENGINE, else python")
     args = ap.parse_args(argv)
+    engine = args.engine
 
     if args.cmd == "watch":
         kinds = args.agents.split(",")
-        g = play_game([make_agent(k, i, args.seed) for i, k in enumerate(kinds)], seed=args.seed, log=True)
+        g = play_game([make_agent(k, i, args.seed) for i, k in enumerate(kinds)], seed=args.seed, log=True, engine=engine)
         print("\n".join(g.log))
     elif args.cmd == "human":
         agents = [make_agent(args.opponent, i, args.seed) for i in (0, 1)]
         agents[args.seat] = HumanAgent()
-        g = play_game(agents, seed=args.seed, log=True)
+        g = play_game(agents, seed=args.seed, log=True, engine=engine)
         print(f"Game over: winner {g.winner} ({g.end_reason})")
     elif args.cmd == "bench":
         t = time.perf_counter()
@@ -66,11 +71,11 @@ def main(argv=None) -> None:
         results = collections.Counter()
         for s in range(args.games):
             kinds = args.agents.split(",")
-            g = play_game([make_agent(k, i, s * 10_000) for i, k in enumerate(kinds)], seed=s)
+            g = play_game([make_agent(k, i, s * 10_000) for i, k in enumerate(kinds)], seed=s, engine=engine)
             decisions += len(g.actions)
             results[("Jund" if g.winner == 0 else "Blue" if g.winner == 1 else "draw", g.end_reason)] += 1
         dt = time.perf_counter() - t
-        print(f"{args.games} games, {decisions} decisions in {dt:.1f}s: {args.games / dt:.1f} games/s, {decisions / dt:.0f} decisions/s")
+        print(f"[{engine_name(engine)}] {args.games} games, {decisions} decisions in {dt:.1f}s: {args.games / dt:.1f} games/s, {decisions / dt:.0f} decisions/s")
         for k, v in sorted(results.items()):
             print(f"  {k}: {v}")
 
@@ -79,7 +84,7 @@ def main(argv=None) -> None:
         kinds = args.agents.split(",")
         matches, games = collections.Counter(), collections.Counter()
         for s in range(args.matches):
-            r = play_match([make_agent(k, i, s * 10_000) for i, k in enumerate(kinds)], seed=s, log=args.log and s == 0)
+            r = play_match([make_agent(k, i, s * 10_000) for i, k in enumerate(kinds)], seed=s, log=args.log and s == 0, engine=engine)
             matches[r.winner] += 1
             for n, (_, w, _) in enumerate(r.games, 1):
                 games[(n, w)] += 1
