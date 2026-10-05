@@ -35,35 +35,21 @@ with open(SPEC_PATH, encoding="utf-8") as _f:
 _ALL_DEFS = {**FACES, **TOKENS, **CARDS}
 
 
-_CARD_FIELDS = (
-    "uid", "oid", "name", "_defn_name", "owner", "controller", "zone", "is_token", "transformed", "tapped", "damage",
-    "deathtouch_damage", "counters", "sick", "attached_to", "skip_untap", "_temp", "_known",
-)  # fmt: skip
-_SETTABLE = {"tapped", "transformed", "sick", "deathtouch_damage", "damage", "counters", "skip_untap", "attached_to", "controller"}
+class NativeCard(_n.CardView):
+    """A card of a native game, like `objects.Card`: one view per physical
+    card for the whole game (identity is stable). The attributes (`oid`,
+    `name`, `tapped`, `counters`...) are Rust getters reading the engine's
+    current state; the settable ones are the fields scenario tests poke."""
 
-
-class NativeCard:
-    """A card of a native game, like `objects.Card`: one proxy per physical
-    card for the whole game (identity is stable), whose attributes always
-    show the card's current state. Last-known-information copies (a stack
-    item's source, a dies trigger's source) are frozen snapshots."""
-
-    __slots__ = ("_g", "_idx", "_snap")
-
-    def __init__(self, g: "NativeGame | None", idx: int | None, snap: tuple | None = None):
-        self._g, self._idx, self._snap = g, idx, snap
-
-    def _t(self) -> tuple:
-        return self._snap if self._idx is None else self._g._info(self._idx)
+    __slots__ = ()
 
     @property
     def temp(self) -> list[TempEffect]:
-        t = [TempEffect(keywords=frozenset(k), power=p, toughness=tt) for k, p, tt in self._t()[16]]
-        return t if self._idx is None else _TempList(self, t)
+        return _TempList(self, [TempEffect(keywords=frozenset(k), power=p, toughness=t) for k, p, t in self._temp])
 
     @property
     def known_to(self) -> set[int]:
-        return set(self._t()[17])
+        return set(self._known)
 
     @property
     def face(self):
@@ -77,24 +63,29 @@ class NativeCard:
         return f"{self.name}#{self.oid}"
 
 
-def _field(i: int, name: str):
-    def get(self):
-        return self._t()[i]
-
-    if name not in _SETTABLE:
-        return property(get)
-
-    def set_(self, v):
-        if self._idx is None:
-            raise AttributeError("last-known-information copies are read-only")
-        self._g._g.set_card_field(self._idx, name, v)
-        self._g._touch()
-
-    return property(get, set_)
+_SNAP_FIELDS = (
+    "uid", "oid", "name", "_defn_name", "owner", "controller", "zone", "is_token", "transformed", "tapped", "damage",
+    "deathtouch_damage", "counters", "sick", "attached_to", "skip_untap", "_temp", "_known",
+)  # fmt: skip
 
 
-for _i, _name in enumerate(_CARD_FIELDS[:16]):
-    setattr(NativeCard, _name, _field(_i, _name))
+class NativeSnapshot:
+    """A frozen last-known-information copy (a stack item's or trigger's source)."""
+
+    __slots__ = _SNAP_FIELDS
+    _idx = None
+
+    def __init__(self, info: tuple):
+        for k, v in zip(_SNAP_FIELDS, info):
+            object.__setattr__(self, k, v)
+
+    temp = property(lambda self: [TempEffect(keywords=frozenset(k), power=p, toughness=t) for k, p, t in self._temp])
+    known_to = property(lambda self: set(self._known))
+    face = property(lambda self: _ALL_DEFS[self.name])
+    defn = property(lambda self: _ALL_DEFS[self._defn_name])
+
+    def __repr__(self) -> str:
+        return f"{self.name}#{self.oid}"
 
 
 class _TempList(list):
@@ -106,43 +97,51 @@ class _TempList(list):
 
     def append(self, t: TempEffect) -> None:
         c = self._card
-        c._g._g.add_temp(c._idx, sorted(t.keywords), t.power, t.toughness)
-        c._g._touch()
+        c._game.add_temp(c._idx, sorted(t.keywords), t.power, t.toughness)
         super().append(t)
 
 
 class NativePlayer:
-    __slots__ = ("_g", "idx", "_life", "library", "hand", "graveyard", "exile", "pool", "drew_from_empty", "_drawn")
+    """`game.players[i]`; zone lists are built on first access."""
+
+    __slots__ = ("_g", "idx", "_info", "_zones")
 
     def __init__(self, g: "NativeGame", idx: int):
-        life, lib, hand, gy, ex, pool, drew, drawn = g._g.player(idx)
-        self._g, self.idx, self._life = g, idx, life
-        card = g._card
-        self.library = [card(i) for i in lib]
-        self.hand = [card(i) for i in hand]
-        self.graveyard = [card(i) for i in gy]
-        self.exile = [card(i) for i in ex]
-        self.pool = dict(pool)
-        self.drew_from_empty = drew
-        self._drawn = drawn
+        self._g, self.idx = g, idx
+        self._info = g._g.player(idx)
+        self._zones = {}
+
+    def _zone(self, i: int) -> list:
+        z = self._zones.get(i)
+        if z is None:
+            card = self._g._card
+            z = self._zones[i] = [card(c) for c in self._info[i]]
+        return z
+
+    library = property(lambda self: self._zone(1))
+    hand = property(lambda self: self._zone(2))
+    graveyard = property(lambda self: self._zone(3))
+    exile = property(lambda self: self._zone(4))
+    pool = property(lambda self: dict(self._info[5]))
+    drew_from_empty = property(lambda self: self._info[6])
 
     @property
     def life(self) -> int:
-        return self._life
+        return self._info[0]
 
     @life.setter
     def life(self, v: int) -> None:
         self._g._g.set_life(self.idx, v)
-        self._life = v
+        self._info = self._g._g.player(self.idx)
 
     @property
     def cards_drawn_this_turn(self) -> int:
-        return self._drawn
+        return self._info[7]
 
     @cards_drawn_this_turn.setter
     def cards_drawn_this_turn(self, v: int) -> None:
         self._g._g.set_cards_drawn_this_turn(self.idx, v)
-        self._drawn = v
+        self._info = self._g._g.player(self.idx)
 
 
 class NativeStackItem:
@@ -153,8 +152,8 @@ class NativeStackItem:
         self.sid = sid
         self.targets = [tuple(t) for t in targets]
         self.card = None if card is None else g._card(card)
-        self.source = None if src is None else NativeCard(None, None, src)
-        self.data = {k: (NativeCard(None, None, v) if k in ("card", "sacrificed") else v) for k, v in data}
+        self.source = None if src is None else NativeSnapshot(src)
+        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed") else v) for k, v in data}
 
     def __repr__(self) -> str:
         return f"[{self.name} ({self.kind}) #{self.sid}]"
@@ -186,7 +185,7 @@ class NativeDecision:
     __slots__ = ("_g", "_version", "player", "kind", "prompt", "_options", "_keys", "_label_list")
 
     def __init__(self, g: "NativeGame", head: tuple):
-        self._g, self._version = g, g._version
+        self._g, self._version = g, g._g.version
         self.player, self.kind, self.prompt = head
         self._options = self._keys = self._label_list = None
 
@@ -208,7 +207,7 @@ class NativeDecision:
         return self._label_list
 
     def _value(self, i: int):
-        if self._version != self._g._version:
+        if self._version != self._g._g.version:
             raise RulesError("option value read after the game moved on")
         return self._g._resolve(self._g._g.option_value(i))
 
@@ -221,9 +220,9 @@ class NativePendingTrigger:
 
     def __init__(self, info: tuple):
         self.controller, src, name, data = info
-        self.source = NativeCard(None, None, src)
+        self.source = NativeSnapshot(src)
         self.tdef = _TriggerName(name)
-        self.data = {k: (NativeCard(None, None, v) if k in ("card", "sacrificed") else v) for k, v in data}
+        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed") else v) for k, v in data}
 
 
 class _TriggerName:
@@ -242,7 +241,6 @@ class _PendingList(list):
 
     def clear(self) -> None:
         self._g._g.clear_pending()
-        self._g._touch()
         super().clear()
 
 
@@ -295,12 +293,11 @@ class NativeGame:
         self._g = _n.Game(
             (list(decks[0]), list(decks[1])), seed, starting_player, auto_single, max_turns, log, setup is not None, start_step, mulligans, match_game
         )
-        self._version = 0
         self._cache: dict = {}
+        self._cache_version = -1
         self._proxies: dict[int, NativeCard] = {}
         if setup is not None:
             setup(self)
-            self._touch()
         try:
             self._g.start()
         except _n.NativeRulesError as e:
@@ -308,11 +305,13 @@ class NativeGame:
 
     # -- caching -------------------------------------------------------------
 
-    def _touch(self) -> None:
-        self._version += 1
-        self._cache = {}
-
     def _cached(self, name, make):
+        """Per-state cache: cleared whenever the engine's version moves
+        (every step and every mutation bump it)."""
+        v = self._g.version
+        if v != self._cache_version:
+            self._cache = {}
+            self._cache_version = v
         c = self._cache
         if name not in c:
             c[name] = make()
@@ -321,27 +320,22 @@ class NativeGame:
     def _card(self, idx: int) -> NativeCard:
         c = self._proxies.get(idx)
         if c is None:
-            c = self._proxies[idx] = NativeCard(self, idx)
+            c = self._proxies[idx] = NativeCard(self._g, idx)
         return c
 
-    def _info(self, idx: int) -> tuple:
-        info = self._cached("info", dict)
-        t = info.get(idx)
-        if t is None:
-            t = info[idx] = self._g.card_info(idx)
-        return t
-
     def _resolve(self, v):
-        """Option values: ("card", idx) markers become card proxies."""
-        if isinstance(v, tuple):
-            if len(v) == 2 and v[0] == "card" and isinstance(v[1], int):
-                return self._card(v[1])
-            return tuple(self._resolve(x) for x in v)
-        return v
+        """Option values: ("card", idx) markers become card proxies (values
+        nest at most one level, e.g. ("cast", ("card", 3), "normal"))."""
+        if type(v) is not tuple:
+            return v
+        if len(v) == 2 and v[0] == "card":
+            return self._card(v[1])
+        card = self._card
+        return tuple([card(x[1]) if type(x) is tuple and len(x) == 2 and x[0] == "card" else x for x in v])
 
     @staticmethod
     def _idx(card) -> int:
-        if not isinstance(card, NativeCard) or card._idx is None:
+        if card.__class__ is not NativeCard:
             raise TypeError(f"expected a live card of this game, got {card!r}")
         return card._idx
 
@@ -349,11 +343,11 @@ class NativeGame:
 
     @property
     def decision(self) -> NativeDecision | None:
-        c = self._cache
-        if "decision" not in c:
-            head = self._g.decision_head()
-            c["decision"] = None if head is None else NativeDecision(self, head)
-        return c["decision"]
+        return self._cached("decision", self._new_decision)
+
+    def _new_decision(self) -> NativeDecision | None:
+        head = self._g.decision_head()
+        return None if head is None else NativeDecision(self, head)
 
     def legal_options(self) -> list:
         d = self.decision
@@ -364,8 +358,6 @@ class NativeGame:
             self._g.step(index)
         except _n.NativeRulesError as e:
             raise RulesError(str(e)) from None
-        finally:
-            self._touch()
 
     def fork(self) -> "NativeGame":
         g = NativeGame(**self._args)
@@ -373,12 +365,10 @@ class NativeGame:
             g._g.replay(self._g.actions)
         except _n.NativeRulesError as e:
             raise RulesError(str(e)) from None
-        g._touch()
         return g
 
     def add_card(self, name: str, player: int, zone: str, tapped: bool = False, sick: bool = False, counters: int = 0) -> NativeCard:
         idx = self._g.add_card(name, player, zone, tapped, sick, counters)
-        self._touch()
         return self._card(idx)
 
     @property
@@ -408,7 +398,6 @@ class NativeGame:
     @active.setter
     def active(self, v: int) -> None:
         self._g.active = v
-        self._touch()
 
     @property
     def starting_player(self) -> int:
@@ -470,16 +459,13 @@ class NativeGame:
 
     def _untap_step(self) -> None:
         self._g.untap_step()
-        self._touch()
 
     def destroy(self, card) -> bool:
         r = self._g.destroy(self._idx(card))
-        self._touch()
         return r
 
     def sacrifice(self, card) -> None:
         self._g.sacrifice(self._idx(card))
-        self._touch()
 
     # -- characteristics and rules queries -----------------------------------
 
@@ -503,7 +489,7 @@ class NativeGame:
         return set(self._g.types(self._idx(c)))
 
     def is_creature(self, c) -> bool:
-        return self._g.is_creature(self._idx(c))
+        return self._g.is_creature(c._idx)
 
     def is_artifact(self, c) -> bool:
         return "Artifact" in c.face.types
@@ -512,16 +498,16 @@ class NativeGame:
         return "Land" in c.face.types
 
     def power(self, c) -> int:
-        return self._g.power(self._idx(c))
+        return self._g.power(c._idx)
 
     def toughness(self, c) -> int:
-        return self._g.toughness(self._idx(c))
+        return self._g.toughness(c._idx)
 
     def keywords(self, c) -> set[str]:
         return set(self._g.keywords(self._idx(c)))
 
     def has(self, c, kw: str) -> bool:
-        return self._g.has(self._idx(c), kw)
+        return self._g.has(c._idx, kw)
 
     def sorcery_timing(self, p: int) -> bool:
         return self._g.sorcery_timing(p)
@@ -578,7 +564,6 @@ class NativeGame:
             rng.shuffle(defs)
             for c, d in zip(hidden, defs):
                 f._g.set_card_def(c._idx, d.name)
-        f._touch()
         return f
 
     def __repr__(self) -> str:

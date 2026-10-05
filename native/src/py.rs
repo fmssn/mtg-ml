@@ -110,11 +110,17 @@ fn sac_filter(s: &str) -> PyResult<SacFilter> {
 #[pyclass(unsendable, module = "mtg_ml_native", name = "Game")]
 pub struct PyGame {
     g: Game,
+    /// Bumped by every step and every mutation; Python-side caches key on it.
+    version: u64,
 }
 
 impl PyGame {
     fn st(&self) -> &State {
         self.g.state()
+    }
+    fn mutate(&mut self) -> &mut State {
+        self.version += 1;
+        self.g.state_mut()
     }
     fn card(&self, c: CIdx) -> PyResult<&Card> {
         self.st().cards.get(c as usize).ok_or_else(|| PyIndexError::new_err("bad card index"))
@@ -153,19 +159,22 @@ impl PyGame {
         }
         let args = Args { decks: [decks.0, decks.1], seed, starting_player, auto_single, max_turns, log, has_setup, start_step, mulligans, match_game };
         let g = Game::new(args).map_err(PyValueError::new_err)?;
-        Ok(PyGame { g })
+        Ok(PyGame { g, version: 0 })
     }
 
     fn start(&mut self) -> PyResult<()> {
+        self.version += 1;
         self.g.start().map_err(NativeRulesError::new_err)
     }
 
     fn step(&mut self, index: usize) -> PyResult<()> {
+        self.version += 1;
         self.g.step(index).map_err(Self::step_err)
     }
 
     /// Step through a list of option indices (fast fork-by-replay).
     fn replay(&mut self, actions: Vec<usize>) -> PyResult<()> {
+        self.version += 1;
         for a in actions {
             self.g.step(a).map_err(Self::step_err)?;
         }
@@ -174,6 +183,10 @@ impl PyGame {
 
     // -- scalar state --------------------------------------------------------
 
+    #[getter]
+    fn version(&self) -> u64 {
+        self.version
+    }
     #[getter]
     fn over(&self) -> bool {
         self.st().over
@@ -200,7 +213,7 @@ impl PyGame {
     }
     #[setter]
     fn set_active(&mut self, v: u8) {
-        self.g.state_mut().active = v;
+        self.mutate().active = v;
     }
     #[getter]
     fn starting_player(&self) -> u8 {
@@ -258,10 +271,10 @@ impl PyGame {
     }
 
     fn set_life(&mut self, p: usize, v: i32) {
-        self.g.state_mut().players[p].life = v;
+        self.mutate().players[p].life = v;
     }
     fn set_cards_drawn_this_turn(&mut self, p: usize, v: i32) {
-        self.g.state_mut().players[p].cards_drawn_this_turn = v;
+        self.mutate().players[p].cards_drawn_this_turn = v;
     }
 
     #[getter]
@@ -394,7 +407,7 @@ impl PyGame {
     #[pyo3(signature = (name, player, zone, tapped=false, sick=false, counters=0))]
     fn add_card(&mut self, name: &str, player: u8, zone: &str, tapped: bool, sick: bool, counters: i32) -> PyResult<CIdx> {
         let z = Zone::parse(zone).filter(|z| *z != Zone::Stack).ok_or_else(|| PyValueError::new_err(format!("bad zone {zone:?}")))?;
-        self.g.state_mut().add_card(name, player, z, tapped, sick, counters).map_err(PyValueError::new_err)
+        self.mutate().add_card(name, player, z, tapped, sick, counters).map_err(PyValueError::new_err)
     }
 
     // -- direct rules actions (scenario tests) --------------------------------
@@ -402,7 +415,7 @@ impl PyGame {
     /// Mutate one field of a card (scenario tests poke card objects directly).
     fn set_card_field(&mut self, c: CIdx, field: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
         self.card(c)?;
-        let card = self.g.state_mut().cm(c);
+        let card = self.mutate().cm(c);
         match field {
             "tapped" => card.tapped = value.extract()?,
             "transformed" => card.transformed = value.extract()?,
@@ -429,20 +442,20 @@ impl PyGame {
             }
             mask |= d.kw(k);
         }
-        self.g.state_mut().cm(c).temp.push(TempEffect { keywords: mask, power, toughness });
+        self.mutate().cm(c).temp.push(TempEffect { keywords: mask, power, toughness });
         Ok(())
     }
 
     fn untap_step(&mut self) {
-        self.g.state_mut().untap_step();
+        self.mutate().untap_step();
     }
     fn destroy(&mut self, c: CIdx) -> PyResult<bool> {
         self.card(c)?;
-        Ok(self.g.state_mut().destroy(c))
+        Ok(self.mutate().destroy(c))
     }
     fn sacrifice(&mut self, c: CIdx) -> PyResult<()> {
         self.card(c)?;
-        self.g.state_mut().sacrifice(c);
+        self.mutate().sacrifice(c);
         Ok(())
     }
     /// Pending triggers: (controller, source card tuple, trigger name, data).
@@ -451,7 +464,7 @@ impl PyGame {
         st.pending.iter().map(|t| (t.controller, card_tuple(py, st.src(&t.source)), t.tdef.name.as_str(), data_list(py, st, &t.data)).into_py(py)).collect()
     }
     fn clear_pending(&mut self) {
-        self.g.state_mut().pending.clear();
+        self.mutate().pending.clear();
     }
 
     /// Replace a card's definition (`determinize`): `c.defn = d; c.transformed = False`.
@@ -459,7 +472,7 @@ impl PyGame {
         self.card(c)?;
         let d = db();
         let def = *d.cards.get(name).ok_or_else(|| PyValueError::new_err(format!("unknown card {name:?}")))?;
-        let card = self.g.state_mut().cm(c);
+        let card = self.mutate().cm(c);
         card.def = def;
         card.transformed = false;
         Ok(())
@@ -467,7 +480,7 @@ impl PyGame {
 
     /// `random.Random.setstate()` for the engine's RNG (625 words: state + index).
     fn set_rng_state(&mut self, words: Vec<u32>) -> PyResult<()> {
-        self.g.state_mut().rng.set_state(&words).map_err(PyValueError::new_err)
+        self.mutate().rng.set_state(&words).map_err(PyValueError::new_err)
     }
 
     /// `random.Random.getstate()` of the engine's RNG.
@@ -661,6 +674,74 @@ impl PyGame {
     }
 }
 
+/// A live view of one card of a game (Python: `NativeCard` subclasses it).
+/// Every getter reads the engine's current state, so a view stays valid,
+/// and keeps its identity, for the whole game.
+#[pyclass(unsendable, subclass, module = "mtg_ml_native", name = "CardView")]
+pub struct CardView {
+    game: Py<PyGame>,
+    idx: CIdx,
+}
+
+macro_rules! card_get {
+    ($($name:ident : $t:ty => $e:expr;)* @set $($sname:ident = $field:literal),*) => {
+        #[pymethods]
+        impl CardView {
+            #[new]
+            fn new(game: Py<PyGame>, idx: CIdx) -> Self {
+                CardView { game, idx }
+            }
+            #[getter]
+            fn _idx(&self) -> CIdx {
+                self.idx
+            }
+            #[getter]
+            fn _game(&self, py: Python<'_>) -> Py<PyGame> {
+                self.game.clone_ref(py)
+            }
+            $(
+                #[getter]
+                fn $name(&self, py: Python<'_>) -> $t {
+                    let g = self.game.borrow(py);
+                    #[allow(unused_variables)]
+                    let st = g.st();
+                    let c = &st.cards[self.idx as usize];
+                    ($e)(c)
+                }
+            )*
+            $(
+                #[setter]
+                fn $sname(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
+                    self.game.borrow_mut(py).set_card_field(self.idx, $field, value)
+                }
+            )*
+        }
+    };
+}
+
+card_get! {
+    uid: u32 => |c: &Card| c.uid;
+    oid: u32 => |c: &Card| c.oid;
+    name: &'static str => |c: &Card| c.name();
+    _defn_name: &'static str => |c: &Card| c.defn().name.as_str();
+    owner: u8 => |c: &Card| c.owner;
+    controller: u8 => |c: &Card| c.controller;
+    zone: &'static str => |c: &Card| c.zone.name();
+    is_token: bool => |c: &Card| c.is_token;
+    transformed: bool => |c: &Card| c.transformed;
+    tapped: bool => |c: &Card| c.tapped;
+    damage: i32 => |c: &Card| c.damage;
+    deathtouch_damage: bool => |c: &Card| c.deathtouch_damage;
+    counters: i32 => |c: &Card| c.counters;
+    sick: bool => |c: &Card| c.sick;
+    attached_to: Option<u32> => |c: &Card| c.attached_to;
+    skip_untap: i32 => |c: &Card| c.skip_untap;
+    _known: Vec<u8> => |c: &Card| known_list(c.known_to);
+    _temp: Vec<(Vec<&'static str>, i32, i32)> => |c: &Card| c.temp.iter().map(|t| (db().keyword_list(t.keywords), t.power, t.toughness)).collect::<Vec<_>>();
+    @set set_tapped = "tapped", set_transformed = "transformed", set_sick = "sick", set_deathtouch_damage = "deathtouch_damage",
+    set_damage = "damage", set_counters = "counters", set_skip_untap = "skip_untap", set_attached_to = "attached_to", set_controller = "controller"
+}
+
 fn ref_exists(st: &State, r: Ref) -> bool {
     match r {
         Ref::Player(_) => true,
@@ -756,6 +837,7 @@ fn loaded_spec() -> String {
 #[pymodule]
 fn mtg_ml_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGame>()?;
+    m.add_class::<CardView>()?;
     m.add_function(wrap_pyfunction!(load_cards, m)?)?;
     m.add_function(wrap_pyfunction!(loaded_spec, m)?)?;
     m.add("NativeRulesError", m.py().get_type_bound::<NativeRulesError>())?;
