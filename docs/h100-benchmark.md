@@ -23,7 +23,7 @@ Findings:
 - **Game play scales well.** 63 workers reach 45–65k decisions/s at 2048 games per iteration (32 games per worker).
 - **The update is the bottleneck on CPU.** On the GPU with large batches the box is about 4× faster than the M3. The remaining 12–14 s update is probably mostly Python batch building (`collate`, padding) in the main process. Not profiled yet.
 - **2048 games per iteration changes training dynamics** (8× more data per update), so the PPO hyperparameters need retuning.
-- **The model is tiny** (about 17M parameters, almost all in hashed embeddings), so the GPU is almost idle. The Python engine (about 60k decisions/s on 64 cores) is the hard limit.
+- **The model is tiny** (about 17M parameters, almost all in hashed embeddings), so the GPU is almost idle. The Python engine (about 60k decisions/s on 64 cores) is the hard limit. Update: with the Rust engine (`--engine native`, [native-engine.md](native-engine.md)) the engine side of a rollout worker is about 13× cheaper (3.95M decisions/s for featurize + step on 64 pinned cores), so CPU inference in the workers is now the limit.
 
 Recommended command:
 
@@ -33,7 +33,7 @@ OMP_NUM_THREADS=8 python -m mtg_ml.rl.train --run runs/ppo1 --iterations 200 --g
 
 ## Next steps, by expected gain
 
-1. **Faster engine:** PyPy in the worker processes, then a Rust port checked against the Python engine by replaying seeds. Self-contained; spun off into its own session.
+1. ~~**Faster engine:** PyPy in the worker processes, then a Rust port checked against the Python engine by replaying seeds.~~ Done: PyPy gives 2-3× but cannot host torch workers; the Rust port gives 12.6-21.6× per core with identical games ([native-engine.md](native-engine.md)).
 2. **Search plus distillation:** tree search (MCTS) guided by the network, with the policy trained on what the search picks. Can be built on the current engine, but only becomes practical at scale after step 1.
 3. **Central GPU inference server and a bigger network**, a transformer over the cards and objects on the board.
 4. **Overlap game play with the update, and build batches in the workers:** about 1.5–2× faster wall time, small change.
