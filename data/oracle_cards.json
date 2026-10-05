@@ -1,0 +1,414 @@
+[
+ {
+  "name": "Island",
+  "mana_cost": "",
+  "type_line": "Basic Land \u2014 Island",
+  "oracle_text": "({T}: Add {U}.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Delver of Secrets // Insectile Aberration",
+  "mana_cost": null,
+  "type_line": "Creature \u2014 Human Wizard // Creature \u2014 Human Insect",
+  "oracle_text": null,
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flying",
+   "Transform"
+  ],
+  "cmc": 1.0,
+  "faces": [
+   {
+    "name": "Delver of Secrets",
+    "mana_cost": "{U}",
+    "type_line": "Creature \u2014 Human Wizard",
+    "oracle_text": "At the beginning of your upkeep, look at the top card of your library. You may reveal that card. If an instant or sorcery card is revealed this way, transform this creature.",
+    "power": "1",
+    "toughness": "1",
+    "keywords": null
+   },
+   {
+    "name": "Insectile Aberration",
+    "mana_cost": "",
+    "type_line": "Creature \u2014 Human Insect",
+    "oracle_text": "Flying",
+    "power": "3",
+    "toughness": "2",
+    "keywords": null
+   }
+  ]
+ },
+ {
+  "name": "Tolarian Terror",
+  "mana_cost": "{6}{U}",
+  "type_line": "Creature \u2014 Serpent",
+  "oracle_text": "This spell costs {1} less to cast for each instant and sorcery card in your graveyard.\nWard {2} (Whenever this creature becomes the target of a spell or ability an opponent controls, counter it unless that player pays {2}.)",
+  "power": "5",
+  "toughness": "5",
+  "keywords": [
+   "Ward"
+  ],
+  "cmc": 7.0
+ },
+ {
+  "name": "Cryptic Serpent",
+  "mana_cost": "{5}{U}{U}",
+  "type_line": "Creature \u2014 Serpent",
+  "oracle_text": "This spell costs {1} less to cast for each instant and sorcery card in your graveyard.",
+  "power": "6",
+  "toughness": "5",
+  "keywords": [],
+  "cmc": 7.0
+ },
+ {
+  "name": "Brainstorm",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Draw three cards, then put two cards from your hand on top of your library in any order.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Ponder",
+  "mana_cost": "{U}",
+  "type_line": "Sorcery",
+  "oracle_text": "Look at the top three cards of your library, then put them back in any order. You may shuffle.\nDraw a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Thought Scour",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Target player mills two cards.\nDraw a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Mill"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Mental Note",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Mill two cards.\nDraw a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Mill"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Counterspell",
+  "mana_cost": "{U}{U}",
+  "type_line": "Instant",
+  "oracle_text": "Counter target spell.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "L\u00f3rien Revealed",
+  "mana_cost": "{3}{U}{U}",
+  "type_line": "Sorcery",
+  "oracle_text": "Draw three cards.\nIslandcycling {1} ({1}, Discard this card: Search your library for an Island card, reveal it, put it into your hand, then shuffle.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Islandcycling",
+   "Landcycling",
+   "Typecycling",
+   "Cycling"
+  ],
+  "cmc": 5.0
+ },
+ {
+  "name": "Force Spike",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Counter target spell unless its controller pays {1}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Deem Inferior",
+  "mana_cost": "{3}{U}",
+  "type_line": "Sorcery",
+  "oracle_text": "This spell costs {1} less to cast for each card you've drawn this turn.\nThe owner of target nonland permanent puts it into their library second from the top or on the bottom.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 4.0
+ },
+ {
+  "name": "Sleep of the Dead",
+  "mana_cost": "{U}",
+  "type_line": "Sorcery",
+  "oracle_text": "Tap target creature. It doesn't untap during its controller's next untap step.\nEscape\u2014{2}{U}, Exile three other cards from your graveyard. (You may cast this card from your graveyard for its escape cost.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Escape"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Plunder the Trollshaws",
+  "mana_cost": "{1}{U}",
+  "type_line": "Instant",
+  "oracle_text": "Draw a card. If this spell was cast from a graveyard, draw two cards instead.\nFlashback {3}{U} (You may cast this card from your graveyard for its flashback cost. Then exile it.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flashback"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Refurbished Familiar",
+  "mana_cost": "{3}{B}",
+  "type_line": "Artifact Creature \u2014 Zombie Rat",
+  "oracle_text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)\nFlying\nWhen this creature enters, each opponent discards a card. For each opponent who can't, you draw a card.",
+  "power": "2",
+  "toughness": "1",
+  "keywords": [
+   "Flying",
+   "Affinity"
+  ],
+  "cmc": 4.0
+ },
+ {
+  "name": "Writhing Chrysalis",
+  "mana_cost": "{2}{R}{G}",
+  "type_line": "Creature \u2014 Eldrazi Drone",
+  "oracle_text": "Devoid (This card has no color.)\nWhen you cast this spell, create two 0/1 colorless Eldrazi Spawn creature tokens with \"Sacrifice this token: Add {C}.\"\nReach\nWhenever you sacrifice another Eldrazi, put a +1/+1 counter on this creature.",
+  "power": "2",
+  "toughness": "3",
+  "keywords": [
+   "Reach",
+   "Devoid"
+  ],
+  "cmc": 4.0
+ },
+ {
+  "name": "Krark-Clan Shaman",
+  "mana_cost": "{R}",
+  "type_line": "Creature \u2014 Goblin Shaman",
+  "oracle_text": "Sacrifice an artifact: This creature deals 1 damage to each creature without flying.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Nyxborn Hydra",
+  "mana_cost": "{X}{G}",
+  "type_line": "Enchantment Creature \u2014 Hydra",
+  "oracle_text": "Bestow {X}{G}{G} (If you cast this card for its bestow cost, it's an Aura spell with enchant creature. It becomes a creature again if it's not attached.)\nReach, trample\nThis permanent enters with X +1/+1 counters on it.\nEnchanted creature gets +1/+1 for each +1/+1 counter on this Aura and has reach and trample.",
+  "power": "0",
+  "toughness": "1",
+  "keywords": [
+   "Reach",
+   "Trample",
+   "Bestow"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Cleansing Wildfire",
+  "mana_cost": "{1}{R}",
+  "type_line": "Sorcery",
+  "oracle_text": "Destroy target land. Its controller may search their library for a basic land card, put it onto the battlefield tapped, then shuffle.\nDraw a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Cast Down",
+  "mana_cost": "{1}{B}",
+  "type_line": "Instant",
+  "oracle_text": "Destroy target nonlegendary creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Fanatical Offering",
+  "mana_cost": "{1}{B}",
+  "type_line": "Instant",
+  "oracle_text": "As an additional cost to cast this spell, sacrifice an artifact or creature.\nDraw two cards and create a Map token. (It's an artifact with \"{1}, {T}, Sacrifice this token: Target creature you control explores. Activate only as a sorcery.\")",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Explore"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Eviscerator's Insight",
+  "mana_cost": "{1}{B}",
+  "type_line": "Instant",
+  "oracle_text": "As an additional cost to cast this spell, sacrifice an artifact or creature.\nDraw two cards.\nFlashback {4}{B} (You may cast this card from your graveyard for its flashback cost and any additional costs. Then exile it.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flashback"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Toxin Analysis",
+  "mana_cost": "{B}",
+  "type_line": "Instant",
+  "oracle_text": "Target creature gains deathtouch and lifelink until end of turn. Investigate. (Create a Clue token. It's an artifact with \"{2}, Sacrifice this token: Draw a card.\")",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Investigate"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Makeshift Munitions",
+  "mana_cost": "{1}{R}",
+  "type_line": "Enchantment",
+  "oracle_text": "{1}, Sacrifice an artifact or creature: This enchantment deals 1 damage to any target.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Ichor Wellspring",
+  "mana_cost": "{2}",
+  "type_line": "Artifact",
+  "oracle_text": "When this artifact enters or is put into a graveyard from the battlefield, draw a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Lembas",
+  "mana_cost": "{2}",
+  "type_line": "Artifact \u2014 Food",
+  "oracle_text": "When this artifact enters, scry 1, then draw a card.\n{2}, {T}, Sacrifice this artifact: You gain 3 life.\nWhen this artifact is put into a graveyard from the battlefield, its owner shuffles it into their library.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Scry"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Nihil Spellbomb",
+  "mana_cost": "{1}",
+  "type_line": "Artifact",
+  "oracle_text": "{T}, Sacrifice this artifact: Exile target player's graveyard.\nWhen this artifact is put into a graveyard from the battlefield, you may pay {B}. If you do, draw a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Drossforge Bridge",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "This land enters tapped.\nIndestructible\n{T}: Add {B} or {R}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Indestructible"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Slagwoods Bridge",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "This land enters tapped.\nIndestructible\n{T}: Add {R} or {G}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Indestructible"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Twisted Landscape",
+  "mana_cost": "",
+  "type_line": "Land",
+  "oracle_text": "{T}: Add {C}.\n{T}, Sacrifice this land: Search your library for a basic Swamp, Mountain, or Forest card, put it onto the battlefield tapped, then shuffle.\nCycling {B}{R}{G} ({B}{R}{G}, Discard this card: Draw a card.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Cycling"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Vault of Whispers",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "{T}: Add {B}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Swamp",
+  "mana_cost": "",
+  "type_line": "Basic Land \u2014 Swamp",
+  "oracle_text": "({T}: Add {B}.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Mountain",
+  "mana_cost": "",
+  "type_line": "Basic Land \u2014 Mountain",
+  "oracle_text": "({T}: Add {R}.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Forest",
+  "mana_cost": "",
+  "type_line": "Basic Land \u2014 Forest",
+  "oracle_text": "({T}: Add {G}.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Gixian Infiltrator",
+  "mana_cost": "{1}{B}",
+  "type_line": "Creature \u2014 Phyrexian Human",
+  "oracle_text": "Whenever you sacrifice another permanent, put a +1/+1 counter on this creature.",
+  "power": "2",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 2.0
+ }
+]

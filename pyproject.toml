@@ -1,0 +1,16 @@
+[project]
+name = "mtg-ml"
+version = "0.1.0"
+description = "Rules engine and RL environment for Magic: The Gathering (Pauper): Jund Wildfire vs Mono Blue Terror"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mtg_ml*"]
