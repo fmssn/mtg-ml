@@ -15,3 +15,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["mtg_ml*"]
+
+[tool.setuptools.package-data]
+"mtg_ml.engine" = ["cards.toml"]

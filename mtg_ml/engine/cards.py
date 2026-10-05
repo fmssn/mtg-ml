@@ -1,10 +1,19 @@
 """Card definitions for the supported pool: Jund Wildfire and Mono Blue Terror
-(Pauper), plus the tokens they create. Oracle text snapshot: data/oracle_cards.json.
+(Pauper), plus the tokens they create.
+
+The pool itself is data: `cards.toml` (shared with the Rust port). This
+module turns each entry into a `CardDef` and each effect, a list of ops,
+into a Python effect function. `OPS` holds the generic ops, `CUSTOM` the
+card-specific effects too irregular to be worth an op. Oracle text
+snapshot: data/oracle_cards.json. How to add cards: docs/adding-cards.md.
 """
 
 from __future__ import annotations
 
-import dataclasses
+import inspect
+import itertools
+import os
+import tomllib
 
 from .mana import ManaCost
 from .objects import (
@@ -21,117 +30,207 @@ from .objects import (
     TriggerDef,
 )
 
+SPEC_PATH = os.path.join(os.path.dirname(__file__), "cards.toml")
+
 CARDS: dict[str, CardDef] = {}
 TOKENS: dict[str, CardDef] = {}
+FACES: dict[str, CardDef] = {}
 
 M = ManaCost.parse
-
-
-def _colors(cost: str | None, devoid: bool = False) -> frozenset[str]:
-    if devoid or not cost:
-        return frozenset()
-    return frozenset(c for c in "WUBRG" if "{%s}" % c in cost)
-
-
-def card(
-    name: str,
-    cost: str | None,
-    types: str,
-    subtypes: str = "",
-    supertypes: str = "",
-    text: str = "",
-    devoid: bool = False,
-    registry: dict | None = None,
-    **kw,
-) -> CardDef:
-    d = CardDef(
-        name=name,
-        cost=M(cost),
-        types=frozenset(types.split()),
-        subtypes=frozenset(subtypes.split()),
-        supertypes=frozenset(supertypes.split()),
-        colors=_colors(cost, devoid),
-        text=text,
-        **kw,
-    )
-    (CARDS if registry is None else registry)[name] = d
-    return d
 
 
 def is_instant_or_sorcery(c) -> bool:
     return bool(c.face.types & {"Instant", "Sorcery"})
 
 
-def _spells_in_graveyard(g, p) -> int:
-    return sum(1 for c in g.players[p].graveyard if is_instant_or_sorcery(c))
-
-
-def _mana_ability(*colors: str) -> AbilityDef:
-    return AbilityDef(name="add " + "/".join(colors), tap=True, mana=tuple(colors))
-
-
-T = TargetSpec
-
-# ---------------------------------------------------------------------------
-# Lands
-# ---------------------------------------------------------------------------
-
-for _name, _sub, _col in (("Island", "Island", "U"), ("Swamp", "Swamp", "B"), ("Mountain", "Mountain", "R"), ("Forest", "Forest", "G")):
-    card(_name, None, "Land", _sub, "Basic", text=f"{{T}}: Add {{{_col}}}.", abilities=(_mana_ability(_col),))
-
-card(
-    "Drossforge Bridge",
-    None,
-    "Artifact Land",
-    text="Enters tapped. Indestructible. {T}: Add {B} or {R}.",
-    keywords=frozenset({"indestructible"}),
-    enters_tapped=True,
-    abilities=(_mana_ability("B", "R"),),
-)
-card(
-    "Slagwoods Bridge",
-    None,
-    "Artifact Land",
-    text="Enters tapped. Indestructible. {T}: Add {R} or {G}.",
-    keywords=frozenset({"indestructible"}),
-    enters_tapped=True,
-    abilities=(_mana_ability("R", "G"),),
-)
-card("Vault of Whispers", None, "Artifact Land", text="{T}: Add {B}.", abilities=(_mana_ability("B"),))
-
-
 def _is_basic(c) -> bool:
     return "Basic" in c.face.supertypes and "Land" in c.face.types
 
 
-def _twisted_search(g, item):
+# ---------------------------------------------------------------------------
+# Generic ops: (game, stack item, op spec) -> None or a generator
+# ---------------------------------------------------------------------------
+
+
+def _op_draw(g, item, op):
+    n = op.get("n_cast_from_graveyard", op["n"]) if item.cast_from == "graveyard" else op["n"]
+    g.draw(item.controller, n)
+
+
+def _op_mill(g, item, op):
+    if op["who"] == "you":
+        g.mill(item.controller, op["n"])
+        return
+    t = g.target(item)
+    if t is not None:
+        g.mill(t[1], op["n"])
+
+
+def _op_counter_target(g, item, op):
+    t = g.target(item)
+    if t is not None:
+        g.counter(t)
+
+
+def _op_counter_target_unless_paid(g, item, op):
+    t = g.target(item)
+    if t is None:
+        return
+    cost = M(op["cost"])
+    paid = yield from g.optional_payment(t.controller, cost, f"{item.name}: pay {cost} or {t.name} is countered")
+    if not paid:
+        g.counter(t)
+
+
+def _op_destroy_target(g, item, op):
+    t = g.target(item)
+    if t is not None:
+        g.destroy(t)
+
+
+def _op_bounce_target(g, item, op):
+    t = g.target(item)
+    if t is not None:
+        g._move(t, "hand")
+
+
+def _op_tap_target(g, item, op):
+    t = g.target(item)
+    if t is not None:
+        t.tapped = True
+        t.skip_untap += op.get("skip_untap", 0)
+
+
+def _op_grant_target(g, item, op):
+    t = g.target(item)
+    if t is not None:
+        t.temp.append(TempEffect(keywords=frozenset(op["keywords"])))
+
+
+def _op_create_token(g, item, op):
+    for _ in range(op.get("n", 1)):
+        g.create_token(item.controller, op["token"])
+
+
+def _op_gain_life(g, item, op):
+    g.gain_life(item.controller, op["n"])
+
+
+def _op_counter_on_source(g, item, op):
+    live = g.live(item.source)
+    if live is not None:
+        live.counters += 1
+
+
+def _op_damage_target(g, item, op):
+    if g.target_legal(item, 0):
+        g.deal_damage(item.source, item.targets[0], op["n"])
+
+
+def _op_damage_each_creature(g, item, op):
+    without = op.get("without")
+    for c in list(g.battlefield):
+        if g.is_creature(c) and not (without and g.has(c, without)):
+            g.deal_damage(item.source, ("perm", c.oid), op["n"])
+
+
+def _op_exile_graveyard(g, item, op):
+    t = g.target(item)
+    if t is None:
+        return
+    for c in list(g.players[t[1]].graveyard):
+        g._move(c, "exile")
+
+
+def search_filter(op):
+    """Library search predicate from an op's supertype / type / subtypes_any."""
+    sup, typ, subs = op.get("supertype"), op.get("type"), op.get("subtypes_any")
+
+    def pred(c) -> bool:
+        f = c.face
+        if sup and sup not in f.supertypes:
+            return False
+        if typ and typ not in f.types:
+            return False
+        if subs and not (f.subtypes & set(subs)):
+            return False
+        return True
+
+    return pred
+
+
+def _op_search_library(g, item, op):
     yield from g.search_library(
-        item.controller,
-        lambda c: _is_basic(c) and bool(c.face.subtypes & {"Swamp", "Mountain", "Forest"}),
-        "battlefield",
-        "a basic Swamp, Mountain, or Forest card",
-        tapped=True,
+        item.controller, search_filter(op), op["dest"], op["what"], tapped=op.get("tapped", False), reveal=op.get("reveal", False)
     )
 
 
-card(
-    "Twisted Landscape",
-    None,
-    "Land",
-    text="{T}: Add {C}. {T}, Sacrifice: search for a basic Swamp, Mountain, or Forest, put it onto the battlefield tapped. Cycling {B}{R}{G}.",
-    abilities=(
-        _mana_ability("C"),
-        AbilityDef(name="search for a basic land", tap=True, sac_self=True, effect=_twisted_search),
-        AbilityDef(name="cycling {B}{R}{G}", cost=M("{B}{R}{G}"), zone="hand", discard_self=True, effect=lambda g, it: g.draw(it.controller)),
-    ),
-)
+def _op_optional_payment(g, item, op):
+    paid = yield from g.optional_payment(item.controller, M(op["cost"]), op["prompt"])
+    if paid:
+        yield from run_ops(g, item, op["then"])
+
+
+def _op_scry(g, item, op):
+    yield from g.scry(item.controller, op["n"])
+
+
+def _op_explore_target(g, item, op):
+    t = g.target(item)
+    if t is not None:
+        yield from g.explore(t)
+
+
+def _op_shuffle_into_library(g, item, op):
+    """Dies trigger: the card that went to the graveyard is shuffled into its
+    owner's library, if it is still that same object in the graveyard."""
+    c = item.data["card"]
+    if c.zone == "graveyard" and c.oid == item.data["oid"]:
+        g._move(c, "library")
+        g.shuffle(c.owner)
+
+
+def _op_custom(g, item, op):
+    return CUSTOM[op["fn"]](g, item)
+
+
+OPS = {
+    "draw": _op_draw,
+    "mill": _op_mill,
+    "counter_target": _op_counter_target,
+    "counter_target_unless_paid": _op_counter_target_unless_paid,
+    "destroy_target": _op_destroy_target,
+    "bounce_target": _op_bounce_target,
+    "tap_target": _op_tap_target,
+    "grant_target": _op_grant_target,
+    "create_token": _op_create_token,
+    "gain_life": _op_gain_life,
+    "counter_on_source": _op_counter_on_source,
+    "damage_target": _op_damage_target,
+    "damage_each_creature": _op_damage_each_creature,
+    "exile_graveyard": _op_exile_graveyard,
+    "search_library": _op_search_library,
+    "optional_payment": _op_optional_payment,
+    "scry": _op_scry,
+    "explore_target": _op_explore_target,
+    "shuffle_into_library": _op_shuffle_into_library,
+    "custom": _op_custom,
+}
+
+
+def run_ops(g, item, ops):
+    for op in ops:
+        res = OPS[op["op"]](g, item, op)
+        if inspect.isgenerator(res):
+            yield from res
+
 
 # ---------------------------------------------------------------------------
-# Mono Blue Terror
+# Custom effects (one card each)
 # ---------------------------------------------------------------------------
 
 
-def _delver_upkeep(g, item):
+def _delver_reveal(g, item):
     p = item.controller
     lib = g.players[p].library
     if not lib:
@@ -152,44 +251,6 @@ def _delver_upkeep(g, item):
             g._log(f"{live.defn.name}#{live.oid} transforms into {live.name}")
 
 
-_aberration = card(
-    "Insectile Aberration", None, "Creature", "Human Insect", text="Flying", power=3, toughness=2, keywords=frozenset({"flying"}), registry={}
-)
-_aberration = dataclasses.replace(_aberration, colors=frozenset({"U"}))  # blue colour indicator
-card(
-    "Delver of Secrets",
-    "{U}",
-    "Creature",
-    "Human Wizard",
-    text="Upkeep: look at the top card; you may reveal it; if it's an instant or sorcery, transform.",
-    power=1,
-    toughness=1,
-    triggers=(TriggerDef("look at top card", "your_upkeep", _delver_upkeep),),
-    back=_aberration,
-)
-card(
-    "Tolarian Terror",
-    "{6}{U}",
-    "Creature",
-    "Serpent",
-    text="Costs {1} less for each instant and sorcery card in your graveyard. Ward {2}.",
-    power=5,
-    toughness=5,
-    ward=2,
-    cost_reduction=_spells_in_graveyard,
-)
-card(
-    "Cryptic Serpent",
-    "{5}{U}{U}",
-    "Creature",
-    "Serpent",
-    text="Costs {1} less for each instant and sorcery card in your graveyard.",
-    power=6,
-    toughness=5,
-    cost_reduction=_spells_in_graveyard,
-)
-
-
 def _brainstorm(g, item):
     p = item.controller
     g.draw(p, 3)
@@ -205,9 +266,6 @@ def _brainstorm(g, item):
         g._move(c, "library", position="top", known_to={p})
 
 
-card("Brainstorm", "{U}", "Instant", text="Draw three cards, then put two cards from your hand on top of your library in any order.", effect=_brainstorm)
-
-
 def _ponder(g, item):
     p = item.controller
     lib = g.players[p].library
@@ -217,7 +275,7 @@ def _ponder(g, item):
     if len(top) > 1:
         options = []
         seen = set()
-        for perm in _permutations(top):
+        for perm in itertools.permutations(top):
             names = tuple(c.name for c in perm)
             if names in seen:
                 continue
@@ -233,68 +291,6 @@ def _ponder(g, item):
     g.draw(p)
 
 
-def _permutations(cards):
-    import itertools
-
-    return [tuple(x) for x in itertools.permutations(cards)]
-
-
-card("Ponder", "{U}", "Sorcery", text="Look at the top three cards, put them back in any order. You may shuffle. Draw a card.", effect=_ponder)
-
-
-def _thought_scour(g, item):
-    t = g.target(item)
-    if t is not None:
-        g.mill(t[1], 2)
-    g.draw(item.controller)
-
-
-card("Thought Scour", "{U}", "Instant", text="Target player mills two cards. Draw a card.", targets=(T("player"),), effect=_thought_scour)
-
-
-def _mental_note(g, item):
-    g.mill(item.controller, 2)
-    g.draw(item.controller)
-
-
-card("Mental Note", "{U}", "Instant", text="Mill two cards. Draw a card.", effect=_mental_note)
-
-
-def _counterspell(g, item):
-    t = g.target(item)
-    if t is not None:
-        g.counter(t)
-
-
-card("Counterspell", "{U}{U}", "Instant", text="Counter target spell.", targets=(T("spell"),), effect=_counterspell)
-
-
-def _force_spike(g, item):
-    t = g.target(item)
-    if t is None:
-        return
-    paid = yield from g.optional_payment(t.controller, M("{1}"), f"Force Spike: pay {{1}} or {t.name} is countered")
-    if not paid:
-        g.counter(t)
-
-
-card("Force Spike", "{U}", "Instant", text="Counter target spell unless its controller pays {1}.", targets=(T("spell"),), effect=_force_spike)
-
-
-def _islandcycle(g, item):
-    yield from g.search_library(item.controller, lambda c: "Island" in c.face.subtypes, "hand", "an Island card", reveal=True)
-
-
-card(
-    "Lorien Revealed",
-    "{3}{U}{U}",
-    "Sorcery",
-    text="Draw three cards. Islandcycling {1}.",
-    effect=lambda g, it: g.draw(it.controller, 3),
-    abilities=(AbilityDef(name="islandcycling {1}", cost=M("{1}"), zone="hand", discard_self=True, effect=_islandcycle),),
-)
-
-
 def _deem_inferior(g, item):
     t = g.target(item)
     if t is None:
@@ -308,320 +304,23 @@ def _deem_inferior(g, item):
     g._move(t, "library", position=where, known_to={0, 1})
 
 
-card(
-    "Deem Inferior",
-    "{3}{U}",
-    "Sorcery",
-    text="Costs {1} less for each card you've drawn this turn. The owner of target nonland permanent puts it second from the top or on the bottom.",
-    targets=(T("nonland_permanent"),),
-    effect=_deem_inferior,
-    cost_reduction=lambda g, p: g.players[p].cards_drawn_this_turn,
-)
-
-
-def _sleep(g, item):
-    t = g.target(item)
-    if t is not None:
-        t.tapped = True
-        t.skip_untap += 1
-
-
-card(
-    "Sleep of the Dead",
-    "{U}",
-    "Sorcery",
-    text="Tap target creature. It doesn't untap during its controller's next untap step. Escape {2}{U}, exile three other cards.",
-    targets=(T("creature"),),
-    effect=_sleep,
-    escape=M("{2}{U}"),
-    escape_exile=3,
-)
-card(
-    "Plunder the Trollshaws",
-    "{1}{U}",
-    "Instant",
-    text="Draw a card. If cast from a graveyard, draw two instead. Flashback {3}{U}.",
-    effect=lambda g, it: g.draw(it.controller, 2 if it.cast_from == "graveyard" else 1),
-    flashback=M("{3}{U}"),
-)
-
-# ---------------------------------------------------------------------------
-# Jund Wildfire
-# ---------------------------------------------------------------------------
-
-
-def _familiar_etb(g, item):
+def _opponent_discards_else_draw(g, item):
     p = item.controller
     opp = 1 - p
     if not g.players[opp].hand:
         g.draw(p)
         return
-    c = yield from g.ask(opp, CHOOSE_CARD, "Refurbished Familiar: discard a card", g._hand_card_options(opp, "discard"))
+    c = yield from g.ask(opp, CHOOSE_CARD, f"{item.source.name}: discard a card", g._hand_card_options(opp, "discard"))
     g.discard(c)
 
 
-def _artifacts_you_control(g, p) -> int:
-    return sum(1 for c in g.battlefield if c.controller == p and g.is_artifact(c))
-
-
-card(
-    "Refurbished Familiar",
-    "{3}{B}",
-    "Artifact Creature",
-    "Zombie Rat",
-    text="Affinity for artifacts. Flying. ETB: each opponent discards a card; for each who can't, you draw.",
-    power=2,
-    toughness=1,
-    keywords=frozenset({"flying"}),
-    cost_reduction=_artifacts_you_control,
-    triggers=(TriggerDef("opponent discards", "etb", _familiar_etb),),
-)
-
-
-def _chrysalis_cast(g, item):
-    g.create_token(item.controller, "Eldrazi Spawn")
-    g.create_token(item.controller, "Eldrazi Spawn")
-
-
-def _add_counter_to_source(g, item):
-    live = g.live(item.source)
-    if live is not None:
-        live.counters += 1
-
-
-card(
-    "Writhing Chrysalis",
-    "{2}{R}{G}",
-    "Creature",
-    "Eldrazi Drone",
-    text="Devoid. When you cast this, create two Eldrazi Spawn. Reach. Whenever you sacrifice another Eldrazi, +1/+1 counter.",
-    devoid=True,
-    power=2,
-    toughness=3,
-    keywords=frozenset({"reach", "devoid"}),
-    triggers=(
-        TriggerDef("create two Eldrazi Spawn", "cast", _chrysalis_cast),
-        TriggerDef("+1/+1 counter", "you_sacrifice_another", _add_counter_to_source, condition=lambda g, src, lki: "Eldrazi" in lki.face.subtypes),
-    ),
-)
-
-
-def _kcs(g, item):
-    for c in list(g.battlefield):
-        if g.is_creature(c) and not g.has(c, "flying"):
-            g.deal_damage(item.source, ("perm", c.oid), 1)
-
-
-card(
-    "Krark-Clan Shaman",
-    "{R}",
-    "Creature",
-    "Goblin Shaman",
-    text="Sacrifice an artifact: deals 1 damage to each creature without flying.",
-    power=1,
-    toughness=1,
-    abilities=(AbilityDef(name="1 damage to each creature without flying", sac_other="artifact", effect=_kcs),),
-)
-card(
-    "Nyxborn Hydra",
-    "{X}{G}",
-    "Enchantment Creature",
-    "Hydra",
-    text="Bestow {X}{G}{G}. Reach, trample. Enters with X +1/+1 counters. Enchanted creature gets +1/+1 per counter and has reach and trample.",
-    power=0,
-    toughness=1,
-    keywords=frozenset({"reach", "trample"}),
-    bestow=M("{X}{G}{G}"),
-    etb_x_counters=True,
-)
-
-
 def _wildfire(g, item):
+    """Destroy target land; its controller may search for a basic land and put it onto the battlefield tapped."""
     t = g.target(item)
     if t is not None:
         controller = t.controller
         g.destroy(t)
         yield from g.search_library(controller, _is_basic, "battlefield", "a basic land card", tapped=True)
-    g.draw(item.controller)
-
-
-card(
-    "Cleansing Wildfire",
-    "{1}{R}",
-    "Sorcery",
-    text="Destroy target land. Its controller may search for a basic land, put it onto the battlefield tapped. Draw a card.",
-    targets=(T("land"),),
-    effect=_wildfire,
-)
-
-
-def _destroy_target(g, item):
-    t = g.target(item)
-    if t is not None:
-        g.destroy(t)
-
-
-card("Cast Down", "{1}{B}", "Instant", text="Destroy target nonlegendary creature.", targets=(T("nonlegendary_creature"),), effect=_destroy_target)
-
-
-def _offering(g, item):
-    g.draw(item.controller, 2)
-    g.create_token(item.controller, "Map")
-
-
-card(
-    "Fanatical Offering",
-    "{1}{B}",
-    "Instant",
-    text="As an additional cost, sacrifice an artifact or creature. Draw two cards and create a Map token.",
-    additional_sac="artifact_or_creature",
-    effect=_offering,
-)
-card(
-    "Eviscerator's Insight",
-    "{1}{B}",
-    "Instant",
-    text="As an additional cost, sacrifice an artifact or creature. Draw two cards. Flashback {4}{B}.",
-    additional_sac="artifact_or_creature",
-    effect=lambda g, it: g.draw(it.controller, 2),
-    flashback=M("{4}{B}"),
-)
-
-
-def _toxin(g, item):
-    t = g.target(item)
-    if t is None:
-        return
-    t.temp.append(TempEffect(keywords=frozenset({"deathtouch", "lifelink"})))
-    g.create_token(item.controller, "Clue")
-
-
-card(
-    "Toxin Analysis",
-    "{B}",
-    "Instant",
-    text="Target creature gains deathtouch and lifelink until end of turn. Investigate.",
-    targets=(T("creature"),),
-    effect=_toxin,
-)
-
-
-def _munitions(g, item):
-    if g.target_legal(item, 0):
-        g.deal_damage(item.source, item.targets[0], 1)
-
-
-card(
-    "Makeshift Munitions",
-    "{1}{R}",
-    "Enchantment",
-    text="{1}, Sacrifice an artifact or creature: 1 damage to any target.",
-    abilities=(AbilityDef(name="1 damage to any target", cost=M("{1}"), sac_other="artifact_or_creature", targets=(T("any"),), effect=_munitions),),
-)
-card(
-    "Ichor Wellspring",
-    "{2}",
-    "Artifact",
-    text="When this enters or is put into a graveyard from the battlefield, draw a card.",
-    triggers=(
-        TriggerDef("draw a card", "etb", lambda g, it: g.draw(it.controller)),
-        TriggerDef("draw a card", "to_graveyard_from_battlefield", lambda g, it: g.draw(it.controller)),
-    ),
-)
-
-
-def _lembas_etb(g, item):
-    yield from g.scry(item.controller, 1)
-    g.draw(item.controller)
-
-
-def _lembas_shuffle(g, item):
-    c = item.data["card"]
-    if c.zone == "graveyard" and c.oid == item.data["oid"]:
-        g._move(c, "library")
-        g.shuffle(c.owner)
-
-
-card(
-    "Lembas",
-    "{2}",
-    "Artifact",
-    "Food",
-    text="ETB: scry 1, then draw. {2}, {T}, Sacrifice: gain 3 life. When put into a graveyard from the battlefield, its owner shuffles it into their library.",
-    abilities=(AbilityDef(name="gain 3 life", cost=M("{2}"), tap=True, sac_self=True, effect=lambda g, it: g.gain_life(it.controller, 3)),),
-    triggers=(
-        TriggerDef("scry 1, draw", "etb", _lembas_etb),
-        TriggerDef("shuffle into library", "to_graveyard_from_battlefield", _lembas_shuffle),
-    ),
-)
-
-
-def _spellbomb_exile(g, item):
-    t = g.target(item)
-    if t is None:
-        return
-    gy = g.players[t[1]].graveyard
-    for c in list(gy):
-        g._move(c, "exile")
-
-
-def _spellbomb_dies(g, item):
-    paid = yield from g.optional_payment(item.controller, M("{B}"), "Nihil Spellbomb: pay {B} to draw a card?")
-    if paid:
-        g.draw(item.controller)
-
-
-card(
-    "Nihil Spellbomb",
-    "{1}",
-    "Artifact",
-    text="{T}, Sacrifice: exile target player's graveyard. When put into a graveyard from the battlefield, you may pay {B}; if you do, draw.",
-    abilities=(AbilityDef(name="exile target player's graveyard", tap=True, sac_self=True, targets=(T("player"),), effect=_spellbomb_exile),),
-    triggers=(TriggerDef("pay {B}: draw", "to_graveyard_from_battlefield", _spellbomb_dies),),
-)
-card(
-    "Gixian Infiltrator",
-    "{1}{B}",
-    "Creature",
-    "Phyrexian Human",
-    text="Whenever you sacrifice another permanent, put a +1/+1 counter on this creature.",
-    power=2,
-    toughness=1,
-    triggers=(TriggerDef("+1/+1 counter", "you_sacrifice_another", _add_counter_to_source),),
-)
-
-# ---------------------------------------------------------------------------
-# Sideboards (lean, matchup-relevant; see decks.py)
-# ---------------------------------------------------------------------------
-
-
-def _counter_target(g, item):
-    t = g.target(item)
-    if t is not None:
-        g.counter(t)
-
-
-card(
-    "Red Elemental Blast",
-    "{R}",
-    "Instant",
-    text="Choose one - Counter target blue spell; or destroy target blue permanent.",
-    modes=(
-        SpellMode("counter", (T("blue_spell"),), _counter_target),
-        SpellMode("destroy", (T("blue_permanent"),), _destroy_target),
-    ),
-)
-card(
-    "Blue Elemental Blast",
-    "{U}",
-    "Instant",
-    text="Choose one - Counter target red spell; or destroy target red permanent.",
-    modes=(
-        SpellMode("counter", (T("red_spell"),), _counter_target),
-        SpellMode("destroy", (T("red_permanent"),), _destroy_target),
-    ),
-)
-card("Go for the Throat", "{1}{B}", "Instant", text="Destroy target creature that isn't an artifact creature.", targets=(T("nonartifact_creature"),), effect=_destroy_target)
 
 
 def _duress(g, item):
@@ -639,82 +338,138 @@ def _duress(g, item):
     g.discard(c)
 
 
-card(
-    "Duress",
-    "{B}",
-    "Sorcery",
-    text="Target opponent reveals their hand. You choose a noncreature, nonland card from it. That player discards that card.",
-    targets=(T("opponent"),),
-    effect=_duress,
-)
-card("Dispel", "{U}", "Instant", text="Counter target instant spell.", targets=(T("instant_spell"),), effect=_counter_target)
-
-
-def _bounce_artifact(g, item):
-    t = g.target(item)
-    if t is not None:
-        g._move(t, "hand")
-
-
-card(
-    "Steel Sabotage",
-    "{U}",
-    "Instant",
-    text="Choose one - Counter target artifact spell; or return target artifact to its owner's hand.",
-    modes=(
-        SpellMode("counter", (T("artifact_spell"),), _counter_target),
-        SpellMode("bounce", (T("artifact"),), _bounce_artifact),
-    ),
-)
+CUSTOM = {
+    "delver_reveal": _delver_reveal,
+    "brainstorm": _brainstorm,
+    "ponder": _ponder,
+    "deem_inferior": _deem_inferior,
+    "opponent_discards_else_draw": _opponent_discards_else_draw,
+    "wildfire": _wildfire,
+    "duress": _duress,
+}
 
 # ---------------------------------------------------------------------------
-# Tokens
+# Spec -> CardDef
 # ---------------------------------------------------------------------------
 
-card(
-    "Eldrazi Spawn",
-    None,
-    "Creature",
-    "Eldrazi Spawn",
-    text="Sacrifice this token: Add {C}.",
-    power=0,
-    toughness=1,
-    abilities=(AbilityDef(name="sacrifice: add C", sac_self=True, mana=("C",)),),
-    registry=TOKENS,
-)
-card(
-    "Clue",
-    None,
-    "Artifact",
-    "Clue",
-    text="{2}, Sacrifice: draw a card.",
-    abilities=(AbilityDef(name="draw a card", cost=M("{2}"), sac_self=True, effect=lambda g, it: g.draw(it.controller)),),
-    registry=TOKENS,
-)
+
+def _spells_in_graveyard(g, p) -> int:
+    return sum(1 for c in g.players[p].graveyard if is_instant_or_sorcery(c))
 
 
-def _map_explore(g, item):
-    t = g.target(item)
-    if t is not None:
-        yield from g.explore(t)
+def _artifacts_you_control(g, p) -> int:
+    return sum(1 for c in g.battlefield if c.controller == p and g.is_artifact(c))
 
 
-card(
-    "Map",
-    None,
-    "Artifact",
-    "Map",
-    text="{1}, {T}, Sacrifice: target creature you control explores. Sorcery speed.",
-    abilities=(
-        AbilityDef(
-            name="explore",
-            cost=M("{1}"),
-            tap=True,
-            sac_self=True,
-            sorcery_speed=True,
-            targets=(T("creature_you_control"),),
-            effect=_map_explore,
-        ),
-    ),
-    registry=TOKENS,
-)
+COST_REDUCTIONS = {
+    "instants_and_sorceries_in_graveyard": _spells_in_graveyard,
+    "artifacts_you_control": _artifacts_you_control,
+    "cards_drawn_this_turn": lambda g, p: g.players[p].cards_drawn_this_turn,
+}
+
+
+def _condition(spec: dict | None):
+    if spec is None:
+        return None
+    if set(spec) == {"sacrificed_subtype"}:
+        sub = spec["sacrificed_subtype"]
+        return lambda g, src, lki: sub in lki.face.subtypes
+    raise ValueError(f"unsupported trigger condition {spec!r}")
+
+
+def make_effect(ops: list[dict] | None):
+    if not ops:
+        return None
+    for op in ops:
+        if op["op"] not in OPS:
+            raise ValueError(f"unknown op {op['op']!r}")
+        if op["op"] == "custom" and op["fn"] not in CUSTOM:
+            raise ValueError(f"unknown custom effect {op['fn']!r}")
+        if op["op"] == "optional_payment":
+            make_effect(op["then"])
+    return lambda g, item: run_ops(g, item, ops)
+
+
+def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:
+    return tuple(TargetSpec(k) for k in kinds or ())
+
+
+def _ability(a: dict) -> AbilityDef:
+    return AbilityDef(
+        name=a["name"],
+        effect=make_effect(a.get("effect")),
+        cost=M(a.get("cost")),
+        tap=a.get("tap", False),
+        sac_self=a.get("sac_self", False),
+        sac_other=a.get("sac_other"),
+        discard_self=a.get("discard_self", False),
+        zone=a.get("zone", "battlefield"),
+        sorcery_speed=a.get("sorcery_speed", False),
+        mana=tuple(a["mana"]) if "mana" in a else None,
+        targets=_targets(a.get("targets")),
+    )
+
+
+def _trigger(t: dict) -> TriggerDef:
+    return TriggerDef(t["name"], t["event"], make_effect(t["effect"]), _condition(t.get("condition")))
+
+
+def colors_of(spec: dict) -> frozenset[str]:
+    if "colors" in spec:
+        return frozenset(spec["colors"].split())
+    cost = spec.get("cost")
+    if spec.get("devoid") or not cost:
+        return frozenset()
+    return frozenset(c for c in "WUBRG" if "{%s}" % c in cost)
+
+
+def card_def(spec: dict) -> CardDef:
+    known = {
+        "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward",
+        "targets", "effect", "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped",
+        "etb_x_counters", "back", "modes", "abilities", "triggers",
+    }  # fmt: skip
+    unknown = set(spec) - known
+    if unknown:
+        raise ValueError(f"{spec.get('name')}: unknown fields {sorted(unknown)}")
+    cr = spec.get("cost_reduction")
+    return CardDef(
+        name=spec["name"],
+        cost=M(spec.get("cost")),
+        types=frozenset(spec["types"].split()),
+        subtypes=frozenset(spec.get("subtypes", "").split()),
+        supertypes=frozenset(spec.get("supertypes", "").split()),
+        colors=colors_of(spec),
+        power=spec.get("power"),
+        toughness=spec.get("toughness"),
+        keywords=frozenset(spec.get("keywords", ())),
+        ward=spec.get("ward", 0),
+        text=spec.get("text", ""),
+        targets=_targets(spec.get("targets")),
+        effect=make_effect(spec.get("effect")),
+        additional_sac=spec.get("additional_sac"),
+        cost_reduction=COST_REDUCTIONS[cr] if cr else None,
+        flashback=M(spec["flashback"]) if "flashback" in spec else None,
+        escape=M(spec["escape"]) if "escape" in spec else None,
+        escape_exile=spec.get("escape_exile", 0),
+        bestow=M(spec["bestow"]) if "bestow" in spec else None,
+        abilities=tuple(_ability(a) for a in spec.get("abilities", ())),
+        triggers=tuple(_trigger(t) for t in spec.get("triggers", ())),
+        enters_tapped=spec.get("enters_tapped", False),
+        etb_x_counters=spec.get("etb_x_counters", False),
+        back=FACES[spec["back"]] if "back" in spec else None,
+        modes=tuple(SpellMode(m["name"], _targets(m.get("targets")), make_effect(m["effect"])) for m in spec.get("modes", ())),
+    )
+
+
+def load(path: str = SPEC_PATH) -> None:
+    with open(path, "rb") as f:
+        spec = tomllib.load(f)
+    for registry, section in ((FACES, "face"), (CARDS, "card"), (TOKENS, "token")):
+        for s in spec.get(section, ()):
+            if s["name"] in registry:
+                raise ValueError(f"duplicate {section} {s['name']!r}")
+            registry[s["name"]] = card_def(s)
+
+
+load()
