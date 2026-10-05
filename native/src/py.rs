@@ -21,18 +21,6 @@ fn rel(p: u8, viewer: u8) -> &'static str {
     }
 }
 
-fn ki_str(k: &KI) -> String {
-    match k {
-        KI::S(s) => s.to_string(),
-        KI::I(i) => i.to_string(),
-        KI::N => "None".to_string(),
-        KI::T(v) => match v.len() {
-            1 => format!("({},)", v[0]),
-            _ => format!("({})", v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ")),
-        },
-    }
-}
-
 fn key_to_py<'py>(py: Python<'py>, key: &Key) -> Bound<'py, PyTuple> {
     let items: Vec<PyObject> = key
         .iter()
@@ -753,18 +741,6 @@ pub fn state_features(st: &State, viewer: u8) -> Vec<String> {
         f.push(format!("stack:{}:{}:{}", i.min(3), rel(it.controller, viewer), it.name));
     }
     f
-}
-
-/// `rl.features.option_tokens(kind, key)`.
-pub fn option_tokens(kind: &str, key: &Key) -> Vec<String> {
-    let mut full: Vec<String> = Vec::with_capacity(key.len() + 1);
-    full.push(kind.to_string());
-    full.extend(key.iter().map(ki_str));
-    let mut toks: Vec<String> = full.iter().enumerate().map(|(i, e)| format!("{i}={e}")).collect();
-    for n in 1..full.len() {
-        toks.push(full[..n + 1].join("|"));
-    }
-    toks
 }
 
 #[pyfunction]

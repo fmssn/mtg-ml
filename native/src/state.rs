@@ -1206,21 +1206,14 @@ impl State {
             Ref::Player(p) => (format!("player {p} ({})", rel(p)), vec![KI::S("player"), KI::S(rel(p))]),
             Ref::Stack(sid) => {
                 let it = &self.stack[self.stack_pos(sid).expect("described stack item")];
-                (format!("spell {}#{} ({})", it.name, it.sid, rel(it.controller)), vec![KI::S("spell"), KI::S(rel(it.controller)), KI::S(self.static_item_name(it))])
+                // A spell on the stack is named after its card (never transformed there).
+                let name = self.c(it.card.expect("only spells are targetable on the stack")).name();
+                (format!("spell {}#{} ({})", it.name, it.sid, rel(it.controller)), vec![KI::S("spell"), KI::S(rel(it.controller)), KI::S(name)])
             }
             Ref::Perm(oid) => {
                 let c = self.c(self.perm(oid).expect("described permanent"));
                 (format!("{}#{} ({})", c.name(), c.oid, rel(c.controller)), vec![KI::S("perm"), KI::S(rel(c.controller)), KI::S(c.name())])
             }
-        }
-    }
-
-    /// A spell's stack name as a static string (its card name at cast time).
-    fn static_item_name(&self, it: &StackItem) -> &'static str {
-        let d = db();
-        match d.cards.get(&it.name).or_else(|| d.tokens.get(&it.name)) {
-            Some(id) => &d.def(*id).name,
-            None => d.defs.iter().find(|x| x.name == it.name).map(|x| x.name.as_str()).expect("spell name"),
         }
     }
 
