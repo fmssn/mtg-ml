@@ -9,6 +9,8 @@ step the harness compares
 * `featurize()` for the deciding player (native fast path vs Python);
 * a dump of the full hidden state (libraries in order, `known_to`, object
   ids, damage, counters, the stack, pending triggers, combat, RNG position);
+* for scripted-bot seats, the bot's choice computed on each engine (the bots
+  read the object model, which the native engine serves through proxies);
 
 and after the game the outcome, the log and the complete RNG state. Every
 `fork_every` steps it also checks `fork()` and `determinize()`.
@@ -221,7 +223,12 @@ def run_lockstep(sc: Scenario, script: list[int] | None = None, full_every: int 
                 return None
             a = min(script[n], len(py.legal_options()) - 1)
         else:
-            a = agents[py.decision.player].act(py)
+            seat = py.decision.player
+            a = agents[seat].act(py)
+            if sc.agents[seat] == "bot":  # bots read the object model: same choice on the native proxies
+                b = agents[seat].act(nat)
+                if a != b:
+                    return Divergence(sc, n, f"bot choice: python={a} native={b}", list(taken))
         taken.append(a)
         errs = []
         for g in (py, nat):

@@ -3,8 +3,14 @@ option labels."""
 
 from __future__ import annotations
 
+from mtg_ml.backend import game_class
 from mtg_ml.engine import Game
 from mtg_ml.engine import objects as O
+
+
+def new_game(*args, **kw) -> Game:
+    """A game on the engine selected by $MTG_ENGINE (set per test by conftest.py)."""
+    return game_class()(*args, **kw)
 
 
 def scenario(p0: dict | None = None, p1: dict | None = None, active: int = 0, step: str = "main1", auto_single: bool = False) -> Game:
@@ -25,7 +31,7 @@ def scenario(p0: dict | None = None, p1: dict | None = None, active: int = 0, st
             g.players[idx].life = spec.get("life", 20)
             g.players[idx].cards_drawn_this_turn = spec.get("drawn", 0)
 
-    g = Game(([], []), seed=0, starting_player=active, setup=setup, start_step=step, auto_single=auto_single, log=True)
+    g = new_game(([], []), seed=0, starting_player=active, setup=setup, start_step=step, auto_single=auto_single, log=True)
     settle(g)
     return g
 

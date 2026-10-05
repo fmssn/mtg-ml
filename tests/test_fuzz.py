@@ -3,6 +3,8 @@ random play reaches every card's actions."""
 
 import random
 
+from helpers import new_game
+
 from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, RulesError, expand
 
 DECKS = (expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR))
@@ -40,7 +42,7 @@ def check_invariants(g: Game) -> None:
 def test_random_games_keep_invariants():
     results = {}
     for seed in range(120):
-        g = Game(DECKS, seed=seed, max_turns=60)
+        g = new_game(DECKS, seed=seed, max_turns=60)
         r = random.Random(seed)
         n = 0
         while not g.over:
@@ -59,7 +61,7 @@ def test_every_offered_option_is_playable():
     """No dead ends: from sampled decision points, every option can be taken
     and play continues to the next decision without a rules error."""
     for seed in range(4):
-        g = Game(DECKS, seed=100 + seed, max_turns=30)
+        g = new_game(DECKS, seed=100 + seed, max_turns=30)
         r = random.Random(seed)
         n = 0
         while not g.over:
@@ -78,7 +80,7 @@ def test_random_play_reaches_every_card():
     used: set[str] = set()
     modes: set[tuple] = set()
     for seed in range(250):
-        g = Game(DECKS, seed=seed, max_turns=40, auto_single=False)
+        g = new_game(DECKS, seed=seed, max_turns=40, auto_single=False)
         r = random.Random(seed)
         while not g.over:
             i = random_index(g, r)

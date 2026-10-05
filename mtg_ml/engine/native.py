@@ -35,22 +35,35 @@ with open(SPEC_PATH, encoding="utf-8") as _f:
 _ALL_DEFS = {**FACES, **TOKENS, **CARDS}
 
 
+_CARD_FIELDS = (
+    "uid", "oid", "name", "_defn_name", "owner", "controller", "zone", "is_token", "transformed", "tapped", "damage",
+    "deathtouch_damage", "counters", "sick", "attached_to", "skip_untap", "_temp", "_known",
+)  # fmt: skip
+_SETTABLE = {"tapped", "transformed", "sick", "deathtouch_damage", "damage", "counters", "skip_untap", "attached_to", "controller"}
+
+
 class NativeCard:
-    """Read-only view of a card (or a last-known-information copy)."""
+    """A card of a native game, like `objects.Card`: one proxy per physical
+    card for the whole game (identity is stable), whose attributes always
+    show the card's current state. Last-known-information copies (a stack
+    item's source, a dies trigger's source) are frozen snapshots."""
 
-    __slots__ = (
-        "_idx", "uid", "oid", "name", "_defn_name", "owner", "controller", "zone", "is_token", "transformed", "tapped",
-        "damage", "deathtouch_damage", "counters", "sick", "attached_to", "skip_untap", "temp", "known_to",
-    )  # fmt: skip
+    __slots__ = ("_g", "_idx", "_snap")
 
-    def __init__(self, info: tuple, idx: int | None = None):
-        (
-            self.uid, self.oid, self.name, self._defn_name, self.owner, self.controller, self.zone, self.is_token, self.transformed,
-            self.tapped, self.damage, self.deathtouch_damage, self.counters, self.sick, self.attached_to, self.skip_untap, temp, known,
-        ) = info  # fmt: skip
-        self._idx = idx
-        self.temp = [TempEffect(keywords=frozenset(k), power=p, toughness=t) for k, p, t in temp]
-        self.known_to = set(known)
+    def __init__(self, g: "NativeGame | None", idx: int | None, snap: tuple | None = None):
+        self._g, self._idx, self._snap = g, idx, snap
+
+    def _t(self) -> tuple:
+        return self._snap if self._idx is None else self._g._info(self._idx)
+
+    @property
+    def temp(self) -> list[TempEffect]:
+        t = [TempEffect(keywords=frozenset(k), power=p, toughness=tt) for k, p, tt in self._t()[16]]
+        return t if self._idx is None else _TempList(self, t)
+
+    @property
+    def known_to(self) -> set[int]:
+        return set(self._t()[17])
 
     @property
     def face(self):
@@ -62,6 +75,40 @@ class NativeCard:
 
     def __repr__(self) -> str:
         return f"{self.name}#{self.oid}"
+
+
+def _field(i: int, name: str):
+    def get(self):
+        return self._t()[i]
+
+    if name not in _SETTABLE:
+        return property(get)
+
+    def set_(self, v):
+        if self._idx is None:
+            raise AttributeError("last-known-information copies are read-only")
+        self._g._g.set_card_field(self._idx, name, v)
+        self._g._touch()
+
+    return property(get, set_)
+
+
+for _i, _name in enumerate(_CARD_FIELDS[:16]):
+    setattr(NativeCard, _name, _field(_i, _name))
+
+
+class _TempList(list):
+    """`card.temp`; `append()` adds the effect to the engine's card."""
+
+    def __init__(self, card: NativeCard, items):
+        super().__init__(items)
+        self._card = card
+
+    def append(self, t: TempEffect) -> None:
+        c = self._card
+        c._g._g.add_temp(c._idx, sorted(t.keywords), t.power, t.toughness)
+        c._g._touch()
+        super().append(t)
 
 
 class NativePlayer:
@@ -106,8 +153,8 @@ class NativeStackItem:
         self.sid = sid
         self.targets = [tuple(t) for t in targets]
         self.card = None if card is None else g._card(card)
-        self.source = None if src is None else NativeCard(src)
-        self.data = {k: (NativeCard(v) if k in ("card", "sacrificed") else v) for k, v in data}
+        self.source = None if src is None else NativeCard(None, None, src)
+        self.data = {k: (NativeCard(None, None, v) if k in ("card", "sacrificed") else v) for k, v in data}
 
     def __repr__(self) -> str:
         return f"[{self.name} ({self.kind}) #{self.sid}]"
@@ -169,6 +216,36 @@ class NativeDecision:
         return f"Decision(p{self.player} {self.kind}: {self.prompt!r}, {len(self.options)} options)"
 
 
+class NativePendingTrigger:
+    __slots__ = ("controller", "source", "tdef", "data")
+
+    def __init__(self, info: tuple):
+        self.controller, src, name, data = info
+        self.source = NativeCard(None, None, src)
+        self.tdef = _TriggerName(name)
+        self.data = {k: (NativeCard(None, None, v) if k in ("card", "sacrificed") else v) for k, v in data}
+
+
+class _TriggerName:
+    __slots__ = ("name",)
+
+    def __init__(self, name: str):
+        self.name = name
+
+
+class _PendingList(list):
+    """`game.pending`; `clear()` clears the engine's list too."""
+
+    def __init__(self, g: "NativeGame"):
+        super().__init__(NativePendingTrigger(t) for t in g._g.pending())
+        self._g = g
+
+    def clear(self) -> None:
+        self._g._g.clear_pending()
+        self._g._touch()
+        super().clear()
+
+
 class _NativeRng:
     """`game.rng`: getstate/setstate on the engine's MT19937."""
 
@@ -220,6 +297,7 @@ class NativeGame:
         )
         self._version = 0
         self._cache: dict = {}
+        self._proxies: dict[int, NativeCard] = {}
         if setup is not None:
             setup(self)
             self._touch()
@@ -241,11 +319,17 @@ class NativeGame:
         return c[name]
 
     def _card(self, idx: int) -> NativeCard:
-        cards = self._cached("cards", dict)
-        c = cards.get(idx)
+        c = self._proxies.get(idx)
         if c is None:
-            c = cards[idx] = NativeCard(self._g.card_info(idx), idx)
+            c = self._proxies[idx] = NativeCard(self, idx)
         return c
+
+    def _info(self, idx: int) -> tuple:
+        info = self._cached("info", dict)
+        t = info.get(idx)
+        if t is None:
+            t = info[idx] = self._g.card_info(idx)
+        return t
 
     def _resolve(self, v):
         """Option values: ("card", idx) markers become card proxies."""
@@ -377,6 +461,25 @@ class NativeGame:
     @property
     def blocks(self) -> dict[int, int]:
         return self._cached("blocks", lambda: dict(self._g.blocks))
+
+    @property
+    def pending(self) -> list[NativePendingTrigger]:
+        return self._cached("pending", lambda: _PendingList(self))
+
+    # -- direct rules actions (scenario tests) ---------------------------------
+
+    def _untap_step(self) -> None:
+        self._g.untap_step()
+        self._touch()
+
+    def destroy(self, card) -> bool:
+        r = self._g.destroy(self._idx(card))
+        self._touch()
+        return r
+
+    def sacrifice(self, card) -> None:
+        self._g.sacrifice(self._idx(card))
+        self._touch()
 
     # -- characteristics and rules queries -----------------------------------
 

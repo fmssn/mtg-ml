@@ -409,6 +409,63 @@ impl PyGame {
         self.g.state_mut().add_card(name, player, z, tapped, sick, counters).map_err(PyValueError::new_err)
     }
 
+    // -- direct rules actions (scenario tests) --------------------------------
+
+    /// Mutate one field of a card (scenario tests poke card objects directly).
+    fn set_card_field(&mut self, c: CIdx, field: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.card(c)?;
+        let card = self.g.state_mut().cm(c);
+        match field {
+            "tapped" => card.tapped = value.extract()?,
+            "transformed" => card.transformed = value.extract()?,
+            "sick" => card.sick = value.extract()?,
+            "deathtouch_damage" => card.deathtouch_damage = value.extract()?,
+            "damage" => card.damage = value.extract()?,
+            "counters" => card.counters = value.extract()?,
+            "skip_untap" => card.skip_untap = value.extract()?,
+            "attached_to" => card.attached_to = value.extract()?,
+            "controller" => card.controller = value.extract()?,
+            _ => return Err(PyValueError::new_err(format!("card field {field:?} is not settable"))),
+        }
+        Ok(())
+    }
+
+    /// Append an 'until end of turn' effect to a card.
+    fn add_temp(&mut self, c: CIdx, keywords: Vec<String>, power: i32, toughness: i32) -> PyResult<()> {
+        self.card(c)?;
+        let d = db();
+        let mut mask = 0;
+        for k in &keywords {
+            if !d.keyword_names.contains(k) {
+                return Err(PyValueError::new_err(format!("unknown keyword {k:?}")));
+            }
+            mask |= d.kw(k);
+        }
+        self.g.state_mut().cm(c).temp.push(TempEffect { keywords: mask, power, toughness });
+        Ok(())
+    }
+
+    fn untap_step(&mut self) {
+        self.g.state_mut().untap_step();
+    }
+    fn destroy(&mut self, c: CIdx) -> PyResult<bool> {
+        self.card(c)?;
+        Ok(self.g.state_mut().destroy(c))
+    }
+    fn sacrifice(&mut self, c: CIdx) -> PyResult<()> {
+        self.card(c)?;
+        self.g.state_mut().sacrifice(c);
+        Ok(())
+    }
+    /// Pending triggers: (controller, source card tuple, trigger name, data).
+    fn pending(&self, py: Python<'_>) -> Vec<PyObject> {
+        let st = self.st();
+        st.pending.iter().map(|t| (t.controller, card_tuple(py, st.src(&t.source)), t.tdef.name.as_str(), data_list(py, st, &t.data)).into_py(py)).collect()
+    }
+    fn clear_pending(&mut self) {
+        self.g.state_mut().pending.clear();
+    }
+
     /// Replace a card's definition (`determinize`): `c.defn = d; c.transformed = False`.
     fn set_card_def(&mut self, c: CIdx, name: &str) -> PyResult<()> {
         self.card(c)?;

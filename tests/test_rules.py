@@ -1,6 +1,6 @@
 """Turn structure, priority, combat and state-based actions."""
 
-from helpers import bf, choose, find, has, labels, names, pass_priority, pay, resolve_stack, scenario
+from helpers import bf, choose, find, has, labels, names, new_game, pass_priority, pay, resolve_stack, scenario
 
 from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, expand
 from mtg_ml.engine import objects as O
@@ -24,7 +24,7 @@ def to_step(g: Game, step: str) -> None:
 
 
 def test_opening_hands_and_first_turn_draw_skip():
-    g = Game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=7, auto_single=False, mulligans=False)
+    g = new_game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=7, auto_single=False, mulligans=False)
     assert [len(p.hand) for p in g.players] == [7, 7]
     assert [len(p.library) for p in g.players] == [53, 53]
     sp = g.starting_player
@@ -209,7 +209,7 @@ def test_mana_empties_between_steps():
 def test_fork_is_exact():
     import random
 
-    g = Game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=3)
+    g = new_game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=3)
     r = random.Random(0)
     for _ in range(150):
         if g.over:
@@ -223,7 +223,7 @@ def test_fork_is_exact():
 
 
 def _mull_game(seed=3):
-    return Game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=seed, auto_single=False)
+    return new_game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=seed, auto_single=False)
 
 
 def test_mulligan_starting_player_decides_first_and_keep_changes_nothing():
