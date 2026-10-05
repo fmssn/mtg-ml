@@ -79,6 +79,7 @@ Grouped by the open problems in this project (search targets, expensive `fork()`
 - Zha et al. (2021), *DouZero: Mastering DouDizhu with Self-Play Deep RL*, ICML. [arXiv:2106.06135](https://arxiv.org/abs/2106.06135) — action encoding comparable to `Option.key`.
 - ★ Guan et al. (2022), *PerfectDou: Dominating DouDizhu with Perfect Information Distillation*. [arXiv:2203.16406](https://arxiv.org/abs/2203.16406) — critic sees hidden cards during training only; cheap win for the value head.
 - Li et al. (2020), *Suphx: Mastering Mahjong with Deep RL* (oracle guiding). [arXiv:2003.13590](https://arxiv.org/abs/2003.13590)
+- Xiao, Zhang, Huang, Huang, Chen & Sun (2023), *Mastering Strategy Card Game (Hearthstone) with Improved Techniques*, IEEE CoG. [arXiv:2303.05197](https://arxiv.org/abs/2303.05197) — closest published analogue to this project: end-to-end policy plus optimistic smooth fictitious play on a full commercial CCG.
 - *Learning to Beat ByteRL: Exploitability of Collectible Card Game Agents* (2024). [arXiv:2404.16689](https://arxiv.org/abs/2404.16689) — exploitability as an evaluation lens.
 
 **PPO practice**
