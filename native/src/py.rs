@@ -600,25 +600,12 @@ impl PyGame {
 
     /// `rl.features.featurize(game, player, state_dim, option_dim)`.
     fn featurize(&self, player: u8, state_dim: u32, option_dim: u32) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
-        let st = self.st();
-        let d = self.decision()?;
-        let mut feats = state_features(st, player);
-        feats.push(format!("seat:{player}"));
-        feats.push(format!("decision:{}", d.kind.name()));
-        let mut state: Vec<u32> = feats.iter().map(|f| crc32fast::hash(f.as_bytes()) % state_dim).collect();
-        state.sort_unstable();
-        state.dedup();
-        let opts = d
-            .options
-            .iter()
-            .map(|o| {
-                let mut v: Vec<u32> = option_tokens(d.kind.name(), &o.key).iter().map(|t| crc32fast::hash(t.as_bytes()) % option_dim).collect();
-                v.sort_unstable();
-                v.dedup();
-                v
-            })
-            .collect();
-        Ok((state, opts))
+        crate::features::featurize(self.st(), player, state_dim, option_dim).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
+    }
+
+    /// Hashed `event_tokens` of option i for (decider, opponent).
+    fn event_hashes(&self, i: usize, option_dim: u32) -> PyResult<(Vec<u32>, Vec<u32>)> {
+        crate::features::event_hashes(self.st(), i, option_dim).ok_or_else(|| PyIndexError::new_err("no such option"))
     }
 
     /// Canonical dump of the full (hidden) state for differential testing.

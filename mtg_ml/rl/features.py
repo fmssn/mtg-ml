@@ -77,6 +77,23 @@ def event_tokens(kind: str, key: tuple, mine: bool) -> list[str]:
 def encode_events(tokens: list[str], option_dim: int = OPTION_DIM) -> list[int]:
     """Hash the tokens gathered since a player's previous decision (a bag
     with counts), plus a bucketed count of how much happened."""
-    n = len(tokens)
-    tokens = tokens[-MAX_EVENT_TOKENS:] + [f"events:{min(n // 8, 16)}"]
-    return [_h(t, option_dim) for t in tokens]
+    return encode_event_hashes([_h(t, option_dim) for t in tokens], option_dim)
+
+
+def event_hashes(game, index: int, option_dim: int = OPTION_DIM) -> tuple[list[int], list[int]]:
+    """Hashed `event_tokens` of option `index` of the current decision, as
+    seen by (the decider, the opponent). Native games hash in Rust."""
+    if getattr(game, "NATIVE", False):
+        return game.event_hashes(index, option_dim)
+    d = game.decision
+    key = d.options[index].key
+    return (
+        [_h(t, option_dim) for t in event_tokens(d.kind, key, mine=True)],
+        [_h(t, option_dim) for t in event_tokens(d.kind, key, mine=False)],
+    )
+
+
+def encode_event_hashes(hashes: list[int], option_dim: int = OPTION_DIM) -> list[int]:
+    """`encode_events` for tokens that are already hashed."""
+    n = len(hashes)
+    return hashes[-MAX_EVENT_TOKENS:] + [_h(f"events:{min(n // 8, 16)}", option_dim)]

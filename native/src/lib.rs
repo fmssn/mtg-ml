@@ -1,5 +1,6 @@
 pub mod cards;
 pub mod engine;
+pub mod features;
 pub mod game;
 pub mod mana;
 #[cfg(feature = "python")]

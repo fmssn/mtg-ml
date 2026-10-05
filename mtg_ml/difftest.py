@@ -151,7 +151,7 @@ def snapshot(g, full: bool = True) -> dict:
     """Everything compared at one decision point."""
     from .encode import state_features
     from .engine.view import observe
-    from .rl.features import featurize
+    from .rl.features import event_hashes, featurize
 
     s = {"decision": decision_view(g), "observe0": observe(g, 0), "observe1": observe(g, 1)}
     if full:
@@ -159,6 +159,7 @@ def snapshot(g, full: bool = True) -> dict:
         s["features1"] = state_features(g, 1)
         if g.decision is not None:
             s["featurize"] = featurize(g, g.decision.player)
+            s["events"] = [event_hashes(g, i) for i in range(len(g.decision.options))]
         s["state"] = dump_state(g)
     return canonical(s)
 

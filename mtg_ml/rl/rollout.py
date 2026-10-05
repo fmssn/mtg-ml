@@ -25,7 +25,7 @@ from ..bots import make_bot
 from ..backend import game_class
 from ..engine import Game
 from ..match import match_decks
-from .features import encode_events, event_tokens, featurize
+from .features import encode_event_hashes, event_hashes, featurize
 from .model import PolicyNet, collate
 
 LEARNER = "learner"
@@ -143,15 +143,15 @@ class _Seat:
 
     def __init__(self):
         self.hidden = None
-        self.events: list[str] = []
+        self.events: list[int] = []  # hashed event tokens
 
 
 def _step(g: Game, seats: tuple[_Seat, _Seat], a: int) -> None:
     """Take option `a` and tell both players what they saw of it."""
-    d = g.decision
-    key = d.options[a].key
-    seats[d.player].events += event_tokens(d.kind, key, mine=True)
-    seats[1 - d.player].events += event_tokens(d.kind, key, mine=False)
+    p = g.decision.player
+    mine, theirs = event_hashes(g, a)
+    seats[p].events += mine
+    seats[1 - p].events += theirs
     g.step(a)
 
 
@@ -184,7 +184,7 @@ def run_job(job: Job) -> Result:
                 continue
             seat = mem[i][p]
             state, opts = featurize(g, p)
-            x = (state, opts, encode_events(seat.events))
+            x = (state, opts, encode_event_hashes(seat.events))
             seat.events = []
             pending.setdefault(pol, []).append((i, p, x))
         for pol, items in pending.items():
