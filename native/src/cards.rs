@@ -150,6 +150,15 @@ pub enum Custom {
     Duress,
 }
 
+/// Whose life an op changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Who {
+    You,
+    Opponent,
+    TargetPlayer,
+    TargetController,
+}
+
 #[derive(Clone, Debug)]
 pub struct SearchFilter {
     pub supertype: Option<String>,
@@ -169,6 +178,7 @@ pub enum Op {
     GrantTarget { keywords: u32 },
     CreateToken { token: DefId, n: i32 },
     GainLife { n: i32 },
+    LoseLife { who: Who, n: i32 },
     CounterOnSource,
     DamageTarget { n: i32 },
     DamageEachCreature { n: i32, without: u32 },
@@ -464,6 +474,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "grant_target" => &["op", "keywords"],
             "create_token" => &["op", "token", "n"],
             "gain_life" | "damage_target" | "scry" => &["op", "n"],
+            "lose_life" => &["op", "who", "n"],
             "damage_each_creature" => &["op", "n", "without"],
             "search_library" => &["op", "supertype", "type", "subtypes_any", "dest", "tapped", "reveal", "what"],
             "optional_payment" => &["op", "cost", "prompt", "then"],
@@ -493,6 +504,16 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 Op::CreateToken { token: *tokens.get(name).ok_or_else(|| format!("unknown token {name:?}"))?, n: get_int(t, "n")?.unwrap_or(1) }
             }
             "gain_life" => Op::GainLife { n: n()? },
+            "lose_life" => Op::LoseLife {
+                who: match req_str(t, "who")? {
+                    "you" => Who::You,
+                    "opponent" => Who::Opponent,
+                    "target_player" => Who::TargetPlayer,
+                    "target_controller" => Who::TargetController,
+                    w => return Err(format!("lose_life: unknown who {w:?}")),
+                },
+                n: n()?,
+            },
             "counter_on_source" => Op::CounterOnSource,
             "damage_target" => Op::DamageTarget { n: n()? },
             "damage_each_creature" => Op::DamageEachCreature { n: n()?, without: get_str(t, "without")?.map(|k| db.kw(k)).unwrap_or(0) },
@@ -536,9 +557,9 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 "opponent_discards_else_draw" => Custom::OpponentDiscardsElseDraw,
                 "wildfire" => Custom::Wildfire,
                 "duress" => Custom::Duress,
-                f => return Err(format!("unknown custom effect {f:?} (implement it in native/src/effects.rs)")),
+                f => return Err(format!("unknown custom effect {f:?}: add it to Custom (native/src/cards.rs) and Eng::custom (native/src/engine.rs)")),
             }),
-            _ => return Err(format!("unknown op {op:?} (implement it in native/src/effects.rs)")),
+            _ => return Err(format!("unknown op {op:?}: add it to Op (native/src/cards.rs) and Eng::run_op (native/src/engine.rs)")),
         });
     }
     Ok(Some(ops))
@@ -676,6 +697,6 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 41);
+        assert_eq!(db.cards.len(), 42);
     }
 }

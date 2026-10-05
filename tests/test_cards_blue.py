@@ -373,3 +373,34 @@ def test_brainstorm_on_opponents_turn_reduces_deem_only_that_turn():
     while g.active != 1:
         g.step(0)
     assert g.players[1].cards_drawn_this_turn <= 1  # reset at Blue's turn
+
+
+def test_vapor_snag_bounces_and_its_controller_loses_life():
+    # Vapor Snag is in no decklist yet: the worked example of docs/adding-cards.md
+    g = scenario(p0={"battlefield": ["Gixian Infiltrator"]}, p1={"hand": ["Vapor Snag"], "battlefield": ISLANDS(1)}, active=1)
+    choose(g, "Cast Vapor Snag")  # the only target and the only payment are taken by settle()
+    resolve_stack(g)
+    assert "Gixian Infiltrator" not in bf(g) and names(g.players[0].hand) == ["Gixian Infiltrator"]
+    assert g.players[0].life == 19 and g.players[1].life == 20
+    assert names(g.players[1].graveyard) == ["Vapor Snag"]
+
+
+def test_vapor_snag_on_your_own_creature_costs_you_the_life():
+    g = scenario(p0={"battlefield": ["Gixian Infiltrator"]}, p1={"hand": ["Vapor Snag"], "battlefield": ["Delver of Secrets"] + ISLANDS(1)}, active=1)
+    choose(g, "Cast Vapor Snag")
+    choose(g, "Delver of Secrets")
+    resolve_stack(g)
+    assert names(g.players[1].hand) == ["Delver of Secrets"] and g.players[1].life == 19 and g.players[0].life == 20
+
+
+def test_vapor_snag_fizzles_when_the_creature_is_gone():
+    g = scenario(
+        p0={"hand": ["Cast Down"], "battlefield": ["Swamp", "Swamp"]},
+        p1={"hand": ["Vapor Snag"], "battlefield": ["Delver of Secrets"] + ISLANDS(1)},
+        active=1,
+    )
+    choose(g, "Cast Vapor Snag")  # only target: Delver
+    pass_priority(g)
+    choose(g, "Cast Cast Down")
+    resolve_stack(g)
+    assert g.players[1].life == 20 and "Delver of Secrets" in names(g.players[1].graveyard)

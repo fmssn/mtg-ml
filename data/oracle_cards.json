@@ -470,5 +470,15 @@
   "toughness": null,
   "keywords": [],
   "cmc": 1.0
+ },
+ {
+  "name": "Vapor Snag",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Return target creature to its owner's hand. Its controller loses 1 life.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
  }
 ]

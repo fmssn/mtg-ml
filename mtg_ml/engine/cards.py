@@ -116,6 +116,21 @@ def _op_gain_life(g, item, op):
     g.gain_life(item.controller, op["n"])
 
 
+def _op_lose_life(g, item, op):
+    """who: you | opponent | target_player | target_controller (of the targeted permanent)."""
+    who = op["who"]
+    if who == "you":
+        p = item.controller
+    elif who == "opponent":
+        p = 1 - item.controller
+    else:
+        t = g.target(item)
+        if t is None:
+            return
+        p = t[1] if who == "target_player" else t.controller
+    g.players[p].life -= op["n"]
+
+
 def _op_counter_on_source(g, item, op):
     live = g.live(item.source)
     if live is not None:
@@ -205,6 +220,7 @@ OPS = {
     "grant_target": _op_grant_target,
     "create_token": _op_create_token,
     "gain_life": _op_gain_life,
+    "lose_life": _op_lose_life,
     "counter_on_source": _op_counter_on_source,
     "damage_target": _op_damage_target,
     "damage_each_creature": _op_damage_each_creature,

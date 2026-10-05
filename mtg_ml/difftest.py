@@ -20,6 +20,7 @@ minimizer then rewrites the action script (earlier choices replaced by
 option 0 where the mismatch survives) and the reproducer is saved as JSON:
 
     python -m mtg_ml.difftest fuzz --games 5000 --jobs 8      # long fuzz
+    python -m mtg_ml.difftest fuzz --games 500 --with-card "1:Vapor Snag:4"   # a new card
     python -m mtg_ml.difftest repro difftest-failure.json      # replay one
 """
 
@@ -296,8 +297,8 @@ def _run_one(args) -> dict | None:
     return None if d is None else d.to_json()
 
 
-def fuzz(n: int, start: int = 0, jobs: int = 1, full_every: int = 1, fork_every: int = 97, out: str = "difftest-failure.json", quiet: bool = False) -> int:
-    scs = scenarios(n, start)
+def fuzz(n: int, start: int = 0, jobs: int = 1, full_every: int = 1, fork_every: int = 97, out: str = "difftest-failure.json", quiet: bool = False, extra: tuple = ()) -> int:
+    scs = scenarios(n, start, extra)
     t = time.perf_counter()
     work = [(sc, full_every, fork_every) for sc in scs]
     if jobs > 1:
@@ -345,11 +346,22 @@ def main(argv=None) -> None:
     f.add_argument("--fork-every", type=int, default=97, help="check fork() and determinize() every N steps (0 = never)")
     f.add_argument("--out", default="difftest-failure.json")
     f.add_argument("--quiet", action="store_true")
+    f.add_argument(
+        "--with-card",
+        action="append",
+        default=[],
+        metavar="SEAT:NAME:N",
+        help="swap N copies of a card into seat SEAT's deck (0 = Jund, 1 = Blue), e.g. '1:Vapor Snag:4'; repeatable",
+    )
     r = sub.add_parser("repro", help="replay a saved divergence")
     r.add_argument("file")
     args = ap.parse_args(argv)
     if args.cmd == "fuzz":
-        sys.exit(1 if fuzz(args.games, args.start, args.jobs, args.full_every, args.fork_every, args.out, args.quiet) else 0)
+        extra = []
+        for spec in args.with_card:
+            seat, name, n = spec.split(":")
+            extra.append((int(seat), name, int(n)))
+        sys.exit(1 if fuzz(args.games, args.start, args.jobs, args.full_every, args.fork_every, args.out, args.quiet, tuple(extra)) else 0)
     with open(args.file) as fh:
         data = json.load(fh)
     sc = Scenario.from_json(data["scenario"])

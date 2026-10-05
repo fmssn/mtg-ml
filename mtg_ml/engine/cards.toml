@@ -209,6 +209,16 @@ text = "Draw a card. If cast from a graveyard, draw two instead. Flashback {3}{U
 effect = [{ op = "draw", n = 1, n_cast_from_graveyard = 2 }]
 flashback = "{3}{U}"
 
+# Not in a decklist yet: the worked example of docs/adding-cards.md. The
+# life loss comes first because it reads the target, which the bounce moves.
+[[card]]
+name = "Vapor Snag"
+cost = "{U}"
+types = "Instant"
+text = "Return target creature to its owner's hand. Its controller loses 1 life."
+targets = ["creature"]
+effect = [{ op = "lose_life", who = "target_controller", n = 1 }, { op = "bounce_target" }]
+
 # ---------------------------------------------------------------------------
 # Jund Wildfire
 # ---------------------------------------------------------------------------

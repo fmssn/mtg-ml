@@ -28,6 +28,9 @@ class Scenario:
     starting_player: int | None = None
     mulligans: bool = True
     max_turns: int = 100
+    # (seat, card name, copies): put cards that are in no decklist yet into
+    # a deck (replacing its last `copies` cards) to fuzz them.
+    extra: tuple[tuple[int, str, int], ...] = ()
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -36,10 +39,19 @@ class Scenario:
     def from_json(d: dict) -> "Scenario":
         d = dict(d)
         d["agents"] = tuple(d["agents"])
+        d["extra"] = tuple(tuple(e) for e in d.get("extra", ()))
         return Scenario(**d)
 
+    def decks(self) -> tuple[list[str], list[str]]:
+        from .match import match_decks
 
-def scenarios(n: int, start: int = 0) -> list[Scenario]:
+        decks = [list(d) for d in match_decks(self.match_game)]
+        for seat, name, n in self.extra:
+            decks[seat][-n:] = [name] * n
+        return decks[0], decks[1]
+
+
+def scenarios(n: int, start: int = 0, extra: tuple = ()) -> list[Scenario]:
     """A deterministic mix: random/chaos/bot seats, games 1-3, both starting
     players, occasional short turn limits and mulligan-free games."""
     out = []
@@ -54,6 +66,7 @@ def scenarios(n: int, start: int = 0) -> list[Scenario]:
                 starting_player=r.choice((None, 0, 1)),
                 mulligans=r.random() < 0.9,
                 max_turns=r.choice((100, 100, 100, 12)),
+                extra=tuple(extra),
             )
         )
     return out
@@ -95,11 +108,10 @@ def make_agents(sc: Scenario):
 
 def new_game(sc: Scenario, engine: str | None = None, log: bool = True):
     from .backend import game_class
-    from .match import match_decks
 
     cls = game_class(engine)
     return cls(
-        match_decks(sc.match_game),
+        sc.decks(),
         seed=sc.seed,
         starting_player=sc.starting_player,
         max_turns=sc.max_turns,

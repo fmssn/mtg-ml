@@ -11,7 +11,7 @@
 
 use corosensei::Yielder;
 
-use crate::cards::{Custom, Op, SacFilter, SearchFilter, T_CREATURE, T_LAND};
+use crate::cards::{Custom, Op, SacFilter, SearchFilter, Who, T_CREATURE, T_LAND};
 use crate::mana::{ManaCost, Remaining};
 use crate::state::*;
 
@@ -1015,6 +1015,25 @@ impl Eng {
                 }
             }
             Op::GainLife { n } => self.s().players[ctl as usize].life += n,
+            Op::LoseLife { who, n } => {
+                let st = self.s();
+                let p = match who {
+                    Who::You => Some(ctl),
+                    Who::Opponent => Some(1 - ctl),
+                    Who::TargetPlayer => match st.target(item, 0) {
+                        Some(Tgt::Player(p)) => Some(p),
+                        _ => None,
+                    },
+                    Who::TargetController => match st.target(item, 0) {
+                        Some(Tgt::Card(c)) => Some(st.c(c).controller),
+                        Some(Tgt::Spell(sid)) => Some(st.stack[st.stack_pos(sid).unwrap()].controller),
+                        _ => None,
+                    },
+                };
+                if let Some(p) = p {
+                    st.players[p as usize].life -= n;
+                }
+            }
             Op::CounterOnSource => {
                 let src = self.source_card(item);
                 let st = self.s();
