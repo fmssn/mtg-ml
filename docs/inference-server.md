@@ -83,7 +83,33 @@ Training iterations (2048 games, update on GPU, learner decisions only): h128 sh
 
 The rollout pipeline changed in the training speed pass ([training-speed-plan.md](training-speed-plan.md)): workers keep a constant number of games live and claim the next from pool-wide counters (`rollout.create_pool` + `run_specs`/`play`), hidden states live in slot tables on both inference paths, recorded samples come back through shared memory, and checkpoints are memory-mapped. For the h128 entity trunk, local inference does 182k decisions/s at 31 workers (240k at 60) while the server does 15k with 26 policies in play and 68k with 2: the server's cost per batch is ~3 ms per policy of kernel launches and host syncs in the step-mode forward, not GPU time. So `--inference local` is the default choice for this network; the server stays the path for a trunk whose CPU forward is expensive (transformer), and would need the sync-free step-mode forward first.
 
+## Batched multi-policy server (2026-10-06, WS4 of [training-speed-plan-2.md](training-speed-plan-2.md))
+
+The server is rebuilt around one forward for all policies, and is now **the faster path for h128 entity**: 27
+workers on cores 33-59, server on core 32 (GPU 4), 25 pool opponents: **374k decisions/s against 158.5k for local
+CPU inference on the same cores** (old server 13.5k); with 2 opponents 422k against 178k. Details and the
+measurements are in the WS4 results of the plan. In short:
+
+- Transport: shared control and data blocks per server, no pipes or pickling per request. Workers write requests
+  in place and spin on a reply ticket; the data block is mapped into the GPU, which reads requests and writes
+  replies directly. The request queue only carries policy registrations (once per key per worker), stats and stop.
+- `rl/stacked.py`: every policy of the server stacked (one embedding table per kind with a zero row, dense layers
+  as (policies, in, out) weights, rows sorted by policy, grouped Triton matmuls), the entity structure derived with
+  fixed shapes from sizes in the headers, Gumbel-max sampling. Transformer trunks and policies of another config
+  take the old per-policy path.
+- One CUDA graph per size level (~11 per run) of the `torch.compile`d forward: per batch ~0.1 ms of host work and
+  0.5-0.7 ms on the GPU, whatever the number of policies. First batch compiles for ~10-20 s.
+- `InferenceServer(n_workers, cfg, worker_cpus, devices=[...], server_cpus=[...])`: one server process per GPU,
+  workers sharded in contiguous blocks, each server pinned to its GPU's NUMA node minus the workers' CPUs unless
+  given CPUs.
+
+```bash
+python tools/bench_rollout.py --inference server --server-cpus 32 --worker-cpus 33-59 --workers 27 --trunk entity --pool 25
+python tools/profile_server.py --device cuda --requests 31 --rows 32 --policies 26 [--kernels] [--no-compile] [--no-graphs]
+```
+
 ## Next steps
 
-1. Cut the server's fixed cost per batch: CUDA graphs or `torch.compile` for the forward pass, and pinned staging buffers.
-2. Raise the worker ceiling: the Rust side could write requests and samples straight into the shared buffers, saving the remaining Python packing.
+1. The server's GPU floor (~0.5 ms per batch) is kernel count in the gather and structure; a hand-fused kernel
+   would cut it. Workers now wait ~25% of a job on it.
+2. Raise the worker ceiling: the Rust side could write requests and samples straight into the shared buffers, saving the remaining Python packing (WS7).
