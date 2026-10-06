@@ -22,7 +22,7 @@ from itertools import accumulate
 import torch
 from torch import nn
 
-from .model import PolicyNet, collate_packed, masked_entropy, packed_tensors, split, structure
+from .model import PolicyNet, _excl, _segments, collate_packed, masked_entropy, packed_tensors, split, structure
 from .rollout import Result
 
 STATS = ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac", "distill_loss")
@@ -105,19 +105,25 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     n_opts = torch.frombuffer(data.samples.n_opts, dtype=torch.int32)  # on the CPU: logit widths without asking the device
     actions = torch.frombuffer(array("q", data.actions), dtype=torch.long).to(dev)
     recorded = torch.stack([old_logp, adv, ret]).to(dev)
-    # distillation targets of searched decisions, dense (n, widest decision); zero rows elsewhere
-    t_len = list(getattr(data, "target_len", ()))
-    searched = sum(1 for t in t_len if t)
-    targets = torch.zeros(n, int(n_opts.max()) if n else 1)
-    pg_mask = torch.ones(n)
-    if searched:
-        pos = 0
-        for i, k in enumerate(t_len):
-            if k:
-                targets[i, :k] = torch.tensor(data.targets[pos : pos + k])
-                pg_mask[i] = 0.0
-                pos += k
-    targets, pg_mask = targets.to(dev), pg_mask.to(dev)
+    # distillation targets of searched decisions, kept flat (a dense n x widest-decision
+    # tensor reached 25 GB: attack declarations can have thousands of options) and
+    # expanded per minibatch to that minibatch's logit width
+    t_len = torch.frombuffer(array("i", list(getattr(data, "target_len", ())) or [0] * n), dtype=torch.int32).long() if n else torch.zeros(0, dtype=torch.long)
+    searched = int((t_len > 0).sum())
+    t_vals = floats(data.targets).to(dev) if searched else torch.zeros(0, device=dev)
+    t_len, t_start = t_len.to(dev), _excl(t_len.to(dev))
+    pg_mask = (t_len == 0).float()
+
+    def dense_targets(r: torch.Tensor, width: int) -> torch.Tensor:
+        """(len(r), width) target rows for decisions r, zero where there is none."""
+        lens = t_len[r]
+        t = torch.zeros(len(r), width, device=dev)
+        if int(lens.sum()):
+            vals, off = _segments(t_vals, t_start[r], lens)
+            rr = torch.repeat_interleave(torch.arange(len(r), device=dev), lens)
+            cols = torch.arange(int(lens.sum()), device=dev) - torch.repeat_interleave(off, lens)
+            t[rr, cols] = vals
+        return t
     totals = [0.0] * len(STATS)
     steps = 0
     stop = False
@@ -127,7 +133,7 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
         rows = order.to(dev)
         batches = split(structure(collate_packed(samples, rows), net.config["state_dim"], net.config["option_dim"]), bounds)
         acts, rec, width = actions[rows], recorded[:, rows], n_opts[order]
-        tgt, pgm = targets[rows], pg_mask[rows]
+        pgm = pg_mask[rows]
         acc = torch.zeros(len(STATS), dtype=torch.float64, device=dev)
         for b, lens, lo, hi in zip(batches, chunks, bounds, bounds[1:]):
             a, (olp, ad, rt) = acts[lo:hi], rec[:, lo:hi]
@@ -140,7 +146,7 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
             pg_loss = (pg * m).sum() / m.sum().clamp(min=1)
             v_loss = 0.5 * (values - rt).pow(2).mean()
             ent = masked_entropy(logits).mean()
-            t = tgt[lo:hi, : logits.shape[1]]
+            t = dense_targets(rows[lo:hi], logits.shape[1]) if searched else torch.zeros_like(logp_all)
             distill = -(t * logp_all.masked_fill(torch.isinf(logits), 0.0)).sum(-1)
             # averaged over the whole minibatch, not the searched rows: a handful of
             # sharp targets must not pull as hard as a full batch of policy gradients

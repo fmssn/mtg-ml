@@ -146,6 +146,12 @@ hard as 5,800 soft ones had. It is now a mean over the whole minibatch
 (`distill_coef` back to 1.0), so the pressure scales with the share of
 decisions the search changed.
 
+The first version of the update kept the targets as a dense tensor of all
+rollout decisions by the widest decision's option count. Attack declarations
+can have thousands of options, so it reached 25 GB on the GPU and varied per
+iteration, which looked like a leak until it crashed the run at iteration 316.
+Targets are flat now and expanded per minibatch to that minibatch's width.
+
 ## Cost and open items
 
 - Every node and every auto-played decision is one forward pass: about 13 evals
