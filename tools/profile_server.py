@@ -39,7 +39,7 @@ def main(argv=None) -> None:
     ap.add_argument("--trunk", default="entity")
     ap.add_argument("--value-net", default="shared")
     ap.add_argument("--no-graphs", action="store_true")
-    ap.add_argument("--compile", action="store_true", help="torch.compile the forward (ServerConfig.compile)")
+    ap.add_argument("--no-compile", action="store_true", help="no torch.compile of the forward (ServerConfig.compile)")
     ap.add_argument("--kernels", action="store_true", help="torch.profiler table of the GPU kernels (eager forward)")
     args = ap.parse_args(argv)
 
@@ -69,7 +69,7 @@ def main(argv=None) -> None:
             samples.append((st, ol, of, encode_event_hashes([r.randrange(1 << 15) for _ in range(r.randrange(8))])))
             g.step(r.randrange(len(ol)))
         s += 1
-    cfg = ServerConfig(device=args.device, graphs=not args.no_graphs, groups=1, compile=args.compile)
+    cfg = ServerConfig(device=args.device, graphs=not args.no_graphs, groups=1, compile=not args.no_compile)
     srv = _Server(cfg, args.requests)
     srv.resp_qs = [_ListQ() for _ in range(args.requests)]
     t = time.perf_counter()
@@ -96,12 +96,13 @@ def main(argv=None) -> None:
         pend = srv.pending()
         assert len(pend) == args.requests
         srv.process(pend)
+        srv.drain()
 
     t = time.perf_counter()
     for _ in range(3):
         batch()
     print(f"warm-up (captures): {time.perf_counter() - t:.2f}s, {srv.stats['graphs']} graphs")
-    for k in ("busy_s", "prep_s", "infer_s", "reply_s"):
+    for k in ("busy_s", "prep_s", "launch_s", "infer_s"):
         srv.stats[k] = 0.0
     srv.stats["batches"] = 0
     pr = cProfile.Profile() if args.profile else None
@@ -114,6 +115,7 @@ def main(argv=None) -> None:
         submit_all()
         sub += time.perf_counter() - ts
         srv.process(srv.pending())
+        srv.drain()
     dt = (time.perf_counter() - t0 - sub) / args.iters
     if pr:
         pr.disable()
@@ -122,10 +124,10 @@ def main(argv=None) -> None:
     b = st["batches"]
     print(
         f"{args.device}{' eager' if args.no_graphs else ''}: {n} decisions in {args.requests} requests, {args.policies} policies: {dt * 1000:.2f} ms/batch = {n / dt:,.0f} decisions/s "
-        f"(prep {st['prep_s'] / b * 1000:.3f}, infer {st['infer_s'] / b * 1000:.3f}, reply {st['reply_s'] / b * 1000:.3f} ms; padded rows {st['padded_rows'] / max(b, 1):.0f})"
+        f"(prep {st['prep_s'] / b * 1000:.3f}, launch {st['launch_s'] / b * 1000:.3f}, launch to answer {st['infer_s'] / b * 1000:.3f} ms; padded rows {st['padded_rows'] / max(b, 1):.0f})"
     )
-    if args.device.startswith("cuda") and not args.no_graphs and srv.graphs:  # GPU time of one replay
-        graph, _ = next(iter(srv.graphs.values()))
+    if args.device.startswith("cuda") and not args.no_graphs and srv.lanes[0].graphs:  # GPU time of one replay
+        graph, _ = next(iter(srv.lanes[0].graphs.values()))
         e0, e1 = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
         e0.record()
         for _ in range(50):
@@ -146,7 +148,7 @@ def main(argv=None) -> None:
             torch.cuda.synchronize()
         rows = sorted((e for e in prof.key_averages() if e.device_time_total > 0 and not e.key.startswith(("aten::", "Torch-Compiled", "## Call", "mtg::"))), key=lambda e: -e.self_device_time_total)
         b = 5
-        print(f"GPU kernels per batch (eager{' compiled' if args.compile else ''} forward at the graphs' shapes): {sum(e.self_device_time_total for e in rows) / b:.0f} us")
+        print(f"GPU kernels per batch (eager{' compiled' if not args.no_compile else ''} forward at the graphs' shapes): {sum(e.self_device_time_total for e in rows) / b:.0f} us")
         for e in rows[:20]:
             print(f"{e.self_device_time_total / b:8.1f} us {e.count / b:4.0f}x  {e.key[:150]}")
 

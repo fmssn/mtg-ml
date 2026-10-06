@@ -70,6 +70,27 @@ def test_server_rollouts_replay_exactly(tmp_path, memory, trunk, value_net, devi
         _replay_matches(net, r)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
+@pytest.mark.parametrize("memory,trunk,value_net", [("gru", "entity", "shared"), ("gru", "mlp", "separate")])
+@pytest.mark.parametrize("compile_", [False, True])
+def test_cuda_server_variants_replay_exactly(tmp_path, memory, trunk, value_net, compile_):
+    """The CUDA paths: graphs, with and without torch.compile, and the eager forward."""
+    net, path = _ckpt(tmp_path, memory, trunk=trunk, value_net=value_net)
+    _, pool_path = _ckpt(tmp_path, memory, seed=1, trunk=trunk, value_net=value_net)
+    specs = [GameSpec(seed=s, seats=seats) for s, seats in enumerate([(LEARNER, LEARNER), (LEARNER, pool_path), (pool_path, LEARNER)] * 4)]
+    for graphs in (True, False) if not compile_ else (True,):
+        srv = InferenceServer(3, ServerConfig(device="cuda", threads=2, compile=compile_, graphs=graphs))
+        try:
+            with srv.pool() as procs:
+                results = procs.map(run_job, [Job(c, path, 1, max_turns=30, engine=ENGINE, inference="server") for c in split_games(specs, 3)])
+            stats = srv.stats()
+        finally:
+            srv.close()
+        assert (stats["graphs"] > 0) == graphs and stats["legacy"] == 0
+        for r in results:
+            _replay_matches(net, r)
+
+
 def test_server_shards_workers_over_devices(tmp_path):
     """Two servers (here both on the CPU), workers split between them."""
     net, path = _ckpt(tmp_path, "gru", trunk="entity")

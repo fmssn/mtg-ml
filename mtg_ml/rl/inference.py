@@ -295,8 +295,9 @@ class ServerConfig:
     request_ints: int = 1 << 18  # int32 words per request slot (a decision takes ~260)
     policy_slots: int = 32  # policies the stack holds before it grows (growing drops the CUDA graphs)
     graphs: bool = True  # CUDA graphs over padded shape buckets (CUDA only)
-    compile: bool = False  # torch.compile the forward (fuses its ~300 small kernels; CUDA only)
-    max_graphs: int = 48
+    compile: bool = True  # torch.compile the forward (fuses its ~300 small kernels; CUDA only; ~10 s at the first batch)
+    max_graphs: int = 48  # per stream
+    streams: int = 2  # batches on the GPU at once (CUDA): a new batch need not wait for the running one
 
 
 # Padded shapes come in levels: level k has 32 * 1.5^k rows and, per row,
@@ -322,6 +323,20 @@ class _CAI:
 
     def __init__(self, ptr: int, n: int, typestr: str):
         self.__cuda_array_interface__ = {"shape": (n,), "typestr": typestr, "data": (ptr, False), "version": 3, "strides": None}
+
+
+class _Lane:
+    """One batch at a time on its own CUDA stream (None on the CPU), with
+    its own pinned header staging, graphs and graph memory pool."""
+
+    def __init__(self, torch, device, ints: int):
+        cuda = device.type == "cuda"
+        self.stream = torch.cuda.Stream(device) if cuda else None
+        self.event = torch.cuda.Event() if cuda else None
+        self.stage = torch.zeros(ints, dtype=torch.int32, pin_memory=cuda)
+        self.graphs: dict = {}
+        self.pool = None
+        self.busy = None  # (request slots, tickets, launch time) of the batch on the GPU
 
 
 class _Server:
@@ -373,7 +388,8 @@ class _Server:
         self.region_f = self.region.view(torch.float32)
         Q = L.slots
         self.Q = Q
-        self.stage = torch.zeros(8 + 7 * Q + 3 * (L.slots * 64 + 1), dtype=torch.int32, pin_memory=self.device.type == "cuda")
+        cuda = self.device.type == "cuda"
+        self.lanes = [_Lane(torch, self.device, 8 + 7 * Q + 3 * 4096) for _ in range(cfg.streams if cuda and not cfg.dry_run else 1)]
         self.stack = None
         self.ids: dict = {}  # policy key -> id (stack slot, or LEGACY + n)
         self.cpu_nets: dict = {}  # id -> the network on the CPU (memory-mapped)
@@ -382,11 +398,9 @@ class _Server:
         self.next_legacy = LEGACY
         self.hidden = None  # (n_workers * SLOTS_PER_WORKER + 1, state size); the last row is the padded rows' dummy
         self.state_size = None
-        self.graphs: dict = {}
-        self.pool = None
         self.pad_eager = False  # eager forward at the padded shapes (profiling the graphs' kernels)
         self._compiled = None
-        self.stats = {"batches": 0, "rows": 0, "requests": 0, "busy_s": 0.0, "prep_s": 0.0, "infer_s": 0.0, "reply_s": 0.0, "padded_rows": 0, "graphs": 0, "eager": 0, "legacy": 0, "capture_s": 0.0}
+        self.stats = {"batches": 0, "rows": 0, "requests": 0, "busy_s": 0.0, "prep_s": 0.0, "launch_s": 0.0, "infer_s": 0.0, "padded_rows": 0, "graphs": 0, "eager": 0, "legacy": 0, "capture_s": 0.0}
 
     # -- policies --------------------------------------------------------
 
@@ -407,6 +421,7 @@ class _Server:
         from .stacked import PolicyStack
 
         path, version = key
+        self.drain()  # batches on the GPU read the weights about to change
         if version:  # a new learner version replaces the others, whatever their path
             for k in [k for k in self.ids if k[1]]:
                 pid = self.ids.pop(k)
@@ -452,7 +467,8 @@ class _Server:
             new.wt[name][: old.capacity].copy_(t)
         self.free = list(range(new.capacity - 1, old.capacity - 1, -1))
         self.stack = new
-        self.graphs.clear()  # they point at the old tensors
+        for lane in self.lanes:
+            lane.graphs.clear()  # they point at the old tensors
 
     # -- batches ---------------------------------------------------------
 
@@ -460,9 +476,35 @@ class _Server:
         """Request slots with a new ticket."""
         return self.np.flatnonzero(self.req != self.seen)
 
-    def process(self, pend) -> None:
-        """One batch: the requests in slots `pend`."""
+    def free_lane(self):
+        """A lane with no batch on the GPU (finishing those that are done), or None."""
+        for lane in self.lanes:
+            if lane.busy is not None and lane.event.query():
+                self._finish(lane)
+        return next((lane for lane in self.lanes if lane.busy is None), None)
+
+    def drain(self) -> None:
+        """Finish every batch on the GPU (before the weights change)."""
+        for lane in self.lanes:
+            if lane.busy is not None:
+                lane.event.synchronize()
+                self._finish(lane)
+
+    def _finish(self, lane) -> None:
+        pend, tickets, t = lane.busy
+        lane.busy = None
+        self.resp[pend] = tickets  # the replies are in the workers' reply areas: tell them
+        self.stats["infer_s"] += time.perf_counter() - t
+
+    def process(self, pend, lane=None) -> None:
+        """One batch: the requests in slots `pend`. On CUDA the batch runs on
+        `lane` (a stream; default: wait for a free one) and is answered by
+        `free_lane`/`drain` once done; elsewhere it is answered here."""
         np = self.np
+        if lane is None:
+            lane = self.free_lane()
+            while lane is None:
+                lane = self.free_lane()
         t0 = time.perf_counter()
         H = self.hdr[pend]  # copies: the header of each request
         n = len(pend)
@@ -481,24 +523,31 @@ class _Server:
         row_pol = np.repeat(pid, ln)
         tot = H[:, H_ROWS : H_RUNS].sum(0)  # rows, options, state / event / option tokens, entities
         t1 = time.perf_counter()
+        tickets = H[:, H_TICKET]
+        self.seen[pend] = tickets
         if self.cfg.dry_run:
             self._dry(pend, row_req, row_loc)
+            lane.busy = (pend, tickets, t1)
+            self._finish(lane)
         elif self.stack is not None and pid.size and int(pid.max()) < LEGACY:
-            self._stacked(pend, H, tot, row_req, row_loc, row_pol)
+            self._stacked(pend, H, tot, row_req, row_loc, row_pol, lane)
+            lane.busy = (pend, tickets, t1)
+            if lane.event is None:
+                self._finish(lane)
+            else:
+                lane.event.record(lane.stream)
         else:
             self._legacy(pend, row_req, row_loc, row_pol)
+            lane.busy = (pend, tickets, t1)
+            self._finish(lane)
         t2 = time.perf_counter()
-        self.resp[pend] = H[:, H_TICKET]
-        self.seen[pend] = H[:, H_TICKET]
-        t3 = time.perf_counter()
         s = self.stats
         s["batches"] += 1
         s["requests"] += n
         s["rows"] += R
-        s["busy_s"] += t3 - t0
+        s["busy_s"] += t2 - t0
         s["prep_s"] += t1 - t0
-        s["infer_s"] += t2 - t1
-        s["reply_s"] += t3 - t2
+        s["launch_s"] += t2 - t1
 
     def _dry(self, pend, row_req, row_loc) -> None:
         np = self.np
@@ -509,7 +558,9 @@ class _Server:
         self.df[ob + 1] = -np.log(no)
         self.df[ob + 2] = 0.0
 
-    def _stacked(self, pend, H, tot, row_req, row_loc, row_pol) -> None:
+    def _stacked(self, pend, H, tot, row_req, row_loc, row_pol, lane) -> None:
+        """Launch the batch on `lane` (CUDA: asynchronously; the caller
+        records the lane's event)."""
         torch = self.torch
         R, N, S, Ev, O, E = (int(x) for x in tot)
         need = (R + 1, N + 1, S, Ev, O, E + 1)
@@ -518,9 +569,9 @@ class _Server:
         R_p = dims[0]
         Q, n = self.Q, len(pend)
         hl = 8 + 7 * Q + 3 * R_p
-        if hl > self.stage.shape[0]:
-            self.stage = torch.zeros(2 * hl, dtype=torch.int32, pin_memory=self.stage.is_pinned())
-        st = self.stage.numpy()
+        if hl > lane.stage.shape[0]:
+            lane.stage = torch.zeros(2 * hl, dtype=torch.int32, pin_memory=lane.stage.is_pinned())
+        st = lane.stage.numpy()
         st[:8] = (R, N, S, Ev, O, E, n, 0)
         q = st[8 : 8 + 7 * Q].reshape(7, Q)
         q[0, :n] = self.in_base[pend]
@@ -532,32 +583,35 @@ class _Server:
         r[1, :R], r[1, R:] = row_loc, 0
         r[2, :R], r[2, R:] = row_pol, row_pol[-1]  # padded rows keep the order sorted
         self.stats["padded_rows"] += R_p
+        if lane.stream is None:  # CPU
+            with torch.no_grad():
+                self._forward(lane.stage[:hl], dims)
+            return
         if use_graphs:
-            g = self.graphs.get(dims) or self._capture(dims)
+            g = lane.graphs.get(dims) or self._capture(lane, dims)
             if g is not None:
                 graph, hdr = g
-                hdr.copy_(self.stage[:hl], non_blocking=True)
-                graph.replay()
-                torch.cuda.current_stream().synchronize()
+                with torch.cuda.stream(lane.stream):
+                    hdr.copy_(lane.stage[:hl], non_blocking=True)
+                    graph.replay()
                 return
         self.stats["eager"] += 1
-        hdr = self.stage[:hl].to(self.device, non_blocking=True)
-        with torch.no_grad():
-            self._forward(hdr, dims)
-        if self.device.type == "cuda":
-            torch.cuda.current_stream().synchronize()
+        with torch.no_grad(), torch.cuda.stream(lane.stream):
+            self._forward(lane.stage[:hl].to(self.device, non_blocking=True), dims)
 
-    def _capture(self, dims: tuple):
-        """Capture the forward for padded shape `dims` (None: run eagerly).
-        Warm-up and capture run on an all-padding header, so they leave the
-        hidden states and replies alone."""
+    def _capture(self, lane, dims: tuple):
+        """Capture the forward for padded shape `dims` on `lane` (None: run
+        eagerly). Warm-up and capture run on an all-padding header, so they
+        leave the hidden states and replies alone. Each lane has its own
+        graphs and memory pool: lanes run concurrently."""
         torch = self.torch
-        if len(self.graphs) >= self.cfg.max_graphs:
+        if len(lane.graphs) >= self.cfg.max_graphs:
             return None
+        self.drain()
         t0 = time.perf_counter()
         hdr = torch.zeros(8 + 7 * self.Q + 3 * dims[0], dtype=torch.int32, device=self.device)
-        if self.pool is None:
-            self.pool = torch.cuda.graph_pool_handle()
+        if lane.pool is None:
+            lane.pool = torch.cuda.graph_pool_handle()
         s = torch.cuda.Stream(self.device)
         s.wait_stream(torch.cuda.current_stream())
         with torch.no_grad():
@@ -566,13 +620,13 @@ class _Server:
                     self._forward(hdr, dims)
             torch.cuda.current_stream().wait_stream(s)
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph, pool=self.pool):
+            with torch.cuda.graph(graph, pool=lane.pool):
                 self._forward(hdr, dims)
-        torch.cuda.current_stream().synchronize()
-        self.graphs[dims] = (graph, hdr)
-        self.stats["graphs"] = len(self.graphs)
+        torch.cuda.synchronize(self.device)
+        lane.graphs[dims] = (graph, hdr)
+        self.stats["graphs"] = sum(len(ln.graphs) for ln in self.lanes)
         self.stats["capture_s"] += time.perf_counter() - t0
-        return self.graphs[dims]
+        return lane.graphs[dims]
 
     def _forward(self, hdr, dims: tuple) -> None:
         """Gather the batch from the request areas (host memory mapped into
@@ -689,7 +743,8 @@ class _Server:
     def close(self) -> None:
         if self._mapped:
             self.torch.cuda.synchronize()
-            self.graphs.clear()
+            for lane in self.lanes:
+                lane.graphs.clear()
             del self.region, self.region_f
             self.torch.cuda.cudart().cudaHostUnregister(self.dn.ctypes.data)
             self._mapped = False
@@ -757,9 +812,11 @@ def serve(cfg: ServerConfig, layout: Layout, names: tuple, req_q, resp_qs, stats
 
 
 def _serve_loop(cfg: ServerConfig, srv: _Server, req_q, stats_q) -> None:
-    """Poll the request tickets; run everything pending as one batch (after
-    waiting up to max_wait_ms for min_rows); between polls, answer queue
-    messages. Idle for 10 ms, it sleeps 0.2 ms between polls."""
+    """Poll the request tickets; whenever a lane (stream) is free, run
+    everything pending as one batch on it (after waiting up to max_wait_ms
+    for min_rows); answer a batch once its lane's event fires; between
+    polls, answer queue messages. Idle for 10 ms, it sleeps 0.2 ms between
+    polls."""
     import traceback
 
     reader = req_q._reader  # noqa: SLF001 - SimpleQueue has no get(timeout)
@@ -771,6 +828,7 @@ def _serve_loop(cfg: ServerConfig, srv: _Server, req_q, stats_q) -> None:
             if reader.poll():
                 m = req_q.get()
                 if m is None:
+                    srv.drain()
                     return
                 if m[0] == "stats":
                     stats_q.put(dict(srv.stats, policies=len(srv.ids), device=cfg.device))
@@ -780,6 +838,9 @@ def _serve_loop(cfg: ServerConfig, srv: _Server, req_q, stats_q) -> None:
                         srv.resp_qs[wid].put(srv.register_key(tuple(key)))
                     except Exception as e:  # noqa: BLE001 - the worker raises it
                         srv.resp_qs[wid].put("".join(traceback.format_exception(e)))
+                continue
+            lane = srv.free_lane()  # answers the batches that are done
+            if lane is None:
                 continue
             pend = srv.pending()
             now = time.perf_counter()
@@ -792,10 +853,10 @@ def _serve_loop(cfg: ServerConfig, srv: _Server, req_q, stats_q) -> None:
                 if int(srv.hdr[pend, H_ROWS].sum()) > cfg.max_rows:  # oldest first is unknown; take a prefix
                     cum = srv.np.cumsum(srv.hdr[pend, H_ROWS])
                     pend = pend[: max(1, int(srv.np.searchsorted(cum, cfg.max_rows, side="right")))]
-                srv.process(pend)
+                srv.process(pend, lane)
                 first_seen = None
                 last = time.perf_counter()
-            elif now - last > 0.01:
+            elif now - last > 0.01 and all(ln.busy is None for ln in srv.lanes):
                 reader.poll(0.0002)
     except Exception as e:
         msg = "".join(traceback.format_exception(e))

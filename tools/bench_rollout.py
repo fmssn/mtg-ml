@@ -49,7 +49,8 @@ def main(argv=None) -> None:
     ap.add_argument("--server-cpus", default=None, help="CPUs reserved for the server, e.g. 32-33; one spec per server separated by ';' with --devices")
     ap.add_argument("--devices", default=None, help="one inference server per device, e.g. cuda:0,cuda:1 (workers sharded over them)")
     ap.add_argument("--no-graphs", action="store_true", help="server runs the forward eagerly (no CUDA graphs)")
-    ap.add_argument("--compile", action="store_true", help="server compiles its forward (torch.compile)")
+    ap.add_argument("--no-compile", action="store_true", help="server runs its forward uncompiled (no torch.compile)")
+    ap.add_argument("--streams", type=int, default=2, help="batches the server keeps on the GPU at once")
     ap.add_argument("--worker-cpus", default=None, help="CPUs the workers are pinned to (one each, round robin)")
     ap.add_argument("--groups", type=int, default=2, help="requests in flight per worker")
     ap.add_argument("--dry-run", action="store_true", help="server returns random options without running the network (pipeline overhead only)")
@@ -84,7 +85,7 @@ def main(argv=None) -> None:
         per_server = [cpus(x) for x in args.server_cpus.split(";")] if args.server_cpus and ";" in args.server_cpus else None
         cfg = ServerConfig(
             device=args.device or default_device(), max_rows=args.max_rows, cpus=None if per_server else cpus(args.server_cpus),
-            dry_run=args.dry_run, graphs=not args.no_graphs, groups=max(4, args.groups), compile=args.compile,
+            dry_run=args.dry_run, graphs=not args.no_graphs, groups=max(4, args.groups), compile=not args.no_compile, streams=args.streams,
         )  # fmt: skip
         server = InferenceServer(args.workers, cfg, worker_cpus=cpus(args.worker_cpus), devices=devices, server_cpus=per_server)
     procs = create_pool(args.workers, args.inference, server, cpus(args.worker_cpus))
@@ -128,7 +129,7 @@ def main(argv=None) -> None:
             b = max(st["batches"], 1)
             line += (
                 f" | server x{len(server.devices)}: {st['rows'] / b:.0f} decisions/batch (padded {st['padded_rows'] / b:.0f}), {st['requests'] / b:.1f} requests/batch, "
-                f"{st['busy_s'] / b * 1000:.2f} ms/batch busy (prep {st['prep_s'] / b * 1000:.2f}, infer {st['infer_s'] / b * 1000:.2f}, reply {st['reply_s'] / b * 1000:.2f}), "
+                f"host {st['busy_s'] / b * 1000:.2f} ms/batch (prep {st['prep_s'] / b * 1000:.2f}, launch {st['launch_s'] / b * 1000:.2f}), launch to answer {st['infer_s'] / b * 1000:.2f} ms, "
                 f"busy {st['busy_s']:.1f}s, {st['graphs']} graphs ({st['capture_s']:.1f}s capturing), {st['eager']} eager, {st['legacy']} legacy batches, "
                 f"devices {','.join(server.devices)}{' DRY RUN' if args.dry_run else ''}"
             )
