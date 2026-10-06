@@ -45,6 +45,30 @@ After the merge: `train.py` adopts the WS3 rollout helper and WS1's fused optimi
 - Exactness: rollouts record exactly what the network computes on replay (`tests/test_inference.py`), for every trunk and both inference modes.
 - Benchmarks on h100-private with the entity run's configuration (`--hidden 128 --trunk entity --value-net shared --games-per-iter 2048 --workers 31 --engine native --device cuda`), pinned CPUs, GPUs chosen by UUID; GPU 6 (bus BE:00.0) is never used.
 
-## Results
+## Results (2026-10-06, same box, GPU 4, cores 0-31, 31 workers, 2048 games per iteration, same seed)
 
-(filled in as the workstreams land)
+Old code is the `bench500k-h128-entity` code (`~/mtg-ml-v3`), new code this branch. Ten iterations each, means over iterations 3-10:
+
+| | decisions / iter | rollout_s | update_s | wall_s / iter | µs / decision | ms / optimizer step | 10 iterations |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| old (sequential) | 226k | 3.30 | 7.80 | 11.10 | 49.2 | 18.1 | 120 s |
+| new, `--pipeline 0` | 231k | 1.80 | 1.89 | 3.71 | 16.0 | 4.3 | 45 s |
+| **new, `--pipeline 1`** (default) | 248k | 1.93 | 2.50 | **2.52** | **10.2** | 5.3 | **35 s** |
+
+**4.4x less wall time per iteration, 4.8x per decision.** Early iterations have short games and few pool opponents; late in a run (378k decisions, 25 pool checkpoints) the measured pieces are 2.7-2.9 s rollout and ~2.8 s update, so the 16.9 s iteration of the old run should take about 3.5-4 s: 500k games in roughly 17 minutes instead of 72.
+
+Per workstream (each measured in isolation on the box):
+
+- **WS1, PPO update** (`rl/ppo.py`, `rl/model.py`, `tools/bench_update.py`): 15.2 -> 3.9 ms per optimizer step for h128 entity (h128 mlp 14.0 -> 3.4, h512 separate 32 -> 23). The decisions go to the device once per update as int32; each epoch is laid out in minibatch order and the entity structure (`model.structure`) derived once, minibatches are slices (`model.split`); statistics are summed on the device and read once per epoch; the GRU runs on end-padded trajectories (exact for zero initial state; cuDNN persistent kernels up to hidden 128, packed above); `make_optimizer` gives fused Adam on CUDA. Statistics match the old implementation to run-to-run CUDA noise; 25 new tests compare the new paths against the old ones. Peak device memory 0.4 -> 6.5 GiB (the epoch lives on the device).
+- **WS2, pipelined trainer** (`rl/train.py`): `--pipeline 1` plays iteration k+1 with the weights of k during the update of k (one-step policy lag, logged as `policy_lag`); weights-only policy files `<run>/policy/vNNNNN.pt` (68 MB instead of the 204 MB `latest.pt`, newest 3 kept) are what workers and the server load; `latest.pt` is written in a background thread; while pipelining the update uses only the cores the workers leave free (8 OMP threads next to 31 busy workers slowed it by 60%). New metrics `wall_s`, `wait_s`, `policy_lag`. `--pipeline 0` reproduces the old loop bit for bit.
+- **WS3, rollouts** (`rl/rollout.py`, `rl/inference.py`, `tools/bench_rollout.py`): a worker's time was 81-84% inference, 38% of it after half its games had ended. Now every worker keeps 64 games live and claims the next from pool-wide counters (`create_pool` + `run_specs`/`play`), sticking to one opponent network at a time (about 2 forward passes per step instead of up to 9); hidden states live in a slot table; samples return through shared memory; checkpoints are memory-mapped (220 -> 6 ms per load). 2048-game entity rollout at 31 workers with 25 pool opponents: 6.1-7.6 s -> 2.7-2.9 s (74k -> 182k decisions/s; 240k at 60 workers). The GPU inference server is **slower** for this trunk (15k decisions/s with 26 policies, 68k with 2): its per-batch cost is kernel launches and syncs in the step-mode forward, so use `--inference local` for h128 entity.
+
+Recommended command (box, one run on cores 0-31):
+
+```bash
+OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=<uuid> taskset -c 0-31 python -m mtg_ml.rl.train --run runs/X \
+  --hidden 128 --trunk entity --value-net shared --inference local --engine native --device cuda \
+  --workers 31 --games-per-iter 2048 --total-games 2000000 --iterations 100000 --eval-every 5
+```
+
+Open: with pipelining the update is 30% slower than alone (2.50 vs 1.89 s: one torch thread and NUMA contention; 30 workers with 2 trainer threads may be the better split, untested); h512 separate stays at 23 ms per step (two packed GRUs above hidden 128); evaluation still blocks the loop (~5%); worker processes are seeded from torch's random seed, so multi-process runs are not reproducible (they never were).
