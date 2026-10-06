@@ -603,6 +603,13 @@ impl PyGame {
         state_features(self.st(), viewer)
     }
 
+    /// `encode.entity_features(game, viewer)`: (feature lists, {object id: entity index}).
+    fn entity_features(&self, viewer: u8) -> (Vec<Vec<String>>, std::collections::HashMap<u32, usize>) {
+        let mut o = crate::features::EntityStrings::default();
+        let ids = crate::features::entity_features_into(self.st(), viewer, &mut o);
+        (o.0, ids.into_iter().enumerate().map(|(k, id)| (id, k)).collect())
+    }
+
     /// `rl.features.featurize(game, player, state_dim, option_dim)`.
     fn featurize(&self, player: u8, state_dim: u32, option_dim: u32) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
         crate::features::featurize(self.st(), player, state_dim, option_dim).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
@@ -762,78 +769,12 @@ fn ref_exists(st: &State, r: Ref) -> bool {
     }
 }
 
-fn bucket(n: i64) -> usize {
-    const EDGES: [i64; 8] = [0, 1, 2, 3, 5, 8, 13, 20];
-    let mut b = 0;
-    for (i, e) in EDGES.iter().enumerate() {
-        if n >= *e {
-            b = i;
-        }
-    }
-    b
-}
 
 /// Port of `encode.state_features` (same features in the same order).
 pub fn state_features(st: &State, viewer: u8) -> Vec<String> {
-    let opp = 1 - viewer;
-    let mut f = Vec::with_capacity(64);
-    f.push(format!("step:{}", st.step_name));
-    f.push(format!("active:{}", rel(st.active, viewer)));
-    f.push(format!("postboard:{}", if st.match_game > 1 { "True" } else { "False" }));
-    for (side, p) in [("self", viewer), ("opponent", opp)] {
-        let pl = &st.players[p as usize];
-        f.push(format!("{side}:life:{}", bucket(pl.life as i64)));
-        f.push(format!("{side}:library:{}", bucket(pl.library.len() as i64)));
-        f.push(format!("{side}:mulligans:{}", st.mulligans_taken[p as usize]));
-        for &c in &pl.graveyard {
-            f.push(format!("{side}:gy:{}", st.c(c).name()));
-        }
-        for (c, n) in &pl.pool {
-            f.push(format!("{side}:pool:{}:{n}", color_str(*c)));
-        }
-        for &c in pl.library.iter().filter(|&&c| st.c(c).known_to & pbit(viewer) != 0).take(3) {
-            f.push(format!("{side}:known_library:{}", st.c(c).name()));
-        }
-    }
-    for &c in &st.players[viewer as usize].hand {
-        f.push(format!("self:hand:{}", st.c(c).name()));
-    }
-    let them = &st.players[opp as usize];
-    f.push(format!("opponent:hand_count:{}", bucket(them.hand.len() as i64)));
-    for &c in them.hand.iter().filter(|&&c| st.c(c).known_to & pbit(viewer) != 0) {
-        f.push(format!("opponent:hand_known:{}", st.c(c).name()));
-    }
-    for &ci in &st.battlefield {
-        let c = st.c(ci);
-        let side = rel(c.controller, viewer);
-        let base = format!("{side}:bf:{}", c.name());
-        f.push(base.clone());
-        for t in type_names(st.types(c)) {
-            f.push(format!("{side}:bf_type:{t}"));
-        }
-        if c.tapped {
-            f.push(format!("{base}:tapped"));
-        }
-        if c.sick {
-            f.push(format!("{base}:sick"));
-        }
-        if st.attackers.contains(&c.oid) {
-            f.push(format!("{base}:attacking"));
-        }
-        if st.blocks.iter().any(|(b, _)| *b == c.oid) {
-            f.push(format!("{base}:blocking"));
-        }
-        if st.is_creature(c) {
-            f.push(format!("{base}:pt:{}/{}", st.power(c), st.toughness(c)));
-        }
-        if c.counters != 0 {
-            f.push(format!("{base}:counters:{}", c.counters));
-        }
-    }
-    for (i, it) in st.stack.iter().rev().enumerate() {
-        f.push(format!("stack:{}:{}:{}", i.min(3), rel(it.controller, viewer), it.name));
-    }
-    f
+    let mut o = crate::features::StringOut::default();
+    crate::features::state_features_into(st, viewer, &mut o);
+    o.finish()
 }
 
 #[pyfunction]

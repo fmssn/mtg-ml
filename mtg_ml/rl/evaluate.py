@@ -4,9 +4,13 @@
     python -m mtg_ml.rl.evaluate runs/a/latest.pt random
     python -m mtg_ml.rl.evaluate runs/a/latest.pt bot      # scripted bots
     python -m mtg_ml.rl.evaluate runs/a/latest.pt bot --bo3   # best-of-three matches
+    python -m mtg_ml.rl.evaluate runs/a/latest.pt bot --jund  # the benchmark: learner Jund vs the blue bot
 
 Every seed is played twice with the seats swapped, so both sides see the
-same shuffles from both decks. Scores count a draw as half a win; the
+same shuffles from both decks. With --jund the learner always plays Jund
+Wildfire (seat 0) and every seed is played once per starting player instead;
+against `bot` that is the project benchmark (learner Jund vs the Mono Blue
+Terror / Delver bot), see `benchmark`. Scores count a draw as half a win; the
 interval is Wilson 95%. With --bo3 each seed is a best-of-three match
 (`mtg_ml.match` rules: sideboarded games 2/3, loser starts the next game).
 """
@@ -35,9 +39,13 @@ def wilson(wins: float, n: int, z: float = 1.96) -> tuple[float, float]:
     return (c - h, c + h)
 
 
-def paired_specs(opponent: str, games: int, seed: int = EVAL_SEED) -> list[GameSpec]:
+def paired_specs(opponent: str, games: int, seed: int = EVAL_SEED, jund_only: bool = False) -> list[GameSpec]:
     specs = []
     for s in range(games // 2):
+        if jund_only:  # learner keeps seat 0 (Jund); the pair swaps who starts
+            specs.append(GameSpec(seed=seed + s, seats=(LEARNER, opponent), starting_player=0))
+            specs.append(GameSpec(seed=seed + s, seats=(LEARNER, opponent), starting_player=1))
+            continue
         specs.append(GameSpec(seed=seed + s, seats=(LEARNER, opponent)))
         specs.append(GameSpec(seed=seed + s, seats=(opponent, LEARNER)))
     return specs
@@ -57,15 +65,20 @@ def score(games: list) -> dict:
     return out
 
 
-def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local") -> dict:
-    jobs = [Job(chunk, learner_path, version, record=False, max_turns=max_turns, inference=inference) for chunk in split_games(paired_specs(opponent, games), n_jobs)]
+def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False) -> dict:
+    specs = paired_specs(opponent, games, jund_only=jund_only)
+    jobs = [Job(chunk, learner_path, version, record=False, max_turns=max_turns, inference=inference) for chunk in split_games(specs, n_jobs)]
     return score([g for r in procs.map(run_job, jobs) for g in r.games])
 
 
-def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local") -> dict:
-    """Best-of-three matches on paired seeds. Each round plays the next game
-    of every unfinished match as one batch. Returns match scores like `score`."""
-    live = [(EVAL_SEED + s, seats, MatchResult()) for s in range(matches // 2) for seats in ((LEARNER, opponent), (opponent, LEARNER))]
+def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False) -> dict:
+    """Best-of-three matches on paired seeds (`jund_only`: one match per seed,
+    learner on Jund). Each round plays the next game of every unfinished match
+    as one batch. Returns match scores like `score`."""
+    if jund_only:
+        live = [(EVAL_SEED + s, (LEARNER, opponent), MatchResult()) for s in range(matches)]
+    else:
+        live = [(EVAL_SEED + s, seats, MatchResult()) for s in range(matches // 2) for seats in ((LEARNER, opponent), (opponent, LEARNER))]
     while True:
         todo = {}
         for seed, seats, res in live:
@@ -82,12 +95,27 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
     return score([(seats, res.winner) for _, seats, res in live])
 
 
+def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local") -> dict:
+    """The fixed benchmark: the learner plays Jund Wildfire against the scripted
+    Mono Blue Terror (Delver) bot. Game-1 decks on paired seeds (each seed once
+    per starting player), plus best-of-three matches. Same seeds every call."""
+    out = {}
+    if games:
+        s, ci, n = head_to_head(procs, learner_path, BOT, games, n_jobs, version, max_turns, inference, jund_only=True)["jund"]
+        out.update({"bench/jund_vs_bot": s, "bench/jund_vs_bot_ci": ci, "bench/jund_vs_bot_n": n})
+    if bo3_matches:
+        s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, jund_only=True)["jund"]
+        out.update({"bench/jund_vs_bot_bo3": s, "bench/jund_vs_bot_bo3_ci": ci, "bench/jund_vs_bot_bo3_n": n})
+    return out
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="mtg_ml.rl.evaluate", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("checkpoint")
     ap.add_argument("opponent", help=f"a checkpoint path, '{RANDOM}' or '{BOT}'")
     ap.add_argument("--games", type=int, default=400, help="games (or matches with --bo3)")
     ap.add_argument("--bo3", action="store_true", help="best-of-three matches with sideboarding")
+    ap.add_argument("--jund", action="store_true", help="learner always plays Jund (seat 0); with 'bot' this is the benchmark")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")
     args = ap.parse_args(argv)
@@ -95,7 +123,7 @@ def main(argv=None) -> None:
         os.environ[ENV_VAR] = engine_name(args.engine)
     with mp.get_context("spawn").Pool(args.workers, initializer=worker_init) as procs:
         fn = head_to_head_bo3 if args.bo3 else head_to_head
-        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers)
+        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund)
     for k, (s, ci, n) in res.items():
         print(f"{k:5s} {s:.3f}  95% CI {ci}  ({n} games)")
 

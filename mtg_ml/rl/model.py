@@ -1,11 +1,16 @@
 """Recurrent policy/value network over hashed state features and scored options.
 
     state indices  --EmbeddingBag(sum)--> MLP --> s                (B, H)
+                   (trunk="entity": global features summed, plus each
+                    entity's features summed -> MLP -> entity vector,
+                    entity vectors summed; then the MLP)
     event indices  --EmbeddingBag(mean)------> e                  (B, H)
     memory         z, h' = GRU([s, e], h)       (memory="gru")
                    z     = MLP([s, e])          (memory="none")
     core           c = s + z
     option indices --EmbeddingBag(sum)--> MLP --> a                (N, H)
+                   (trunk="entity": plus a projection of the vector of
+                    every entity the option points at)
     logit(option)  = MLP([c[row], a, c[row] * a])                 (N,)
     value          = Linear(c)                                    (B,)
 
@@ -122,7 +127,55 @@ def collate_packed(ps: PackedSamples, idx=None) -> Batch:
     return Batch(s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, no.clone())
 
 
-TRUNKS = ("mlp", "transformer")
+TRUNKS = ("mlp", "transformer", "entity")
+
+
+def _lengths(off: torch.Tensor, total: int) -> torch.Tensor:
+    return torch.diff(off, append=torch.tensor([total], device=off.device, dtype=off.dtype)).long()
+
+
+def _keep(idx: torch.Tensor, off: torch.Tensor, keep: torch.Tensor):
+    """(idx, off) with the tokens where `keep` is False removed."""
+    rows = torch.repeat_interleave(torch.arange(off.shape[0], device=idx.device), _lengths(off, idx.shape[0]))
+    n = torch.zeros(off.shape[0], dtype=torch.long, device=idx.device).index_add_(0, rows[keep], torch.ones_like(rows[keep]))
+    return idx[keep], _excl(n)
+
+
+class EntityEncoder(nn.Module):
+    """State = global features, then entity segments each opened by the
+    separator `dim` (rl/features.py). Global features are summed; each
+    entity's features are summed and passed through an MLP; entity vectors
+    are summed into the state (a deep-sets encoder, so counts survive) and
+    kept so options can point at them."""
+
+    def __init__(self, dim: int, hidden: int):
+        super().__init__()
+        self.sep = dim
+        self.emb = nn.Embedding(dim, hidden)
+        nn.init.normal_(self.emb.weight, std=0.05)
+        self.ent = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
+
+    def forward(self, idx: torch.Tensor, off: torch.Tensor):
+        """Returns (state sum (B, H), entity vectors (E, H), first entity row of each sample (B,))."""
+        B, dev = off.shape[0], idx.device
+        idx = idx.long()
+        rows = torch.repeat_interleave(torch.arange(B, device=dev), _lengths(off, idx.shape[0]))
+        sep = idx == self.sep
+        csum = torch.cumsum(sep.long(), 0)
+        seg = csum - (csum - sep.long())[off.long()][rows]  # entity number within the sample, 0 = global
+        n_ent = torch.zeros(B, dtype=torch.long, device=dev).index_add_(0, rows, sep.long())
+        base = _excl(n_ent)
+        glob = ~sep & (seg == 0)
+        inent = ~sep & (seg > 0)
+        ones = lambda m: torch.ones_like(m, dtype=torch.long)  # noqa: E731
+        g_n = torch.zeros(B, dtype=torch.long, device=dev).index_add_(0, rows[glob], ones(rows[glob]))
+        g = nn.functional.embedding_bag(idx[glob], self.emb.weight, _excl(g_n), mode="sum")
+        E = int(n_ent.sum())
+        ent_of = base[rows[inent]] + seg[inent] - 1  # tokens are already grouped by entity
+        e_n = torch.zeros(E, dtype=torch.long, device=dev).index_add_(0, ent_of, ones(ent_of))
+        ents = self.ent(nn.functional.embedding_bag(idx[inent], self.emb.weight, _excl(e_n), mode="sum"))
+        owner = torch.repeat_interleave(torch.arange(B, device=dev), n_ent)
+        return g.index_add(0, owner, ents), ents, base
 VALUE_NETS = ("shared", "separate")
 
 
@@ -160,8 +213,13 @@ class _Core(nn.Module):
         super().__init__()
         self.hidden = hidden
         self.memory = memory
+        self.sep = state_dim
+        self.entities = None  # (entity vectors, first row per sample) of the last forward, trunk="entity"
         if trunk == "transformer":
             self.state = TokenEncoder(state_dim, hidden)
+        elif trunk == "entity":
+            self.state = EntityEncoder(state_dim, hidden)
+            self.trunk = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
         else:
             emb = nn.EmbeddingBag(state_dim, hidden, mode="sum")
             nn.init.normal_(emb.weight, std=0.05)
@@ -188,15 +246,22 @@ class _Core(nn.Module):
         return torch.cat([out[i, :n] for i, n in enumerate(lengths)]), None
 
     def forward(self, b: Batch, hidden, lengths):
-        s = self.state(b.s_idx, b.s_off) if self.trunk_kind == "transformer" else self.trunk(self.state_emb(b.s_idx, b.s_off))
+        if self.trunk_kind == "entity":
+            g, ents, base = self.state(b.s_idx, b.s_off)
+            s = self.trunk(g)
+            self.entities = (ents, base)
+        else:  # these trunks treat entity features as part of the flat bag
+            idx, off = _keep(b.s_idx, b.s_off, b.s_idx != self.sep)
+            s = self.state(idx, off) if self.trunk_kind == "transformer" else self.trunk(self.state_emb(idx, off))
         e = self.event_emb(b.e_idx, b.e_off)
         z, hn = self._memory(torch.cat([s, e], dim=-1), hidden, lengths)
         return s + z, hn
 
 
 class PolicyNet(nn.Module):
-    """hidden: policy width. trunk: "mlp" (EmbeddingBag + MLP) or
-    "transformer" (2 layers over the active state features). value_net:
+    """hidden: policy width. trunk: "mlp" (EmbeddingBag + MLP),
+    "transformer" (2 layers over the active state features) or "entity"
+    (deep sets over permanents and stack items; options point at entities). value_net:
     "shared" (a linear value head on the policy core) or "separate" (its own
     embeddings, trunk and memory of width value_hidden, no shared gradients;
     Andrychowicz et al. 2020 found separate, wider value networks better).
@@ -225,6 +290,8 @@ class PolicyNet(nn.Module):
         self.option_emb = nn.EmbeddingBag(option_dim, hidden, mode="sum")
         nn.init.normal_(self.option_emb.weight, std=0.05)
         self.option_mlp = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
+        self.option_dim = option_dim
+        self.pointer = nn.Linear(hidden, hidden, bias=False) if trunk == "entity" else None
         self.scorer = nn.Sequential(nn.Linear(3 * hidden, hidden), nn.ReLU(), nn.Linear(hidden, 1))
         if value_net == "separate":
             self.value_core = _Core(value_hidden, memory, trunk, state_dim, option_dim)
@@ -255,13 +322,26 @@ class PolicyNet(nn.Module):
                 hn = torch.cat([hn, hvn], dim=-1)
         else:
             values = self.value_head(c).squeeze(-1)
-        a = self.option_mlp(self.option_emb(b.o_idx, b.o_off))
+        a = self.option_mlp(self._options(b))
         cr = c[b.o_row]
         scores = self.scorer(torch.cat([cr, a, cr * a], dim=-1)).squeeze(-1)
         width = int(b.n_opts.max()) if max_options is None else max_options
         logits = torch.full((c.shape[0], width), float("-inf"), device=c.device, dtype=scores.dtype)
         logits[b.o_row, b.o_pos] = scores
         return logits, values, hn
+
+    def _options(self, b: Batch) -> torch.Tensor:
+        """Summed option token embeddings, plus the projected vectors of the
+        entities an option points at (tokens >= option_dim)."""
+        ptr = b.o_idx >= self.option_dim
+        idx, off = _keep(b.o_idx, b.o_off, ~ptr)
+        a = self.option_emb(idx, off)
+        if self.pointer is not None and self.policy_core.entities is not None:
+            ents, base = self.policy_core.entities
+            opt = torch.repeat_interleave(torch.arange(b.o_off.shape[0], device=a.device), _lengths(b.o_off, b.o_idx.shape[0]))[ptr]
+            k = b.o_idx[ptr].long() - self.option_dim
+            a = a.index_add(0, opt, self.pointer(ents[base[b.o_row[opt]] + k]))
+        return a
 
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
         """Accepts checkpoints from before the core refactor (state_emb, trunk,

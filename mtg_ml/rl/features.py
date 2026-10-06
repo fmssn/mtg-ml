@@ -2,7 +2,11 @@
 
 State: the hashed sparse features of `encode.state_features` plus the seat
 (which deck we are) and the decision kind, as indices into a state
-vocabulary. Options: each legal option's key is expanded into hashed tokens
+vocabulary, followed by one segment per entity (`encode.entity_features`:
+permanents and stack items), each opened by the separator `state_dim`.
+Options also get a pointer `option_dim + k` for every entity k they are
+about (the attacker, blocker, mana source, target, ...), so the network can
+score "block with this Terror" from that Terror's own vector. Options: each legal option's key is expanded into hashed tokens
 (every key element with its position, and every key prefix), so options
 that share structure ("cast X", "pay with Swamp") share parameters. The
 policy scores options one by one; illegal actions never exist, which is
@@ -13,7 +17,7 @@ from __future__ import annotations
 
 import zlib
 
-from ..encode import state_features
+from ..encode import entity_features, option_object_ids, state_features
 
 STATE_DIM = 1 << 16
 OPTION_DIM = 1 << 15
@@ -39,7 +43,15 @@ def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = O
     feats.append(f"seat:{player}")
     feats.append(f"decision:{d.kind}")
     state = sorted({_h(f, state_dim) for f in feats})
-    opts = [sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key)}) for o in game.legal_options()]
+    ents, index = entity_features(game, player)
+    for e in ents:
+        state.append(state_dim)
+        state.extend(sorted({_h(t, state_dim) for t in e}))
+    opts = []
+    for o in game.legal_options():
+        toks = sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key)})
+        toks += sorted({option_dim + index[i] for i in option_object_ids(o) if i in index})
+        opts.append(toks)
     return state, opts
 
 

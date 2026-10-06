@@ -545,6 +545,9 @@ class NativeGame:
     def state_features(self, viewer: int) -> list[str]:
         return self._g.state_features(viewer)
 
+    def entity_features(self, viewer: int) -> tuple[list[list[str]], dict[int, int]]:
+        return self._g.entity_features(viewer)
+
     def featurize(self, player: int, state_dim: int, option_dim: int):
         return self._g.featurize(player, state_dim, option_dim)
 
