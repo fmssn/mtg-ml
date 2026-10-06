@@ -41,7 +41,7 @@ class PPOConfig:
     # Searched decisions (rl/search.py) are trained towards the search's policy
     # (cross-entropy) instead of the policy-gradient term, whose action they did
     # not sample from the policy; they still train the value head.
-    distill_coef: float = 0.3  # 1.0 with c_scale 1.0 collapsed the policy in three updates; see search.py
+    distill_coef: float = 1.0  # the distillation term is a mean over all rows, so ~0.5% searched rows weigh ~0.5% of a one-hot cross-entropy
 
 
 def make_optimizer(params, lr: float, device) -> torch.optim.Optimizer:
@@ -142,7 +142,9 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
             ent = masked_entropy(logits).mean()
             t = tgt[lo:hi, : logits.shape[1]]
             distill = -(t * logp_all.masked_fill(torch.isinf(logits), 0.0)).sum(-1)
-            d_loss = (distill * (1 - m)).sum() / (1 - m).sum().clamp(min=1)
+            # averaged over the whole minibatch, not the searched rows: a handful of
+            # sharp targets must not pull as hard as a full batch of policy gradients
+            d_loss = (distill * (1 - m)).sum() / len(m)
             loss = pg_loss + cfg.vf_coef * v_loss - cfg.ent_coef * ent + cfg.distill_coef * d_loss
             opt.zero_grad(set_to_none=True)
             loss.backward()

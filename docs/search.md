@@ -139,6 +139,13 @@ recurrent state and pending events when the learner plays that seat too
 different, worse player, and part of the value swings came from it. Metrics:
 `searches` (searches run) next to `searched` (interventions distilled).
 
+Attempt 4 (the gate, 17% of searches intervening) still jumped to KL 0.16 and
+entropy 0.54 on its first update: the distillation loss was averaged over the
+searched rows only, so five one-hot targets in a 2,048-row minibatch pulled as
+hard as 5,800 soft ones had. It is now a mean over the whole minibatch
+(`distill_coef` back to 1.0), so the pressure scales with the share of
+decisions the search changed.
+
 ## Cost and open items
 
 - Every node and every auto-played decision is one forward pass: about 13 evals
