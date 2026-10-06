@@ -55,7 +55,7 @@ import torch
 from ..backend import ENV_VAR, engine_name
 from .evaluate import benchmark, head_to_head, head_to_head_bo3
 from .model import PolicyNet
-from .ppo import PPOConfig, ppo_update
+from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update
 from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, Result, create_pool, play
 
 KEEP_POLICIES = 3  # the newest, the one a lagged rollout may still be loading, one spare
@@ -143,7 +143,7 @@ class Trainer:
         torch.manual_seed(cfg.seed)
         self.rng = random.Random(cfg.seed)
         self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden).to(cfg.device)
-        self.opt = torch.optim.Adam(self.net.parameters(), lr=cfg.ppo.lr, eps=1e-5)
+        self.opt = make_optimizer(self.net.parameters(), cfg.ppo.lr, cfg.device)
         self.iteration = 0
         self.games_total = 0
         self.saver = ThreadPoolExecutor(1, thread_name_prefix="checkpoint")
@@ -151,7 +151,7 @@ class Trainer:
         if os.path.exists(self.latest):
             ck = torch.load(self.latest, map_location=cfg.device, weights_only=False)
             self.net.load_state_dict(ck["model"])
-            self.opt.load_state_dict(ck["optim"])
+            load_optimizer_state(self.opt, ck["optim"])
             self.iteration = ck["iteration"]
             self.games_total = ck.get("games_total", self.iteration * cfg.games_per_iter)
             self.rng.setstate(ck["rng"])

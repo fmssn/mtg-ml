@@ -50,6 +50,23 @@ def make_optimizer(params, lr: float, device) -> torch.optim.Optimizer:
     return torch.optim.Adam(params, lr=lr, eps=1e-5, fused=torch.device(device).type == "cuda")
 
 
+def load_optimizer_state(opt: torch.optim.Optimizer, state_dict: dict) -> None:
+    """`opt.load_state_dict` for an optimizer from `make_optimizer`: keeps
+    this optimizer's `fused` flag (the checkpoint's groups bring their own,
+    None for plain Adam) and, when fused, moves every `step` to its
+    parameter's device (plain Adam keeps it on the CPU, which fused Adam
+    rejects). The steps are the same either way."""
+    fused = opt.param_groups[0].get("fused")
+    opt.load_state_dict(state_dict)
+    for g in opt.param_groups:
+        g["fused"] = fused
+        if fused:
+            for p in g["params"]:
+                st = opt.state.get(p)
+                if st and "step" in st:
+                    st["step"] = st["step"].to(p.device, torch.float32)
+
+
 def trajectory_minibatches(lengths: list[int], size: int, gen=None) -> tuple[torch.Tensor, list[list[int]]]:
     """Shuffle trajectories and group them into chunks of >= size steps.
     Returns the decision order (the shuffled trajectories laid end to end)
