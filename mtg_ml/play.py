@@ -21,7 +21,11 @@ from .bots import make_bot
 from .match import play_match
 
 
-def make_agent(kind: str, seat: int, seed: int):
+def make_agent(kind: str, seat: int, seed: int, greedy: bool = False):
+    if kind.startswith("model:"):  # model:<checkpoint path>
+        from .rl.agent import ModelAgent
+
+        return ModelAgent(kind[len("model:"):], seat, sample=not greedy, seed=seed)
     if kind == "bot":
         return make_bot(seat)
     if kind.startswith("search"):  # search or search:<playouts>
@@ -31,7 +35,7 @@ def make_agent(kind: str, seat: int, seed: int):
         return SearchBot(seat, playouts=playouts, seed=seed)
     if kind == "random":
         return RandomAgent(seed + seat)
-    raise SystemExit(f"unknown agent {kind!r} (random, bot, search[:playouts])")
+    raise SystemExit(f"unknown agent {kind!r} (random, bot, search[:playouts], model:<checkpoint>)")
 
 
 def main(argv=None) -> None:

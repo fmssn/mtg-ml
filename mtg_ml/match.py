@@ -64,12 +64,14 @@ class MatchResult:
 
 def play_match(agents, seed: int = 0, engine: str | None = None, **game_kw) -> MatchResult:
     """agents: [seat0, seat1] objects with act(game), reused across games."""
+    from .agents import take  # agents imports the engine; keep this module light
+
     Game = game_class(engine)
     res = MatchResult()
     while not res.over:
         n, start = res.next_game(seed)
         g = Game(match_decks(n), seed=game_seed(seed, n), starting_player=start, match_game=n, **game_kw)
         while not g.over:
-            g.step(agents[g.decision.player].act(g))
+            take(g, agents, agents[g.decision.player].act(g))
         res.games.append((start, g.winner, g.end_reason))
     return res
