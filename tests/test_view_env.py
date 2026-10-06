@@ -71,3 +71,29 @@ def test_features_do_not_depend_on_hidden_cards():
     d = determinize(g, viewer, random.Random(3))
     assert state_features(g, viewer) == state_features(d, viewer)
     assert encode_state(g, viewer) == encode_state(d, viewer)
+
+
+def test_state_features_keep_counts_turn_and_exact_life():
+    """Identical objects stay countable after hashing into a set, and turn,
+    life and hand size are thermometers (they all collapsed before 2026-10)."""
+    one = scenario(p0={"hand": ["Brainstorm"], "battlefield": ["Swamp"], "life": 19})
+    three = scenario(p0={"hand": ["Brainstorm", "Brainstorm"], "battlefield": ["Swamp", "Swamp", ("Swamp", {"tapped": True})], "life": 13})
+    f1, f3 = set(state_features(one, 0)), set(state_features(three, 0))
+    assert {"self:bf_type:Land#3", "self:bf_type:Land:untapped#2", "self:hand:Brainstorm#2"} <= f3
+    assert "self:bf_type:Land#2" not in f1 and "self:bf_type:Land:untapped#3" not in f3
+    assert "self:life>=18" in f1 and "self:life>=14" not in f3 and "self:life>=12" in f3
+    assert "self:hand_count>=2" in f3 and "self:hand_count>=2" not in f1
+    assert any(x.startswith("turn>=") for x in f1)
+
+
+def test_entities_keep_each_permanent_whole():
+    """Each permanent is its own entity, so a tapped and an untapped Swamp
+    are told apart, and option labels resolve to entity indices."""
+    from mtg_ml.encode import entity_features
+
+    g = scenario(p0={"battlefield": ["Swamp", ("Swamp", {"tapped": True})]}, p1={"battlefield": ["Island"]})
+    ents, index = entity_features(g, 0)
+    swamps = [e for e in ents if "e:name:Swamp" in e]
+    assert len(swamps) == 2 and sum("e:tapped" in e for e in swamps) == 1
+    assert all("e:ctrl:self" in e for e in swamps) and any("e:ctrl:opponent" in e for e in ents)
+    assert sorted(index.values()) == list(range(len(ents)))

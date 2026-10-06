@@ -32,7 +32,7 @@ def _replay_matches(net, res, tol=1e-4):
     assert torch.allclose(values, rec_values, atol=tol), (values - rec_values).abs().max()
 
 
-VARIANTS = [("gru", "mlp", "shared"), ("none", "mlp", "shared"), ("gru", "mlp", "separate"), ("gru", "transformer", "separate"), ("none", "transformer", "shared")]
+VARIANTS = [("gru", "mlp", "shared"), ("none", "mlp", "shared"), ("gru", "mlp", "separate"), ("gru", "transformer", "separate"), ("none", "transformer", "shared"), ("gru", "entity", "shared"), ("none", "entity", "separate")]
 
 
 @pytest.mark.parametrize("memory,trunk,value_net", VARIANTS)
