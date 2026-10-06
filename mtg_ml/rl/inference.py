@@ -72,19 +72,21 @@ class InferenceClient:
         self.wid = wid
         self.req_q = req_q
         self.resp_q = resp_q
-        self.inp = [_Block(1 << 20) for _ in range(groups)]
-        self.out = [_Block(1 << 16) for _ in range(groups)]
+        # Created on first use: the server keeps one descriptor per block.
+        self.inp: list[_Block | None] = [None] * groups
+        self.out: list[_Block | None] = [None] * groups
         self.ticket = 0
         self.done: set[int] = set()
 
     def submit(self, group: int, rows: list) -> tuple:
-        """rows: (policy key, slot, fresh, state, opts, events), grouped by
-        policy key (rows of one policy contiguous). Returns a handle."""
+        """rows: (policy key, slot, fresh, state, option lengths, option
+        tokens, events), grouped by policy key (rows of one policy
+        contiguous). Returns a handle."""
         n = len(rows)
         slot, fresh, s_len, e_len, n_opts = array("i"), array("i"), array("i"), array("i"), array("i")
         o_len, s_idx, e_idx, o_idx = array("i"), array("i"), array("i"), array("i")
         policies: list[list] = []
-        for r, (key, sl, fr, state, opts, events) in enumerate(rows):
+        for r, (key, sl, fr, state, ol, of, events) in enumerate(rows):
             if not policies or policies[-1][0] != key:
                 policies.append([key, r, r])
             policies[-1][2] = r + 1
@@ -94,12 +96,13 @@ class InferenceClient:
             s_idx.extend(state)
             e_len.append(len(events))
             e_idx.extend(events)
-            n_opts.append(len(opts))
-            for toks in opts:
-                o_len.append(len(toks))
-                o_idx.extend(toks)
+            n_opts.append(len(ol))
+            o_len.extend(ol)
+            o_idx.extend(of)
         parts = (slot, fresh, s_len, e_len, n_opts, o_len, s_idx, e_idx, o_idx)
         total = sum(len(p) for p in parts)
+        if self.inp[group] is None:
+            self.inp[group], self.out[group] = _Block(1 << 20), _Block(1 << 16)
         inp, out = self.inp[group], self.out[group]
         inp.ensure(total * _I32)
         out.ensure(n * 3 * _I32)
@@ -122,15 +125,13 @@ class InferenceClient:
                 raise RuntimeError(f"inference server failed: {t}")
             self.done.add(t)
         self.done.discard(ticket)
-        buf = self.out[group].shm.buf
-        acts = buf[: n * _I32].cast("i").tolist()
-        logp = buf[n * _I32 : 2 * n * _I32].cast("f").tolist()
-        vals = buf[2 * n * _I32 : 3 * n * _I32].cast("f").tolist()
-        return acts, logp, vals
+        out = self.out[group].shm.buf[: 3 * n * _I32].cast("f").tolist()  # rows of (action, log-prob, value)
+        return [int(a) for a in out[0::3]], out[1::3], out[2::3]
 
     def close(self) -> None:
         for b in self.inp + self.out:
-            b.close()
+            if b is not None:
+                b.close()
 
 
 _CLIENT: InferenceClient | None = None
@@ -229,19 +230,26 @@ class _Server:
         back in one copy. No step on the device forces a host sync."""
         torch = self.torch
         t0 = time.perf_counter()
-        per_field = [[] for _ in range(9)]  # slot fresh s_len e_len n_opts o_len s_idx e_idx o_idx
-        row_wid, row_pol, n_rows = [], [], []
+        # All requests' blocks as one tensor, then every field gathered across
+        # requests with a single vectorized index (no per-request splitting).
+        flats, counts_all, row_wid, row_pol, n_rows = [], [], [], [], []
         keys: dict = {}
         for wid, ticket, in_name, out_name, counts, policies in msgs:
-            flat = torch.frombuffer(_attach(self.shm, in_name).buf, dtype=torch.int32, count=sum(counts))
-            for f, part in enumerate(torch.split(flat, counts)):
-                per_field[f].append(part)
+            flats.append(torch.frombuffer(_attach(self.shm, in_name).buf, dtype=torch.int32, count=sum(counts)))
+            counts_all.append(counts)
             n_rows.append(counts[0])
             row_wid.append((wid, counts[0]))
             for key, a, b in policies:
                 row_pol.append((keys.setdefault(tuple(key), len(keys)), b - a))
-        cat = lambda fl: (torch.cat(fl) if len(fl) > 1 else fl[0]).long()  # noqa: E731
-        slot, fresh, s_len, e_len, n_opts, o_len, s_idx, e_idx, o_idx = (cat(fl) for fl in per_field)
+        flat = torch.cat(flats) if len(flats) > 1 else flats[0]  # int32 throughout: half the bytes to copy
+        C = torch.tensor(counts_all, dtype=torch.long)  # (requests, 9)
+        base = torch.cumsum(C.sum(1), 0) - C.sum(1)  # start of each request's block
+        S = base[:, None] + torch.cumsum(C, 1) - C  # start of field f of request m
+        L = C.t().reshape(-1)  # field-major: all requests' field 0, then field 1...
+        starts = S.t().reshape(-1)
+        idx = torch.repeat_interleave(starts - (torch.cumsum(L, 0) - L), L) + torch.arange(int(L.sum()))
+        slot, fresh, s_len, e_len, n_opts, o_len, s_idx, e_idx, o_idx = torch.split(flat[idx], C.sum(0).tolist())
+        slot, fresh, s_len, e_len, n_opts, o_len = (x.long() for x in (slot, fresh, s_len, e_len, n_opts, o_len))
         B = slot.shape[0]
         wid = torch.repeat_interleave(torch.tensor([w for w, _ in row_wid]), torch.tensor([n for _, n in row_wid]))
         gslot = slot + wid * SLOTS_PER_WORKER
@@ -272,12 +280,9 @@ class _Server:
                     acts[rows], logp[rows], vals[rows] = res[0].long(), res[1], res[2]
         t2 = time.perf_counter()
         r = 0
+        res = torch.stack([acts.to(torch.float32), logp, vals], 1)  # (B, 3): action, log-prob, value per row
         for (wid_, ticket, in_name, out_name, counts, policies), n in zip(msgs, n_rows):
-            buf = _attach(self.shm, out_name).buf
-            torch.frombuffer(buf, dtype=torch.int32, count=n).copy_(acts[r : r + n].to(torch.int32))
-            o = torch.frombuffer(buf, dtype=torch.float32, count=2 * n, offset=n * _I32)
-            o[:n].copy_(logp[r : r + n])
-            o[n:].copy_(vals[r : r + n])
+            torch.frombuffer(_attach(self.shm, out_name).buf, dtype=torch.float32, count=3 * n).view(n, 3).copy_(res[r : r + n])
             r += n
             self.resp_qs[wid_].put(ticket)
         self.stats["batches"] += 1
@@ -299,6 +304,7 @@ class _Server:
         gs, fr, s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, n_opts = torch.split(dev, sizes)
         batch = Batch(s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, n_opts)
         hidden = None
+        gs = gs.long()
         if net.memory == "gru":
             hidden = self.hidden[gs]
             hidden[fr.bool()] = 0.0
@@ -312,7 +318,7 @@ class _Server:
 
 def _select(torch, rows, gslot, fresh, s_len, e_len, n_opts, o_len, s_idx, e_idx, o_idx) -> list:
     """CPU: the model inputs of decisions `rows` (None = all), as one list of
-    int64 tensors: gslot, fresh, state values/offsets, event values/offsets,
+    int32 tensors: gslot, fresh, state values/offsets, event values/offsets,
     option values/offsets, option row, option position, options per row."""
 
     def excl(x):
@@ -339,7 +345,7 @@ def _select(torch, rows, gslot, fresh, s_len, e_len, n_opts, o_len, s_idx, e_idx
         gs, fr = gslot[rows], fresh[rows]
     o_row = torch.repeat_interleave(torch.arange(no.shape[0]), no)
     o_pos = torch.arange(o_row.shape[0]) - torch.repeat_interleave(excl(no), no)
-    return [gs, fr, s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, no]
+    return [x.to(torch.int32) for x in (gs, fr, s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, no)]
 
 
 def serve(cfg: ServerConfig, n_workers: int, req_q, resp_qs, stats_q) -> None:
@@ -347,6 +353,13 @@ def serve(cfg: ServerConfig, n_workers: int, req_q, resp_qs, stats_q) -> None:
     for the counters on `stats_q`."""
     if cfg.cpus and hasattr(os, "sched_setaffinity"):
         os.sched_setaffinity(0, set(cfg.cpus))
+    try:  # one open shared-memory block per worker group
+        import resource
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (hard if hard != resource.RLIM_INFINITY else 65536, hard))
+    except (ImportError, ValueError, OSError):
+        pass
     srv = _Server(cfg, n_workers)
     srv.resp_qs = resp_qs
     prof_path = os.environ.get("MTG_SERVER_PROFILE")

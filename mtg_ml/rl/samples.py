@@ -29,15 +29,23 @@ class PackedSamples:
     # -- building ------------------------------------------------------------
 
     def append(self, sample) -> None:
-        state, opts, events = sample
+        """sample: (state, opts, events) or the flat form (state, option
+        lengths, option tokens, events) of `features.featurize_flat`."""
+        if len(sample) == 4:
+            state, o_len, o_flat, events = sample
+            self.n_opts.append(len(o_len))
+            self.o_len.extend(o_len)
+            self.o_idx.extend(o_flat)
+        else:
+            state, opts, events = sample
+            self.n_opts.append(len(opts))
+            for toks in opts:
+                self.o_len.append(len(toks))
+                self.o_idx.extend(toks)
         self.s_len.append(len(state))
         self.s_idx.extend(state)
         self.e_len.append(len(events))
         self.e_idx.extend(events)
-        self.n_opts.append(len(opts))
-        for toks in opts:
-            self.o_len.append(len(toks))
-            self.o_idx.extend(toks)
         self._starts = self._cache = None
 
     def extend(self, other) -> None:

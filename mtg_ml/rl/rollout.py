@@ -27,7 +27,7 @@ from ..bots import make_bot
 from ..backend import game_class
 from ..engine import Game
 from ..match import match_decks
-from .features import encode_event_hashes, event_hashes, featurize
+from .features import encode_event_hashes, event_hashes, featurize_flat
 from .samples import PackedSamples
 
 LEARNER = "learner"
@@ -194,7 +194,9 @@ class _LocalEvaluator:
                 if net.memory != "none":
                     hs = [self.hidden.get((items[k][1], items[k][2])) for k in ks]
                     hidden = torch.stack([net.initial_state(1)[0] if h is None else h for h in hs])
-                logits, values, hn = net(collate([items[k][3] for k in ks]), hidden)
+                ps = PackedSamples()
+                ps.extend(items[k][3] for k in ks)
+                logits, values, hn = net(collate(ps), hidden)
                 dist = torch.distributions.Categorical(logits=logits)
                 acts = dist.sample()
                 logps = dist.log_prob(acts)
@@ -224,7 +226,7 @@ class _ServerEvaluator:
             key = self.learner_key if pol == LEARNER else (pol, 0)
             fresh = (i, p) not in self.started
             self.started.add((i, p))
-            rows.append((key, 2 * i + p, int(fresh), x[0], x[1], x[2]))
+            rows.append((key, 2 * i + p, int(fresh), x[0], x[1], x[2], x[3]))
         order = sorted(range(len(items)), key=lambda k: items[k][0])
         return self.client.submit(group, rows), order
 
@@ -287,8 +289,8 @@ def run_job(job: Job) -> Result:
                 continue
             live.append(i)
             seat = mem[i][p]
-            state, opts = featurize(g, p)
-            x = (state, opts, encode_event_hashes(seat.events))
+            state, o_len, o_flat = featurize_flat(g, p)
+            x = (state, o_len, o_flat, encode_event_hashes(seat.events))
             seat.events = []
             pot = _potential(g, p) if job.record and pol == LEARNER else 0.0
             items.append((pol, i, p, x, pot))

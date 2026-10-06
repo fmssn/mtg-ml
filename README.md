@@ -74,7 +74,7 @@ Shuffling forgets library knowledge.
 - **Cards** are one declarative spec, `mtg_ml/engine/cards.toml`, loaded by both engines. A card that only uses existing effect ops needs no code. How to add cards and decks: [`docs/adding-cards.md`](docs/adding-cards.md).
 - **PyPy** runs the Python engine 2-3x faster, but rollout workers import torch, so it only becomes usable once inference moves to a central server.
 
-Architecture, determinism, the differential suite and all benchmarks: [`docs/native-engine.md`](docs/native-engine.md).
+Architecture, determinism, the differential suite and all benchmarks: [`docs/native-engine.md`](docs/native-engine.md). Rollout throughput, packed samples and the central GPU inference server (`--inference server`): [`docs/inference-server.md`](docs/inference-server.md).
 
 ## Mulligans, sideboards and matches
 

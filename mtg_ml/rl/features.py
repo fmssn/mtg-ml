@@ -43,6 +43,15 @@ def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = O
     return state, opts
 
 
+def featurize_flat(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM):
+    """`featurize` with the options flattened: (state, option lengths, all
+    option tokens). What rollouts record and send to the inference server."""
+    if getattr(game, "NATIVE", False):
+        return game.featurize_flat(player, state_dim, option_dim)
+    state, opts = featurize(game, player, state_dim, option_dim)
+    return state, [len(o) for o in opts], [t for o in opts for t in o]
+
+
 # Decision kinds whose chosen option is public when the opponent makes it.
 # Excluded: choose_card / order / choose_mode keys can name hidden cards
 # (Brainstorm put-backs, Ponder order, scry and Deem Inferior choices).

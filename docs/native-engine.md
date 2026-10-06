@@ -190,7 +190,7 @@ PyPy is a 2-3× quick win for the engine alone, but it is **not usable for train
 
 ## What limits training throughput now
 
-With the Rust engine a rollout worker spends most of its time outside the engine: torch inference (batched per worker on CPU), sampling, collating tensors, and Python glue. The single-worker end-to-end measurement above (4.6×, against 12.6-13.6× for the rollout CPU path) shows it. The next step is a central inference server on the GPU: workers run engine + `featurize()` (now ~60k decisions/s per core) and ship feature indices; one process batches across all workers on the H100. That server is not part of this change. Once it exists, workers no longer import torch, so they could also run on PyPy, although the Rust engine makes that unnecessary.
+Follow-up work on the rest of the rollout pipeline is in [inference-server.md](inference-server.md). The trainer was unpickling recorded samples in one process, which capped rollouts at ~150-200k decisions/s; packed samples doubled throughput (300k decisions/s with 30 workers, 520k with 60). A central GPU inference server (`--inference server`) is built and tested, and pays off once the network grows.
 
 ## Limitations
 

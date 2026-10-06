@@ -608,6 +608,14 @@ impl PyGame {
         crate::features::featurize(self.st(), player, state_dim, option_dim).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
     }
 
+    /// `featurize` with the options flattened: (state, option lengths, all
+    /// option tokens). Cheaper to pack into requests and samples.
+    fn featurize_flat(&self, player: u8, state_dim: u32, option_dim: u32) -> PyResult<(Vec<u32>, Vec<u32>, Vec<u32>)> {
+        let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
+        let lens = opts.iter().map(|o| o.len() as u32).collect();
+        Ok((state, lens, opts.concat()))
+    }
+
     /// Hashed `event_tokens` of option i for (decider, opponent).
     fn event_hashes(&self, i: usize, option_dim: u32) -> PyResult<(Vec<u32>, Vec<u32>)> {
         crate::features::event_hashes(self.st(), i, option_dim).ok_or_else(|| PyIndexError::new_err("no such option"))

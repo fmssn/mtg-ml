@@ -548,6 +548,9 @@ class NativeGame:
     def featurize(self, player: int, state_dim: int, option_dim: int):
         return self._g.featurize(player, state_dim, option_dim)
 
+    def featurize_flat(self, player: int, state_dim: int, option_dim: int):
+        return self._g.featurize_flat(player, state_dim, option_dim)
+
     def event_hashes(self, index: int, option_dim: int):
         return self._g.event_hashes(index, option_dim)
 
