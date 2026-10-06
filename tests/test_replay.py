@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from mtg_ml.agents import RandomAgent
 from mtg_ml.bots import make_bot
 from mtg_ml.replay import record
@@ -42,7 +44,7 @@ def test_uids_are_stable_across_zones():
 
 
 def test_model_agent_records_policy_and_value(tmp_path):
-    import torch
+    torch = pytest.importorskip("torch")
 
     from mtg_ml.rl.agent import ModelAgent
     from mtg_ml.rl.model import PolicyNet
@@ -57,3 +59,50 @@ def test_model_agent_records_policy_and_value(tmp_path):
         assert len(d["policy"]) == len(d["options"])
         assert abs(sum(d["policy"]) - 1) < 1e-2
         assert -1.5 < d["value"] < 1.5
+
+
+def test_replay_listing_survives_malformed_files(tmp_path):
+    from mtg_ml.replay import _replay_summary
+
+    for name, body in [("a.json", '{"meta": null}'), ("b.json", "[]"), ("c.json", "not json"), ("d.json", '{"meta": {"seed": 4}}')]:
+        (tmp_path / name).write_text(body)
+    rows = {p.name: _replay_summary(p) for p in tmp_path.glob("*.json")}
+    assert all(r["file"] == n for n, r in rows.items())
+    assert rows["d.json"]["seed"] == 4
+
+
+def test_known_top_stops_at_first_unknown_card():
+    from types import SimpleNamespace as C
+
+    from mtg_ml.replay import _known_top
+
+    lib = [C(name="Island", known_to=set()), C(name="Mental Note", known_to={1})]
+    assert _known_top(lib) == []  # a known second card must not be shown as the top
+    lib[0].known_to = {0}
+    assert _known_top(lib) == ["Island", "Mental Note"]
+
+
+def test_model_agent_resets_between_games(tmp_path):
+    torch = pytest.importorskip("torch")
+    from mtg_ml.match import play_match
+    from mtg_ml.rl.agent import ModelAgent
+    from mtg_ml.rl.model import PolicyNet
+
+    config = {"hidden": 16, "memory": "gru", "trunk": "entity"}
+    path = tmp_path / "tiny.pt"
+    torch.save({"config": config, "model": PolicyNet(**config).state_dict()}, path)
+    agent = ModelAgent(str(path), 0, seed=1)
+    seen = []
+    act = agent.act
+
+    def spy(game):
+        # At a game's first decision the old memory is gone: either act is
+        # about to switch games, or observe already did and cleared it.
+        seen.append((game, game is not agent.game or agent.hidden is None))
+        return act(game)
+
+    agent.act = spy
+    res = play_match([agent, make_bot(1)], seed=3)
+    firsts = [fresh for i, (g, fresh) in enumerate(seen) if i == 0 or seen[i - 1][0] is not g]
+    assert len(res.games) >= 2 and len(firsts) == len(res.games)
+    assert all(firsts)  # every game starts from a fresh memory

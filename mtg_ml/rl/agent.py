@@ -7,8 +7,11 @@ Mirrors what rollouts do for the learner (`rollout._LocalEvaluator`): the
 recurrent state persists across the agent's decisions, and the events it saw
 since its previous decision (its own and the opponent's public actions) are
 fed in with the next one. For that the game loop must call `observe(game, a)`
-before every `game.step(a)`, whoever decides. After `act`, `last_info` holds
-the policy (one probability per option) and the value estimate.
+before every `game.step(a)`, whoever decides (`agents.take` does). Memory
+resets whenever the agent sees a different game object, so one agent can play
+a whole match. After `act`, `last_info` holds the policy (one probability per
+option) and the value estimate (the predicted discounted return, not a
+calibrated win probability).
 """
 
 from __future__ import annotations
@@ -27,11 +30,17 @@ class ModelAgent:
         self.seat = seat
         self.sample = sample
         self.gen = torch.Generator().manual_seed(seed * 2 + seat)
+        self.game = None
         self.hidden = None
         self.events: list[int] = []
         self.last_info: dict | None = None
 
+    def _track(self, game) -> None:
+        if game is not self.game:  # a new game: forget the previous one
+            self.game, self.hidden, self.events, self.last_info = game, None, [], None
+
     def observe(self, game, index: int) -> None:
+        self._track(game)
         mine, theirs = event_hashes(game, index)
         self.events += mine if game.decision.player == self.seat else theirs
 
@@ -39,6 +48,7 @@ class ModelAgent:
         from .model import collate
 
         torch = self.torch
+        self._track(game)
         state, o_len, o_flat = featurize_flat(game, self.seat)
         ps = PackedSamples()
         ps.extend([(state, o_len, o_flat, encode_event_hashes(self.events))])

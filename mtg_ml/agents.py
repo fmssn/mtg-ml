@@ -70,10 +70,19 @@ def render(game: Game, viewer: int) -> str:
     return "\n".join(lines)
 
 
+def take(g: Game, agents, index: int) -> None:
+    """Take option `index`, first telling every agent with an `observe` hook
+    (recurrent models track both players' actions) what is being done."""
+    for a in agents:
+        if hasattr(a, "observe"):
+            a.observe(g, index)
+    g.step(index)
+
+
 def play_game(agents, seed: int = 0, decks=None, engine: str | None = None, **game_kw) -> Game:
     """engine: "python" / "native" (default: $MTG_ENGINE, else python)."""
     decks = decks or (expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR))
     g = game_class(engine)(decks, seed=seed, **game_kw)
     while not g.over:
-        g.step(agents[g.decision.player].act(g))
+        take(g, agents, agents[g.decision.player].act(g))
     return g

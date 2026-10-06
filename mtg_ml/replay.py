@@ -20,6 +20,7 @@ import pathlib
 import time
 import urllib.parse
 
+from .agents import take
 from .backend import engine_name, game_class
 from .engine import JUND_WILDFIRE, MONO_BLUE_TERROR, expand
 
@@ -77,6 +78,17 @@ def _ref_label(g, ref) -> str | None:
     return None if c is None else c.name
 
 
+def _known_top(library, n: int = 3) -> list[str]:
+    """Names of the top cards someone knows, stopping at the first unknown one,
+    so every entry's position is exact (index 0 = top)."""
+    out = []
+    for c in library[:n]:
+        if not c.known_to:
+            break
+        out.append(c.name)
+    return out
+
+
 def snapshot(g, info: dict) -> dict:
     """Full (omniscient) game state. `info` collects static card data by name."""
     players = []
@@ -86,7 +98,7 @@ def snapshot(g, info: dict) -> dict:
                 "life": p.life,
                 "hand": [_card(c, info) for c in p.hand],
                 "library": len(p.library),
-                "library_top_known": [c.name for c in p.library[:3] if (1 - p.idx) in c.known_to or p.idx in c.known_to],
+                "library_top_known": _known_top(p.library),
                 "graveyard": [_card(c, info) for c in p.graveyard],
                 "exile": [_card(c, info) for c in p.exile],
                 "pool": {k: v for k, v in p.pool.items() if v},
@@ -143,10 +155,7 @@ def record(agents, seed: int = 0, decks=None, engine: str | None = None, names=(
         decision.update(getattr(agent, "last_info", None) or {})
         frames.append({"state": snapshot(g, info), "events": g.log[seen:], "decision": decision})
         seen = len(g.log)
-        for a in agents:  # recurrent models track what both players did
-            if hasattr(a, "observe"):
-                a.observe(g, choice)
-        g.step(choice)
+        take(g, agents, choice)
     frames.append({"state": snapshot(g, info), "events": g.log[seen:], "decision": None})
     return {
         "format": FORMAT,
@@ -172,11 +181,13 @@ def record(agents, seed: int = 0, decks=None, engine: str | None = None, names=(
 
 
 def _replay_summary(path: pathlib.Path) -> dict:
+    """Listing entry for one replay file; malformed files list without metadata."""
     try:
-        meta = json.loads(path.read_text())["meta"]
-    except (OSError, ValueError, KeyError):
-        meta = {}
-    return {"file": path.name, "mtime": path.stat().st_mtime, **meta}
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        data = None
+    meta = data.get("meta") if isinstance(data, dict) else None
+    return {**(meta if isinstance(meta, dict) else {}), "file": path.name, "mtime": path.stat().st_mtime}
 
 
 def serve(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 8765) -> None:
