@@ -1,0 +1,864 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTG Replay Viewer</title>
+<style>
+:root{
+  --bg:#0d0f13; --panel:#151820; --panel2:#1c2029; --line:#2a303c; --text:#e7e9ef; --muted:#8a93a6; --dim:#5b6375;
+  --p0:#e0694d; --p1:#4f95e0; --accent:#f0c869; --good:#5fd38f; --bad:#ef6767;
+  --felt:#13241b; --felt2:#0f1a14;
+  --u:min(1vh,.62vw);
+  --cw:calc(var(--u)*12);   /* creature width */
+  --lw:calc(var(--u)*8);    /* land / other width */
+  --hw:calc(var(--u)*10.5); /* hand width */
+  --pw:calc(var(--u)*6.6);  /* pile width */
+  --ar:1.3934;              /* card height / width */
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.4 -apple-system,BlinkMacSystemFont,"Inter",system-ui,sans-serif;overflow:hidden}
+button,select,input{font:inherit;color:inherit}
+.p0c{color:var(--p0)}.p1c{color:var(--p1)}
+
+#app{display:grid;grid-template-columns:1fr 300px;grid-template-rows:44px 1fr auto;height:100vh}
+#top{grid-column:1/3;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+#top h1{font-size:14px;margin:0;font-weight:700;letter-spacing:.02em}
+#top select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 8px;max-width:360px}
+#top .meta{color:var(--muted);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}
+.btn:hover{border-color:#3d4556}
+.btn.on{border-color:var(--accent);color:var(--accent)}
+
+/* ------------------------------------------------------------ board */
+#board{position:relative;overflow:hidden;display:grid;grid-template-rows:minmax(0,1fr) auto minmax(0,1fr);background:radial-gradient(ellipse at 50% 50%,var(--felt) 0%,var(--felt2) 75%)}
+#arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:30}
+.mat{display:grid;grid-template-columns:128px 1fr auto;gap:10px;padding:8px 12px;min-height:0;overflow:hidden}
+.mat.top{align-items:start}
+.mat.bottom{align-items:end}
+.zones{display:flex;flex-direction:column;gap:5px;min-width:0}
+.mat.top .zones{flex-direction:column-reverse}
+
+/* lanes */
+.lane{position:relative;display:flex;align-items:center;gap:8px;border-radius:10px;padding:4px 8px 4px 26px;background:#ffffff06;border:1px solid #ffffff0d;min-width:0}
+.lane .lname{position:absolute;left:0;top:0;bottom:0;width:20px;display:flex;align-items:center;justify-content:center;writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#ffffff40;border-right:1px solid #ffffff0d}
+.lane .cards{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:calc(var(--lw)*var(--ar));min-width:0}
+.lane.creatures .cards{min-height:calc(var(--cw)*var(--ar) + 8px)}
+.lane .empty{color:#ffffff30;font-size:11px;font-style:italic}
+.lane-row{display:flex;gap:6px;min-width:0;align-items:stretch}
+.lane-row .lane.lands,.lane-row .lane.other{flex:0 1 auto;min-width:calc(var(--lw)*1.6)}
+.lane-row .hand{flex:1 .3 auto;min-width:calc(var(--hw)*2)}
+/* lands and other permanents fan out instead of wrapping when the row is full */
+.lane-row .lane .cards{flex-wrap:nowrap;--sov:0px}
+.lane-row .lane .cards>.perm+.perm{margin-left:calc(var(--sov)*-1)}
+.lane-row .lane .cards>.perm:hover{z-index:6}
+.lane.other:has(.empty){display:none}
+
+/* hand */
+.hand{position:relative;display:flex;align-items:center;gap:10px;border-radius:10px;padding:5px 10px 5px 26px;background:#00000040;border:1px solid #ffffff10;min-height:calc(var(--hw)*var(--ar) + 10px);--hov:calc(var(--hw)*.18)}
+.mat.p0 .hand{border-top:2px solid #e0694d80}
+.mat.p1 .hand{border-bottom:2px solid #4f95e080}
+.hand .cards{display:flex;align-items:center;padding-left:var(--hov)}
+.hand .card{--w:var(--hw);margin-left:calc(var(--hov)*-1);transition:transform .12s, box-shadow .12s}
+.hand .card:hover{transform:translateY(-10px) scale(1.06);z-index:5}
+.mat.top .hand .card:hover{transform:translateY(10px) scale(1.06)}
+
+/* piles */
+.piles{display:flex;flex-direction:column;gap:8px;align-self:stretch;justify-content:space-between}
+.mat.top .piles{flex-direction:column-reverse}
+.pile{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default}
+.pile.clickable{cursor:pointer}
+.pile .pstack{position:relative;width:var(--pw);height:calc(var(--pw)*var(--ar))}
+.pile .pstack .card{--w:var(--pw)}
+.pile .plabel{font-size:10.5px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.pile .plabel b{color:var(--text);font-size:12px;margin-left:3px}
+.pile .pempty{width:100%;height:100%;border:1.5px dashed #ffffff22;border-radius:5%;display:flex;align-items:center;justify-content:center;color:#ffffff30;font-size:10px}
+.pile .pop{display:none;position:absolute;right:calc(100% + 8px);top:0;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:190px;max-height:320px;overflow:auto;box-shadow:0 8px 24px #000a;font-size:12px}
+.mat.bottom .pile .pop{top:auto;bottom:0}
+.pile:hover .pop{display:block}
+.pop .pl{display:flex;justify-content:space-between;gap:10px;padding:1px 0}
+.pop .pl.new{color:var(--good)}
+.libback{width:100%;height:100%;border-radius:5%;background:repeating-linear-gradient(45deg,#3a2716 0 6px,#33220f 6px 12px);border:3px solid #120c06;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#f3d7a3;text-shadow:0 1px 2px #000}
+.known{font-size:10px;color:var(--accent);max-width:calc(var(--pw) + 30px);text-align:center;line-height:1.2}
+
+/* player plate */
+.plate{align-self:stretch;display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:12px;background:#0009;border:1px solid #ffffff12;position:relative}
+.mat.top .plate{justify-content:flex-start}
+.mat.bottom .plate{justify-content:flex-end}
+.plate .pname{font-weight:700;font-size:13px;line-height:1.2}
+.plate .pagent{font-size:11px;color:var(--muted)}
+.plate .plife{font-size:40px;font-weight:800;line-height:1;display:flex;align-items:baseline;gap:6px}
+.plate .delta{font-size:15px;font-weight:700;padding:1px 6px;border-radius:6px}
+.delta.neg{color:#fff;background:var(--bad)}.delta.pos{color:#0c2;background:#5fd38f30}
+.plate .pstats{display:flex;flex-wrap:wrap;gap:4px}
+.chip{display:inline-flex;align-items:center;gap:4px;background:#ffffff0d;border:1px solid #ffffff14;border-radius:999px;padding:1px 8px;font-size:11px;color:var(--muted)}
+.chip b{color:var(--text)}
+.plate .flags{display:flex;flex-direction:column;gap:4px}
+.flag{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:6px;align-self:flex-start}
+.flag.turn{background:var(--accent);color:#211800}
+.flag.deciding{background:#ffffff14;color:var(--text);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.55}}
+.mat.p0 .plate.active{border-color:#e0694d99;box-shadow:0 0 0 1px #e0694d55,0 0 24px #e0694d22}
+.mat.p1 .plate.active{border-color:#4f95e099;box-shadow:0 0 0 1px #4f95e055,0 0 24px #4f95e022}
+.mana{display:inline-flex;gap:2px}
+.mana i{font-style:normal;width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#111}
+.mana .W{background:#f6f0d0}.mana .U{background:#7fb6ea}.mana .B{background:#a59a96}.mana .R{background:#ec8a6a}.mana .G{background:#7cc796}.mana .C{background:#cbc5c0}
+
+/* center strip */
+#center{display:grid;grid-template-columns:128px minmax(0,1.3fr) minmax(0,1fr);align-items:center;gap:10px 14px;padding:6px 14px 6px 12px;border-top:1px dashed #ffffff1c;border-bottom:1px dashed #ffffff1c;background:#00000030;}
+.turninfo{display:flex;flex-direction:column;gap:5px;min-width:0}
+.turninfo .tt{font-size:14px;font-weight:700;line-height:1.2}
+.turninfo .ts{font-size:12px;color:var(--text)}
+.phases{display:flex;gap:2px}
+.phases span{flex:1;height:5px;border-radius:2px;background:#ffffff14}
+.phases span.done{background:#ffffff40}
+.phases.p0 span.cur{background:var(--p0)}.phases.p1 span.cur{background:var(--p1)}
+#next{display:flex;align-items:center;gap:12px;padding:8px 14px 8px 8px;border-radius:12px;background:#000c;border:1px solid #ffffff1f;min-width:0;min-height:calc(var(--lw)*var(--ar) + 16px);position:relative}
+#next.p0{border-left:5px solid var(--p0);box-shadow:0 0 0 1px #e0694d40,0 6px 30px #e0694d26}
+#next.p1{border-left:5px solid var(--p1);box-shadow:0 0 0 1px #4f95e040,0 6px 30px #4f95e026}
+#next.pass{opacity:.7}
+#next.fresh{animation:nextin .35s ease-out}
+@keyframes nextin{from{transform:translateY(4px);opacity:.3}}
+#next .card{--w:clamp(48px,calc(var(--lw)*.8),66px)}
+#next .nthumb{flex:none}
+#next .nbody{min-width:0;display:flex;flex-direction:column;gap:3px;line-height:1.25}
+#next .nhead{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#next .nkind{background:#ffffff14;color:var(--text);border-radius:4px;padding:0 6px;letter-spacing:.06em}
+#next .nact{font-size:clamp(15px,calc(var(--u)*2.3),22px);font-weight:800;line-height:1.15;color:#fff}
+#next .nctx{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#next .nalt{position:relative;font-size:11px;color:var(--muted);cursor:default;align-self:flex-start;border-bottom:1px dotted #ffffff40}
+#next .nalt .altpop{display:none;position:absolute;left:0;bottom:calc(100% + 6px);z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px;min-width:280px;max-height:300px;overflow:auto;box-shadow:0 8px 24px #000a;font-size:12px;color:var(--dim)}
+#next .nalt:hover .altpop{display:block}
+.altpop div{padding:2px 4px;border-radius:4px}
+.altpop .ch{color:var(--text);background:#f0c86918}
+#next .over{font-size:20px;font-weight:800}
+#next .nmeta{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#next .conf{font-size:11px;font-weight:700;color:#211800;background:var(--accent);border-radius:4px;padding:0 6px}
+#next .winest{font-size:11px;color:var(--muted)}
+#next .winest b{color:var(--text)}
+.altpop .pp{display:inline-block;width:34px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pbar{position:relative;flex:none;width:44px;height:16px;border-radius:3px;background:#ffffff0d;overflow:hidden;font-size:10.5px;font-variant-numeric:tabular-nums}
+.pbar i{position:absolute;inset:0 auto 0 0;width:calc(var(--p)*100%);background:#f0c86955}
+.pbar span{position:relative;display:block;text-align:right;padding-right:4px;line-height:16px;color:var(--text)}
+.perm.next>.card,.card.next,.pile.next .pstack .card{box-shadow:0 0 0 3px #fff,0 0 22px #ffffffaa !important}
+.perm.next::before,.hand .card.next::before,.pile.next .pstack::before{content:"NEXT";position:absolute;top:-10px;left:50%;transform:translateX(-50%);z-index:5;background:#fff;color:#111;font-size:9.5px;font-weight:800;letter-spacing:.08em;padding:0 6px;border-radius:4px;line-height:15px}
+.hand .card.next{transform:translateY(-8px);z-index:4}
+.mat.top .hand .card.next{transform:translateY(8px)}
+.plate.next{box-shadow:0 0 0 3px #fff,0 0 22px #ffffff88 !important}
+#stack{display:flex;align-items:center;gap:10px;min-width:0;overflow:hidden}
+#stack .slabel{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#ffffff40;writing-mode:vertical-rl;transform:rotate(180deg)}
+.sitem{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border-radius:8px;background:#0008;border:1px solid #ffffff14;max-width:260px}
+.sitem.c0{border-left:3px solid var(--p0)}.sitem.c1{border-left:3px solid var(--p1)}
+.sitem .card{--w:var(--lw)}
+.sitem .stext{font-size:12px;line-height:1.3}
+.sitem .stext .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.sitem .stext .tg{color:var(--accent)}
+.sitem.topmost{box-shadow:0 0 0 1px var(--accent)}
+.stack-empty{color:#ffffff30;font-style:italic;font-size:12px}
+
+/* ------------------------------------------------------------ cards */
+.card{--w:var(--cw);position:relative;width:var(--w);height:calc(var(--w)*var(--ar));border-radius:calc(var(--w)*.05);flex:none;background:#20242c;box-shadow:0 2px 5px #0009;user-select:none}
+.card img{width:100%;height:100%;border-radius:inherit;display:block}
+.card.back{background:repeating-linear-gradient(45deg,#3a2716 0 6px,#33220f 6px 12px);border:2px solid #120c06}
+.tface{position:absolute;inset:0;border-radius:inherit;padding:5% 6%;display:flex;flex-direction:column;gap:3%;overflow:hidden;font-size:calc(var(--w)*.085);line-height:1.15;border:2px solid #000;background:linear-gradient(#2a2e36,#1b1e24)}
+.tface .tn{font-weight:700;display:flex;justify-content:space-between;gap:2px}
+.tface .tt2{color:#aab;font-size:.85em;border-top:1px solid #ffffff22;padding-top:2%}
+.tface .tx{color:#ccd;font-size:.8em;flex:1;overflow:hidden}
+.tface .tpt{align-self:flex-end;font-weight:800}
+.tface.cU{background:linear-gradient(#22405f,#16273a)}.tface.cB{background:linear-gradient(#3a3438,#1f1b1e)}
+.tface.cR{background:linear-gradient(#5f2a22,#3a1914)}.tface.cG{background:linear-gradient(#24502f,#15301c)}
+.tface.cM{background:linear-gradient(#5d4c1f,#382d12)}
+
+.perm{position:relative;display:flex;align-items:center;justify-content:center;width:var(--w);height:calc(var(--w)*var(--ar));flex:none;transition:transform .15s}
+.lane.creatures .perm{--w:var(--cw)}
+.lane.lands .perm,.lane.other .perm{--w:var(--lw)}
+.perm .card{--w:inherit;width:var(--w)}
+.perm.tapped{width:calc(var(--w)*var(--ar))}
+.perm.tapped>.card{transform:rotate(90deg)}
+.perm.grouped>.card{box-shadow:3px -3px 0 -1px #2b2f37,3px -3px 0 0 #000,6px -6px 0 -1px #2b2f37,6px -6px 0 0 #000}
+.mat.bottom .perm.attacking{transform:translateY(-14px)}
+.mat.top .perm.attacking{transform:translateY(14px)}
+.perm.attacking>.card{box-shadow:0 0 0 2px var(--bad),0 0 16px #ef676799}
+.perm.blocking>.card{box-shadow:0 0 0 2px #9fc3ff,0 0 14px #9fc3ff88}
+.entered>.card,.card.entered{animation:enter 1.3s ease-out}
+.entered>.card::after,.card.entered::after{content:"";position:absolute;inset:-3px;border-radius:inherit;border:2px solid var(--good);opacity:.9;pointer-events:none}
+@keyframes enter{0%{transform:scale(1.12);filter:brightness(1.4)}100%{transform:none;filter:none}}
+.perm.tapped.entered>.card{animation:none}
+.badges{position:absolute;inset:0;pointer-events:none;z-index:2}
+.b{position:absolute;font-size:11px;font-weight:800;padding:0 5px;border-radius:4px;line-height:16px;white-space:nowrap}
+.b.pt{right:2px;bottom:2px;background:#000d;color:#fff}
+.b.pt.hurt{color:#ff9b9b}
+.b.dmg{right:2px;bottom:20px;background:var(--bad);color:#fff}
+.b.ctr{left:2px;bottom:2px;background:var(--good);color:#04210f}
+.b.cnt{right:-6px;top:-8px;background:var(--accent);color:#211800;border-radius:9px;font-size:12px}
+.b.sick{left:2px;top:2px;background:#000c;color:#c9d2ff;font-size:10px}
+.b.atk{left:50%;transform:translateX(-50%);top:-9px;background:var(--bad);color:#fff}
+.b.blk{left:50%;transform:translateX(-50%);top:-9px;background:#9fc3ff;color:#0b1a33}
+.perm.tapped .badges{inset:calc(var(--w)*(var(--ar) - 1)/2) 0}
+.attached{position:absolute;left:50%;top:0;transform:translate(-50%,-26%);z-index:-1;opacity:.95}
+.attached .card{--w:calc(var(--cw)*.9)}
+
+/* ------------------------------------------------------------ side panel */
+#app.nopanel{grid-template-columns:1fr 0}
+#app.nopanel #side{display:none}
+#side{grid-row:2/4;grid-column:2;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+.sec{border-bottom:1px solid var(--line);padding:10px 12px}
+.sec h3{margin:0 0 6px;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600}
+#preview{display:grid;grid-template-columns:150px 1fr;gap:10px;min-height:232px}
+#preview .card{--w:150px}
+#preview .ptxt{font-size:12px;color:var(--muted);overflow:auto;max-height:210px}
+#preview .ptxt b{color:var(--text);font-size:13px}
+#preview .ptxt .otext{color:var(--text);margin-top:6px;white-space:pre-wrap}
+#preview .hint{grid-column:1/3;color:var(--dim);display:flex;align-items:center;justify-content:center;font-style:italic}
+#decision .dh{font-weight:600;margin-bottom:2px}
+#decision .dp{color:var(--muted);font-size:12px;margin-bottom:6px}
+#decision ol{list-style:none;margin:0;padding:0;max-height:190px;overflow:auto}
+#decision li{padding:3px 6px;border-radius:5px;color:var(--dim);font-size:12px;display:flex;gap:6px}
+#decision li.ch{color:var(--text);background:#f0c86918;outline:1px solid #f0c86966}
+#decision li.ch::before{content:"✓";color:var(--accent)}
+#decision li:not(.ch)::before{content:"·"}
+#log{flex:1;overflow:auto;padding:8px 12px;font:11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;min-height:0}
+#log div{color:var(--muted);white-space:pre-wrap;word-break:break-word}
+#log .future{display:none}
+#log .now{background:#f0c86912}
+#log .turnh{color:var(--accent);font-weight:700;margin-top:8px}
+#log .stepl{color:var(--dim);font-size:10.5px}
+#log .dec0{color:#e0694dcc}#log .dec1{color:#4f95e0cc}
+#log .ev0{color:var(--p0)}#log .ev1{color:var(--p1)}
+#log .over{color:var(--accent);font-weight:700}
+
+/* ------------------------------------------------------------ controls */
+#controls{grid-column:1;border-top:1px solid var(--line);background:var(--panel);padding:6px 12px}
+.crow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.crow .sp{flex:1}
+.crow .info{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+#timeline{flex:1 1 220px;min-width:160px;position:relative;height:34px;border-radius:6px;overflow:hidden;cursor:pointer;background:var(--panel2);display:flex}
+#timeline .seg{height:100%;border-right:1px solid #0006;display:flex;align-items:flex-end;padding:0 3px 2px;font-size:9.5px;color:#ffffff70;overflow:hidden}
+#timeline .seg.t0{background:#e0694d22}#timeline .seg.t1{background:#4f95e022}#timeline .seg.tm{background:#ffffff08}
+#timeline svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#timeline .pos{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);box-shadow:0 0 6px var(--accent);pointer-events:none}
+kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:11px}
+label.tg{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;cursor:pointer}
+
+/* overlays */
+#modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;z-index:100}
+#modal.on{display:flex}
+#modal .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:min(1100px,92vw);max-height:86vh;overflow:auto}
+#modal .box h2{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between;gap:20px}
+#modal .grid{display:flex;flex-wrap:wrap;gap:10px}
+#modal .grid .card{--w:130px}
+#modal .grid .wrap{display:flex;flex-direction:column;gap:3px;align-items:center;font-size:11px;color:var(--muted)}
+#drop{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--muted);z-index:50;background:var(--felt2)}
+#drop.on{display:flex}
+#drop.drag{outline:3px dashed var(--accent);outline-offset:-20px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top">
+    <h1>MTG Replay</h1>
+    <select id="pick" title="Recorded replays"></select>
+    <label class="btn" title="Open a replay JSON file">Open file…<input id="file" type="file" accept=".json" hidden></label>
+    <div class="meta" id="meta"></div>
+    <button class="btn" id="bPanel" title="Show or hide the side panel (L)">Hide panel</button>
+  </div>
+
+  <div id="board">
+    <section class="mat top p1" id="mat1"></section>
+    <section id="center">
+      <div class="turninfo"><div class="tt" id="tt"></div><div class="phases" id="phases"></div><div class="ts" id="ts"></div></div>
+      <div id="next"></div>
+      <div id="stack"></div>
+    </section>
+    <section class="mat bottom p0" id="mat0"></section>
+    <svg id="arrows"><defs>
+      <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#f0c869"/></marker>
+      <marker id="ahw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#ffffff"/></marker>
+      <marker id="ahb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#9fc3ff"/></marker>
+    </defs><g id="arrowg"></g></svg>
+    <div id="drop"><div style="font-size:16px;color:var(--text)">Drop a replay JSON here</div><div>or run <code>python -m mtg_ml.replay serve</code> and open the printed URL</div></div>
+  </div>
+
+  <aside id="side">
+    <div class="sec" id="decision"></div>
+    <div class="sec"><h3>Card</h3><div id="preview"><div class="hint">Hover a card to inspect it</div></div></div>
+    <div class="sec" style="padding-bottom:4px;border-bottom:0"><h3>Game log</h3></div>
+    <div id="log"></div>
+  </aside>
+
+  <div id="controls">
+    <div class="crow">
+      <button class="btn" id="bStart" title="Start (Home)">⏮</button>
+      <button class="btn" id="bPrevT" title="Previous turn (Shift+←)">⇤ turn</button>
+      <button class="btn" id="bPrev" title="Step back (←)">◀</button>
+      <button class="btn" id="bPlay" title="Play / pause (Space)" style="min-width:74px">▶ Play</button>
+      <button class="btn" id="bNext" title="Step (→)">▶</button>
+      <button class="btn" id="bNextT" title="Next turn (Shift+→)">turn ⇥</button>
+      <button class="btn" id="bEnd" title="End (End)">⏭</button>
+      <div id="timeline" title="Click to jump. Keys: ←/→ step, Shift+←/→ turn, Space play, L side panel"></div>
+      <select id="speed" class="btn" title="Playback speed"><option value="0.5">0.5 step/s</option><option value="1">1 step/s</option><option value="2" selected>2 steps/s</option><option value="4">4 steps/s</option><option value="8">8 steps/s</option></select>
+      <label class="tg" title="Skip passes and mana payments with nothing happening"><input type="checkbox" id="keyOnly" checked> key moments</label>
+      <label class="tg"><input type="checkbox" id="showHands" checked> hands</label>
+      <span class="info" id="pos"></span>
+    </div>
+  </div>
+</div>
+<div id="modal"><div class="box"></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const STEPS = ['untap','upkeep','draw','main1','begin_combat','declare_attackers','declare_blockers','combat_damage','end_combat','main2','end','cleanup'];
+const STEP_LABEL = {untap:'Untap',upkeep:'Upkeep',draw:'Draw',main1:'Main 1',begin_combat:'Combat',declare_attackers:'Attackers',declare_blockers:'Blockers',combat_damage:'Damage',end_combat:'End combat',main2:'Main 2',end:'End',cleanup:'Cleanup'};
+const PCLS = ['p0c','p1c'];
+
+let lastFitTurn = -1;
+let R = null, idx = 0, shown = null, playing = false, timer = null, file = '';
+let keyFrames = [], turnStarts = [];
+const pref = {keyOnly: true, showHands: true, speed: 2, panel: true};
+
+// ---------------------------------------------------------------- Scryfall images
+const IMG_KEY = 'mtgml-scryfall-v1';
+let IMG = {};
+try { IMG = JSON.parse(localStorage.getItem(IMG_KEY) || '{}'); } catch (e) { IMG = {}; }
+const saveImg = () => { try { localStorage.setItem(IMG_KEY, JSON.stringify(IMG)); } catch (e) {} };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function addSf(c, alias) {
+  const url = x => x && (x.normal || x.large);
+  if (c.image_uris) { IMG[c.name] = url(c.image_uris); if (alias) IMG[alias] = url(c.image_uris); }
+  for (const f of c.card_faces || []) if (f.image_uris) IMG[f.name] = url(f.image_uris);
+  if (alias && !IMG[alias] && c.card_faces?.[0]?.image_uris) IMG[alias] = url(c.card_faces[0].image_uris);
+}
+
+async function resolveImages(cards) {
+  const want = Object.keys(cards).filter(n => !(n in IMG));
+  if (!want.length) return;
+  const normal = want.filter(n => !cards[n].token), tokens = want.filter(n => cards[n].token);
+  for (let i = 0; i < normal.length; i += 75) {
+    try {
+      const r = await fetch('https://api.scryfall.com/cards/collection', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({identifiers: normal.slice(i, i + 75).map(name => ({name}))})});
+      for (const c of (await r.json()).data || []) addSf(c);
+    } catch (e) { console.warn('scryfall', e); return; }
+  }
+  for (const n of tokens) {
+    try {
+      const r = await fetch(`https://api.scryfall.com/cards/search?include_extras=true&q=${encodeURIComponent(`!"${n}" t:token`)}`);
+      if (r.ok) { const j = await r.json(); if (j.data?.length) addSf(j.data[0], n); }
+    } catch (e) {}
+    await sleep(110);
+  }
+  for (const n of want) if (!(n in IMG)) {  // back faces etc.
+    try {
+      const r = await fetch(`https://api.scryfall.com/cards/named?exact=${encodeURIComponent(n)}`);
+      if (r.ok) addSf(await r.json(), n); else if (r.status === 404) IMG[n] = null;
+    } catch (e) {}
+    await sleep(110);
+  }
+  saveImg();
+  render(true);
+}
+
+// ---------------------------------------------------------------- card rendering
+function colorOf(name) {
+  const info = R?.cards[name]; if (!info) return '';
+  const cs = new Set((info.cost.match(/[WUBRG]/g) || []));
+  if (cs.size > 1) return 'cM';
+  return cs.size ? 'c' + [...cs][0] : '';
+}
+function textFace(name) {
+  const i = R?.cards[name] || {types: [], subtypes: [], cost: '', text: ''};
+  const tl = i.types.join(' ') + (i.subtypes.length ? ' — ' + i.subtypes.join(' ') : '');
+  return `<div class="tface ${colorOf(name)}"><div class="tn"><span>${esc(name)}</span><span>${esc(i.cost.replace(/[{}]/g, ''))}</span></div>
+    <div class="tt2">${esc((i.token ? 'Token ' : '') + tl)}</div><div class="tx">${esc(i.text || '')}</div>${i.power != null ? `<div class="tpt">${i.power}/${i.toughness}</div>` : ''}</div>`;
+}
+function cardHtml(name, o = {}) {
+  const url = IMG[name];
+  const face = url ? `<img src="${url}" alt="${esc(name)}" draggable="false">` : textFace(name);
+  return `<div class="card ${o.cls || ''}" data-name="${esc(name)}"${o.uid ? ` data-uid="${o.uid}"` : ''}>${face}${o.badges || ''}</div>`;
+}
+const backHtml = () => `<div class="card back"></div>`;
+
+// ---------------------------------------------------------------- frame bookkeeping
+function zoneMap(s) {
+  const m = new Map();
+  s.players.forEach((p, i) => {
+    p.hand.forEach(c => m.set(c.uid, 'h' + i));
+    p.graveyard.forEach(c => m.set(c.uid, 'g' + i));
+    p.exile.forEach(c => m.set(c.uid, 'x' + i));
+  });
+  s.battlefield.forEach(c => m.set(c.uid, 'b' + c.controller));
+  return m;
+}
+function isKey(f) {
+  const d = f.decision;
+  if (!d) return true;
+  const evs = f.events.filter(l => !l.startsWith('--') && !/^  p\d priority: Pass priority/.test(l) && !/^  p\d pay_mana/.test(l));
+  if (evs.length) return true;
+  const label = d.options[d.chosen];
+  if (d.kind === 'pay_mana') return false;
+  if (d.kind === 'priority' && label === 'Pass priority') return false;
+  if (d.kind === 'declare_attacker' && /^Done/.test(label) && d.options.length === 1) return false;
+  return true;
+}
+function indexReplay() {
+  keyFrames = []; turnStarts = [];
+  let lastTurn = -1;
+  R.frames.forEach((f, i) => {
+    if (isKey(f)) keyFrames.push(i);
+    if (f.state.turn !== lastTurn) { turnStarts.push(i); lastTurn = f.state.turn; }
+  });
+}
+
+// ---------------------------------------------------------------- render
+function render(force) {
+  if (!R) return;
+  const f = R.frames[idx], s = f.state;
+  // Changes are shown relative to the previous step: the previous key frame when
+  // skipping, else the previous frame (also after jumps).
+  const prevKey = pref.keyOnly ? [...keyFrames].reverse().find(k => k < idx) : undefined;
+  const base = prevKey ?? Math.max(0, idx - 1);
+  const ps = R.frames[base].state;
+  const before = idx === 0 ? new Map() : zoneMap(ps), after = zoneMap(s);
+  const entered = new Set();
+  if (idx > 0) for (const [uid, z] of after) if (before.get(uid) !== z) entered.add(uid);
+  renderMat(0, s, ps, entered, f);
+  renderMat(1, s, ps, entered, f);
+  renderCenter(s);
+  renderDecision(f);
+  renderNext(f, s);
+  renderLog();
+  renderTimelinePos();
+  $('#pos').textContent = `${idx + 1}/${R.frames.length}`;
+  // Re-grow at most once per turn so cards don't change size on every step.
+  fit(force === 'refit' || s.turn !== lastFitTurn);
+  lastFitTurn = s.turn;
+  shown = idx;
+  try { history.replaceState(null, '', `#r=${encodeURIComponent(file)}&f=${idx}`); } catch (e) {}
+  requestAnimationFrame(drawArrows);
+}
+
+function groupPerms(perms, all) {
+  const out = [], by = new Map();
+  for (const c of perms) {
+    if (!(all || c.token) || c.attacking || c.blocking || c.damage || c.counters) { out.push([c]); continue; }
+    const k = [c.name, !!c.tapped, !!c.sick, c.power, c.toughness].join('|');
+    if (by.has(k)) by.get(k).push(c); else { const g = [c]; by.set(k, g); out.push(g); }
+  }
+  return out;
+}
+
+function permHtml(g, entered, attachedTo, s) {
+  const c = g[0], n = g.length;
+  const cls = ['perm'];
+  if (c.tapped) cls.push('tapped');
+  if (c.attacking) cls.push('attacking');
+  if (c.blocking) cls.push('blocking');
+  if (n > 1) cls.push('grouped');
+  if (g.some(x => entered.has(x.uid))) cls.push('entered');
+  let b = '';
+  if (n > 1) b += `<span class="b cnt">×${n}</span>`;
+  if (c.power != null) b += `<span class="b pt ${c.damage ? 'hurt' : ''}">${c.power}/${c.toughness}</span>`;
+  if (c.damage) b += `<span class="b dmg">${c.damage} dmg</span>`;
+  if (c.counters) b += `<span class="b ctr">+${c.counters}</span>`;
+  if (c.sick) b += `<span class="b sick" title="summoning sick">zZ</span>`;
+  if (c.attacking) b += `<span class="b atk">⚔ attacking</span>`;
+  if (c.blocking) b += `<span class="b blk">⛨ blocking</span>`;
+  const att = (attachedTo.get(c.oid) || []).map(a => `<div class="attached" data-oids="${a.oid}">${cardHtml(a.name, {uid: a.uid})}</div>`).join('');
+  return `<div class="${cls.join(' ')}" data-oids="${g.map(x => x.oid).join(' ')}" data-uid="${c.uid}">${att}${cardHtml(c.name, {uid: c.uid})}<div class="badges">${b}</div></div>`;
+}
+
+function pileHtml(kind, label, cards, p, entered) {
+  const n = cards.length, top = cards[n - 1];
+  const depth = Math.min(n - 1, 5);
+  const shadow = Array.from({length: depth}, (_, i) => `${(i + 1) * 1.5}px ${(i + 1) * -1.5}px 0 -0.5px #2a2e36, ${(i + 1) * 1.5}px ${(i + 1) * -1.5}px 0 0 #000`).join(',');
+  const face = n ? cardHtml(top.name, {uid: top.uid, cls: entered.has(top.uid) ? 'entered' : ''}).replace('class="card', `style="box-shadow:${shadow || 'none'}" class="card`) : `<div class="pempty">empty</div>`;
+  const anyNew = cards.some(c => entered.has(c.uid));
+  const list = [...cards].reverse().map(c => `<div class="pl ${entered.has(c.uid) ? 'new' : ''}"><span>${esc(c.name)}</span></div>`).join('');
+  return `<div class="pile ${n ? 'clickable' : ''}" data-pile="${kind}" data-p="${p}">
+    <div class="pstack">${face}</div>
+    <div class="plabel">${label}<b>${n}</b>${anyNew && !entered.has(top?.uid) ? ' <span style="color:var(--good)">●</span>' : ''}</div>
+    ${n ? `<div class="pop"><div style="color:var(--muted);font-size:10.5px;margin-bottom:4px">${label} · newest first · click to open</div>${list}</div>` : ''}</div>`;
+}
+
+function renderMat(p, s, ps, entered, f) {
+  const P = s.players[p], prevP = ps.players[p];
+  const mine = s.battlefield.filter(c => c.controller === p);
+  const attachedTo = new Map();
+  for (const c of s.battlefield) if (c.attached_to != null) {
+    if (!attachedTo.has(c.attached_to)) attachedTo.set(c.attached_to, []);
+    attachedTo.get(c.attached_to).push(c);
+  }
+  const hostOids = new Set(s.battlefield.map(c => c.oid));
+  const free = mine.filter(c => c.attached_to == null || !hostOids.has(c.attached_to));
+  const creatures = free.filter(c => c.types.includes('Creature'));
+  const lands = free.filter(c => c.types.includes('Land') && !c.types.includes('Creature'))
+    .sort((a, b) => a.name.localeCompare(b.name) || (a.tapped ? 1 : 0) - (b.tapped ? 1 : 0));
+  const other = free.filter(c => !c.types.includes('Creature') && !c.types.includes('Land'));
+  const lane = (cls, name, groups) => `<div class="lane ${cls}"><div class="lname">${name}</div><div class="cards">${
+    groups.length ? groups.map(g => permHtml(g, entered, attachedTo, s)).join('') : `<span class="empty">no ${name.toLowerCase()}</span>`}</div></div>`;
+
+  const hand = pref.showHands
+    ? P.hand.map(c => cardHtml(c.name, {uid: c.uid, cls: entered.has(c.uid) ? 'entered' : ''})).join('')
+    : P.hand.map(backHtml).join('');
+  const dLife = P.life - prevP.life;
+  const deciding = f.decision && f.decision.player === p;
+  const pool = Object.entries(P.pool).map(([k, v]) => Array(v).fill(`<i class="${k}">${k}</i>`).join('')).join('');
+  const agent = R.meta.agents?.[p] || '?';
+
+  $('#mat' + p).innerHTML = `
+    <div class="plate ${s.active === p ? 'active' : ''}">
+      <div><div class="pname ${PCLS[p]}">${esc(R.meta.decks?.[p] || 'Player ' + p)}</div><div class="pagent">seat ${p} · ${esc(agent)}</div></div>
+      <div class="plife ${PCLS[p]}">${P.life}${dLife ? `<span class="delta ${dLife < 0 ? 'neg' : 'pos'}">${dLife > 0 ? '+' : ''}${dLife}</span>` : ''}</div>
+      <div class="pstats"><span class="chip">hand <b>${P.hand.length}</b></span><span class="chip">library <b>${P.library}</b></span>${P.mulligans ? `<span class="chip">mull <b>${P.mulligans}</b></span>` : ''}</div>
+      ${pool ? `<div class="mana" title="mana pool">${pool}</div>` : ''}
+      <div class="flags">${s.active === p ? `<span class="flag turn">their turn</span>` : ''}${deciding ? `<span class="flag deciding">deciding · ${esc(f.decision.kind.replace(/_/g, ' '))}</span>` : ''}</div>
+    </div>
+    <div class="zones">
+      ${lane('creatures', 'Creatures', groupPerms(creatures, false))}
+      <div class="lane-row">${lane('lands', 'Lands', groupPerms(lands, true))}${lane('other', 'Other', groupPerms(other, true))}
+      <div class="hand" style="flex-basis:calc(var(--hw)*${(Math.max(P.hand.length, 2) * 0.86 + 0.6).toFixed(2)})"><div class="lane-lbl lname" style="position:absolute;left:0;top:0;bottom:0;width:20px;display:flex;align-items:center;justify-content:center;writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#ffffff50">Hand ${P.hand.length}</div><div class="cards">${hand || '<span class="empty" style="color:#ffffff30;font-style:italic;font-size:11px;margin-left:calc(var(--hov)*-1)">empty hand</span>'}</div></div></div>
+    </div>
+    <div class="piles">
+      <div class="pile" title="Library"><div class="pstack"><div class="libback">${P.library}</div></div><div class="plabel">Library</div>${P.library_top_known?.length ? `<div class="known">top: ${P.library_top_known.map(esc).join(', ')}</div>` : ''}</div>
+      ${pileHtml('graveyard', 'Graveyard', P.graveyard, p, entered)}
+      ${pileHtml('exile', 'Exile', P.exile, p, entered)}
+    </div>`;
+}
+
+function renderCenter(s) {
+  const a = s.active;
+  $('#tt').innerHTML = s.turn === 0 ? 'Mulligans' : `Turn ${s.turn}<br><span class="${PCLS[a]}">${esc(R.meta.decks?.[a] || 'P' + a)}</span>`;
+  const si = STEPS.indexOf(s.step);
+  $('#phases').className = 'phases p' + a;
+  $('#phases').innerHTML = s.turn === 0 ? '' : STEPS.map(x => `<span title="${STEP_LABEL[x]}" class="${x === s.step ? 'cur' : STEPS.indexOf(x) < si ? 'done' : ''}"></span>`).join('');
+  $('#ts').textContent = s.turn === 0 ? '' : STEP_LABEL[s.step] || s.step;
+  const st = s.stack;
+  $('#stack').innerHTML = `<span class="slabel">Stack</span>` + (st.length ? [...st].reverse().map((it, i) => `
+    <div class="sitem c${it.controller} ${i === 0 ? 'topmost' : ''}" data-targets="${(it.target_oids || []).join(' ')}">
+      ${cardHtml(it.card || it.name)}
+      <div class="stext"><div class="k">${i === 0 ? 'top · ' : ''}${esc(it.kind)}${it.method !== 'normal' ? ' · ' + esc(it.method) : ''}${it.x ? ' · X=' + it.x : ''}</div>
+      <div class="${PCLS[it.controller]}" style="font-weight:600">${esc(it.name)}</div>
+      ${it.targets.length ? `<div class="tg">→ ${it.targets.map(esc).join(', ')}</div>` : ''}</div>
+    </div>`).join('') : `<span class="stack-empty">empty</span>`);
+}
+
+function renderDecision(f) {
+  const d = f.decision, el = $('#decision');
+  if (!d) {
+    const m = R.meta;
+    el.innerHTML = `<h3>Result</h3><div class="dh">${m.winner == null ? 'Draw' : `<span class="${PCLS[m.winner]}">${esc(m.decks[m.winner])}</span> wins`}</div><div class="dp">${esc(m.end_reason)} · turn ${m.turns}</div>`;
+    return;
+  }
+  el.innerHTML = `<h3>Next action · all ${d.options.length} option${d.options.length > 1 ? 's' : ''}</h3>
+    <div class="dh"><span class="${PCLS[d.player]}">${esc(R.meta.decks?.[d.player] || 'P' + d.player)}</span> · ${esc(d.kind.replace(/_/g, ' '))}</div>
+    <div class="dp">${esc(humanize(d.prompt))}</div>
+    <ol>${d.options.map((o, i) => `<li class="${i === d.chosen ? 'ch' : ''}">${d.policy ? `<span class="pbar" style="--p:${d.policy[i]}"><i></i><span>${Math.round(d.policy[i] * 100)}%</span></span>` : ''}<span>${esc(humanize(o))}</span></li>`).join('')}</ol>`;
+  const ch = el.querySelector('li.ch'); if (ch) ch.scrollIntoView({block: 'nearest'});
+}
+
+// ---------------------------------------------------------------- next action callout
+const KIND = {priority: 'action', pay_mana: 'pay mana', declare_attacker: 'attack', declare_blocker: 'block', choose_card: 'choose card',
+  exile_from_graveyard: 'escape cost', order_triggers: 'order triggers', choose_x: 'choose X', choose_mode: 'choose', yes_no: 'yes / no'};
+function humanize(label) {
+  return label.replace(/#\d+/g, '').replace(/player (\d)( \((self|opponent)\))?/g, (_, p) => R.meta.decks?.[+p] || 'player ' + p)
+    .replace(/ \(self\)/g, ' (own)').replace(/ \(opponent\)/g, " (opponent's)").replace(/ \(normal\)/g, '');
+}
+// Which objects the chosen option is about: ids in the label, else cards of the deciding player named in it.
+function involved(d, s) {
+  const label = d.options[d.chosen], out = {oids: [], hand: [], gy: [], players: [], name: null};
+  for (const m of label.matchAll(/#(\d+)/g)) out.oids.push(+m[1]);
+  const pl = label.match(/player (\d)/); if (pl) out.players.push(+pl[1]);
+  if (out.oids.length) out.name = s.battlefield.find(c => c.oid === out.oids[0])?.name || label.match(/(?:with|Target|Tap|Sacrifice) ([^#]+)#/)?.[1];
+  if (!out.oids.length && !out.players.length) {
+    const P = s.players[d.player];
+    const named = arr => [...arr].sort((a, b) => b.name.length - a.name.length).find(c => label.includes(c.name));
+    const src = label.includes(':') ? label.split(':')[0] : null;
+    const perm = src && s.battlefield.find(c => c.controller === d.player && c.name === src);
+    const fromGy = /\((escape|flashback)\)|^Exile /.test(label);
+    const g = !perm && fromGy && named(P.graveyard), h = !perm && !g && named(P.hand);
+    if (perm) { out.oids.push(perm.oid); out.name = perm.name; }
+    else if (h) { out.hand.push(h.uid); out.name = h.name; }
+    else if (g) { out.gy.push(g.uid); out.name = g.name; }
+  }
+  if (!out.name) out.name = (d.prompt.match(/ for (.+?)(: |$)/) || [])[1];
+  if (out.name && !R.cards[out.name]) out.name = Object.keys(R.cards).find(n => out.name.startsWith(n)) || null;
+  return out;
+}
+let lastNextKey = '';
+function renderNext(f, s) {
+  const el = $('#next'), d = f.decision;
+  board_clearNext();
+  if (!d) {
+    const m = R.meta;
+    el.className = m.winner == null ? '' : 'p' + m.winner;
+    el.innerHTML = `<div class="nbody"><div class="nhead">game over</div><div class="over ${m.winner == null ? '' : PCLS[m.winner]}">${m.winner == null ? 'Draw' : esc(m.decks[m.winner]) + ' wins'}</div><div class="nctx">${esc(m.end_reason)} · turn ${m.turns}</div></div>`;
+    return;
+  }
+  const label = d.options[d.chosen], inv = involved(d, s), pass = label === 'Pass priority';
+  const key = idx + '|' + label;
+  el.className = `p${d.player}${pass ? ' pass' : ''}${key !== lastNextKey ? ' fresh' : ''}`;
+  lastNextKey = key;
+  const pct = i => d.policy ? `<span class="pp">${Math.round(d.policy[i] * 100)}%</span>` : '';
+  const alts = d.options.map((o, i) => `<div class="${i === d.chosen ? 'ch' : ''}">${pct(i)}${i === d.chosen ? '✓ ' : ''}${esc(humanize(o))}</div>`).join('');
+  el.innerHTML = `${inv.name && !pass ? `<div class="nthumb">${cardHtml(inv.name)}</div>` : ''}
+    <div class="nbody">
+      <div class="nhead"><span class="${PCLS[d.player]}" style="letter-spacing:.06em">${esc(R.meta.decks?.[d.player] || 'P' + d.player)} is about to</span><span class="nkind">${esc(KIND[d.kind] || d.kind.replace(/_/g, ' '))}</span></div>
+      <div class="nact">${esc(pass ? 'Pass priority' : humanize(label))}</div>
+      <div class="nctx">${esc(humanize(d.prompt))}</div>
+      <div class="nmeta">${d.options.length > 1 ? `<div class="nalt">chose 1 of ${d.options.length} options<div class="altpop">${alts}</div></div>` : `<div class="nalt">only option</div>`}
+      ${d.policy ? `<span class="conf" title="Probability the model gave this option">${Math.round(d.policy[d.chosen] * 100)}% sure</span>` : ''}
+      ${d.value != null ? `<span class="winest" title="The model's own estimate of its chance to win, from its value head">thinks it wins <b>${Math.round((d.value + 1) * 50)}%</b></span>` : ''}</div>
+    </div>`;
+  if (pass) return;
+  const board = $('#board');
+  for (const oid of inv.oids) board.querySelectorAll(`.perm[data-oids~="${oid}"]`).forEach(e => e.classList.add('next'));
+  for (const uid of inv.hand) board.querySelector(`#mat${d.player} .hand .card[data-uid="${uid}"]`)?.classList.add('next');
+  if (inv.gy.length) board.querySelector(`#mat${d.player} .pile[data-pile="graveyard"]`)?.classList.add('next');
+  for (const p of inv.players) board.querySelector(`#mat${p} .plate`)?.classList.add('next');
+}
+function board_clearNext() { document.querySelectorAll('#board .next').forEach(e => e.classList.remove('next')); }
+
+// log: built once per replay, then classes toggled per frame
+let logEls = [];
+function buildLog() {
+  const out = [];
+  R.frames.forEach((f, fi) => {
+    for (const l of f.events) {
+      let cls = '';
+      if (l.startsWith('===')) cls = 'turnh';
+      else if (l.startsWith('--')) cls = 'stepl';
+      else if (l.startsWith('GAME OVER')) cls = 'over';
+      else { const m = l.match(/^  p(\d) /); if (m) cls = 'dec' + m[1]; else { const m2 = l.match(/^p(\d) |\(p(\d)\)/); if (m2) cls = 'ev' + (m2[1] || m2[2]); } }
+      out.push(`<div data-f="${fi}" class="${cls}">${esc(l.replace(/^  /, ''))}</div>`);
+    }
+  });
+  $('#log').innerHTML = out.join('');
+  logEls = [...$('#log').children].map(e => [e, +e.dataset.f]);
+}
+function renderLog() {
+  let last = null;
+  for (const [e, fi] of logEls) {
+    e.classList.toggle('future', fi > idx);
+    e.classList.toggle('now', fi === idx);
+    if (fi <= idx) last = e;
+  }
+  if (last) last.scrollIntoView({block: 'nearest'});
+}
+
+function buildTimeline() {
+  const n = R.frames.length, tl = $('#timeline');
+  let segs = '';
+  turnStarts.forEach((st, i) => {
+    const end = turnStarts[i + 1] ?? n, s = R.frames[st].state;
+    segs += `<div class="seg ${s.turn === 0 ? 'tm' : 't' + s.active}" style="flex:${end - st}" title="Turn ${s.turn}">${s.turn || 'M'}</div>`;
+  });
+  const life = p => R.frames.map((f, i) => `${(i / (n - 1)) * 1000},${38 - Math.max(0, Math.min(f.state.players[p].life, 25)) / 25 * 34 - 2}`).join(' ');
+  const vals = [0, 1].map(p => R.frames.map((f, i) => f.decision && f.decision.player === p && f.decision.value != null ? `${(i / (n - 1)) * 1000},${36 - (f.decision.value + 1) / 2 * 34}` : null).filter(Boolean).join(' '));
+  tl.innerHTML = segs + `<svg viewBox="0 0 1000 38" preserveAspectRatio="none">
+    ${vals.map((v, p) => v ? `<polyline points="${v}" fill="none" stroke="#f0c869" stroke-width="1.2" stroke-dasharray="3 2" vector-effect="non-scaling-stroke" opacity=".85"/>` : '').join('')}
+    <polyline points="${life(1)}" fill="none" stroke="#4f95e0" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+    <polyline points="${life(0)}" fill="none" stroke="#e0694d" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg><div class="pos" id="tpos"></div>`;
+}
+function renderTimelinePos() { $('#tpos').style.left = `calc(${idx / Math.max(1, R.frames.length - 1) * 100}% - 1px)`; }
+
+
+// ---------------------------------------------------------------- arrows (stack targets, blocks)
+function center(el, box) { const r = el.getBoundingClientRect(); return [r.left + r.width / 2 - box.left, r.top + r.height / 2 - box.top]; }
+function curve([x1, y1], [x2, y2]) {
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2, dx = x2 - x1, dy = y2 - y1, k = 0.18;
+  return `M${x1},${y1} Q${mx - dy * k},${my + dx * k} ${x2},${y2}`;
+}
+function drawArrows() {
+  const board = $('#board'), box = board.getBoundingClientRect(), g = $('#arrowg');
+  let out = '';
+  board.querySelectorAll('.sitem[data-targets]').forEach(si => {
+    for (const oid of si.dataset.targets.split(' ').filter(Boolean)) {
+      const t = board.querySelector(`[data-oids~="${oid}"]`);
+      if (t) out += `<path d="${curve(center(si.querySelector('.card'), box), center(t, box))}" stroke="#f0c869" stroke-width="2.5" fill="none" stroke-dasharray="7 4" marker-end="url(#ah)" opacity=".9"/>`;
+    }
+  });
+  if (R) for (const c of R.frames[idx].state.battlefield) if (c.blocking) {
+    const a = board.querySelector(`[data-oids~="${c.oid}"]`), t = board.querySelector(`[data-oids~="${c.blocking}"]`);
+    if (a && t) out += `<path d="${curve(center(a, box), center(t, box))}" stroke="#9fc3ff" stroke-width="2.5" fill="none" marker-end="url(#ahb)" opacity=".9"/>`;
+  }
+  const nx = $('#next');
+  if (nx && R && R.frames[idx].decision) {
+    const from = nx.querySelector('.card') || nx;
+    board.querySelectorAll('.perm.next, .hand .card.next, .pile.next, .plate.next').forEach(t => {
+      out += `<path d="${curve(center(from, box), center(t, box))}" stroke="#ffffff" stroke-width="2.5" fill="none" marker-end="url(#ahw)" opacity=".85"/>`;
+    });
+  }
+  g.innerHTML = out;
+}
+// Card sizes follow --u; shrink it until both mats fit (re-grown on load / resize).
+const maxU = () => Math.min(innerHeight * 0.013, innerWidth * 0.01);
+let curU = 0;
+function fitHands() {
+  document.querySelectorAll('.hand').forEach(h => {
+    const cards = h.querySelectorAll('.cards > .card'), n = cards.length;
+    if (!n) return;
+    const w = cards[0].offsetWidth, avail = h.clientWidth - 40;
+    const ov = n > 1 ? Math.min(w * .72, Math.max(w * .12, (n * w - avail) / (n - 1))) : w * .12;
+    h.style.setProperty('--hov', ov + 'px');
+  });
+}
+// Lanes ask for their natural width (flex-basis), flex shares the row out, then
+// each lane overlaps its cards just enough to fit what it got. Returns false if
+// some lane would need more overlap than still reads well.
+function fitLanes() {
+  const lanes = [...document.querySelectorAll('.lane-row .lane .cards')];
+  for (const c of lanes) {
+    c.style.setProperty('--sov', '0px');
+    c.parentElement.style.flexBasis = 'auto';
+  }
+  for (const c of lanes) c.parentElement.style.flexBasis = c.parentElement.offsetWidth + 'px';
+  let ok = true;
+  for (const c of lanes) {
+    const kids = [...c.children].filter(k => k.classList.contains('perm')), n = kids.length;
+    const need = c.scrollWidth, avail = c.clientWidth;
+    if (n < 2 || need <= avail) continue;  // a lone card may poke out by its count badge
+    const want = (need - avail) / (n - 1), cap = Math.min(...kids.map(k => k.offsetWidth)) * .62;
+    if (want > cap) ok = false;
+    c.style.setProperty('--sov', Math.min(cap, want) + 'px');
+  }
+  return ok;
+}
+function fit(reset) {
+  if (reset || !curU) curU = maxU();
+  const root = document.documentElement.style, mats = [$('#mat0'), $('#mat1')];
+  const over = () => mats.some(m => m.scrollHeight > m.clientHeight + 1)
+    || !lanesOk || [...document.querySelectorAll('.hand')].some(h => h.scrollWidth > h.clientWidth + 1)
+    || $('#center').scrollWidth > $('#center').clientWidth + 1;
+  let lanesOk = true;
+  const apply = () => { root.setProperty('--u', curU + 'px'); lanesOk = fitLanes(); fitHands(); };
+  apply();
+  for (let n = 0; n < 80 && curU > 3.5 && over(); n++) { curU -= 0.15; apply(); }
+}
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { fit(true); drawArrows(); }, 80); });
+
+// ---------------------------------------------------------------- preview / modal
+function showPreview(name, uid) {
+  if (!R) return;
+  const i = R.cards[name] || {types: [], subtypes: [], cost: '', text: ''};
+  const perm = uid && R.frames[idx].state.battlefield.find(c => c.uid === +uid);
+  const st = perm ? [perm.tapped && 'tapped', perm.sick && 'summoning sick', perm.attacking && 'attacking', perm.blocking && 'blocking',
+    perm.damage && `${perm.damage} damage`, perm.counters && `+${perm.counters}/+${perm.counters}`, perm.token && 'token',
+    perm.keywords?.length && perm.keywords.join(', ')].filter(Boolean) : [];
+  $('#preview').innerHTML = `${cardHtml(name)}<div class="ptxt"><b>${esc(name)}</b> ${esc(i.cost)}<br>
+    ${esc((i.token ? 'Token ' : '') + i.types.join(' ') + (i.subtypes.length ? ' — ' + i.subtypes.join(' ') : ''))}
+    ${perm && perm.power != null ? `<br>now <b>${perm.power}/${perm.toughness}</b>` : i.power != null ? `<br>${i.power}/${i.toughness}` : ''}
+    ${st.length ? `<div style="margin-top:4px;color:var(--accent)">${st.map(esc).join(' · ')}</div>` : ''}
+    <div class="otext">${esc(i.text || '')}</div></div>`;
+}
+document.addEventListener('mouseover', e => {
+  const c = e.target.closest('.card[data-name]');
+  if (c && !c.closest('#preview')) showPreview(c.dataset.name, c.dataset.uid || c.closest('[data-uid]')?.dataset.uid);
+});
+document.addEventListener('click', e => {
+  const p = e.target.closest('.pile.clickable');
+  if (p) { openPile(p.dataset.pile, +p.dataset.p); return; }
+  if (e.target.id === 'modal') $('#modal').classList.remove('on');
+});
+function openPile(kind, p) {
+  const cards = [...R.frames[idx].state.players[p][kind]].reverse();
+  $('#modal .box').innerHTML = `<h2><span><span class="${PCLS[p]}">${esc(R.meta.decks[p])}</span> · ${kind} (${cards.length}) · newest first</span><button class="btn" onclick="$('#modal').classList.remove('on')">close</button></h2>
+    <div class="grid">${cards.map((c, i) => `<div class="wrap">${cardHtml(c.name, {uid: c.uid})}<span>${i === 0 ? 'newest' : '#' + (cards.length - i)}</span></div>`).join('')}</div>`;
+  $('#modal').classList.add('on');
+}
+
+// ---------------------------------------------------------------- navigation
+function seek(i) { idx = Math.max(0, Math.min(R.frames.length - 1, i)); render(); }
+function step(dir) {
+  if (!R) return;
+  if (!pref.keyOnly) return seek(idx + dir);
+  if (dir > 0) seek(keyFrames.find(k => k > idx) ?? R.frames.length - 1);
+  else seek([...keyFrames].reverse().find(k => k < idx) ?? 0);
+}
+function turnJump(dir) {
+  if (!R) return;
+  if (dir > 0) seek(turnStarts.find(t => t > idx) ?? R.frames.length - 1);
+  else { const cur = [...turnStarts].reverse().find(t => t <= idx) ?? 0; seek(cur < idx && idx - cur > 1 ? cur : ([...turnStarts].reverse().find(t => t < cur) ?? 0)); }
+}
+function setPlaying(on) {
+  playing = on; clearInterval(timer);
+  $('#bPlay').textContent = on ? '❚❚ Pause' : '▶ Play';
+  $('#bPlay').classList.toggle('on', on);
+  if (on) timer = setInterval(() => { if (idx >= R.frames.length - 1) return setPlaying(false); step(1); }, 1000 / pref.speed);
+}
+$('#bStart').onclick = () => seek(0);
+$('#bEnd').onclick = () => seek(R.frames.length - 1);
+$('#bPrev').onclick = () => step(-1);
+$('#bNext').onclick = () => step(1);
+$('#bPrevT').onclick = () => turnJump(-1);
+$('#bNextT').onclick = () => turnJump(1);
+$('#bPlay').onclick = () => R && setPlaying(!playing);
+$('#speed').onchange = e => { pref.speed = +e.target.value; if (playing) setPlaying(true); savePref(); };
+$('#keyOnly').onchange = e => { pref.keyOnly = e.target.checked; savePref(); };
+$('#showHands').onchange = e => { pref.showHands = e.target.checked; savePref(); render(); };
+function setPanel(on) {
+  pref.panel = on; $('#app').classList.toggle('nopanel', !on);
+  $('#bPanel').textContent = on ? 'Hide panel' : 'Show panel';
+  savePref(); fit(true); requestAnimationFrame(drawArrows);
+}
+$('#bPanel').onclick = () => setPanel(!pref.panel);
+$('#timeline').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); seek(Math.round((e.clientX - r.left) / r.width * (R.frames.length - 1))); };
+document.addEventListener('keydown', e => {
+  if (!R || e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') return;
+  if (e.key === 'Escape') $('#modal').classList.remove('on');
+  else if (e.key === 'ArrowRight') { e.shiftKey ? turnJump(1) : step(1); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft') { e.shiftKey ? turnJump(-1) : step(-1); e.preventDefault(); }
+  else if (e.key === ' ') { setPlaying(!playing); e.preventDefault(); }
+  else if (e.key === 'l' || e.key === 'L') setPanel(!pref.panel);
+  else if (e.key === 'Home') seek(0);
+  else if (e.key === 'End') seek(R.frames.length - 1);
+});
+function savePref() { try { localStorage.setItem('mtgml-viewer-pref', JSON.stringify(pref)); } catch (e) {} }
+try { Object.assign(pref, JSON.parse(localStorage.getItem('mtgml-viewer-pref') || '{}')); } catch (e) {}
+$('#app').classList.toggle('nopanel', !pref.panel); $('#bPanel').textContent = pref.panel ? 'Hide panel' : 'Show panel';
+$('#keyOnly').checked = pref.keyOnly; $('#showHands').checked = pref.showHands; $('#speed').value = String(pref.speed);
+
+// ---------------------------------------------------------------- loading
+function load(rep, name, frame = 0) {
+  setPlaying(false);
+  R = rep; file = name; shown = null;
+  $('#drop').classList.remove('on');
+  const m = R.meta;
+  $('#meta').innerHTML = `<span class="p0c">${esc(m.decks[0])}</span> (${esc(m.agents[0])}) vs <span class="p1c">${esc(m.decks[1])}</span> (${esc(m.agents[1])}) · seed ${m.seed} · ${m.engine} · ${R.frames.length} frames · ${m.turns} turns · winner: ${m.winner == null ? 'draw' : `<span class="${PCLS[m.winner]}">${esc(m.decks[m.winner])}</span>`} (${esc(m.end_reason)})`;
+  indexReplay(); buildLog(); buildTimeline();
+  idx = Math.max(0, Math.min(frame, R.frames.length - 1));
+  render('refit');
+  resolveImages(R.cards);
+}
+async function loadFromServer(name, frame) {
+  const r = await fetch('replays/' + encodeURIComponent(name));
+  if (!r.ok) throw new Error(r.status);
+  load(await r.json(), name, frame);
+}
+$('#pick').onchange = e => loadFromServer(e.target.value, 0);
+$('#file').onchange = async e => { const f = e.target.files[0]; if (f) load(JSON.parse(await f.text()), f.name); };
+addEventListener('dragover', e => { e.preventDefault(); $('#drop').classList.add('on', 'drag'); });
+addEventListener('dragleave', e => { if (!e.relatedTarget) { $('#drop').classList.remove('drag'); if (R) $('#drop').classList.remove('on'); } });
+addEventListener('drop', async e => {
+  e.preventDefault(); $('#drop').classList.remove('drag');
+  const f = e.dataTransfer.files[0]; if (f) load(JSON.parse(await f.text()), f.name);
+});
+
+(async function init() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  try {
+    const list = await (await fetch('api/replays')).json();
+    $('#pick').innerHTML = list.map(r => `<option value="${esc(r.file)}">${esc(r.file)}${r.winner != null ? ` · ${r.winner === 0 ? 'Jund' : 'Blue'} wins T${r.turns}` : ''}</option>`).join('') || '<option>no replays yet</option>';
+    const want = h.get('r') && list.some(r => r.file === h.get('r')) ? h.get('r') : list[0]?.file;
+    if (want) { $('#pick').value = want; await loadFromServer(want, +(h.get('f') || 0)); }
+    else $('#drop').classList.add('on');
+  } catch (e) {
+    $('#pick').style.display = 'none';
+    $('#drop').classList.add('on');
+  }
+})();
+</script>
+</body>
+</html>

@@ -15,6 +15,9 @@ python -m mtg_ml.play watch --seed 3     # random vs random, full game log
 python -m mtg_ml.play human --seat 1     # play Mono Blue Terror in the terminal
 python -m mtg_ml.play bench --games 200  # throughput
 python -m mtg_ml.play match --matches 200  # best-of-three bot matches with sideboards
+python -m mtg_ml.replay record --agents bot,bot --games 10   # write replays/*.json
+python -m mtg_ml.replay record --agents model:runs/x/latest.pt,bot --games 5   # a trained model vs the blue bot
+python -m mtg_ml.replay serve                                # watch them at http://127.0.0.1:8765
 
 # optional: the Rust engine, 13-22x faster, identical games (docs/native-engine.md)
 (cd native && maturin develop --release)

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "replay-viewer",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "mtg_ml.replay", "serve"],
+      "port": 8765
+    }
+  ]
+}
