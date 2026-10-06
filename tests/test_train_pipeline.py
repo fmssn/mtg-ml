@@ -142,6 +142,7 @@ def test_cpu_layout(monkeypatch):
     monkeypatch.setattr(collect, "gpu_numa_cpus", lambda device: (2, tuple(range(32, 48))))
     lay = cpu_layout(27, "cuda", avail=range(32, 60))  # the box: GPU 4 on node 2 (cores 32-47), taskset 32-59
     assert lay.trainer == (32,) and lay.workers == tuple(range(33, 60)) and lay.shared_eval and lay.evaluator == lay.workers
+    assert lay.collector == tuple(range(48, 60))  # off the trainer's node
     lay = cpu_layout(23, "cuda", avail=range(32, 60))
     assert lay.trainer == (32,) and lay.evaluator == (33, 34, 35, 36) and lay.workers == tuple(range(37, 60)) and not lay.shared_eval
     lay = cpu_layout(20, "cuda", server=True, evaluation=False, avail=range(28, 60))  # workers off the GPU's node first

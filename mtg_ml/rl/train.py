@@ -27,7 +27,7 @@ Processes (`rl/collect.py`). The trainer's main thread only updates and
 publishes. The rollout workers belong to a collector process, which
 streams the games (`rollout.play`), merges the results and hands the merged
 batch over in one shared-memory block (`--collector thread` keeps the pool
-and the merge in a thread of the trainer, as before 2026-10). The evaluation
+and the merge in a thread of the trainer, the old layout). The evaluation
 runs in a process of its own with its own pool (`--eval-workers`, local CPU
 inference) on cores the run does not use, from the policy file of the
 iteration it evaluates (pinned against `KEEP_POLICIES` pruning until it is
@@ -42,16 +42,19 @@ iteration k, so an iteration takes max(rollout, update) instead of their
 sum. That is the usual one-step policy lag: the recorded log-probs are the
 behaviour policy's, so the clipped ratio stays valid. A policy file is never
 rewritten, so the update cannot change the weights under a rollout that is
-still loading them. The trainer is then pinned to its cores (`--trainer-cpus`)
-and uses one torch thread per core. `--pipeline 0` runs the steps one after
-the other.
+still loading them. The trainer is then pinned to its cores (also with
+`--trainer-cpus` given) and uses one torch thread per core. `--pipeline 0`
+runs the steps one after the other.
 
 CPU layout (`collect.cpu_layout`, printed at start): unless given with
 `--trainer-cpus`, `--worker-cpus`, `--eval-cpus` (lists like `32-47,50`),
 the trainer takes one core on the GPU's NUMA node (sysfs), the inference
 server (`--inference server`) the next, every rollout worker one core from
 the other end of the affinity mask, the evaluation up to 8 of the cores left
-(none left: it shares the workers' cores, niced), the trainer the rest.
+(none left: it shares the workers' cores, niced), the trainer the rest; the
+collector moves between the workers' cores off the trainer's node. Workers
+on the trainer's NUMA node slow the update (~12% with 15 of them on the box;
+none: as fast as alone), so its node gets workers last.
 
 `--total-games` stops after that many training games (counted across
 resumes). Resuming from `latest.pt` at iteration k drops what the lost
@@ -224,8 +227,8 @@ class Trainer:
 
             dev = c.server_device or (c.device if c.device != "cpu" else default_device())
             server_cfg = ServerConfig(device=dev, max_rows=c.server_max_rows, cpus=lay.server or None)
-        if c.collector == "process":  # it moves between the workers' cores, merging as their jobs end
-            return PoolProcess(c.workers, c.inference, server_cfg, lay.workers or None, lay.workers or None)
+        if c.collector == "process":  # merging as jobs end, off the trainer's NUMA node if it can
+            return PoolProcess(c.workers, c.inference, server_cfg, lay.workers or None, lay.collector or None)
         if c.collector != "thread":
             raise ValueError(f"collector must be process or thread, not {c.collector!r}")
         if c.inference == "server":

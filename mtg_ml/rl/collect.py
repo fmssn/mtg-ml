@@ -365,12 +365,13 @@ class Layout:
     workers: tuple[int, ...]  # the rollout workers, one per core (empty: unpinned)
     node: int | None = None  # the GPU's NUMA node
     shared_eval: bool = False  # the evaluation runs niced on the workers' cores
+    collector: tuple[int, ...] = ()  # the collector process: the workers' cores off the GPU's node if there are any
 
     def describe(self) -> str:
         node = f" (GPU NUMA node {self.node})" if self.node is not None else ""
         ev = fmt_cpus(self.evaluator) + (" shared with the workers, niced" if self.shared_eval else "")
         srv = f" | server {fmt_cpus(self.server)}" if self.server else ""
-        return f"cpu layout{node}: trainer {fmt_cpus(self.trainer)}{srv} | workers {fmt_cpus(self.workers)} | evaluation {ev}"
+        return f"cpu layout{node}: trainer {fmt_cpus(self.trainer)}{srv} | workers {fmt_cpus(self.workers)} | collector {fmt_cpus(self.collector)} | evaluation {ev}"
 
 
 def cpu_layout(workers: int, device: str = "cpu", server: bool = False, evaluation: bool = True, trainer_cpus: str = "", worker_cpus: str = "", eval_cpus: str = "", avail=None) -> Layout:
@@ -399,4 +400,4 @@ def cpu_layout(workers: int, device: str = "cpu", server: bool = False, evaluati
     shared = evaluation and not ev
     if shared:
         ev = wk or avail
-    return Layout(tuple(trainer), srv, tuple(ev), tuple(wk), node, shared)
+    return Layout(tuple(trainer), srv, tuple(ev), tuple(wk), node, shared, tuple(c for c in wk if c not in local) or tuple(wk))
