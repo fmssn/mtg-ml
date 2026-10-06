@@ -65,10 +65,16 @@ def load_optimizer_state(opt: torch.optim.Optimizer, state_dict: dict) -> None:
     this optimizer's `fused` flag (the checkpoint's groups bring their own,
     None for plain Adam) and, when fused, moves every `step` to its
     parameter's device (plain Adam keeps it on the CPU, which fused Adam
-    rejects). The steps are the same either way."""
+    rejects). The steps are the same either way. Also keeps this optimizer's
+    learning rates: the checkpoint's groups would bring the lr it was saved
+    with, silently overriding a changed --ppo-lr on resume."""
     fused = opt.param_groups[0].get("fused")
+    lrs = [g["lr"] for g in opt.param_groups]
     opt.load_state_dict(state_dict)
-    for g in opt.param_groups:
+    for g, lr in zip(opt.param_groups, lrs):
+        g["lr"] = lr
+        if "initial_lr" in g:
+            g["initial_lr"] = lr
         g["fused"] = fused
         if fused:
             for p in g["params"]:
@@ -375,11 +381,13 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     `cfg.capture` and the trunk is not "transformer" (whose encoder waits
     for the device), else "eager"."""
     n = len(data.actions)
+    if n == 0:  # nothing to learn from (and no minibatches to average over)
+        return {**{k: 0.0 for k in STATS}, "updates": 0, "early_stop": False, "explained_var": float("nan")}
     floats = lambda xs: torch.frombuffer(array("f", xs), dtype=torch.float32)  # noqa: E731 - 3x faster than torch.tensor(list)
     old_logp, adv, ret = floats(data.logps), floats(data.advantages), floats(data.returns)
-    var = ret.var().item()
-    explained_var = float("nan") if n < 2 or var == 0 else 1 - adv.var().item() / var  # values = ret - adv
-    adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+    var = ret.var().item() if n > 1 else 0.0
+    explained_var = float("nan") if var == 0 else 1 - adv.var().item() / var  # values = ret - adv
+    adv = (adv - adv.mean()) / (adv.std() + 1e-8) if n > 1 else adv - adv.mean()  # std of one sample is NaN
     net.train()
     dev = torch.device(device)
     if mode is None:
