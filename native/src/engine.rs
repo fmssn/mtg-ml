@@ -1,0 +1,1293 @@
+//! The decision-making half of the rules: everything that is a generator in
+//! game.py. It runs on a stackful coroutine (`corosensei`), so `ask()`
+//! suspends exactly where Python's `yield` does and the code below reads
+//! like the Python it mirrors.
+//!
+//! Aliasing: the state lives behind a raw pointer shared with the driver
+//! (`game.rs`), which reads (and, for determinization, edits) it while the
+//! coroutine is suspended. Engine code therefore never holds a `&mut State`
+//! across `ask()`: `Eng::s()` hands out a fresh borrow tied to `&mut self`,
+//! and `ask()` itself takes `&mut self`, so the borrow checker enforces it.
+
+use corosensei::Yielder;
+
+use crate::cards::{Custom, Op, SacFilter, SearchFilter, Who, T_CREATURE, T_LAND};
+use crate::mana::{ManaCost, Remaining};
+use crate::state::*;
+
+pub struct Eng {
+    pub s: *mut State,
+    pub y: *const Yielder<usize, ()>,
+}
+
+fn opt(label: String, key: Key, value: Val) -> Opt {
+    Opt { label, key, value }
+}
+
+fn s(x: &'static str) -> KI {
+    KI::S(x)
+}
+
+impl Eng {
+    #[inline(always)]
+    pub fn s(&mut self) -> &mut State {
+        unsafe { &mut *self.s }
+    }
+
+    /// `Game.ask`: returns the chosen option's value.
+    pub fn ask(&mut self, player: u8, kind: Kind, prompt: impl FnOnce() -> String, mut options: Vec<Opt>) -> R<Val> {
+        if options.is_empty() {
+            return rules(format!("decision '{}' ({}) has no options", kind.name(), prompt()));
+        }
+        let st = self.s();
+        if st.auto_single && options.len() == 1 {
+            if st.logging && kind != Kind::Priority {
+                let m = format!("  p{player} {}: {} (only option)", kind.name(), options[0].label);
+                st.log.push(m);
+            }
+            return Ok(options.pop().unwrap().value);
+        }
+        st.decision = Some(Decision { player, kind, prompt: prompt(), options });
+        let idx = unsafe { (*self.y).suspend(()) };
+        let d = self.s().decision.take().expect("resumed without a decision");
+        Ok(d.options.into_iter().nth(idx).expect("option index").value)
+    }
+
+    fn log(&mut self, f: impl FnOnce(&State) -> String) {
+        let st = self.s();
+        if st.logging {
+            let m = f(st);
+            st.log.push(m);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Turn structure
+    // ------------------------------------------------------------------
+
+    pub fn main(&mut self, start_step: &str) -> R<()> {
+        if self.s().mulligan_phase {
+            self.mulligans()?;
+        }
+        let mut first = true;
+        loop {
+            let st = self.s();
+            st.turn += 1;
+            if st.turn > st.max_turns {
+                return Err(Stop::GameOver { winner: None, reason: "turn limit" });
+            }
+            if !(first && st.args.has_setup) {
+                st.begin_turn();
+            }
+            let start = if first { start_step } else { "untap" };
+            let skip_draw = first && st.skip_first_draw;
+            self.run_turn(start, skip_draw)?;
+            first = false;
+            let st = self.s();
+            st.active = 1 - st.active;
+        }
+    }
+
+    fn mulligans(&mut self) -> R<()> {
+        self.s().step_name = "mulligan";
+        let sp = self.s().starting_player;
+        let order = [sp, 1 - sp];
+        let mut deciding: Vec<u8> = order.to_vec();
+        while !deciding.is_empty() {
+            let mut again = vec![];
+            for &p in &deciding {
+                let n = self.s().mulligans_taken[p as usize];
+                let mut options = vec![opt(format!("Keep ({} cards)", 7 - n), vec![s("mulligan"), s("keep")], Val::Bool(false))];
+                if n < 6 {
+                    options.push(opt(format!("Mulligan (to {})", 6 - n), vec![s("mulligan"), s("mulligan")], Val::Bool(true)));
+                }
+                if let Val::Bool(true) = self.ask(p, Kind::Mulligan, || format!("Opening hand, {n} mulligan(s) taken: keep {}?", 7 - n), options)? {
+                    again.push(p);
+                }
+            }
+            for &p in &again {
+                let st = self.s();
+                st.mulligans_taken[p as usize] += 1;
+                let n = st.mulligans_taken[p as usize];
+                st.push_log_lazy(|_| format!("p{p} mulligans ({n})"));
+                for c in st.players[p as usize].hand.clone() {
+                    st.move_card(c, Zone::Library, None, Pos::Bottom, None, false);
+                }
+                st.shuffle(p as usize);
+                st.draw(p as usize, 7, false);
+            }
+            deciding = again;
+        }
+        for p in order {
+            let n = self.s().mulligans_taken[p as usize];
+            for i in 0..n {
+                let options = self.s().hand_card_options(p, "bottom");
+                let c = self.ask(p, Kind::ChooseCard, || format!("Mulligan: put a card on the bottom of your library ({}/{n})", i + 1), options)?;
+                if let Val::Card(c) = c {
+                    self.s().move_card(c, Zone::Library, None, Pos::Bottom, Some(pbit(p)), false);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn run_turn(&mut self, start: &str, skip_draw: bool) -> R<()> {
+        let from = STEPS.iter().position(|x| *x == start).ok_or_else(|| Stop::Rules(format!("unknown step {start:?}")))?;
+        for &name in &STEPS[from..] {
+            if (name == "declare_blockers" || name == "combat_damage") && self.s().attackers.is_empty() {
+                continue;
+            }
+            self.s().step_name = name;
+            self.log(|_| format!("-- {name}"));
+            match name {
+                "untap" => self.s().untap_step(),
+                "upkeep" => {
+                    self.s().emit_upkeep();
+                    self.priority_round()?;
+                }
+                "draw" => {
+                    if !skip_draw {
+                        let a = self.s().active as usize;
+                        self.s().draw(a, 1, true);
+                    }
+                    self.priority_round()?;
+                }
+                "declare_attackers" => {
+                    self.declare_attackers()?;
+                    self.priority_round()?;
+                }
+                "declare_blockers" => {
+                    self.declare_blockers()?;
+                    self.priority_round()?;
+                }
+                "combat_damage" => {
+                    self.combat_damage()?;
+                    self.priority_round()?;
+                }
+                "end_combat" => {
+                    self.priority_round()?;
+                    self.s().clear_combat();
+                }
+                "cleanup" => self.cleanup_step()?,
+                _ => self.priority_round()?,
+            }
+            self.s().empty_pools();
+        }
+        Ok(())
+    }
+
+    fn cleanup_step(&mut self) -> R<()> {
+        loop {
+            let p = self.s().active;
+            while self.s().players[p as usize].hand.len() > MAX_HAND {
+                let n = self.s().players[p as usize].hand.len();
+                let options = self.s().hand_card_options(p, "discard");
+                if let Val::Card(c) = self.ask(p, Kind::ChooseCard, || format!("Discard to hand size ({n}/{MAX_HAND})"), options)? {
+                    self.s().discard(c);
+                }
+            }
+            let st = self.s();
+            for i in 0..st.battlefield.len() {
+                let ci = st.battlefield[i];
+                let c = st.cm(ci);
+                c.damage = 0;
+                c.deathtouch_damage = false;
+                c.temp.clear();
+            }
+            let changed = st.sba()?;
+            if changed || !self.s().pending.is_empty() {
+                self.priority_round()?;
+                self.s().empty_pools();
+                continue;
+            }
+            return Ok(());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Priority
+    // ------------------------------------------------------------------
+
+    fn priority_round(&mut self) -> R<()> {
+        let mut p = self.s().active;
+        let mut passes = 0;
+        loop {
+            self.sba_and_triggers()?;
+            let options = self.s().priority_options(p);
+            let step = self.s().step_name;
+            let act = self.ask(p, Kind::Priority, || format!("Priority ({step})"), options)?;
+            if let Val::Pass = act {
+                passes += 1;
+                if passes >= 2 {
+                    if self.s().stack.is_empty() {
+                        return Ok(());
+                    }
+                    self.resolve_top()?;
+                    passes = 0;
+                    p = self.s().active;
+                } else {
+                    p = 1 - p;
+                }
+            } else {
+                self.take_action(p, act)?;
+                passes = 0;
+            }
+        }
+    }
+
+    fn sba_and_triggers(&mut self) -> R<()> {
+        loop {
+            let changed = self.s().sba()?;
+            if !self.s().pending.is_empty() {
+                self.put_triggers_on_stack()?;
+                continue;
+            }
+            if !changed {
+                return Ok(());
+            }
+        }
+    }
+
+    fn take_action(&mut self, p: u8, act: Val) -> R<()> {
+        match act {
+            Val::Land(card) => {
+                let st = self.s();
+                st.lands_played += 1;
+                st.push_log_lazy(|s| format!("p{p} plays {}", s.c(card).name()));
+                st.put_onto_battlefield(card, p, false);
+                Ok(())
+            }
+            Val::Cast(card, mode, choice) => self.cast(p, card, mode, choice),
+            Val::Activate(card, i) => self.activate(p, card, i as usize),
+            Val::Mana(card, i) => {
+                let st = self.s();
+                let color = st.c(card).face().abilities[i as usize].mana.as_ref().unwrap()[0];
+                st.activate_mana_ability(card, i as usize);
+                st.players[p as usize].pool_add(color, 1);
+                Ok(())
+            }
+            other => rules(format!("unknown action {other:?}")),
+        }
+    }
+
+    fn put_triggers_on_stack(&mut self) -> R<()> {
+        let pend = std::mem::take(&mut self.s().pending);
+        let active = self.s().active;
+        let (mut first, mut second): (Vec<PendingTrigger>, Vec<PendingTrigger>) = (vec![], vec![]);
+        for t in pend {
+            if t.controller == active {
+                first.push(t);
+            } else if t.controller == 1 - active {
+                second.push(t);
+            }
+        }
+        for (p, mut mine) in [(active, first), (1 - active, second)] {
+            while !mine.is_empty() {
+                let st = self.s();
+                let mut options = vec![];
+                let mut seen: Vec<(&'static str, &'static str)> = vec![];
+                for (i, t) in mine.iter().enumerate() {
+                    let key = (st.src(&t.source).name(), t.tdef.name.as_str());
+                    if seen.contains(&key) {
+                        continue;
+                    }
+                    seen.push(key);
+                    options.push(opt(format!("Put on stack: {} - {}", key.0, key.1), vec![s("trigger"), s(key.0), s(key.1)], Val::Trigger(i)));
+                }
+                let i = match self.ask(p, Kind::OrderTriggers, || "Choose the next trigger to put on the stack (first = resolves last)".to_string(), options)? {
+                    Val::Trigger(i) => i,
+                    _ => unreachable!(),
+                };
+                let t = mine.remove(i);
+                let st = self.s();
+                let sid = st.new_id();
+                let name = format!("{}: {}", st.src(&t.source).name(), t.tdef.name);
+                st.push_log_lazy(|_| format!("trigger -> stack: {name}"));
+                st.stack.push(StackItem {
+                    sid,
+                    kind: SKind::Trigger,
+                    controller: t.controller,
+                    name,
+                    effect: Some(&t.tdef.effect),
+                    target_specs: vec![],
+                    targets: vec![],
+                    card: None,
+                    source: Some(t.source),
+                    method: Method::Normal,
+                    cast_from: Zone::Hand,
+                    x: 0,
+                    data: t.data,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Targets, costs and mana
+    // ------------------------------------------------------------------
+
+    fn choose_targets(&mut self, p: u8, sid: u32) -> R<()> {
+        let specs = {
+            let st = self.s();
+            st.stack[st.stack_pos(sid).unwrap()].target_specs.clone()
+        };
+        for spec in specs {
+            let st = self.s();
+            let cands = st.target_candidates(spec, p, Some(sid));
+            let refs = st.referenced_oids();
+            let mut seen_perm: Vec<EquivKey> = vec![];
+            let mut seen_ref: Vec<Ref> = vec![];
+            let mut options = vec![];
+            for r in cands {
+                match r {
+                    Ref::Perm(oid) => {
+                        let k = st.equiv_key(st.perm(oid).unwrap(), &refs);
+                        if seen_perm.contains(&k) {
+                            continue;
+                        }
+                        seen_perm.push(k);
+                    }
+                    _ => {
+                        if seen_ref.contains(&r) {
+                            continue;
+                        }
+                        seen_ref.push(r);
+                    }
+                }
+                let (label, key) = st.describe_ref(r, p);
+                let mut full = vec![s("target"), s(spec.name())];
+                full.extend(key);
+                options.push(opt(format!("Target {label}"), full, Val::Ref(r)));
+            }
+            let item_name = st.stack[st.stack_pos(sid).unwrap()].name.clone();
+            let r = match self.ask(p, Kind::Target, || format!("Choose target ({}) for {item_name}", spec.name()), options)? {
+                Val::Ref(r) => r,
+                _ => unreachable!(),
+            };
+            let st = self.s();
+            let pos = st.stack_pos(sid).unwrap();
+            st.stack[pos].targets.push(r);
+        }
+        Ok(())
+    }
+
+    fn pay_mana(&mut self, p: u8, mut rem: Remaining, sac_filter: Option<SacFilter>, exclude: &[u32], what: &str) -> R<()> {
+        while !rem.is_paid() {
+            let st = self.s();
+            let mut options = vec![];
+            let mut pool_sorted = st.players[p as usize].pool.clone();
+            pool_sorted.sort();
+            for &(color, n) in &pool_sorted {
+                if n <= 0 || !rem.useful(color) {
+                    continue;
+                }
+                let mut r2 = rem.clone();
+                r2.apply(color);
+                let mut pool2 = st.players[p as usize].pool.clone();
+                for e in pool2.iter_mut() {
+                    if e.0 == color {
+                        e.1 -= 1;
+                    }
+                }
+                if st.cost_feasible(p, &r2, sac_filter, exclude, Some(&pool2), &[]) {
+                    let c = color_str(color);
+                    options.push(opt(format!("Pay with floating {c}"), vec![s("pay"), s("pool"), s(c)], Val::Pool(color)));
+                }
+            }
+            let sources: Vec<CIdx> = st.mana_sources(p, exclude).into_iter().map(|(c, _)| c).collect();
+            for card in st.dedupe_by_equiv(sources) {
+                let c = st.c(card);
+                let ab = c.face().abilities.iter().find(|a| a.mana.is_some()).unwrap();
+                for &color in ab.mana.as_ref().unwrap() {
+                    if !rem.useful(color) {
+                        continue;
+                    }
+                    let mut r2 = rem.clone();
+                    r2.apply(color);
+                    let gone: Vec<u32> = if ab.sac_self { vec![c.oid] } else { vec![] };
+                    let mut excl = exclude.to_vec();
+                    excl.push(c.oid);
+                    if st.cost_feasible(p, &r2, sac_filter, &excl, None, &gone) {
+                        let verb = if ab.sac_self { "Sacrifice" } else { "Tap" };
+                        let cs = color_str(color);
+                        options.push(opt(format!("{verb} {}#{} for {cs}", c.name(), c.oid), vec![s("pay"), s("source"), s(c.name()), s(cs)], Val::Source(card, color)));
+                    }
+                }
+            }
+            let rem_s = rem.to_string();
+            match self.ask(p, Kind::PayMana, || format!("Pay {rem_s} for {what}"), options)? {
+                Val::Pool(c) => {
+                    self.s().players[p as usize].pool_spend(c);
+                    rem.apply(c);
+                }
+                Val::Source(card, color) => {
+                    let st = self.s();
+                    let ai = st.c(card).face().abilities.iter().position(|a| a.mana.is_some()).unwrap();
+                    st.activate_mana_ability(card, ai);
+                    if !rem.apply(color) {
+                        return rules("mana unit could not be applied");
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(())
+    }
+
+    /// 'You may pay {cost}': returns whether it was paid.
+    fn optional_payment(&mut self, p: u8, cost: &ManaCost, prompt: String) -> R<bool> {
+        let mut options = vec![opt("Don't pay".into(), vec![s("pay_optional"), s("no")], Val::Bool(false))];
+        if self.s().can_afford(p, cost) {
+            options.push(opt(format!("Pay {}", cost.to_string()), vec![s("pay_optional"), s("yes")], Val::Bool(true)));
+        }
+        let pr = prompt.clone();
+        let pay = matches!(self.ask(p, Kind::YesNo, move || pr, options)?, Val::Bool(true));
+        if pay {
+            self.pay_mana(p, Remaining::of(cost), None, &[], &prompt)?;
+        }
+        Ok(pay)
+    }
+
+    fn choose_sacrifice(&mut self, p: u8, flt: SacFilter, what: &str) -> R<()> {
+        let st = self.s();
+        let cands = st.dedupe_by_equiv(st.sac_candidates(p, flt, &[]));
+        let options = cands
+            .iter()
+            .map(|&c| {
+                let card = st.c(c);
+                opt(format!("Sacrifice {}#{}", card.name(), card.oid), vec![s("sacrifice"), s(card.name())], Val::Card(c))
+            })
+            .collect();
+        let fname = flt.name().replace('_', " ");
+        if let Val::Card(c) = self.ask(p, Kind::Sacrifice, || format!("Sacrifice an {fname} for {what}"), options)? {
+            self.s().sacrifice(c);
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Casting spells and activating abilities
+    // ------------------------------------------------------------------
+
+    fn cast(&mut self, p: u8, card: CIdx, mode: Method, choice: Option<u8>) -> R<()> {
+        let st = self.s();
+        let d = st.c(card).face();
+        let from_zone = st.c(card).zone;
+        let name = st.c(card).name().to_string();
+        let effect: Option<&'static [Op]> = match choice {
+            None => d.effect.as_deref(),
+            Some(i) => Some(&d.modes[i as usize].effect),
+        };
+        let target_specs = st.mode_targets(card, mode, choice);
+        st.move_card(card, Zone::Stack, Some(p), Pos::Top, None, false);
+        let sid = st.c(card).oid;
+        st.stack.push(StackItem {
+            sid,
+            kind: SKind::Spell,
+            controller: p,
+            name,
+            effect,
+            target_specs,
+            targets: vec![],
+            card: Some(card),
+            source: None,
+            method: mode,
+            cast_from: from_zone,
+            x: 0,
+            data: Data::default(),
+        });
+        st.push_log_lazy(|s| format!("p{p} casts {} ({}) from {}", s.c(card).name(), mode.name(), from_zone.name()));
+        let base = st.mode_cost(card, mode).unwrap().clone();
+        let reduction = st.cost_reduction(p, card);
+        let cname = st.c(card).name();
+        if base.x != 0 {
+            let mut options = vec![];
+            let mut x = 0;
+            while st.cost_feasible(p, &Remaining::of(&base.with_x(x).reduced(reduction)), d.additional_sac, &[], None, &[]) {
+                options.push(opt(format!("X={x}"), vec![s("x"), KI::I(x as i64)], Val::Int(x)));
+                x += 1;
+            }
+            let xv = match self.ask(p, Kind::ChooseX, || format!("Choose X for {cname}"), options)? {
+                Val::Int(v) => v,
+                _ => unreachable!(),
+            };
+            let st = self.s();
+            let pos = st.stack_pos(sid).unwrap();
+            st.stack[pos].x = xv;
+        }
+        self.choose_targets(p, sid)?;
+        let st = self.s();
+        let xv = st.stack[st.stack_pos(sid).unwrap()].x;
+        let cost = base.with_x(xv).reduced(reduction);
+        self.pay_mana(p, Remaining::of(&cost), d.additional_sac, &[], cname)?;
+        if let Some(flt) = d.additional_sac {
+            self.choose_sacrifice(p, flt, cname)?;
+        }
+        if mode == Method::Escape {
+            self.exile_from_graveyard(p, d.escape_exile, cname)?;
+        }
+        self.s().emit_cast(sid);
+        self.s().emit_targeted(sid);
+        Ok(())
+    }
+
+    fn exile_from_graveyard(&mut self, p: u8, n: i32, what: &str) -> R<()> {
+        for i in 0..n {
+            let st = self.s();
+            let options = st
+                .dedupe_by_name(st.players[p as usize].graveyard.iter().copied())
+                .into_iter()
+                .map(|c| {
+                    let nm = st.c(c).name();
+                    opt(format!("Exile {nm}"), vec![s("exile_gy"), s(nm)], Val::Card(c))
+                })
+                .collect();
+            if let Val::Card(c) = self.ask(p, Kind::ExileFromGy, || format!("Exile a card from your graveyard for {what} ({}/{n})", i + 1), options)? {
+                self.s().mv(c, Zone::Exile);
+            }
+        }
+        Ok(())
+    }
+
+    fn activate(&mut self, p: u8, card: CIdx, index: usize) -> R<()> {
+        let st = self.s();
+        let ab = &st.c(card).face().abilities[index];
+        let sid = st.new_id();
+        let name = format!("{}: {}", st.c(card).name(), ab.name);
+        let oid = st.c(card).oid;
+        st.stack.push(StackItem {
+            sid,
+            kind: SKind::Ability,
+            controller: p,
+            name: name.clone(),
+            effect: ab.effect.as_deref(),
+            target_specs: ab.targets.clone(),
+            targets: vec![],
+            card: None,
+            source: Some(Src::Live(card)),
+            method: Method::Normal,
+            cast_from: Zone::Hand,
+            x: 0,
+            data: Data { source_oid: Some(oid), ..Default::default() },
+        });
+        st.push_log_lazy(|_| format!("p{p} activates {name}"));
+        self.choose_targets(p, sid)?;
+        let exclude: Vec<u32> = if ab.tap { vec![self.s().c(card).oid] } else { vec![] };
+        self.pay_mana(p, Remaining::of(&ab.cost), ab.sac_other, &exclude, &name)?;
+        if ab.tap {
+            self.s().cm(card).tapped = true;
+        }
+        if let Some(flt) = ab.sac_other {
+            self.choose_sacrifice(p, flt, &name)?;
+        }
+        let st = self.s();
+        let snap = st.c(card).clone();
+        let pos = st.stack_pos(sid).unwrap();
+        st.stack[pos].source = Some(Src::Snap(Box::new(snap)));
+        if ab.discard_self {
+            st.discard(card);
+        }
+        if ab.sac_self && st.c(card).zone == Zone::Battlefield {
+            st.sacrifice(card);
+        }
+        st.emit_targeted(sid);
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Resolution
+    // ------------------------------------------------------------------
+
+    fn resolve_top(&mut self) -> R<()> {
+        let item = self.s().stack.last().unwrap().clone();
+        self.log(|_| format!("resolve {}", item.name));
+        let st = self.s();
+        if !item.targets.is_empty() && !(0..item.targets.len()).any(|i| st.target_legal(&item, i)) {
+            if !(item.kind == SKind::Spell && item.method == Method::Bestow) {
+                st.push_log_lazy(|_| format!("{} fizzles (no legal targets)", item.name));
+                st.stack.pop();
+                if item.kind == SKind::Spell {
+                    self.spell_leaves_stack(&item);
+                }
+                return Ok(());
+            }
+        }
+        if item.kind == SKind::Spell {
+            let card = item.card.unwrap();
+            if self.s().c(card).face().is_permanent_card() {
+                self.s().stack.pop();
+                self.resolve_permanent_spell(&item);
+            } else {
+                self.run_effect(item.effect, &item)?;
+                if let Some(pos) = self.s().stack_pos(item.sid) {
+                    self.s().stack.remove(pos);
+                    self.spell_leaves_stack(&item);
+                }
+            }
+        } else {
+            self.run_effect(item.effect, &item)?;
+            if let Some(pos) = self.s().stack_pos(item.sid) {
+                self.s().stack.remove(pos);
+            }
+        }
+        Ok(())
+    }
+
+    fn spell_leaves_stack(&mut self, item: &StackItem) {
+        let dest = if item.method == Method::Flashback { Zone::Exile } else { Zone::Graveyard };
+        self.s().mv(item.card.unwrap(), dest);
+    }
+
+    fn resolve_permanent_spell(&mut self, item: &StackItem) {
+        let st = self.s();
+        let card = item.card.unwrap();
+        let host = if item.method == Method::Bestow {
+            match st.target(item, 0) {
+                Some(Tgt::Card(h)) => Some(h),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let new = st.move_card(card, Zone::Battlefield, Some(item.controller), Pos::Top, None, false).unwrap();
+        if st.c(card).face().etb_x_counters {
+            st.cm(new).counters = item.x;
+        }
+        if let Some(h) = host {
+            let hoid = st.c(h).oid;
+            st.cm(new).attached_to = Some(hoid);
+        }
+        st.emit_etb(new);
+    }
+
+    pub fn counter(&mut self, sid: u32) {
+        let st = self.s();
+        if let Some(pos) = st.stack_pos(sid) {
+            st.push_log_lazy(|s| format!("{} is countered", s.stack[pos].name));
+            let item = st.stack.remove(pos);
+            if item.kind == SKind::Spell {
+                self.spell_leaves_stack(&item);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Library helpers used by card effects
+    // ------------------------------------------------------------------
+
+    fn search_library(&mut self, p: u8, filter: &SearchFilter, to_battlefield: bool, what: &str, tapped: bool, reveal: bool) -> R<Option<CIdx>> {
+        let st = self.s();
+        let lib = st.players[p as usize].library.clone();
+        let cands = st.dedupe_by_name(lib.into_iter().filter(|&c| search_matches(filter, st.c(c))));
+        let mut options = vec![opt("Find nothing".into(), vec![s("search"), KI::N], Val::None)];
+        for c in cands {
+            let n = st.c(c).name();
+            options.push(opt(format!("Find {n}"), vec![s("search"), s(n)], Val::Card(c)));
+        }
+        let found = match self.ask(p, Kind::ChooseCard, || format!("Search your library for {what}"), options)? {
+            Val::Card(c) => Some(c),
+            _ => None,
+        };
+        let st = self.s();
+        if let Some(c) = found {
+            if to_battlefield {
+                st.put_onto_battlefield(c, p, tapped);
+            } else {
+                st.move_card(c, Zone::Hand, None, Pos::Top, if reveal { Some(BOTH) } else { None }, false);
+            }
+        }
+        st.shuffle(p as usize);
+        Ok(found)
+    }
+
+    fn scry(&mut self, p: u8) -> R<()> {
+        let st = self.s();
+        let lib = &st.players[p as usize].library;
+        if lib.is_empty() {
+            return Ok(());
+        }
+        let c = lib[0];
+        st.cm(c).known_to |= pbit(p);
+        let n = st.c(c).name();
+        let options = vec![
+            opt(format!("Keep {n} on top"), vec![s("scry"), s("top")], Val::Top),
+            opt(format!("Put {n} on the bottom"), vec![s("scry"), s("bottom")], Val::Bottom),
+        ];
+        if let Val::Bottom = self.ask(p, Kind::ChooseMode, || format!("Scry 1: {n}"), options)? {
+            let lib = &mut self.s().players[p as usize].library;
+            let pos = lib.iter().position(|&x| x == c).unwrap();
+            lib.remove(pos);
+            lib.push(c);
+        }
+        Ok(())
+    }
+
+    fn explore(&mut self, creature: CIdx) -> R<()> {
+        let st = self.s();
+        let p = st.c(creature).controller;
+        let lib = st.players[p as usize].library.clone();
+        if !lib.is_empty() && st.is_land(st.c(lib[0])) {
+            st.move_card(lib[0], Zone::Hand, None, Pos::Top, Some(BOTH), false);
+            return Ok(());
+        }
+        if !lib.is_empty() {
+            st.cm(lib[0]).known_to = BOTH;
+        }
+        if let Some(live) = st.live(&st.c(creature).clone()) {
+            st.cm(live).counters += 1;
+        }
+        if !lib.is_empty() {
+            let card = lib[0];
+            let n = st.c(card).name();
+            let options = vec![
+                opt(format!("Keep {n} on top"), vec![s("explore"), s("keep")], Val::Bool(false)),
+                opt(format!("Put {n} into graveyard"), vec![s("explore"), s("graveyard")], Val::Bool(true)),
+            ];
+            if let Val::Bool(true) = self.ask(p, Kind::YesNo, || format!("Explore: put {n} into your graveyard?"), options)? {
+                self.s().mv(card, Zone::Graveyard);
+            }
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Combat
+    // ------------------------------------------------------------------
+
+    fn declare_attackers(&mut self) -> R<()> {
+        let st = self.s();
+        let p = st.active;
+        let eligible: Vec<CIdx> = st
+            .battlefield
+            .iter()
+            .copied()
+            .filter(|&ci| {
+                let c = st.c(ci);
+                c.controller == p && st.is_creature(c) && !c.tapped && !c.sick
+            })
+            .collect();
+        let refs = st.referenced_oids();
+        let mut groups: Vec<Vec<CIdx>> = vec![];
+        let mut index: Vec<EquivKey> = vec![];
+        for c in eligible {
+            let k = st.equiv_key(c, &refs);
+            match index.iter().position(|x| *x == k) {
+                Some(i) => groups[i].push(c),
+                None => {
+                    index.push(k);
+                    groups.push(vec![c]);
+                }
+            }
+        }
+        let mut chosen: Vec<CIdx> = vec![];
+        let mut gi_min = 0;
+        loop {
+            let st = self.s();
+            let mut options = vec![opt("Done declaring attackers".into(), vec![s("attack"), KI::N], Val::None)];
+            for gi in gi_min..groups.len() {
+                if let Some(&c) = groups[gi].iter().find(|c| !chosen.contains(c)) {
+                    let card = st.c(c);
+                    options.push(opt(format!("Attack with {}#{}", card.name(), card.oid), vec![s("attack"), s(card.name())], Val::Group(gi)));
+                }
+            }
+            match self.ask(p, Kind::DeclareAttacker, || "Declare attackers".to_string(), options)? {
+                Val::Group(gi) => {
+                    let c = *groups[gi].iter().find(|c| !chosen.contains(c)).unwrap();
+                    chosen.push(c);
+                    gi_min = gi;
+                }
+                _ => break,
+            }
+        }
+        let st = self.s();
+        for &c in &chosen {
+            st.cm(c).tapped = true;
+            let oid = st.c(c).oid;
+            st.attackers.push(oid);
+        }
+        if !chosen.is_empty() {
+            st.push_log_lazy(|s| format!("p{p} attacks with [{}]", chosen.iter().map(|&c| s.c(c).repr()).collect::<Vec<_>>().join(", ")));
+        }
+        Ok(())
+    }
+
+    fn declare_blockers(&mut self) -> R<()> {
+        let st = self.s();
+        let d = 1 - st.active;
+        let blockers: Vec<CIdx> = st
+            .battlefield
+            .iter()
+            .copied()
+            .filter(|&ci| {
+                let c = st.c(ci);
+                c.controller == d && st.is_creature(c) && !c.tapped
+            })
+            .collect();
+        for b in blockers {
+            let st = self.s();
+            let bc = st.c(b);
+            let attackers: Vec<CIdx> = st.attackers.iter().filter_map(|&a| st.perm(a)).filter(|&a| st.can_block(bc, st.c(a))).collect();
+            let mut options = vec![opt(format!("{}#{} does not block", bc.name(), bc.oid), vec![s("block"), s(bc.name()), KI::N], Val::None)];
+            let refs = st.referenced_oids();
+            let mut seen: Vec<EquivKey> = vec![];
+            for a in attackers {
+                let k = st.equiv_key(a, &refs);
+                if seen.contains(&k) {
+                    continue;
+                }
+                seen.push(k);
+                let ac = st.c(a);
+                options.push(opt(format!("{}#{} blocks {}#{}", bc.name(), bc.oid, ac.name(), ac.oid), vec![s("block"), s(bc.name()), s(ac.name())], Val::Card(a)));
+            }
+            let (bn, bo) = (bc.name(), bc.oid);
+            if let Val::Card(a) = self.ask(d, Kind::DeclareBlocker, || format!("Block with {bn}#{bo}?"), options)? {
+                let st = self.s();
+                let aoid = st.c(a).oid;
+                let boid = st.c(b).oid;
+                match st.blocks.iter_mut().find(|(x, _)| *x == boid) {
+                    Some(e) => e.1 = aoid,
+                    None => st.blocks.push((boid, aoid)),
+                }
+                if !st.blocked.contains(&aoid) {
+                    st.blocked.push(aoid);
+                }
+            }
+        }
+        let st = self.s();
+        if !st.blocks.is_empty() {
+            st.push_log_lazy(|s| format!("p{d} blocks: {{{}}}", s.blocks.iter().map(|(b, a)| format!("{b}: {a}")).collect::<Vec<_>>().join(", ")));
+        }
+        Ok(())
+    }
+
+    fn combat_damage(&mut self) -> R<()> {
+        let mut assignments: Vec<(CIdx, Ref, i32)> = vec![];
+        let st = self.s();
+        let defender = 1 - st.active;
+        for aoid in st.attackers.clone() {
+            let st = self.s();
+            let a = match st.perm(aoid) {
+                Some(a) => a,
+                None => continue,
+            };
+            let pw = st.power(st.c(a));
+            if pw <= 0 {
+                continue;
+            }
+            if !st.blocked.contains(&aoid) {
+                assignments.push((a, Ref::Player(defender), pw));
+                continue;
+            }
+            let blockers: Vec<CIdx> = st.blocks.iter().filter(|(_, at)| *at == aoid).filter_map(|(b, _)| st.perm(*b)).collect();
+            let trample = st.has(st.c(a), "trample");
+            if blockers.is_empty() {
+                if trample {
+                    assignments.push((a, Ref::Player(defender), pw));
+                }
+                continue;
+            }
+            if blockers.len() == 1 && !trample {
+                assignments.push((a, Ref::Perm(st.c(blockers[0]).oid), pw));
+                continue;
+            }
+            let slots = blockers.len() + usize::from(trample);
+            let lethal: Vec<i32> = blockers.iter().map(|&b| st.lethal(st.c(a), st.c(b))).collect();
+            let mut options = vec![];
+            for split in compositions(pw, slots) {
+                if trample && *split.last().unwrap() > 0 && split.iter().zip(&lethal).any(|(s, l)| s < l) {
+                    continue;
+                }
+                let mut parts: Vec<String> = split.iter().zip(&blockers).map(|(s, &b)| format!("{s} to {}", st.c(b).repr())).collect();
+                if trample {
+                    parts.push(format!("{} to player", split.last().unwrap()));
+                }
+                let key = vec![s("damage"), KI::T(split.iter().map(|&v| v as i64).collect())];
+                options.push(opt(parts.join(", "), key, Val::Split(split)));
+            }
+            let (an, ao) = (st.c(a).name(), st.c(a).oid);
+            let active = st.active;
+            let split = match self.ask(active, Kind::AssignDamage, || format!("Assign {pw} damage from {an}#{ao}"), options)? {
+                Val::Split(v) => v,
+                _ => unreachable!(),
+            };
+            let st = self.s();
+            for (sv, &b) in split.iter().zip(&blockers) {
+                if *sv != 0 {
+                    assignments.push((a, Ref::Perm(st.c(b).oid), *sv));
+                }
+            }
+            if trample && *split.last().unwrap() != 0 {
+                assignments.push((a, Ref::Player(defender), *split.last().unwrap()));
+            }
+        }
+        let st = self.s();
+        for (boid, aoid) in st.blocks.clone() {
+            let (b, a) = match (st.perm(boid), st.perm(aoid)) {
+                (Some(b), Some(a)) => (b, a),
+                _ => continue,
+            };
+            let pw = st.power(st.c(b));
+            if pw > 0 {
+                assignments.push((b, Ref::Perm(st.c(a).oid), pw));
+            }
+        }
+        for (src, tgt, n) in assignments {
+            let card = st.c(src).clone();
+            st.deal_damage(&card, tgt, n);
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Effects
+    // ------------------------------------------------------------------
+
+    fn run_effect(&mut self, ops: Option<&'static [Op]>, item: &StackItem) -> R<()> {
+        if let Some(ops) = ops {
+            for op in ops {
+                self.run_op(op, item)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn source_card(&mut self, item: &StackItem) -> Card {
+        let st = self.s();
+        st.src(item.source.as_ref().unwrap()).clone()
+    }
+
+    fn run_op(&mut self, op: &'static Op, item: &StackItem) -> R<()> {
+        let ctl = item.controller;
+        match op {
+            Op::Draw { n, n_cast_from_graveyard } => {
+                let n = if item.cast_from == Zone::Graveyard { n_cast_from_graveyard.unwrap_or(*n) } else { *n };
+                self.s().draw(ctl as usize, n, true);
+            }
+            Op::Mill { target_player, n } => {
+                if !target_player {
+                    self.s().mill(ctl as usize, *n);
+                } else if let Some(Tgt::Player(p)) = self.s().target(item, 0) {
+                    self.s().mill(p as usize, *n);
+                }
+            }
+            Op::CounterTarget => {
+                if let Some(Tgt::Spell(sid)) = self.s().target(item, 0) {
+                    self.counter(sid);
+                }
+            }
+            Op::CounterTargetUnlessPaid { cost } => {
+                if let Some(Tgt::Spell(sid)) = self.s().target(item, 0) {
+                    let st = self.s();
+                    let t = &st.stack[st.stack_pos(sid).unwrap()];
+                    let (tc, tn) = (t.controller, t.name.clone());
+                    let paid = self.optional_payment(tc, cost, format!("{}: pay {} or {tn} is countered", item.name, cost.to_string()))?;
+                    if !paid {
+                        self.counter(sid);
+                    }
+                }
+            }
+            Op::DestroyTarget => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    self.s().destroy(c);
+                }
+            }
+            Op::BounceTarget => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    self.s().mv(c, Zone::Hand);
+                }
+            }
+            Op::TapTarget { skip_untap } => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    let card = self.s().cm(c);
+                    card.tapped = true;
+                    card.skip_untap += skip_untap;
+                }
+            }
+            Op::GrantTarget { keywords } => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    self.s().cm(c).temp.push(TempEffect { keywords: *keywords, power: 0, toughness: 0 });
+                }
+            }
+            Op::CreateToken { token, n } => {
+                for _ in 0..*n {
+                    self.s().create_token(ctl, *token);
+                }
+            }
+            Op::GainLife { n } => self.s().players[ctl as usize].life += n,
+            Op::LoseLife { who, n } => {
+                let st = self.s();
+                let p = match who {
+                    Who::You => Some(ctl),
+                    Who::Opponent => Some(1 - ctl),
+                    Who::TargetPlayer => match st.target(item, 0) {
+                        Some(Tgt::Player(p)) => Some(p),
+                        _ => None,
+                    },
+                    Who::TargetController => match st.target(item, 0) {
+                        Some(Tgt::Card(c)) => Some(st.c(c).controller),
+                        Some(Tgt::Spell(sid)) => Some(st.stack[st.stack_pos(sid).unwrap()].controller),
+                        _ => None,
+                    },
+                };
+                if let Some(p) = p {
+                    st.players[p as usize].life -= n;
+                }
+            }
+            Op::CounterOnSource => {
+                let src = self.source_card(item);
+                let st = self.s();
+                if let Some(live) = st.live(&src) {
+                    st.cm(live).counters += 1;
+                }
+            }
+            Op::DamageTarget { n } => {
+                if self.s().target_legal(item, 0) {
+                    let src = self.source_card(item);
+                    self.s().deal_damage(&src, item.targets[0], *n);
+                }
+            }
+            Op::DamageEachCreature { n, without } => {
+                let src = self.source_card(item);
+                let st = self.s();
+                for c in st.battlefield.clone() {
+                    let card = st.c(c);
+                    if st.is_creature(card) && !(*without != 0 && st.keywords(card) & without != 0) {
+                        let oid = card.oid;
+                        st.deal_damage(&src, Ref::Perm(oid), *n);
+                    }
+                }
+            }
+            Op::ExileGraveyard => {
+                if let Some(Tgt::Player(p)) = self.s().target(item, 0) {
+                    let st = self.s();
+                    for c in st.players[p as usize].graveyard.clone() {
+                        st.mv(c, Zone::Exile);
+                    }
+                }
+            }
+            Op::SearchLibrary { filter, to_battlefield, tapped, reveal, what } => {
+                self.search_library(ctl, filter, *to_battlefield, what, *tapped, *reveal)?;
+            }
+            Op::OptionalPayment { cost, prompt, then } => {
+                if self.optional_payment(ctl, cost, prompt.clone())? {
+                    self.run_effect(Some(then), item)?;
+                }
+            }
+            Op::Scry { .. } => self.scry(ctl)?,
+            Op::ExploreTarget => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    self.explore(c)?;
+                }
+            }
+            Op::ShuffleIntoLibrary => {
+                let st = self.s();
+                let c = item.data.card.unwrap();
+                if st.c(c).zone == Zone::Graveyard && Some(st.c(c).oid) == item.data.oid {
+                    st.mv(c, Zone::Library);
+                    let owner = st.c(c).owner as usize;
+                    st.shuffle(owner);
+                }
+            }
+            Op::Ward => {
+                let st = self.s();
+                let sid = item.data.sid.unwrap();
+                if let Some(pos) = st.stack_pos(sid) {
+                    let amount = item.data.amount.unwrap();
+                    let (tc, tn) = (st.stack[pos].controller, st.stack[pos].name.clone());
+                    let paid = self.optional_payment(tc, &ManaCost::generic(amount), format!("Ward: pay {{{amount}}} or {tn} is countered"))?;
+                    if !paid {
+                        self.counter(sid);
+                    }
+                }
+            }
+            Op::Custom(f) => self.custom(*f, item)?,
+        }
+        Ok(())
+    }
+
+    fn custom(&mut self, f: Custom, item: &StackItem) -> R<()> {
+        let p = item.controller;
+        match f {
+            Custom::DelverReveal => {
+                let st = self.s();
+                let top = match st.players[p as usize].library.first() {
+                    Some(&c) => c,
+                    None => return Ok(()),
+                };
+                st.cm(top).known_to |= pbit(p);
+                let n = st.c(top).name();
+                let options = vec![
+                    opt("Don't reveal".into(), vec![s("reveal"), s("no")], Val::Bool(false)),
+                    opt(format!("Reveal {n}"), vec![s("reveal"), s("yes")], Val::Bool(true)),
+                ];
+                if let Val::Bool(true) = self.ask(p, Kind::YesNo, || format!("Delver of Secrets: reveal {n}?"), options)? {
+                    let src = self.source_card(item);
+                    let st = self.s();
+                    st.cm(top).known_to = BOTH;
+                    let live = st.live(&src);
+                    if is_instant_or_sorcery(st.c(top).face()) {
+                        if let Some(l) = live {
+                            if !st.c(l).transformed {
+                                st.cm(l).transformed = true;
+                                st.push_log_lazy(|s| {
+                                    let c = s.c(l);
+                                    format!("{}#{} transforms into {}", c.defn().name, c.oid, c.name())
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Custom::Brainstorm => {
+                self.s().draw(p as usize, 3, true);
+                for i in 0..2 {
+                    if self.s().players[p as usize].hand.is_empty() {
+                        break;
+                    }
+                    let options = self.s().hand_card_options(p, "put back");
+                    if let Val::Card(c) = self.ask(
+                        p,
+                        Kind::ChooseCard,
+                        || format!("Brainstorm: put a card from your hand on top of your library ({}/2, the second one ends on top)", i + 1),
+                        options,
+                    )? {
+                        self.s().move_card(c, Zone::Library, None, Pos::Top, Some(pbit(p)), false);
+                    }
+                }
+            }
+            Custom::Ponder => {
+                let st = self.s();
+                let lib = &st.players[p as usize].library;
+                let top: Vec<CIdx> = lib.iter().take(3).copied().collect();
+                for &c in &top {
+                    st.cm(c).known_to |= pbit(p);
+                }
+                if top.len() > 1 {
+                    let mut options = vec![];
+                    let mut seen: Vec<Vec<&'static str>> = vec![];
+                    for perm in permutations(&top) {
+                        let names: Vec<&'static str> = perm.iter().map(|&c| st.c(c).name()).collect();
+                        if seen.contains(&names) {
+                            continue;
+                        }
+                        seen.push(names.clone());
+                        let mut key = vec![s("order")];
+                        key.extend(names.iter().map(|n| s(n)));
+                        options.push(opt(format!("Top to bottom: {}", names.join(", ")), key, Val::Order(perm)));
+                    }
+                    if let Val::Order(order) = self.ask(p, Kind::Order, || "Ponder: put the cards back in any order".to_string(), options)? {
+                        let lib = &mut self.s().players[p as usize].library;
+                        lib[..order.len()].copy_from_slice(&order);
+                    }
+                }
+                let options = vec![
+                    opt("Don't shuffle".into(), vec![s("shuffle"), s("no")], Val::Bool(false)),
+                    opt("Shuffle".into(), vec![s("shuffle"), s("yes")], Val::Bool(true)),
+                ];
+                if let Val::Bool(true) = self.ask(p, Kind::YesNo, || "Ponder: shuffle your library?".to_string(), options)? {
+                    self.s().shuffle(p as usize);
+                }
+                self.s().draw(p as usize, 1, true);
+            }
+            Custom::DeemInferior => {
+                if let Some(Tgt::Card(t)) = self.s().target(item, 0) {
+                    let st = self.s();
+                    let owner = st.c(t).owner;
+                    let n = st.c(t).name();
+                    let mut options = vec![opt(format!("Put {n} on the bottom"), vec![s("deem"), s("bottom")], Val::Bottom)];
+                    if st.players[owner as usize].library.len() >= 2 {
+                        options.insert(0, opt(format!("Put {n} second from the top"), vec![s("deem"), s("second")], Val::Int(1)));
+                    }
+                    let pos = match self.ask(owner, Kind::ChooseMode, || format!("Deem Inferior: where does {n} go?"), options)? {
+                        Val::Int(i) => Pos::At(i as usize),
+                        _ => Pos::Bottom,
+                    };
+                    self.s().move_card(t, Zone::Library, None, pos, Some(BOTH), false);
+                }
+            }
+            Custom::OpponentDiscardsElseDraw => {
+                let opp = 1 - p;
+                if self.s().players[opp as usize].hand.is_empty() {
+                    self.s().draw(p as usize, 1, true);
+                    return Ok(());
+                }
+                let src_name = self.source_card(item).name();
+                let options = self.s().hand_card_options(opp, "discard");
+                if let Val::Card(c) = self.ask(opp, Kind::ChooseCard, || format!("{src_name}: discard a card"), options)? {
+                    self.s().discard(c);
+                }
+            }
+            Custom::Wildfire => {
+                if let Some(Tgt::Card(t)) = self.s().target(item, 0) {
+                    let controller = self.s().c(t).controller;
+                    self.s().destroy(t);
+                    let basic = SearchFilter { supertype: Some("Basic".into()), types: T_LAND, subtypes_any: vec![] };
+                    self.search_library(controller, &basic, true, "a basic land card", true, false)?;
+                }
+            }
+            Custom::Duress => {
+                if let Some(Tgt::Player(v)) = self.s().target(item, 0) {
+                    let st = self.s();
+                    let hand = st.players[v as usize].hand.clone();
+                    for &c in &hand {
+                        st.cm(c).known_to = BOTH;
+                    }
+                    st.push_log_lazy(|s| format!("p{v} reveals [{}]", hand.iter().map(|&c| py_repr_str(s.c(c).name())).collect::<Vec<_>>().join(", ")));
+                    let cands = st.dedupe_by_name(hand.iter().copied().filter(|&c| {
+                        let f = st.c(c).face();
+                        !f.is_type(T_CREATURE) && !f.is_type(T_LAND)
+                    }));
+                    if cands.is_empty() {
+                        return Ok(());
+                    }
+                    let options = cands
+                        .iter()
+                        .map(|&c| {
+                            let n = st.c(c).name();
+                            opt(format!("Discard {n}"), vec![s("duress"), s(n)], Val::Card(c))
+                        })
+                        .collect();
+                    if let Val::Card(c) = self.ask(p, Kind::ChooseCard, || "Duress: choose a card to discard".to_string(), options)? {
+                        self.s().discard(c);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn search_matches(f: &SearchFilter, c: &Card) -> bool {
+    let face = c.face();
+    if let Some(sup) = &f.supertype {
+        if !face.has_supertype(sup) {
+            return false;
+        }
+    }
+    if f.types != 0 && face.types & f.types == 0 {
+        return false;
+    }
+    if !f.subtypes_any.is_empty() && !f.subtypes_any.iter().any(|s| face.has_subtype(s)) {
+        return false;
+    }
+    true
+}
+
+/// itertools.permutations order (lexicographic in positions).
+fn permutations(items: &[CIdx]) -> Vec<Vec<CIdx>> {
+    if items.len() <= 1 {
+        return vec![items.to_vec()];
+    }
+    let mut out = vec![];
+    for i in 0..items.len() {
+        let mut rest = items.to_vec();
+        let x = rest.remove(i);
+        for mut p in permutations(&rest) {
+            p.insert(0, x);
+            out.push(p);
+        }
+    }
+    out
+}
+

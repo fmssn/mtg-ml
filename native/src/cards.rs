@@ -1,0 +1,702 @@
+//! The card pool, loaded from the same `cards.toml` the Python engine uses.
+//!
+//! The Python wrapper passes the spec text in at import time
+//! (`mtg_ml_native.load_cards`), so a card that only uses existing ops needs
+//! no rebuild. Without that call (Rust unit tests) the copy compiled into the
+//! crate is used.
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use toml::{Table, Value};
+
+use crate::mana::ManaCost;
+
+pub type DefId = u16;
+
+pub const BUILTIN_SPEC: &str = include_str!("../../mtg_ml/engine/cards.toml");
+
+// Card types, bit order = alphabetical so iteration yields sorted names.
+pub const TYPE_NAMES: [&str; 9] = ["Artifact", "Battle", "Creature", "Enchantment", "Instant", "Kindred", "Land", "Planeswalker", "Sorcery"];
+pub const T_ARTIFACT: u16 = 1 << 0;
+pub const T_BATTLE: u16 = 1 << 1;
+pub const T_CREATURE: u16 = 1 << 2;
+pub const T_ENCHANTMENT: u16 = 1 << 3;
+pub const T_INSTANT: u16 = 1 << 4;
+pub const T_LAND: u16 = 1 << 6;
+pub const T_PLANESWALKER: u16 = 1 << 7;
+pub const T_SORCERY: u16 = 1 << 8;
+
+pub fn type_bit(name: &str) -> Result<u16, String> {
+    TYPE_NAMES.iter().position(|t| *t == name).map(|i| 1u16 << i).ok_or_else(|| format!("unknown card type {name:?}"))
+}
+
+pub fn type_names(mask: u16) -> Vec<&'static str> {
+    (0..TYPE_NAMES.len()).filter(|i| mask & (1 << i) != 0).map(|i| TYPE_NAMES[i]).collect()
+}
+
+/// Colour bits (W U B R G), as in a card's colours.
+pub fn color_bit(c: u8) -> u8 {
+    match c {
+        b'W' => 1,
+        b'U' => 2,
+        b'B' => 4,
+        b'R' => 8,
+        b'G' => 16,
+        _ => 0,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TK {
+    Creature,
+    NonlegendaryCreature,
+    NonartifactCreature,
+    CreatureYouControl,
+    Land,
+    NonlandPermanent,
+    Artifact,
+    BluePermanent,
+    RedPermanent,
+    Spell,
+    BlueSpell,
+    RedSpell,
+    InstantSpell,
+    ArtifactSpell,
+    Player,
+    Opponent,
+    Any,
+}
+
+const TK_NAMES: [(&str, TK); 17] = [
+    ("creature", TK::Creature),
+    ("nonlegendary_creature", TK::NonlegendaryCreature),
+    ("nonartifact_creature", TK::NonartifactCreature),
+    ("creature_you_control", TK::CreatureYouControl),
+    ("land", TK::Land),
+    ("nonland_permanent", TK::NonlandPermanent),
+    ("artifact", TK::Artifact),
+    ("blue_permanent", TK::BluePermanent),
+    ("red_permanent", TK::RedPermanent),
+    ("spell", TK::Spell),
+    ("blue_spell", TK::BlueSpell),
+    ("red_spell", TK::RedSpell),
+    ("instant_spell", TK::InstantSpell),
+    ("artifact_spell", TK::ArtifactSpell),
+    ("player", TK::Player),
+    ("opponent", TK::Opponent),
+    ("any", TK::Any),
+];
+
+impl TK {
+    pub fn parse(s: &str) -> Result<TK, String> {
+        TK_NAMES.iter().find(|(n, _)| *n == s).map(|(_, k)| *k).ok_or_else(|| format!("unknown target kind {s:?}"))
+    }
+    pub fn name(self) -> &'static str {
+        TK_NAMES.iter().find(|(_, k)| *k == self).unwrap().0
+    }
+    pub fn is_spell(self) -> bool {
+        self.name().ends_with("spell")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SacFilter {
+    Artifact,
+    ArtifactOrCreature,
+}
+
+impl SacFilter {
+    fn parse(s: &str) -> Result<SacFilter, String> {
+        match s {
+            "artifact" => Ok(SacFilter::Artifact),
+            "artifact_or_creature" => Ok(SacFilter::ArtifactOrCreature),
+            _ => Err(format!("unknown sacrifice filter {s:?}")),
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            SacFilter::Artifact => "artifact",
+            SacFilter::ArtifactOrCreature => "artifact_or_creature",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CostRed {
+    InstantsAndSorceriesInGraveyard,
+    ArtifactsYouControl,
+    CardsDrawnThisTurn,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Event {
+    Etb,
+    ToGraveyardFromBattlefield,
+    Cast,
+    YouSacrificeAnother,
+    YourUpkeep,
+    BecomesTarget,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Custom {
+    DelverReveal,
+    Brainstorm,
+    Ponder,
+    DeemInferior,
+    OpponentDiscardsElseDraw,
+    Wildfire,
+    Duress,
+}
+
+/// Whose life an op changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Who {
+    You,
+    Opponent,
+    TargetPlayer,
+    TargetController,
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchFilter {
+    pub supertype: Option<String>,
+    pub types: u16,
+    pub subtypes_any: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Op {
+    Draw { n: i32, n_cast_from_graveyard: Option<i32> },
+    Mill { target_player: bool, n: i32 },
+    CounterTarget,
+    CounterTargetUnlessPaid { cost: ManaCost },
+    DestroyTarget,
+    BounceTarget,
+    TapTarget { skip_untap: i32 },
+    GrantTarget { keywords: u32 },
+    CreateToken { token: DefId, n: i32 },
+    GainLife { n: i32 },
+    LoseLife { who: Who, n: i32 },
+    CounterOnSource,
+    DamageTarget { n: i32 },
+    DamageEachCreature { n: i32, without: u32 },
+    ExileGraveyard,
+    SearchLibrary { filter: SearchFilter, to_battlefield: bool, tapped: bool, reveal: bool, what: String },
+    OptionalPayment { cost: ManaCost, prompt: String, then: Vec<Op> },
+    Scry { n: i32 },
+    ExploreTarget,
+    ShuffleIntoLibrary,
+    Custom(Custom),
+    /// Engine-internal: the ward trigger.
+    Ward,
+}
+
+#[derive(Clone, Debug)]
+pub struct AbilityDef {
+    pub name: String,
+    pub effect: Option<Vec<Op>>,
+    pub cost: ManaCost,
+    pub tap: bool,
+    pub sac_self: bool,
+    pub sac_other: Option<SacFilter>,
+    pub discard_self: bool,
+    pub zone_hand: bool,
+    pub sorcery_speed: bool,
+    pub mana: Option<Vec<u8>>,
+    pub targets: Vec<TK>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TriggerDef {
+    pub name: String,
+    pub event: Event,
+    pub effect: Vec<Op>,
+    pub sacrificed_subtype: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SpellMode {
+    pub name: String,
+    pub targets: Vec<TK>,
+    pub effect: Vec<Op>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CardDef {
+    pub id: DefId,
+    pub name: String,
+    pub cost: ManaCost,
+    pub types: u16,
+    pub subtypes: Vec<String>,
+    pub supertypes: Vec<String>,
+    pub colors: u8,
+    pub power: Option<i32>,
+    pub toughness: Option<i32>,
+    pub keywords: u32,
+    pub ward: i32,
+    pub targets: Vec<TK>,
+    pub effect: Option<Vec<Op>>,
+    pub additional_sac: Option<SacFilter>,
+    pub cost_reduction: Option<CostRed>,
+    pub flashback: Option<ManaCost>,
+    pub escape: Option<ManaCost>,
+    pub escape_exile: i32,
+    pub bestow: Option<ManaCost>,
+    pub abilities: Vec<AbilityDef>,
+    pub triggers: Vec<TriggerDef>,
+    pub enters_tapped: bool,
+    pub etb_x_counters: bool,
+    pub back: Option<DefId>,
+    pub modes: Vec<SpellMode>,
+}
+
+impl CardDef {
+    pub fn is_type(&self, t: u16) -> bool {
+        self.types & t != 0
+    }
+    pub fn is_permanent_card(&self) -> bool {
+        self.types & (T_ARTIFACT | T_CREATURE | T_ENCHANTMENT | T_LAND | T_PLANESWALKER | T_BATTLE) != 0
+    }
+    pub fn has_subtype(&self, s: &str) -> bool {
+        self.subtypes.iter().any(|x| x == s)
+    }
+    pub fn has_supertype(&self, s: &str) -> bool {
+        self.supertypes.iter().any(|x| x == s)
+    }
+}
+
+pub struct CardDb {
+    pub defs: Vec<CardDef>,
+    pub cards: HashMap<String, DefId>,
+    pub tokens: HashMap<String, DefId>,
+    pub keyword_names: Vec<String>,
+    pub ward: TriggerDef,
+    pub spec_text: String,
+}
+
+/// Keywords the engine itself gives meaning to (or grants).
+const ENGINE_KEYWORDS: [&str; 6] = ["deathtouch", "flying", "indestructible", "lifelink", "reach", "trample"];
+
+impl CardDb {
+    pub fn def(&self, id: DefId) -> &CardDef {
+        &self.defs[id as usize]
+    }
+
+    pub fn kw(&self, name: &str) -> u32 {
+        match self.keyword_names.iter().position(|k| k == name) {
+            Some(i) => 1 << i,
+            None => panic!("unknown keyword {name:?}"),
+        }
+    }
+
+    pub fn keyword_list(&self, mask: u32) -> Vec<&str> {
+        (0..self.keyword_names.len()).filter(|i| mask & (1 << i) != 0).map(|i| self.keyword_names[i].as_str()).collect()
+    }
+
+    pub fn parse(text: &str) -> Result<CardDb, String> {
+        let root: Table = text.parse::<Table>().map_err(|e| format!("cards.toml: {e}"))?;
+        let section = |name: &str| -> Result<Vec<Table>, String> {
+            match root.get(name) {
+                None => Ok(vec![]),
+                Some(Value::Array(a)) => a.iter().map(|v| v.as_table().cloned().ok_or_else(|| format!("[[{name}]] entries must be tables"))).collect(),
+                Some(_) => Err(format!("{name} must be an array of tables")),
+            }
+        };
+        let (faces, cards, tokens) = (section("face")?, section("card")?, section("token")?);
+        for k in root.keys() {
+            if !["face", "card", "token"].contains(&k.as_str()) {
+                return Err(format!("cards.toml: unknown top-level key {k:?}"));
+            }
+        }
+        // Keyword vocabulary: everything mentioned anywhere, sorted.
+        let mut kws: Vec<String> = ENGINE_KEYWORDS.iter().map(|s| s.to_string()).collect();
+        fn collect_kws(v: &Value, out: &mut Vec<String>) {
+            match v {
+                Value::Table(t) => {
+                    for (k, x) in t {
+                        if k == "keywords" {
+                            if let Value::Array(a) = x {
+                                for s in a.iter().filter_map(|s| s.as_str()) {
+                                    out.push(s.to_string());
+                                }
+                            }
+                        } else if k == "without" {
+                            if let Some(s) = x.as_str() {
+                                out.push(s.to_string());
+                            }
+                        } else {
+                            collect_kws(x, out);
+                        }
+                    }
+                }
+                Value::Array(a) => a.iter().for_each(|x| collect_kws(x, out)),
+                _ => {}
+            }
+        }
+        collect_kws(&Value::Table(root.clone()), &mut kws);
+        kws.sort();
+        kws.dedup();
+        if kws.len() > 32 {
+            return Err("more than 32 distinct keywords".into());
+        }
+        let mut db = CardDb {
+            defs: vec![],
+            cards: HashMap::new(),
+            tokens: HashMap::new(),
+            keyword_names: kws,
+            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None },
+            spec_text: text.to_string(),
+        };
+        // Names first so effects can reference tokens and cards can reference faces.
+        let mut face_ids = HashMap::new();
+        let mut all: Vec<(&str, &Table)> = vec![];
+        for (sec, list) in [("face", &faces), ("card", &cards), ("token", &tokens)] {
+            for t in list.iter() {
+                let name = t.get("name").and_then(|v| v.as_str()).ok_or_else(|| format!("[[{sec}]] entry without a name"))?;
+                let id = all.len() as DefId;
+                let reg = match sec {
+                    "face" => &mut face_ids,
+                    "card" => &mut db.cards,
+                    _ => &mut db.tokens,
+                };
+                if reg.insert(name.to_string(), id).is_some() {
+                    return Err(format!("duplicate {sec} {name:?}"));
+                }
+                all.push((sec, t));
+            }
+        }
+        let tokens_by_name = db.tokens.clone();
+        for (i, (_, t)) in all.iter().enumerate() {
+            let d = parse_card(i as DefId, t, &db, &face_ids, &tokens_by_name).map_err(|e| format!("{}: {e}", t.get("name").and_then(|v| v.as_str()).unwrap_or("?")))?;
+            db.defs.push(d);
+        }
+        Ok(db)
+    }
+}
+
+static DB: OnceLock<CardDb> = OnceLock::new();
+
+/// Install the card pool from spec text. Idempotent for identical text.
+pub fn load(text: &str) -> Result<(), String> {
+    if let Some(db) = DB.get() {
+        return if db.spec_text == text { Ok(()) } else { Err("a different card spec is already loaded in this process".into()) };
+    }
+    let db = CardDb::parse(text)?;
+    let _ = DB.set(db);
+    Ok(())
+}
+
+pub fn db() -> &'static CardDb {
+    DB.get_or_init(|| CardDb::parse(BUILTIN_SPEC).expect("built-in cards.toml"))
+}
+
+// ---------------------------------------------------------------------------
+// Spec parsing helpers
+// ---------------------------------------------------------------------------
+
+fn get_str<'a>(t: &'a Table, k: &str) -> Result<Option<&'a str>, String> {
+    match t.get(k) {
+        None => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s.as_str())),
+        Some(_) => Err(format!("{k} must be a string")),
+    }
+}
+
+fn req_str<'a>(t: &'a Table, k: &str) -> Result<&'a str, String> {
+    get_str(t, k)?.ok_or_else(|| format!("missing {k}"))
+}
+
+fn get_bool(t: &Table, k: &str) -> Result<bool, String> {
+    match t.get(k) {
+        None => Ok(false),
+        Some(Value::Boolean(b)) => Ok(*b),
+        Some(_) => Err(format!("{k} must be a boolean")),
+    }
+}
+
+fn get_int(t: &Table, k: &str) -> Result<Option<i32>, String> {
+    match t.get(k) {
+        None => Ok(None),
+        Some(Value::Integer(i)) => Ok(Some(*i as i32)),
+        Some(_) => Err(format!("{k} must be an integer")),
+    }
+}
+
+fn get_str_list(t: &Table, k: &str) -> Result<Vec<String>, String> {
+    match t.get(k) {
+        None => Ok(vec![]),
+        Some(Value::Array(a)) => a.iter().map(|v| v.as_str().map(|s| s.to_string()).ok_or_else(|| format!("{k} must be a list of strings"))).collect(),
+        Some(_) => Err(format!("{k} must be a list")),
+    }
+}
+
+fn check_keys(t: &Table, allowed: &[&str], what: &str) -> Result<(), String> {
+    for k in t.keys() {
+        if !allowed.contains(&k.as_str()) {
+            return Err(format!("unknown {what} field {k:?}"));
+        }
+    }
+    Ok(())
+}
+
+fn mana(t: &Table, k: &str) -> Result<Option<ManaCost>, String> {
+    match get_str(t, k)? {
+        None => Ok(None),
+        Some(s) => ManaCost::parse(Some(s)).map(Some),
+    }
+}
+
+fn targets(t: &Table) -> Result<Vec<TK>, String> {
+    get_str_list(t, "targets")?.iter().map(|s| TK::parse(s)).collect()
+}
+
+fn words(t: &Table, k: &str) -> Result<Vec<String>, String> {
+    Ok(get_str(t, k)?.unwrap_or("").split_whitespace().map(|s| s.to_string()).collect())
+}
+
+fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) -> Result<Option<Vec<Op>>, String> {
+    let arr = match v {
+        None => return Ok(None),
+        Some(Value::Array(a)) => a,
+        Some(_) => return Err("effect must be a list of ops".into()),
+    };
+    let mut ops = vec![];
+    for v in arr {
+        let t = v.as_table().ok_or("ops must be tables")?;
+        let op = req_str(t, "op")?;
+        let keys: &[&str] = match op {
+            "draw" => &["op", "n", "n_cast_from_graveyard"],
+            "mill" => &["op", "who", "n"],
+            "counter_target_unless_paid" => &["op", "cost"],
+            "tap_target" => &["op", "skip_untap"],
+            "grant_target" => &["op", "keywords"],
+            "create_token" => &["op", "token", "n"],
+            "gain_life" | "damage_target" | "scry" => &["op", "n"],
+            "lose_life" => &["op", "who", "n"],
+            "damage_each_creature" => &["op", "n", "without"],
+            "search_library" => &["op", "supertype", "type", "subtypes_any", "dest", "tapped", "reveal", "what"],
+            "optional_payment" => &["op", "cost", "prompt", "then"],
+            "custom" => &["op", "fn"],
+            _ => &["op"],
+        };
+        check_keys(t, keys, &format!("op {op:?}"))?;
+        let n = || get_int(t, "n")?.ok_or_else(|| format!("op {op:?} needs n"));
+        ops.push(match op {
+            "draw" => Op::Draw { n: n()?, n_cast_from_graveyard: get_int(t, "n_cast_from_graveyard")? },
+            "mill" => Op::Mill {
+                target_player: match req_str(t, "who")? {
+                    "you" => false,
+                    "target_player" => true,
+                    w => return Err(format!("mill: unknown who {w:?}")),
+                },
+                n: n()?,
+            },
+            "counter_target" => Op::CounterTarget,
+            "counter_target_unless_paid" => Op::CounterTargetUnlessPaid { cost: ManaCost::parse(Some(req_str(t, "cost")?))? },
+            "destroy_target" => Op::DestroyTarget,
+            "bounce_target" => Op::BounceTarget,
+            "tap_target" => Op::TapTarget { skip_untap: get_int(t, "skip_untap")?.unwrap_or(0) },
+            "grant_target" => Op::GrantTarget { keywords: get_str_list(t, "keywords")?.iter().fold(0, |m, k| m | db.kw(k)) },
+            "create_token" => {
+                let name = req_str(t, "token")?;
+                Op::CreateToken { token: *tokens.get(name).ok_or_else(|| format!("unknown token {name:?}"))?, n: get_int(t, "n")?.unwrap_or(1) }
+            }
+            "gain_life" => Op::GainLife { n: n()? },
+            "lose_life" => Op::LoseLife {
+                who: match req_str(t, "who")? {
+                    "you" => Who::You,
+                    "opponent" => Who::Opponent,
+                    "target_player" => Who::TargetPlayer,
+                    "target_controller" => Who::TargetController,
+                    w => return Err(format!("lose_life: unknown who {w:?}")),
+                },
+                n: n()?,
+            },
+            "counter_on_source" => Op::CounterOnSource,
+            "damage_target" => Op::DamageTarget { n: n()? },
+            "damage_each_creature" => Op::DamageEachCreature { n: n()?, without: get_str(t, "without")?.map(|k| db.kw(k)).unwrap_or(0) },
+            "exile_graveyard" => Op::ExileGraveyard,
+            "search_library" => Op::SearchLibrary {
+                filter: SearchFilter {
+                    supertype: get_str(t, "supertype")?.map(|s| s.to_string()),
+                    types: match get_str(t, "type")? {
+                        Some(s) => type_bit(s)?,
+                        None => 0,
+                    },
+                    subtypes_any: get_str_list(t, "subtypes_any")?,
+                },
+                to_battlefield: match req_str(t, "dest")? {
+                    "battlefield" => true,
+                    "hand" => false,
+                    d => return Err(format!("search_library: unsupported dest {d:?}")),
+                },
+                tapped: get_bool(t, "tapped")?,
+                reveal: get_bool(t, "reveal")?,
+                what: req_str(t, "what")?.to_string(),
+            },
+            "optional_payment" => Op::OptionalPayment {
+                cost: ManaCost::parse(Some(req_str(t, "cost")?))?,
+                prompt: req_str(t, "prompt")?.to_string(),
+                then: parse_ops(t.get("then"), db, tokens)?.unwrap_or_default(),
+            },
+            "scry" => {
+                if n()? != 1 {
+                    return Err("scry: only n = 1 is supported".into());
+                }
+                Op::Scry { n: 1 }
+            }
+            "explore_target" => Op::ExploreTarget,
+            "shuffle_into_library" => Op::ShuffleIntoLibrary,
+            "custom" => Op::Custom(match req_str(t, "fn")? {
+                "delver_reveal" => Custom::DelverReveal,
+                "brainstorm" => Custom::Brainstorm,
+                "ponder" => Custom::Ponder,
+                "deem_inferior" => Custom::DeemInferior,
+                "opponent_discards_else_draw" => Custom::OpponentDiscardsElseDraw,
+                "wildfire" => Custom::Wildfire,
+                "duress" => Custom::Duress,
+                f => return Err(format!("unknown custom effect {f:?}: add it to Custom (native/src/cards.rs) and Eng::custom (native/src/engine.rs)")),
+            }),
+            _ => return Err(format!("unknown op {op:?}: add it to Op (native/src/cards.rs) and Eng::run_op (native/src/engine.rs)")),
+        });
+    }
+    Ok(Some(ops))
+}
+
+fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>, tokens: &HashMap<String, DefId>) -> Result<CardDef, String> {
+    check_keys(
+        t,
+        &[
+            "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward", "targets", "effect",
+            "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped", "etb_x_counters", "back", "modes",
+            "abilities", "triggers",
+        ],
+        "card",
+    )?;
+    let cost_text = get_str(t, "cost")?;
+    let colors = match get_str(t, "colors")? {
+        Some(c) => c.split_whitespace().fold(0, |m, s| m | color_bit(s.as_bytes()[0])),
+        None if get_bool(t, "devoid")? || cost_text.map_or(true, |c| c.is_empty()) => 0,
+        None => [b'W', b'U', b'B', b'R', b'G'].iter().filter(|c| cost_text.unwrap().contains(&format!("{{{}}}", **c as char))).fold(0, |m, c| m | color_bit(*c)),
+    };
+    let mut types = 0;
+    for w in words(t, "types")? {
+        types |= type_bit(&w)?;
+    }
+    let mut abilities = vec![];
+    if let Some(v) = t.get("abilities") {
+        for a in v.as_array().ok_or("abilities must be a list")? {
+            let a = a.as_table().ok_or("abilities must be tables")?;
+            check_keys(a, &["name", "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "zone", "sorcery_speed", "mana", "targets"], "ability")?;
+            abilities.push(AbilityDef {
+                name: req_str(a, "name")?.to_string(),
+                effect: parse_ops(a.get("effect"), db, tokens)?,
+                cost: mana(a, "cost")?.unwrap_or_default(),
+                tap: get_bool(a, "tap")?,
+                sac_self: get_bool(a, "sac_self")?,
+                sac_other: get_str(a, "sac_other")?.map(SacFilter::parse).transpose()?,
+                discard_self: get_bool(a, "discard_self")?,
+                zone_hand: match get_str(a, "zone")?.unwrap_or("battlefield") {
+                    "battlefield" => false,
+                    "hand" => true,
+                    z => return Err(format!("unknown ability zone {z:?}")),
+                },
+                sorcery_speed: get_bool(a, "sorcery_speed")?,
+                mana: if a.contains_key("mana") { Some(get_str_list(a, "mana")?.iter().map(|s| s.as_bytes()[0]).collect()) } else { None },
+                targets: targets(a)?,
+            });
+        }
+    }
+    let mut triggers = vec![];
+    if let Some(v) = t.get("triggers") {
+        for tr in v.as_array().ok_or("triggers must be a list")? {
+            let tr = tr.as_table().ok_or("triggers must be tables")?;
+            check_keys(tr, &["name", "event", "effect", "condition"], "trigger")?;
+            let sacrificed_subtype = match tr.get("condition") {
+                None => None,
+                Some(Value::Table(c)) if c.len() == 1 && c.contains_key("sacrificed_subtype") => Some(req_str(c, "sacrificed_subtype")?.to_string()),
+                Some(c) => return Err(format!("unsupported trigger condition {c}")),
+            };
+            triggers.push(TriggerDef {
+                name: req_str(tr, "name")?.to_string(),
+                event: match req_str(tr, "event")? {
+                    "etb" => Event::Etb,
+                    "to_graveyard_from_battlefield" => Event::ToGraveyardFromBattlefield,
+                    "cast" => Event::Cast,
+                    "you_sacrifice_another" => Event::YouSacrificeAnother,
+                    "your_upkeep" => Event::YourUpkeep,
+                    e => return Err(format!("unknown trigger event {e:?}")),
+                },
+                effect: parse_ops(tr.get("effect"), db, tokens)?.ok_or("trigger without effect")?,
+                sacrificed_subtype,
+            });
+        }
+    }
+    let mut modes = vec![];
+    if let Some(v) = t.get("modes") {
+        for m in v.as_array().ok_or("modes must be a list")? {
+            let m = m.as_table().ok_or("modes must be tables")?;
+            check_keys(m, &["name", "targets", "effect"], "mode")?;
+            modes.push(SpellMode {
+                name: req_str(m, "name")?.to_string(),
+                targets: targets(m)?,
+                effect: parse_ops(m.get("effect"), db, tokens)?.ok_or("mode without effect")?,
+            });
+        }
+    }
+    Ok(CardDef {
+        id,
+        name: req_str(t, "name")?.to_string(),
+        cost: ManaCost::parse(cost_text)?,
+        types,
+        subtypes: words(t, "subtypes")?,
+        supertypes: words(t, "supertypes")?,
+        colors,
+        power: get_int(t, "power")?,
+        toughness: get_int(t, "toughness")?,
+        keywords: get_str_list(t, "keywords")?.iter().fold(0, |m, k| m | db.kw(k)),
+        ward: get_int(t, "ward")?.unwrap_or(0),
+        targets: targets(t)?,
+        effect: parse_ops(t.get("effect"), db, tokens)?,
+        additional_sac: get_str(t, "additional_sac")?.map(SacFilter::parse).transpose()?,
+        cost_reduction: match get_str(t, "cost_reduction")? {
+            None => None,
+            Some("instants_and_sorceries_in_graveyard") => Some(CostRed::InstantsAndSorceriesInGraveyard),
+            Some("artifacts_you_control") => Some(CostRed::ArtifactsYouControl),
+            Some("cards_drawn_this_turn") => Some(CostRed::CardsDrawnThisTurn),
+            Some(c) => return Err(format!("unknown cost_reduction {c:?}")),
+        },
+        flashback: mana(t, "flashback")?,
+        escape: mana(t, "escape")?,
+        escape_exile: get_int(t, "escape_exile")?.unwrap_or(0),
+        bestow: mana(t, "bestow")?,
+        abilities,
+        triggers,
+        enters_tapped: get_bool(t, "enters_tapped")?,
+        etb_x_counters: get_bool(t, "etb_x_counters")?,
+        back: match get_str(t, "back")? {
+            None => None,
+            Some(b) => Some(*faces.get(b).ok_or_else(|| format!("unknown back face {b:?}"))?),
+        },
+        modes,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_spec_parses() {
+        let db = db();
+        assert!(db.cards.contains_key("Brainstorm"));
+        let delver = db.def(db.cards["Delver of Secrets"]);
+        let back = db.def(delver.back.unwrap());
+        assert_eq!(back.name, "Insectile Aberration");
+        assert_eq!(back.colors, color_bit(b'U'));
+        assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
+        assert_eq!(db.cards.len(), 42);
+    }
+}

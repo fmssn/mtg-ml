@@ -1,6 +1,6 @@
 import random
 
-from helpers import choose, pay, resolve_stack, scenario
+from helpers import choose, new_game, pay, resolve_stack, scenario
 
 from mtg_ml.encode import encode_state, state_features
 from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, expand
@@ -19,7 +19,7 @@ def advance(g, n, seed=0):
 
 
 def test_observe_hides_opponent_hand_and_library():
-    g = Game(DECKS, seed=1)
+    g = new_game(DECKS, seed=1)
     o = observe(g, 0)
     assert len(o["self"]["hand"]) == 7
     assert o["opponent"]["hand_count"] == 7 and o["opponent"]["hand_known"] == []
@@ -36,7 +36,7 @@ def test_brainstorm_knowledge_is_private():
 
 
 def test_determinize_preserves_viewer_information():
-    g = Game(DECKS, seed=5)
+    g = new_game(DECKS, seed=5)
     advance(g, 120)
     viewer = g.decision.player
     before = observe(g, viewer)
@@ -65,7 +65,7 @@ def test_features_and_env_roundtrip():
 
 
 def test_features_do_not_depend_on_hidden_cards():
-    g = Game(DECKS, seed=9)
+    g = new_game(DECKS, seed=9)
     advance(g, 80)
     viewer = g.decision.player
     d = determinize(g, viewer, random.Random(3))

@@ -1,6 +1,6 @@
 import random
 
-from helpers import choose, pass_priority, pay, scenario, settle
+from helpers import choose, new_game, pass_priority, pay, scenario, settle
 
 from mtg_ml.agents import RandomAgent, play_game
 from mtg_ml.bots import BlueBot, JundBot, make_bot
@@ -17,7 +17,7 @@ def _label(g, bot):
 def test_bots_finish_games_and_handle_every_decision_kind():
     kinds = set()
     for s in range(40):
-        g = Game(DECKS, seed=s)
+        g = new_game(DECKS, seed=s)
         agents = [make_bot(0), make_bot(1)] if s % 2 else [make_bot(0), RandomAgent(s)] if s % 4 else [RandomAgent(s), make_bot(1)]
         while not g.over:
             d = g.decision
@@ -39,7 +39,7 @@ def test_bots_do_not_use_hidden_information():
     """Re-sampling every card the bot cannot see never changes its choice."""
     checked = 0
     for s in range(6):
-        g, r = Game(DECKS, seed=s), random.Random(s)
+        g, r = new_game(DECKS, seed=s), random.Random(s)
         bots = [make_bot(0), make_bot(1)]
         while not g.over and checked < 400:
             d = g.decision
@@ -130,7 +130,7 @@ def test_blocker_takes_a_free_kill_and_avoids_a_bad_block():
 def test_search_bot_returns_legal_choices_and_respects_hidden_info():
     from mtg_ml.bots.search import SearchBot
 
-    g = Game(DECKS, seed=11)
+    g = new_game(DECKS, seed=11)
     bots = [SearchBot(0, playouts=2, max_options=2, seed=1), make_bot(1)]
     steps = 0
     while not g.over and steps < 60:

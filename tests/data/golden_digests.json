@@ -1,0 +1,2942 @@
+[
+{
+"scenario": {
+"seed": 0,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "5cf4788d15ed3938"
+},
+{
+"scenario": {
+"seed": 1,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "75c0ff08b7e07f5d"
+},
+{
+"scenario": {
+"seed": 2,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "d39ab2491e2ae827"
+},
+{
+"scenario": {
+"seed": 3,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "831ba372f156a13a"
+},
+{
+"scenario": {
+"seed": 4,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "7ea6d0f2b01b0137"
+},
+{
+"scenario": {
+"seed": 5,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "3f2c709804ddfc3f"
+},
+{
+"scenario": {
+"seed": 6,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "ac95bde017675e11"
+},
+{
+"scenario": {
+"seed": 7,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "d74b5116a11e395e"
+},
+{
+"scenario": {
+"seed": 8,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "655d9ad6f721cf67"
+},
+{
+"scenario": {
+"seed": 9,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "f1bfb3b838ce9271"
+},
+{
+"scenario": {
+"seed": 10,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "9b7ebd989f82fc5a"
+},
+{
+"scenario": {
+"seed": 11,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "1adc66adc444f44e"
+},
+{
+"scenario": {
+"seed": 12,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "c479131faf3027cd"
+},
+{
+"scenario": {
+"seed": 13,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "27debc1796641aac"
+},
+{
+"scenario": {
+"seed": 14,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "6d97be1f76854a20"
+},
+{
+"scenario": {
+"seed": 15,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "cc48ca37ebc037ea"
+},
+{
+"scenario": {
+"seed": 16,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "63f419fb3654e264"
+},
+{
+"scenario": {
+"seed": 17,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "a73cfcb44d2d217c"
+},
+{
+"scenario": {
+"seed": 18,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "70f7cd0b96df660e"
+},
+{
+"scenario": {
+"seed": 19,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "9d9412cd1d9ef86b"
+},
+{
+"scenario": {
+"seed": 20,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "6095fd8110ecd637"
+},
+{
+"scenario": {
+"seed": 21,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "c91e4118540625ba"
+},
+{
+"scenario": {
+"seed": 22,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "6e73c9984913eadf"
+},
+{
+"scenario": {
+"seed": 23,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "a0d872bfede84827"
+},
+{
+"scenario": {
+"seed": 24,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "64a57f39ceeb278b"
+},
+{
+"scenario": {
+"seed": 25,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "fd2d19181239a9d1"
+},
+{
+"scenario": {
+"seed": 26,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "3b8ac8266e89755c"
+},
+{
+"scenario": {
+"seed": 27,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "f84daa9b85b7f57c"
+},
+{
+"scenario": {
+"seed": 28,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "ab81161b368ceb40"
+},
+{
+"scenario": {
+"seed": 29,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "c546b8c2f19d1229"
+},
+{
+"scenario": {
+"seed": 30,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "bf0909293b6c85d7"
+},
+{
+"scenario": {
+"seed": 31,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "0c6a4e86334fd6c1"
+},
+{
+"scenario": {
+"seed": 32,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "ab58c9b9cc0237e3"
+},
+{
+"scenario": {
+"seed": 33,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "34a37609a89f211c"
+},
+{
+"scenario": {
+"seed": 34,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "159ec02bb90e9222"
+},
+{
+"scenario": {
+"seed": 35,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "f02c173d2b82a77e"
+},
+{
+"scenario": {
+"seed": 36,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "461f653c8587c37a"
+},
+{
+"scenario": {
+"seed": 37,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "f21a8d0a6ef9ab92"
+},
+{
+"scenario": {
+"seed": 38,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "1c4b3e3614918de8"
+},
+{
+"scenario": {
+"seed": 39,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "321a99ef8967c5b5"
+},
+{
+"scenario": {
+"seed": 40,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "749070b52104d235"
+},
+{
+"scenario": {
+"seed": 41,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "89b5d26277be0ef2"
+},
+{
+"scenario": {
+"seed": 42,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "79bfecba8e9d2b76"
+},
+{
+"scenario": {
+"seed": 43,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "7f341a5d12e36e33"
+},
+{
+"scenario": {
+"seed": 44,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "ef54226c4b949489"
+},
+{
+"scenario": {
+"seed": 45,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "a9b8fcaba7a26c8a"
+},
+{
+"scenario": {
+"seed": 46,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "3bbf4abc9e955cb5"
+},
+{
+"scenario": {
+"seed": 47,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "e54f69070585921a"
+},
+{
+"scenario": {
+"seed": 48,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "2d85ac9332ea5fe4"
+},
+{
+"scenario": {
+"seed": 49,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "930ec50244796a15"
+},
+{
+"scenario": {
+"seed": 50,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "6ff90a9d48c7cc83"
+},
+{
+"scenario": {
+"seed": 51,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "f2e20d52265de9fa"
+},
+{
+"scenario": {
+"seed": 52,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "dd091cf2690a3132"
+},
+{
+"scenario": {
+"seed": 53,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "1d5f0e7e8d01cc03"
+},
+{
+"scenario": {
+"seed": 54,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "84e63f0f521992c8"
+},
+{
+"scenario": {
+"seed": 55,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "c99639b8de91cfac"
+},
+{
+"scenario": {
+"seed": 56,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "9363de40cb4a4124"
+},
+{
+"scenario": {
+"seed": 57,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "a9eda3bcca73bf69"
+},
+{
+"scenario": {
+"seed": 58,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": false,
+"max_turns": 12
+},
+"digest": "ecbeafb2fe90b239"
+},
+{
+"scenario": {
+"seed": 59,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "3b713bbf6fb34374"
+},
+{
+"scenario": {
+"seed": 60,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "e536f68a1e3f7aef"
+},
+{
+"scenario": {
+"seed": 61,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "56775dc0afb45cbe"
+},
+{
+"scenario": {
+"seed": 62,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "1debf716aabb49f0"
+},
+{
+"scenario": {
+"seed": 63,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "8f725212585f48fd"
+},
+{
+"scenario": {
+"seed": 64,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "8ddb0f7140ff4fdf"
+},
+{
+"scenario": {
+"seed": 65,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "7caa77b43c9ace32"
+},
+{
+"scenario": {
+"seed": 66,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "5b6cf3f8b8e16387"
+},
+{
+"scenario": {
+"seed": 67,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "67411fd7bda5b6d1"
+},
+{
+"scenario": {
+"seed": 68,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "2217ef40d2771970"
+},
+{
+"scenario": {
+"seed": 69,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "86ff0bb698d459e5"
+},
+{
+"scenario": {
+"seed": 70,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "f5b90d2cfdbd36ca"
+},
+{
+"scenario": {
+"seed": 71,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "236bf1b353bcba03"
+},
+{
+"scenario": {
+"seed": 72,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "592f3a47ac69e06b"
+},
+{
+"scenario": {
+"seed": 73,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "01b4a07f913348fc"
+},
+{
+"scenario": {
+"seed": 74,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "26b4b18f184f2c7b"
+},
+{
+"scenario": {
+"seed": 75,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "b7dc5728a64aaaca"
+},
+{
+"scenario": {
+"seed": 76,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "397eec8ce5b6cce6"
+},
+{
+"scenario": {
+"seed": 77,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "a467491136f8e5b1"
+},
+{
+"scenario": {
+"seed": 78,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "34c95385d2e20ea7"
+},
+{
+"scenario": {
+"seed": 79,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "444fa918cccf023f"
+},
+{
+"scenario": {
+"seed": 80,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "d13cf0656b52f312"
+},
+{
+"scenario": {
+"seed": 81,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "71434e1d9178d6a3"
+},
+{
+"scenario": {
+"seed": 82,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "7bd91374212d4828"
+},
+{
+"scenario": {
+"seed": 83,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "ea29c40e341a738a"
+},
+{
+"scenario": {
+"seed": 84,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "d14d3120f9707b42"
+},
+{
+"scenario": {
+"seed": 85,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "24a1ff33f4ba8110"
+},
+{
+"scenario": {
+"seed": 86,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "668d3729bb86409d"
+},
+{
+"scenario": {
+"seed": 87,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "3565ee2bb4d8d9df"
+},
+{
+"scenario": {
+"seed": 88,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "bca1ca8834182586"
+},
+{
+"scenario": {
+"seed": 89,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "4c7ea5c2136e9aed"
+},
+{
+"scenario": {
+"seed": 90,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "1152d4b26245e474"
+},
+{
+"scenario": {
+"seed": 91,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "29e6b798de747f93"
+},
+{
+"scenario": {
+"seed": 92,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "f29960567a4fb5e6"
+},
+{
+"scenario": {
+"seed": 93,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "0de6297765f7cf61"
+},
+{
+"scenario": {
+"seed": 94,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "fe3a58371fdef51e"
+},
+{
+"scenario": {
+"seed": 95,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "ca7bc055381da0ea"
+},
+{
+"scenario": {
+"seed": 96,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "c6e1e9e7bb8ed96a"
+},
+{
+"scenario": {
+"seed": 97,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "9ef9ed7e55087293"
+},
+{
+"scenario": {
+"seed": 98,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "05a500b900d562a2"
+},
+{
+"scenario": {
+"seed": 99,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "95bc81fbae06c679"
+},
+{
+"scenario": {
+"seed": 100,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "d7c8437634777222"
+},
+{
+"scenario": {
+"seed": 101,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "c89da2971a01d4bf"
+},
+{
+"scenario": {
+"seed": 102,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "e641cfe9e18b455b"
+},
+{
+"scenario": {
+"seed": 103,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "ea73f79d324dba27"
+},
+{
+"scenario": {
+"seed": 104,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "a8aac08654ae1af3"
+},
+{
+"scenario": {
+"seed": 105,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "0cc83a47e8f991d7"
+},
+{
+"scenario": {
+"seed": 106,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "b0a5996706e05994"
+},
+{
+"scenario": {
+"seed": 107,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "e3db6a3b4e76c3ac"
+},
+{
+"scenario": {
+"seed": 108,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "fbd814853d3dbdfb"
+},
+{
+"scenario": {
+"seed": 109,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "6d3caf1f7a7ae3d4"
+},
+{
+"scenario": {
+"seed": 110,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "c0337b8f31e41859"
+},
+{
+"scenario": {
+"seed": 111,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "a28afcad194fd9d9"
+},
+{
+"scenario": {
+"seed": 112,
+"agents": [
+"random",
+"random"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "e61b98804093c5f2"
+},
+{
+"scenario": {
+"seed": 113,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "8737f23c0c14d103"
+},
+{
+"scenario": {
+"seed": 114,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "efb7809d9cf4e7f3"
+},
+{
+"scenario": {
+"seed": 115,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "cb3c7cbaedb0784f"
+},
+{
+"scenario": {
+"seed": 116,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "97e9460b86e90265"
+},
+{
+"scenario": {
+"seed": 117,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "a81612fdffc6dde2"
+},
+{
+"scenario": {
+"seed": 118,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "677ce4be1a1bef7c"
+},
+{
+"scenario": {
+"seed": 119,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "91aa2b14a18d70e6"
+},
+{
+"scenario": {
+"seed": 120,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "5e07a81283c1d850"
+},
+{
+"scenario": {
+"seed": 121,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "1cd4422f9d5c345b"
+},
+{
+"scenario": {
+"seed": 122,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "6f7e09a1897bf3a7"
+},
+{
+"scenario": {
+"seed": 123,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "b9d51d8619005753"
+},
+{
+"scenario": {
+"seed": 124,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "9b7a89ba3956e595"
+},
+{
+"scenario": {
+"seed": 125,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "4626a96d36d29cdc"
+},
+{
+"scenario": {
+"seed": 126,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "6e30a36746c7dd46"
+},
+{
+"scenario": {
+"seed": 127,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "8e7c7e14e27941a4"
+},
+{
+"scenario": {
+"seed": 128,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "7b570b0a2b5b9edc"
+},
+{
+"scenario": {
+"seed": 129,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "0eda2f9e4c8f25c6"
+},
+{
+"scenario": {
+"seed": 130,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "9f613c36139c342a"
+},
+{
+"scenario": {
+"seed": 131,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "74ff840d9ae8fd18"
+},
+{
+"scenario": {
+"seed": 132,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "b103a7ebd96c43bc"
+},
+{
+"scenario": {
+"seed": 133,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "f420320f1a15610a"
+},
+{
+"scenario": {
+"seed": 134,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "af75482a25bdf8bd"
+},
+{
+"scenario": {
+"seed": 135,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "949f2c692a6c39b2"
+},
+{
+"scenario": {
+"seed": 136,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "7c1149932f34ea6e"
+},
+{
+"scenario": {
+"seed": 137,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "217cf203fab36a55"
+},
+{
+"scenario": {
+"seed": 138,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "2a104461db08d96e"
+},
+{
+"scenario": {
+"seed": 139,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "f165e5a8a7d84986"
+},
+{
+"scenario": {
+"seed": 140,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "3188389e380c8c00"
+},
+{
+"scenario": {
+"seed": 141,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "5b4578d548adb35d"
+},
+{
+"scenario": {
+"seed": 142,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "1538ca1e8433afe3"
+},
+{
+"scenario": {
+"seed": 143,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "246d675d4e7bade0"
+},
+{
+"scenario": {
+"seed": 144,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "dada043886249928"
+},
+{
+"scenario": {
+"seed": 145,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "f98ae36ee6e98df3"
+},
+{
+"scenario": {
+"seed": 146,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "50f4db0007e1547a"
+},
+{
+"scenario": {
+"seed": 147,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "81730e05aed5a47a"
+},
+{
+"scenario": {
+"seed": 148,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "02b4c83aedaddf00"
+},
+{
+"scenario": {
+"seed": 149,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "84f6ec622472f32d"
+},
+{
+"scenario": {
+"seed": 150,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "3340e844a46690d7"
+},
+{
+"scenario": {
+"seed": 151,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "e205a4050f6fe4ec"
+},
+{
+"scenario": {
+"seed": 152,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "59827de311a5cf02"
+},
+{
+"scenario": {
+"seed": 153,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "209f5ff5cab06991"
+},
+{
+"scenario": {
+"seed": 154,
+"agents": [
+"random",
+"random"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": false,
+"max_turns": 12
+},
+"digest": "4bb36d4c7031fe00"
+},
+{
+"scenario": {
+"seed": 155,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "2525def3e33ba158"
+},
+{
+"scenario": {
+"seed": 156,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "7266db517b6d2419"
+},
+{
+"scenario": {
+"seed": 157,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "fbe12eda4d56c886"
+},
+{
+"scenario": {
+"seed": 158,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "1f8058c0ec605045"
+},
+{
+"scenario": {
+"seed": 159,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "54f1f983aaa58c99"
+},
+{
+"scenario": {
+"seed": 160,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "9291698cccd8ef9a"
+},
+{
+"scenario": {
+"seed": 161,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "d410913041979121"
+},
+{
+"scenario": {
+"seed": 162,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "eecc1a4ca14d16f6"
+},
+{
+"scenario": {
+"seed": 163,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "ebb4ea6120acef98"
+},
+{
+"scenario": {
+"seed": 164,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "44a308ce619dcfba"
+},
+{
+"scenario": {
+"seed": 165,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "dcc1642ca8aade90"
+},
+{
+"scenario": {
+"seed": 166,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "a4d0f13d85e191d1"
+},
+{
+"scenario": {
+"seed": 167,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "1b6e001ca184cc4f"
+},
+{
+"scenario": {
+"seed": 168,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "3ad34d1de448af81"
+},
+{
+"scenario": {
+"seed": 169,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "3753eca950d108fd"
+},
+{
+"scenario": {
+"seed": 170,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "44fc5e701601e495"
+},
+{
+"scenario": {
+"seed": 171,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "6113ca4655a808d6"
+},
+{
+"scenario": {
+"seed": 172,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "0ecf63f1b3838ad6"
+},
+{
+"scenario": {
+"seed": 173,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "1a8c74df0dc89469"
+},
+{
+"scenario": {
+"seed": 174,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "863f3668359cc9b5"
+},
+{
+"scenario": {
+"seed": 175,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "adad36cd6778be23"
+},
+{
+"scenario": {
+"seed": 176,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "75ed5025afe4806c"
+},
+{
+"scenario": {
+"seed": 177,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "b366bf1565391325"
+},
+{
+"scenario": {
+"seed": 178,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "1cd7ab8115ebbc65"
+},
+{
+"scenario": {
+"seed": 179,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "0785b4a07976bf69"
+},
+{
+"scenario": {
+"seed": 180,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "c9a094f0d0f61d67"
+},
+{
+"scenario": {
+"seed": 181,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "3fbe38242d5f7990"
+},
+{
+"scenario": {
+"seed": 182,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "46eafa1ad1be3fb5"
+},
+{
+"scenario": {
+"seed": 183,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "4dbb3c2140857088"
+},
+{
+"scenario": {
+"seed": 184,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "a9f828974730ace3"
+},
+{
+"scenario": {
+"seed": 185,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 3,
+"starting_player": 1,
+"mulligans": false,
+"max_turns": 100
+},
+"digest": "3ff24201460e10ef"
+},
+{
+"scenario": {
+"seed": 186,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "79bec07ff392f920"
+},
+{
+"scenario": {
+"seed": 187,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "d48c3c5192269918"
+},
+{
+"scenario": {
+"seed": 188,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "3cca4b466d343944"
+},
+{
+"scenario": {
+"seed": 189,
+"agents": [
+"random",
+"random"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "aebaf6d62d6d0a7d"
+},
+{
+"scenario": {
+"seed": 190,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "bf465314d3d1cd0d"
+},
+{
+"scenario": {
+"seed": 191,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "1a0d24185cc4f5e4"
+},
+{
+"scenario": {
+"seed": 192,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "926cc26303b46282"
+},
+{
+"scenario": {
+"seed": 193,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "93390fc4cd4619db"
+},
+{
+"scenario": {
+"seed": 194,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "b500a5404def3ef9"
+},
+{
+"scenario": {
+"seed": 195,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "f8bcb2e6e8c1ffa1"
+},
+{
+"scenario": {
+"seed": 196,
+"agents": [
+"random",
+"random"
+],
+"match_game": 3,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "17f9de16c5afaae2"
+},
+{
+"scenario": {
+"seed": 197,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "71403569e61161ab"
+},
+{
+"scenario": {
+"seed": 198,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "64a379a0a91b918c"
+},
+{
+"scenario": {
+"seed": 199,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "035f21936d33fe49"
+},
+{
+"scenario": {
+"seed": 200,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "b20f0360b0e76f66"
+},
+{
+"scenario": {
+"seed": 201,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 3,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "b1554d95398b490f"
+},
+{
+"scenario": {
+"seed": 202,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "8278ec2fa34615cb"
+},
+{
+"scenario": {
+"seed": 203,
+"agents": [
+"random",
+"random"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "5572ef89874c9a69"
+},
+{
+"scenario": {
+"seed": 204,
+"agents": [
+"chaos",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "75a552c262afd401"
+},
+{
+"scenario": {
+"seed": 205,
+"agents": [
+"bot",
+"bot"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "2d7049c5a790b13a"
+},
+{
+"scenario": {
+"seed": 206,
+"agents": [
+"bot",
+"random"
+],
+"match_game": 2,
+"starting_player": null,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "ebda07f1a3fcf9f8"
+},
+{
+"scenario": {
+"seed": 207,
+"agents": [
+"random",
+"bot"
+],
+"match_game": 2,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "5c60a54045c5476a"
+},
+{
+"scenario": {
+"seed": 208,
+"agents": [
+"chaos",
+"bot"
+],
+"match_game": 1,
+"starting_player": 1,
+"mulligans": true,
+"max_turns": 100
+},
+"digest": "2fbdfa4d21cb6956"
+},
+{
+"scenario": {
+"seed": 209,
+"agents": [
+"bot",
+"chaos"
+],
+"match_game": 1,
+"starting_player": 0,
+"mulligans": true,
+"max_turns": 12
+},
+"digest": "32bb395350e11beb"
+}
+]

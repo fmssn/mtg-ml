@@ -18,6 +18,7 @@ import math
 import multiprocessing as mp
 import os
 
+from ..backend import ENV_VAR, engine_name
 from ..match import MatchResult, game_seed
 from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, run_job, split_games, worker_init
 
@@ -56,12 +57,12 @@ def score(games: list) -> dict:
     return out
 
 
-def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100) -> dict:
-    jobs = [Job(chunk, learner_path, version, record=False, max_turns=max_turns) for chunk in split_games(paired_specs(opponent, games), n_jobs)]
+def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local") -> dict:
+    jobs = [Job(chunk, learner_path, version, record=False, max_turns=max_turns, inference=inference) for chunk in split_games(paired_specs(opponent, games), n_jobs)]
     return score([g for r in procs.map(run_job, jobs) for g in r.games])
 
 
-def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100) -> dict:
+def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local") -> dict:
     """Best-of-three matches on paired seeds. Each round plays the next game
     of every unfinished match as one batch. Returns match scores like `score`."""
     live = [(EVAL_SEED + s, seats, MatchResult()) for s in range(matches // 2) for seats in ((LEARNER, opponent), (opponent, LEARNER))]
@@ -73,7 +74,7 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
                 todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n))
         if not todo:
             break
-        jobs = [Job(chunk, learner_path, version, record=False, max_turns=max_turns) for chunk in split_games([sp for _, sp in todo.values()], n_jobs)]
+        jobs = [Job(chunk, learner_path, version, record=False, max_turns=max_turns, inference=inference) for chunk in split_games([sp for _, sp in todo.values()], n_jobs)]
         for r in procs.map(run_job, jobs):
             for seats, winner, reason, _, _, seed in r.games:
                 res, spec = todo[(seed, seats)]
@@ -88,7 +89,10 @@ def main(argv=None) -> None:
     ap.add_argument("--games", type=int, default=400, help="games (or matches with --bo3)")
     ap.add_argument("--bo3", action="store_true", help="best-of-three matches with sideboarding")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
+    ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")
     args = ap.parse_args(argv)
+    if args.engine:
+        os.environ[ENV_VAR] = engine_name(args.engine)
     with mp.get_context("spawn").Pool(args.workers, initializer=worker_init) as procs:
         fn = head_to_head_bo3 if args.bo3 else head_to_head
         res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers)

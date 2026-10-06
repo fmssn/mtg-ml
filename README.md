@@ -10,11 +10,15 @@ Background research and the roadmap: [`docs/research-mtg-pauper-rl.md`](docs/res
 
 ```bash
 pip install -e '.[dev]'          # no runtime dependencies, Python >= 3.11
-python -m pytest                 # 131 tests: per-card rules, combat, fuzzing
+python -m pytest                 # per-card rules, combat, fuzzing, golden traces (+ native variants, see below)
 python -m mtg_ml.play watch --seed 3     # random vs random, full game log
 python -m mtg_ml.play human --seat 1     # play Mono Blue Terror in the terminal
 python -m mtg_ml.play bench --games 200  # throughput
 python -m mtg_ml.play match --matches 200  # best-of-three bot matches with sideboards
+
+# optional: the Rust engine, 13-22x faster, identical games (docs/native-engine.md)
+(cd native && maturin develop --release)
+python -m mtg_ml.play bench --games 2000 --engine native   # or MTG_ENGINE=native for everything
 ```
 
 ```python
@@ -60,6 +64,17 @@ print(g.winner, g.end_reason)
 - library cards you learned through Brainstorm, Ponder, Delver, scry, Deem Inferior or explore.
 
 Shuffling forgets library knowledge.
+
+## Native engine
+
+`native/` is a Rust port of the engine (PyO3 / maturin, module `mtg_ml_native`) that plays exactly the same games as the Python engine: same seeds, same decision sequence, same options with the same labels and keys, same views and the same RNG stream. Python stays the reference; the native engine is an optional backend chosen with `--engine native`, `engine=` or `MTG_ENGINE=native` (`mtg_ml/backend.py`). Training uses it with `python -m mtg_ml.rl.train --engine native`.
+
+- **Speed** (one core of h100-private): 190k decisions/s engine-only (21.6x), 60k decisions/s for a rollout worker's CPU work of featurize + event tokens + step (12.6x); 3.95M decisions/s on 64 pinned cores.
+- **Correctness** is checked differentially: `mtg_ml/difftest.py` plays scenarios (random, chaos and bot agents, mulligans, games 1-3) in both engines in lockstep and compares every decision, view, feature vector and the full hidden state at every step; all rules, card, bot and fuzz tests also run on both engines.
+- **Cards** are one declarative spec, `mtg_ml/engine/cards.toml`, loaded by both engines. A card that only uses existing effect ops needs no code. How to add cards and decks: [`docs/adding-cards.md`](docs/adding-cards.md).
+- **PyPy** runs the Python engine 2-3x faster, but rollout workers import torch, so it only becomes usable once inference moves to a central server.
+
+Architecture, determinism, the differential suite and all benchmarks: [`docs/native-engine.md`](docs/native-engine.md). Rollout throughput, packed samples and the central GPU inference server (`--inference server`): [`docs/inference-server.md`](docs/inference-server.md).
 
 ## Mulligans, sideboards and matches
 
@@ -151,7 +166,7 @@ Implemented:
 - alternative and additional costs: flashback (exiled afterwards), escape, bestow (including the illegal-target fallback to a creature), cycling and islandcycling, X costs, affinity, the other cost reductions, and sacrifice costs;
 - ward, transform, indestructible, tokens (Eldrazi Spawn, Clue, Map) and explore.
 
-Card list and oracle text: [`mtg_ml/engine/decks.py`](mtg_ml/engine/decks.py), [`data/oracle_cards.json`](data/oracle_cards.json). The lists are from MTGGoldfish (fetched 2026-10-05).
+Card list and oracle text: [`mtg_ml/engine/decks.py`](mtg_ml/engine/decks.py), [`mtg_ml/engine/cards.toml`](mtg_ml/engine/cards.toml), [`data/oracle_cards.json`](data/oracle_cards.json). The lists are from MTGGoldfish (fetched 2026-10-05).
 
 **Not implemented**, because no card in the pool needs it: first strike, vigilance, planeswalkers, control change, copies, replacement effects, layers beyond counters, auras and temporary effects, and the legend rule. The engine is deliberately limited to this card pool. A turn limit (default 100) ends a game as a draw, so self-play always terminates.
 
@@ -164,13 +179,19 @@ Card list and oracle text: [`mtg_ml/engine/decks.py`](mtg_ml/engine/decks.py), [
   - random play reaches every card, alternative cost and token ability.
 - `tools/audit_triggers.py` plays random games and re-derives from the log alone which triggers should have fired (ETB, dies, cast, sacrifice, upkeep, ward), then checks them against what the engine put on the stack. On 100 games: 1,121 triggers expected, 1,121 stacked, none missed or spurious. Run `python tools/audit_triggers.py --games 100 --out logs/` to also keep the logs.
 - `tests/test_view_env.py` checks that observations and features never depend on hidden cards and that determinization keeps a player's view intact.
+- `tests/test_golden.py` replays recorded games and compares digests of every decision, view, log line and outcome (`python -m mtg_ml.trace check`), so engine refactors are checked for exact equivalence.
+- `tests/test_card_spec.py` checks `cards.toml` against the oracle snapshot.
+- The rules, card, bot, view and fuzz tests run on both engines (`tests/conftest.py`); `tests/test_difftest.py` and `python -m mtg_ml.difftest fuzz --games 5000 --jobs 8` compare the engines in lockstep.
 
-Throughput: about 6,000 decisions/s, or 25 random games/s, on one CPU core. That is enough for engine validation and small experiments. For large-scale training the plan is a faster port (e.g. Rust) checked against this engine by replaying the same seeds and action sequences in both.
+Throughput on one CPU core of h100-private: about 8,800 decisions/s (Python engine), 190,000 decisions/s (native engine). `python tools/bench_engine.py --help` measures engine-only, agent, rollout and bot throughput, optionally on many pinned cores.
 
 ## Layout
 
 ```
-mtg_ml/engine/   mana.py objects.py game.py cards.py decks.py view.py
+mtg_ml/engine/   mana.py objects.py game.py cards.toml cards.py decks.py view.py native.py (NativeGame)
+mtg_ml/backend.py  engine switch (MTG_ENGINE)
+mtg_ml/trace.py    reproducible scenarios, golden digests
+mtg_ml/difftest.py differential testing of the two engines
 mtg_ml/encode.py hashed state features, action keys
 mtg_ml/env.py    two-player step/reset wrapper
 mtg_ml/agents.py random and human agents, game runner
@@ -178,4 +199,7 @@ mtg_ml/match.py  best-of-three matches with sideboarding
 mtg_ml/play.py   CLI
 mtg_ml/bots/     base.py jund.py blue.py (scripted baseline bots)
 mtg_ml/rl/       features.py model.py rollout.py ppo.py train.py evaluate.py (masked PPO self-play)
+native/src/      rng.rs mana.rs cards.rs state.rs engine.rs game.rs features.rs py.rs (Rust port)
+tools/           audit_triggers.py bench_engine.py
+docs/            research-mtg-pauper-rl.md native-engine.md adding-cards.md
 ```

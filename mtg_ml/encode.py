@@ -24,6 +24,8 @@ def _bucket(n: int, edges=(0, 1, 2, 3, 5, 8, 13, 20)) -> int:
 
 
 def state_features(game, viewer: int) -> list[str]:
+    if getattr(game, "NATIVE", False):
+        return game.state_features(viewer)
     o = observe(game, viewer)
     f = [f"step:{o['step']}", f"active:{o['active']}", f"postboard:{o['match_game'] > 1}"]
     for side in ("self", "opponent"):

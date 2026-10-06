@@ -13,7 +13,8 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-from .engine import DECKS, Game, expand, postboard
+from .backend import game_class
+from .engine import DECKS, expand, postboard
 
 DECK_NAMES = ("jund_wildfire", "mono_blue_terror")
 
@@ -61,8 +62,9 @@ class MatchResult:
         return len(self.games) + 1, next_starting_player(start, winner)
 
 
-def play_match(agents, seed: int = 0, **game_kw) -> MatchResult:
+def play_match(agents, seed: int = 0, engine: str | None = None, **game_kw) -> MatchResult:
     """agents: [seat0, seat1] objects with act(game), reused across games."""
+    Game = game_class(engine)
     res = MatchResult()
     while not res.over:
         n, start = res.next_game(seed)

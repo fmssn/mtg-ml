@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mtg-ml-native"
+version = "0.1.0"
+description = "Rust port of the mtg-ml rules engine (optional backend, MTG_ENGINE=native)"
+requires-python = ">=3.11"
+
+[tool.maturin]
+features = ["python"]
+module-name = "mtg_ml_native"

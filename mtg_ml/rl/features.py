@@ -32,6 +32,8 @@ def option_tokens(kind: str, key: tuple) -> list[str]:
 
 def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM):
     """(state indices, [option indices, ...]) for `player` at the current decision."""
+    if getattr(game, "NATIVE", False):
+        return game.featurize(player, state_dim, option_dim)
     d = game.decision
     feats = state_features(game, player)
     feats.append(f"seat:{player}")
@@ -39,6 +41,15 @@ def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = O
     state = sorted({_h(f, state_dim) for f in feats})
     opts = [sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key)}) for o in game.legal_options()]
     return state, opts
+
+
+def featurize_flat(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM):
+    """`featurize` with the options flattened: (state, option lengths, all
+    option tokens). What rollouts record and send to the inference server."""
+    if getattr(game, "NATIVE", False):
+        return game.featurize_flat(player, state_dim, option_dim)
+    state, opts = featurize(game, player, state_dim, option_dim)
+    return state, [len(o) for o in opts], [t for o in opts for t in o]
 
 
 # Decision kinds whose chosen option is public when the opponent makes it.
@@ -75,6 +86,23 @@ def event_tokens(kind: str, key: tuple, mine: bool) -> list[str]:
 def encode_events(tokens: list[str], option_dim: int = OPTION_DIM) -> list[int]:
     """Hash the tokens gathered since a player's previous decision (a bag
     with counts), plus a bucketed count of how much happened."""
-    n = len(tokens)
-    tokens = tokens[-MAX_EVENT_TOKENS:] + [f"events:{min(n // 8, 16)}"]
-    return [_h(t, option_dim) for t in tokens]
+    return encode_event_hashes([_h(t, option_dim) for t in tokens], option_dim)
+
+
+def event_hashes(game, index: int, option_dim: int = OPTION_DIM) -> tuple[list[int], list[int]]:
+    """Hashed `event_tokens` of option `index` of the current decision, as
+    seen by (the decider, the opponent). Native games hash in Rust."""
+    if getattr(game, "NATIVE", False):
+        return game.event_hashes(index, option_dim)
+    d = game.decision
+    key = d.options[index].key
+    return (
+        [_h(t, option_dim) for t in event_tokens(d.kind, key, mine=True)],
+        [_h(t, option_dim) for t in event_tokens(d.kind, key, mine=False)],
+    )
+
+
+def encode_event_hashes(hashes: list[int], option_dim: int = OPTION_DIM) -> list[int]:
+    """`encode_events` for tokens that are already hashed."""
+    n = len(hashes)
+    return hashes[-MAX_EVENT_TOKENS:] + [_h(f"events:{min(n // 8, 16)}", option_dim)]

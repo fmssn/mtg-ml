@@ -31,6 +31,7 @@ from dataclasses import asdict, dataclass, field, fields
 
 import torch
 
+from ..backend import ENV_VAR, engine_name
 from .evaluate import head_to_head, head_to_head_bo3
 from .model import PolicyNet
 from .ppo import PPOConfig, ppo_update
@@ -43,7 +44,10 @@ class TrainConfig:
     iterations: int = 100
     games_per_iter: int = 256  # >= ~32 per worker keeps batched inference cheap next to the engine
     workers: int = max(1, (os.cpu_count() or 2) - 1)
-    hidden: int = 128
+    hidden: int = 512  # policy width (128 before 2026-10; 7x455 / 6x512 MLPs are typical for PPO card-game agents)
+    trunk: str = "mlp"  # "mlp" or "transformer" (2 layers over the active state features)
+    value_net: str = "separate"  # "separate": own embeddings, trunk and memory; "shared": linear head on the policy core
+    value_hidden: int = 0  # width of a separate value net (0 = hidden)
     memory: str = "gru"  # "gru" (recurrent over the player's decisions) or "none"
     gamma: float = 0.995
     lam: float = 0.95
@@ -60,17 +64,22 @@ class TrainConfig:
     max_turns: int = 100
     seed: int = 0
     device: str = "cpu"
+    engine: str = "python"  # rules engine for rollouts: python (reference) or native (Rust, mtg_ml_native)
+    inference: str = "local"  # policy inference: local (CPU torch in each worker) or server (one GPU process, rl/inference.py)
+    server_device: str = ""  # device of the inference server ("" = --device, or cuda when --device is cpu and a GPU exists)
+    server_max_rows: int = 16384  # largest batch the server builds from queued requests
     ppo: PPOConfig = field(default_factory=PPOConfig)
 
 
 class Trainer:
     def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
+        os.environ[ENV_VAR] = engine_name(cfg.engine)  # spawned rollout workers inherit it
         os.makedirs(os.path.join(cfg.run, "pool"), exist_ok=True)
         self.latest = os.path.join(cfg.run, "latest.pt")
         torch.manual_seed(cfg.seed)
         self.rng = random.Random(cfg.seed)
-        self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory).to(cfg.device)
+        self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden).to(cfg.device)
         self.opt = torch.optim.Adam(self.net.parameters(), lr=cfg.ppo.lr, eps=1e-5)
         self.iteration = 0
         self.pool: list[str] = []
@@ -85,7 +94,17 @@ class Trainer:
         if not self.pool:
             self.pool.append(self._save(os.path.join(cfg.run, "pool", "iter_00000.pt")))
             self._save(self.latest)
-        self.procs = mp.get_context("spawn").Pool(cfg.workers, initializer=worker_init)
+        self.server = None
+        if cfg.inference == "server":
+            from .inference import InferenceServer, ServerConfig, default_device
+
+            dev = cfg.server_device or (cfg.device if cfg.device != "cpu" else default_device())
+            self.server = InferenceServer(cfg.workers, ServerConfig(device=dev, max_rows=cfg.server_max_rows))
+            self.procs = self.server.pool()
+        elif cfg.inference == "local":
+            self.procs = mp.get_context("spawn").Pool(cfg.workers, initializer=worker_init)
+        else:
+            raise ValueError(f"inference must be local or server, not {cfg.inference!r}")
 
     # -- checkpoints ---------------------------------------------------------
 
@@ -110,7 +129,7 @@ class Trainer:
     def _run(self, specs: list[GameSpec], record: bool, shaping: float = 0.0) -> Result:
         c = self.cfg
         jobs = [
-            Job(chunk, self.latest, self.iteration + 1, record=record, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns)
+            Job(chunk, self.latest, self.iteration + 1, record=record, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference)
             for chunk in split_games(specs, c.workers)
         ]
         merged = Result()
@@ -140,11 +159,11 @@ class Trainer:
         seeds (game 1 decks), plus best-of-three matches against the bots."""
         c, out = self.cfg, {}
         for name, opp in (("random", RANDOM), ("bot", BOT), ("pool0", self.pool[0])):
-            res = head_to_head(self.procs, self.latest, opp, c.eval_games, c.workers, self.iteration + 1, c.max_turns)
+            res = head_to_head(self.procs, self.latest, opp, c.eval_games, c.workers, self.iteration + 1, c.max_turns, c.inference)
             for deck in ("jund", "blue"):
                 out[f"eval/{name}/{deck}"], out[f"eval/{name}/{deck}_ci"], _ = res[deck]
         if c.eval_bo3_matches:
-            res = head_to_head_bo3(self.procs, self.latest, BOT, c.eval_bo3_matches, c.workers, self.iteration + 1, c.max_turns)
+            res = head_to_head_bo3(self.procs, self.latest, BOT, c.eval_bo3_matches, c.workers, self.iteration + 1, c.max_turns, c.inference)
             for deck in ("jund", "blue"):
                 out[f"eval/bot_bo3/{deck}"], out[f"eval/bot_bo3/{deck}_ci"], _ = res[deck]
         return out
@@ -192,6 +211,8 @@ class Trainer:
             log.close()
             self.procs.close()
             self.procs.join()
+            if self.server is not None:
+                self.server.close()
 
 
 def _rate(games, seat: int) -> float:
