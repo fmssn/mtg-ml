@@ -75,7 +75,9 @@ def main(argv=None) -> None:
     ap.add_argument("--epochs", type=int, default=4, help="timed epochs")
     ap.add_argument("--warmup-epochs", type=int, default=1)
     ap.add_argument("--iter-decisions", type=int, default=378_000)
+    ap.add_argument("--mode", default=None, choices=("eager", "padded", "graph"), help="ppo_update mode (default: graph on CUDA)")
     ap.add_argument("--profile", action="store_true", help="cProfile the timed epochs")
+    ap.add_argument("--torch-profile", action="store_true", help="torch.profiler table (CUDA kernels) of the timed epochs")
     args = ap.parse_args(argv)
 
     import torch
@@ -102,18 +104,28 @@ def main(argv=None) -> None:
     opt = make_optimizer(net.parameters(), cfg.lr, dev)
     gen = torch.Generator().manual_seed(0)
     sync = torch.cuda.synchronize if dev.type == "cuda" else (lambda: None)
-    ppo_update(net, opt, data, cfg, device=dev, gen=gen)
+    t = time.perf_counter()
+    ppo_update(net, opt, data, cfg, device=dev, gen=gen, mode=args.mode)
     sync()
+    warm = time.perf_counter() - t
     cfg.epochs = args.epochs
     pr = cProfile.Profile() if args.profile else None
     if pr:
         pr.enable()
+    tp = None
+    if args.torch_profile:
+        from torch.profiler import ProfilerActivity, profile
+
+        tp = profile(activities=[ProfilerActivity.CPU] + ([ProfilerActivity.CUDA] if dev.type == "cuda" else []))
+        tp.__enter__()
     t = time.perf_counter()
-    stats = ppo_update(net, opt, data, cfg, device=dev, gen=gen)
+    stats = ppo_update(net, opt, data, cfg, device=dev, gen=gen, mode=args.mode)
     sync()
     dt = time.perf_counter() - t
     if pr:
         pr.disable()
+    if tp:
+        tp.__exit__(None, None, None)
     steps = stats["updates"]
     mem = f", peak device memory {torch.cuda.max_memory_allocated(dev) / 2**30:.1f} GiB" if dev.type == "cuda" else ""
     print(
@@ -121,9 +133,18 @@ def main(argv=None) -> None:
         f"in {dt:.2f}s = {dt / steps * 1000:.2f} ms/step; projected {dt * args.iter_decisions / n:.1f}s per iteration of "
         f"{args.iter_decisions} decisions x {args.epochs} epochs{mem}"
     )
+    from mtg_ml.rl import ppo
+
+    g = ppo._GRAPHS.get(opt)
+    print(
+        f"mode={args.mode or 'default'} minibatch={args.minibatch}: {dt / args.epochs:.3f} s/epoch = {dt / args.epochs * 250_000 / n:.3f} s per epoch of 250k decisions; "
+        f"warm-up epoch {warm:.2f}s" + (f", {g.captures} graphs captured in {g.capture_s:.2f}s, shapes {[dict(k) | {'gru': sorted(v)} for k, v in g.graphs.items()]}" if g else "")
+    )
     print({k: round(v, 5) if isinstance(v, float) else v for k, v in stats.items()})
     if pr:
         pstats.Stats(pr).sort_stats("tottime").print_stats(25)
+    if tp:
+        print(tp.key_averages().table(sort_by="cuda_time_total" if dev.type == "cuda" else "cpu_time_total", row_limit=40, max_name_column_width=60))
 
 
 if __name__ == "__main__":

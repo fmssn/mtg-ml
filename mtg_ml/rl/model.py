@@ -34,6 +34,7 @@ options of that decision.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import NamedTuple
 
 import torch
 from torch import nn
@@ -69,6 +70,11 @@ class Batch:
     ot_off: torch.Tensor | None = None  # (N,) offsets into ot_idx
     p_opt: torch.Tensor | None = None  # (P,) option of each entity pointer
     p_ent: torch.Tensor | None = None  # (P,) entity it points at (row of the batch's entity vectors)
+    # Padded training pieces only (`pad_split`): per token list ("st", "e",
+    # "ot"), its tokens sorted by index, for the embedding weight gradient
+    # (`_bag`): (bag of each sorted token, segment offsets, index of each
+    # segment, mean weights or None).
+    bag_t: dict | None = None
 
     def to(self, device) -> "Batch":
         return Batch(*(None if x is None else x.to(device) for x in (getattr(self, f) for f in self.__dataclass_fields__)))
@@ -214,16 +220,23 @@ def _level_sizes(b: Batch) -> dict:
     }  # fmt: skip
 
 
+def _piece_starts(b: Batch, bounds: list[int]) -> tuple[dict, torch.Tensor]:
+    """(level -> row of `at`, at): where the pieces [bounds[k], bounds[k + 1])
+    of a `structure`d batch start at every level, (levels, pieces + 1)."""
+    sizes = _level_sizes(b)
+    cum = torch.stack(list(sizes.values())).cumsum(1)  # (levels, B): a scan along dim 0 of (B, levels) is ~100x slower on CUDA
+    at = torch.cat([cum.new_zeros(len(sizes), 1), cum], 1)[:, torch.tensor(bounds, device=cum.device)]  # (levels, pieces + 1) starts
+    return {k: i for i, k in enumerate(sizes)}, at
+
+
 def split(b: Batch, bounds: list[int]) -> list[Batch]:
     """The decisions [bounds[k], bounds[k + 1]) (all of them) of a
     `structure`d batch as batches of their own: slices, with positions
     re-based to start at 0 (one subtraction per field for all pieces). Waits
     for the device here, for the sizes; using the pieces never does."""
-    sizes = _level_sizes(b)
-    cum = torch.stack(list(sizes.values())).cumsum(1)  # (levels, B): a scan along dim 0 of (B, levels) is ~100x slower on CUDA
-    at = torch.cat([cum.new_zeros(len(sizes), 1), cum], 1)[:, torch.tensor(bounds, device=cum.device)]  # (levels, pieces + 1) starts
+    level, at = _piece_starts(b, bounds)
     n = at[:, 1:] - at[:, :-1]
-    counts, level = n.tolist(), {k: i for i, k in enumerate(sizes)}
+    counts = n.tolist()
     fields = {}
     for name, (lvl, ref) in _FIELD_LEVELS.items():
         x = getattr(b, name)
@@ -231,6 +244,169 @@ def split(b: Batch, bounds: list[int]) -> list[Batch]:
             x = x - torch.repeat_interleave(at[level[ref], :-1], n[level[lvl]], output_size=x.shape[0])
         fields[name] = x.split(counts[level[lvl]])
     return [Batch(**{name: parts[k] for name, parts in fields.items()}) for k in range(len(bounds) - 1)]
+
+
+# -- padded pieces, for a training step captured in a CUDA graph -----------------
+#
+# A graph replays fixed shapes, so every minibatch of an epoch is padded to the
+# same size at every level. Padding never reaches a real decision: padded
+# rows, options, entities, pointers and bags point only at padding (in turn,
+# so that no index_add piles onto one row: atomics on one address serialise),
+# there is always at least one padded row, entity and bag, every padded row
+# gets an option, so its logits are finite, and the loss weighs padded rows
+# with 0, so they add exactly 0 to every gradient. The padded tokens of the
+# flat token lists are spread evenly over the padded bags (rows, options) and
+# over 64 indices, for the same reason.
+
+PAD_TOKENS = 64
+TRANSPOSE_CHUNK = 32  # tokens per bag of the transposed embedding gradient (`_TransposedBag`)
+PAD_FIELDS = {  # the fields the structured forward reads: (level, level its values are positions in, value at padded positions)
+    "st_idx": ("st", None, "token"), "st_off": ("row", "st", "spread:st"), "bag_off": ("bag", "st", "spread:st"),
+    "g_bag": ("row", "bag", "cycle:bag"), "e_bag": ("ent", "bag", "cycle:bag"), "e_row": ("ent", "row", "cycle:row"),
+    "e_idx": ("e", None, "token"), "e_off": ("row", "e", "spread:e"), "ot_idx": ("ot", None, "token"), "ot_off": ("opt", "ot", "spread:ot"),
+    "o_row": ("opt", "row", "cycle:row"), "o_pos": ("opt", None, "zero"), "p_opt": ("ptr", "opt", "cycle:opt"), "p_ent": ("ptr", "ent", "cycle:ent"),
+}  # fmt: skip
+
+
+def bucket(x: int, per_octave: int = 8) -> int:
+    """x rounded up to one of `per_octave` sizes per power of two (8: at
+    most 14% more), so that padded sizes repeat across epochs and a captured
+    graph is reused."""
+    q = 1 << max(int(x).bit_length() - 1 - (per_octave.bit_length() - 1), 0)
+    return -(-int(x) // q) * q
+
+
+def pad_sizes(counts: dict[str, list[int]]) -> dict[str, int]:
+    """Padded size of every level for pieces with these item counts (per
+    level, per piece): room for every piece plus at least one padded row,
+    entity and bag, and an option for every padded row."""
+    row, ent = bucket(max(counts["row"]) + 1), bucket(max(counts["ent"]) + 1)
+    opt = bucket(max(o + row - r for o, r in zip(counts["opt"], counts["row"])))
+    return {"row": row, "ent": ent, "bag": row + ent, "opt": opt, **{k: bucket(max(counts[k]) + 1) for k in counts if k in ("st", "e", "ot", "ptr") or k.startswith("u_")}}
+
+
+def pad_fits(sizes: dict[str, int], counts: dict[str, list[int]]) -> bool:
+    """Whether pieces with these counts fit padded `sizes` (of other pieces)."""
+    return (
+        sizes["bag"] == sizes["row"] + sizes["ent"]
+        and all(sizes.get(k, 0) > max(counts[k]) for k in counts if k in ("row", "ent", "st", "e", "ot", "ptr") or k.startswith("u_"))
+        and sizes["opt"] >= max(o + sizes["row"] - r for o, r in zip(counts["opt"], counts["row"]))
+    )
+
+
+def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | None = None) -> tuple[dict, dict, dict]:
+    """The pieces of `split(b, bounds)`, padded to `sizes(counts)` (counts:
+    level -> items per piece): {field: (pieces, size of its level)} for the
+    fields of PAD_FIELDS, positions re-based to each piece. Also returns the
+    sizes and the counts. Waits for the counts; a few kernels per field for
+    all pieces.
+
+    transpose: {token list: (vocabulary size, its bag offsets field)}, of
+    "st" (bag_off or st_off), "e" (e_off), "ot" (ot_off): also the inputs of
+    `_TransposedBag` for these lists, fields t_<list>_bag (level of the
+    tokens), t_<list>_off and t_<list>_uid (level u_<list>: chunks of one
+    index per piece, counted in counts), and t_e_w (float, mean weights)."""
+    level, at = _piece_starts(b, bounds)
+    M, dev = len(bounds) - 1, at.device
+    piece = torch.arange(M, device=dev)
+    n = at[:, 1:] - at[:, :-1]
+    cnt = {k: n[i] for k, i in level.items()}  # level -> items per piece, on the device
+    start = {k: at[i] for k, i in level.items()}
+    lists, extra = {}, {}
+    for key, (vocab, off_name) in (transpose or {}).items():  # tokens sorted by (piece, index): one sort for the epoch
+        tok_lvl = {"st": "st", "e": "e", "ot": "ot"}[key]
+        bag_lvl = PAD_FIELDS[off_name][0]
+        idx, off = getattr(b, f"{key}_idx").long(), getattr(b, off_name)
+        T = idx.shape[0]
+        lens = _lengths(off, T)
+        bag = torch.repeat_interleave(torch.arange(off.shape[0], device=dev), lens, output_size=T)
+        own = torch.repeat_interleave(piece, cnt[tok_lvl], output_size=T)
+        kt = torch.int32 if M * (vocab + 1) < 2**31 else torch.long  # radix sort: half the passes
+        skey, perm = torch.sort(own.to(kt) * (vocab + 1) + idx.to(kt), stable=True)
+        new = torch.ones(T, dtype=torch.bool, device=dev)
+        new[1:] = skey[1:] != skey[:-1]
+        pos = torch.arange(T, device=dev)
+        seg_at = pos[new]
+        new |= (pos - seg_at[torch.cumsum(new, 0) - 1]) % TRANSPOSE_CHUNK == 0  # chunks of at most TRANSPOSE_CHUNK tokens
+        seg_own = own[new]
+        u = torch.zeros(M, dtype=torch.long, device=dev).index_add_(0, seg_own, torch.ones_like(seg_own))
+        cnt[f"u_{key}"], start[f"u_{key}"] = u, torch.cat([u.new_zeros(1), u.cumsum(0)])
+        sbag = bag[perm]
+        lists[key] = (tok_lvl, bag_lvl, vocab, sbag - start[bag_lvl][own], (torch.arange(T, device=dev) - start[tok_lvl][own])[new], idx[perm][new])
+        if off_name == "e_off":
+            extra[f"t_{key}_w"] = 1.0 / lens[sbag].float()
+    keys = list(cnt)
+    counts = dict(zip(keys, torch.stack([cnt[k] for k in keys]).tolist()))
+    sizes = sizes(counts)
+
+    def place(x, lvl, pad, rebase=None):
+        D, nl = sizes[lvl], cnt[lvl][:, None]
+        own = torch.repeat_interleave(piece, cnt[lvl], output_size=x.shape[0])
+        if rebase is not None:
+            x = x - start[rebase][own]
+        j = torch.arange(D, device=dev).expand(M, D)
+        if pad == "zero":
+            grid = torch.zeros(M, D, dtype=x.dtype, device=dev)
+        elif pad == "token":
+            grid = j % PAD_TOKENS
+        elif pad.startswith("spread:"):  # the padded bags split the padded tokens evenly
+            tok = cnt[pad[7:]][:, None]
+            grid = tok + torch.div((j - nl) * (sizes[pad[7:]] - tok), D - nl, rounding_mode="floor")
+        elif pad.startswith("cycle:"):  # the k-th padded item points at padded item k of that level, cycling
+            to = cnt[pad[6:]][:, None]
+            grid = to + torch.remainder(j - nl, sizes[pad[6:]] - to)
+        else:  # a constant
+            grid = torch.full((M, D), int(pad), dtype=torch.long, device=dev)
+        dest = own * D + torch.arange(x.shape[0], device=dev) - start[lvl][own]
+        return grid.reshape(-1).index_copy(0, dest, x).view(M, D)
+
+    out = {name: place(getattr(b, name).long(), lvl, pad, ref) for name, (lvl, ref, pad) in PAD_FIELDS.items()}
+    for key, (tok_lvl, bag_lvl, vocab, sbag, seg_at, uid) in lists.items():
+        out[f"t_{key}_bag"] = place(sbag, tok_lvl, f"cycle:{bag_lvl}")  # padded tokens to padded bags: zero gradient
+        out[f"t_{key}_off"] = place(seg_at, f"u_{key}", f"spread:{tok_lvl}")
+        out[f"t_{key}_uid"] = place(uid, f"u_{key}", str(vocab))  # padded segments: the scratch row
+    for name, w in extra.items():
+        out[name] = place(w, "e", "zero")
+    return out, sizes, counts
+
+
+def padded_batch(f: dict) -> Batch:
+    """A Batch of one padded piece ({field: 1-D tensor} of `pad_split`); the
+    fields the structured forward does not read are None."""
+    bag_t = {k: (f[f"t_{k}_bag"], f[f"t_{k}_off"], f[f"t_{k}_uid"], f.get(f"t_{k}_w")) for k in ("st", "e", "ot") if f"t_{k}_bag" in f}
+    return Batch(None, None, f["e_idx"], f["e_off"], None, None, f["o_row"], f["o_pos"], None, **{k: f[k] for k in PAD_FIELDS if k not in ("e_idx", "e_off", "o_row", "o_pos")}, bag_t=bag_t or None)
+
+
+class SequenceLayout(NamedTuple):
+    """Sequence mode with static shapes: the GRU runs on a (sequences, steps)
+    batch; row i goes to position pos_in[i] of it flattened (padded rows to
+    a junk position, sequences * steps, after it) and reads its output from
+    pos_out[i]."""
+
+    pos_in: torch.Tensor
+    pos_out: torch.Tensor
+    sequences: int
+    steps: int
+
+
+def pad_sequences(chunks: list[list[int]], rows: int, gru: list[tuple[int, int]]):
+    """GRU layouts of padded pieces: chunks[k] are the trajectory lengths of
+    piece k, laid end to end in its first rows of `rows`, run as a gru[k] =
+    (sequences, steps) batch. Returns (pos_in, pos_out), (pieces, rows) CPU
+    tensors (see SequenceLayout)."""
+    L = torch.tensor([n for c in chunks for n in c], dtype=torch.long)
+    k = torch.tensor([len(c) for c in chunks], dtype=torch.long)
+    T, S = torch.tensor(gru, dtype=torch.long).T
+    M, total = len(chunks), int(L.sum())
+    seq_piece = torch.repeat_interleave(torch.arange(M), k)
+    seq = torch.arange(L.shape[0]) - _excl(k)[seq_piece]  # trajectory number within its piece
+    pos = torch.repeat_interleave(seq * S[seq_piece] - _excl(L), L) + torch.arange(total)  # trajectory * steps + step
+    row_piece = torch.repeat_interleave(seq_piece, L)
+    dest = row_piece * rows + torch.arange(total) - _excl(torch.tensor([sum(c) for c in chunks], dtype=torch.long))[row_piece]
+    junk = (T * S)[:, None]
+    pos_in = junk.expand(M, rows).reshape(-1).index_copy(0, dest, pos).view(M, rows)
+    pos_out = (torch.arange(rows) % junk).reshape(-1).index_copy(0, dest, pos).view(M, rows)  # padded rows: any output, in turn (they get no gradient)
+    return pos_in, pos_out
 
 
 TRUNKS = ("mlp", "transformer", "entity")
@@ -245,6 +421,39 @@ def _keep(idx: torch.Tensor, off: torch.Tensor, keep: torch.Tensor):
     rows = torch.repeat_interleave(torch.arange(off.shape[0], device=idx.device), _lengths(off, idx.shape[0]))
     n = torch.zeros(off.shape[0], dtype=torch.long, device=idx.device).index_add_(0, rows[keep], torch.ones_like(rows[keep]))
     return idx[keep], _excl(n)
+
+
+class _TransposedBag(torch.autograd.Function):
+    """embedding_bag whose weight gradient is one more embedding bag: over
+    the bag gradients, with the tokens sorted by index (`pad_split`
+    precomputes that once per epoch) in chunks of at most TRANSPOSE_CHUNK
+    tokens of one index, each chunk's sum added to its index's row. (One bag
+    per index would be walked serially: common features occur ~10^4 times
+    in a minibatch.) PyTorch's backward sorts the tokens and reduces segments
+    in every step, ~3x the forward's time. Chunks with index = vocabulary
+    size are padding and land in a scratch row."""
+
+    @staticmethod
+    def forward(ctx, weight, idx, off, mean, t_bag, t_off, t_uid, t_w):
+        ctx.save_for_backward(t_bag, t_off, t_uid, t_w)
+        ctx.rows = weight.shape[0]
+        return nn.functional.embedding_bag(idx, weight, off, mode="mean" if mean else "sum")
+
+    @staticmethod
+    def backward(ctx, g):
+        t_bag, t_off, t_uid, t_w = ctx.saved_tensors
+        seg = nn.functional.embedding_bag(t_bag, g.contiguous(), t_off, mode="sum", per_sample_weights=t_w)
+        dw = g.new_zeros(ctx.rows + 1, g.shape[1]).index_add_(0, t_uid, seg)
+        return dw[:-1], None, None, None, None, None, None, None
+
+
+def _bag(b: Batch, key: str, weight: torch.Tensor, idx: torch.Tensor, off: torch.Tensor, mean: bool = False) -> torch.Tensor:
+    """Bags of `idx` (sum, or mean) of embedding rows `weight`; with the
+    transposed weight gradient when `b` carries it."""
+    t = b.bag_t.get(key) if b.bag_t else None
+    if t is None:
+        return nn.functional.embedding_bag(idx, weight, off, mode="mean" if mean else "sum")
+    return _TransposedBag.apply(weight, idx, off, mean, *t)
 
 
 class EntityEncoder(nn.Module):
@@ -265,7 +474,7 @@ class EntityEncoder(nn.Module):
         """Returns (state sum (B, H), entity vectors (E, H), first entity row
         of each sample (B,), None when `b` carries the precomputed structure)."""
         if b.bag_off is not None:  # one bag per sample's globals and per entity, no masks
-            bags = nn.functional.embedding_bag(b.st_idx, self.emb.weight, b.bag_off, mode="sum")
+            bags = _bag(b, "st", self.emb.weight, b.st_idx, b.bag_off)
             ents = self.ent(bags.index_select(0, b.e_bag))
             return bags.index_select(0, b.g_bag).index_add(0, b.e_row, ents), ents, None
         idx, off = b.s_idx, b.s_off
@@ -360,6 +569,10 @@ class _Core(nn.Module):
         # launches kernels per time step); above that it has none, and padded
         # is ~15% slower than packed (twice the rows; measured at 256 and
         # 512). On the CPU padded is faster at every size.
+        if isinstance(lengths, SequenceLayout):  # static shapes (captured step): always padded
+            pos_in, pos_out, T, S = lengths
+            xp = x.new_zeros(T * S + 1, x.shape[1]).index_copy(0, pos_in, x)[:-1].view(T, S, -1)
+            return self.gru(xp)[0].reshape(-1, self.hidden).index_select(0, pos_out), None
         if x.is_cuda and self.hidden > 128:
             rows, batch_sizes = _sequence_layout(lengths, x.device, packed=True)
             y = self.gru(PackedSequence(x.index_select(0, rows), batch_sizes))[0].data
@@ -375,8 +588,8 @@ class _Core(nn.Module):
             self.entities = (ents, base)
         else:  # these trunks treat entity features as part of the flat bag
             idx, off = (b.st_idx, b.st_off) if b.st_idx is not None else _keep(b.s_idx, b.s_off, b.s_idx != self.sep)
-            s = self.state(idx, off) if self.trunk_kind == "transformer" else self.trunk(self.state_emb(idx, off))
-        e = self.event_emb(b.e_idx, b.e_off)
+            s = self.state(idx, off) if self.trunk_kind == "transformer" else self.trunk(_bag(b, "st", self.state_emb.weight, idx, off))
+        e = _bag(b, "e", self.event_emb.weight, b.e_idx, b.e_off, mean=True)
         z, hn = self._memory(torch.cat([s, e], dim=-1), hidden, lengths)
         return s + z, hn
 
@@ -452,9 +665,10 @@ class PolicyNet(nn.Module):
     def initial_state(self, n: int = 1) -> torch.Tensor:
         return torch.zeros(n, self.state_size)
 
-    def forward(self, b: Batch, hidden: torch.Tensor | None = None, lengths: list[int] | None = None, max_options: int | None = None):
+    def forward(self, b: Batch, hidden: torch.Tensor | None = None, lengths: list[int] | SequenceLayout | None = None, max_options: int | None = None):
         """Returns (logits (B, max_opts), values (B,), new hidden (B, state_size) or None).
-        `max_options` (= n_opts.max()) can be passed to avoid a device sync."""
+        `max_options` (= n_opts.max()) can be passed to avoid a device sync.
+        Sequence mode takes `lengths` or, for padded pieces, a SequenceLayout."""
         hp = hv = None
         if hidden is not None:
             hp, hv = hidden[:, : self.hidden].contiguous(), hidden[:, self.hidden :].contiguous()
@@ -478,7 +692,7 @@ class PolicyNet(nn.Module):
         """Summed option token embeddings, plus the projected vectors of the
         entities an option points at (tokens >= option_dim)."""
         if b.ot_idx is not None:  # pointers already split off (`structure`), no masks
-            a = self.option_emb(b.ot_idx, b.ot_off)
+            a = _bag(b, "ot", self.option_emb.weight, b.ot_idx, b.ot_off)
             if self.pointer is not None:
                 a = a.index_add(0, b.p_opt, self.pointer(self.policy_core.entities[0].index_select(0, b.p_ent)))
             return a
