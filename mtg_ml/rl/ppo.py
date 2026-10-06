@@ -31,7 +31,7 @@ from itertools import accumulate
 import torch
 from torch import nn
 
-from .model import PAD_FIELDS, PolicyNet, SequenceLayout, bucket, collate_packed, masked_entropy, packed_tensors, pad_fits, pad_sequences, pad_sizes, pad_split, padded_batch, split, structure
+from .model import PAD_FIELDS, PolicyNet, SequenceLayout, bucket, collate_packed, packed_tensors, pad_fits, pad_sequences, pad_sizes, pad_split, padded_batch, split, structure
 from .rollout import Result
 
 STATS = ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac")
@@ -47,7 +47,7 @@ class PPOConfig:
     ent_coef: float = 0.01
     max_grad_norm: float = 0.5
     target_kl: float | None = 0.03  # stop the epoch loop early past this
-    capture: int = 1  # on CUDA, every step a CUDA graph replay over padded minibatches (0: plain eager steps)
+    capture: int = 2  # on CUDA: 1 every step a CUDA graph replay over padded minibatches, 2 also the forward and losses compiled by Inductor (~15% faster, ~10-30 s of compiling per process), 0 plain eager steps
 
 
 def make_optimizer(params, lr: float, device) -> torch.optim.Optimizer:
@@ -103,12 +103,13 @@ def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, 
     row weights `w` (0 for padded rows) and their sum `n`: means over the
     real rows only."""
     logits, values, _ = net(b, lengths=lengths, max_options=width)
-    logp = torch.log_softmax(logits, dim=-1).gather(1, a[:, None]).squeeze(1)
+    logp_all = torch.log_softmax(logits, dim=-1)
+    logp = logp_all.gather(1, a[:, None]).squeeze(1)
     ratio = (logp - olp).exp()
     mean = (lambda x: x.mean()) if w is None else (lambda x: (w * x).sum() / n)  # noqa: E731
     pg_loss = -mean(torch.min(ratio * ad, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * ad))
     v_loss = 0.5 * mean((values - rt).pow(2))
-    ent = mean(masked_entropy(logits))
+    ent = mean(-(logp_all.exp() * logp_all.masked_fill(torch.isinf(logits), 0.0)).sum(-1))  # masked_entropy, sharing the log_softmax
     loss = pg_loss + cfg.vf_coef * v_loss - cfg.ent_coef * ent
     with torch.no_grad():
         kl = mean((ratio - 1) - (logp - olp))
@@ -175,18 +176,20 @@ def _need(counts: dict, extra: dict) -> dict:
     return pad_sizes(counts) | {"width": extra["width"]}
 
 
-def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None):
+def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None, choose_gru=None):
     """The minibatches of an epoch padded to one set of shapes, packed as
     (pieces, ·) int64 and float32 tensors in `_layout` order, and the GRU
     batch of each, (trajectories, longest), rounded to 4 sizes per octave:
     the GRU's time is ~linear in both. `choose(counts, extra)` picks the
-    shapes (`_need` or a cached one they fit); `transpose` goes to
-    `pad_split`."""
+    shapes (`_need` or a cached one they fit), `choose_gru(shapes, gru)`
+    may pick a bigger GRU batch; `transpose` goes to `pad_split`."""
     dev = acts.device
     extra = {"width": int(width.max())}
     fields, shapes, counts = pad_split(big, bounds, lambda counts: choose(counts, extra), transpose)
     M, R = len(chunks), shapes["row"]
     gru = [(bucket(len(c), 4), bucket(max(c), 4)) for c in chunks]
+    if choose_gru:
+        gru = [choose_gru(shapes, g) for g in gru]
     pos_in, pos_out = pad_sequences(chunks, R, gru)
     n = torch.tensor(counts["row"], dtype=torch.long)
     piece = torch.repeat_interleave(torch.arange(M), n)
@@ -212,7 +215,8 @@ class _StepGraphs:
     the graphs when it changes (a reloaded optimizer state, a new learning
     rate)."""
 
-    MAX_SHAPES = 3  # each with a graph per GRU batch (~20)
+    MAX_SHAPES = 3  # each with a graph per GRU batch (~16)
+    MARGIN = 1.05  # a new shape has room for 5% more than the epoch that needed it: a shape is ~16 captures
 
     def __init__(self, net, opt, cfg):
         self.fingerprint = _StepGraphs.fingerprint_of(net, opt, cfg)
@@ -226,12 +230,31 @@ class _StepGraphs:
         params = [p for g in opt.param_groups for p in g["params"]]
         state = tuple(t.data_ptr() for p in params for t in opt.state.get(p, {}).values() if torch.is_tensor(t))
         groups = tuple((g["lr"], g["betas"], g["eps"], g["weight_decay"], g.get("amsgrad"), g.get("maximize")) for g in opt.param_groups)
-        return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm)
+        return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm, cfg.capture)
 
     def choose(self, counts: dict, extra: dict) -> dict:
-        """The smallest captured shape these pieces fit, else a new one."""
+        """The smallest captured shape these pieces fit, else a new one with
+        some room (MARGIN) that also fits every earlier epoch (the
+        elementwise max), so that the shapes settle within a few epochs."""
         fit = [dict(k) for k in self.graphs if pad_fits(dict(k), counts) and all(dict(k)[x] >= v for x, v in extra.items())]
-        return min(fit, key=lambda s: (s["row"], s["st"])) if fit else _need(counts, extra)
+        if fit:
+            return min(fit, key=lambda s: (s["row"], s["st"]))
+        roomy = {k: [int(x * self.MARGIN) for x in v] if k != "opt" else v for k, v in counts.items()}
+        new = _need(roomy, extra)
+        grown = {k: max([v] + [dict(c).get(k, 0) for c in self.graphs]) for k, v in new.items()}
+        grown["bag"] = grown["row"] + grown["ent"]
+        grown["opt"] = max(grown["opt"], bucket(max(o + grown["row"] - r for o, r in zip(counts["opt"], counts["row"]))))
+        return grown
+
+    def choose_gru(self, shapes: dict, gru: tuple) -> tuple:
+        """A captured GRU batch that fits `gru` = (trajectories, steps) and
+        costs at most 15% more (the GRU takes ~steps * (1.9 + 0.06 *
+        trajectories) us on an H100), else `gru`: rare combinations would
+        otherwise each cost a capture."""
+        cost = lambda g: g[1] * (1.9 + 0.06 * g[0])  # noqa: E731
+        have = [g for g in self.graphs.get(tuple(sorted(shapes.items())), {}) if g[0] >= gru[0] and g[1] >= gru[1]]
+        best = min(have, key=cost, default=None)
+        return best if best is not None and cost(best) <= 1.15 * cost(gru) else gru
 
     def run(self, net, opt, cfg, shapes: dict, gru: list[tuple], ints: torch.Tensor, flts: torch.Tensor) -> None:
         """One step per minibatch (row) of ints, flts; statistics summed into `acc`."""
@@ -259,13 +282,14 @@ class _StepGraphs:
 
     def _capture(self, net, opt, cfg, shapes, gru, ints, flts) -> tuple:
         t = time.perf_counter()
+        losses = _compiled_losses() if cfg.capture >= 2 else _padded_losses  # compiles in the warm-up, outside the capture
         si, sf = ints.clone(), flts.clone()
         _drop_entities(net)
         side, main = torch.cuda.Stream(), torch.cuda.current_stream()
         side.wait_stream(main)
         with torch.cuda.stream(side):  # lazy initialisation (cuDNN, cuBLAS) must not happen while capturing
             opt.zero_grad(set_to_none=True)
-            loss, _ = _padded_losses(net, cfg, shapes, gru, si, sf)
+            loss, _ = losses(net, cfg, shapes, gru, si, sf)
             loss.backward()
             del loss
         main.wait_stream(side)
@@ -275,12 +299,18 @@ class _StepGraphs:
         for g in opt.param_groups:
             g["capturable"] = True  # fused Adam keeps its step counts on the device either way; this only lifts the capture check
         graph = torch.cuda.CUDAGraph()
-        try:
-            with torch.cuda.graph(graph, pool=self.pool):
-                loss, stats = _padded_losses(net, cfg, shapes, gru, si, sf)
-                _step(net, opt, cfg, loss, FOLD_CLIP)
-                self.acc += stats
-                del loss, stats
+        side.wait_stream(main)
+        try:  # not `torch.cuda.graph`, which synchronizes and empties the allocator's cache on entry: ~100 ms per capture
+            with torch.cuda.stream(side):
+                graph.capture_begin(pool=self.pool)
+                try:
+                    loss, stats = losses(net, cfg, shapes, gru, si, sf)
+                    _step(net, opt, cfg, loss, FOLD_CLIP)
+                    self.acc += stats
+                    del loss, stats
+                finally:
+                    graph.capture_end()
+            main.wait_stream(side)
         finally:
             for g, c in zip(opt.param_groups, capturable):
                 g["capturable"] = c
@@ -288,6 +318,17 @@ class _StepGraphs:
         self.captures += 1
         self.capture_s += time.perf_counter() - t
         return graph, si, sf
+
+
+_COMPILED = []
+
+
+def _compiled_losses():
+    """`_padded_losses` compiled by Inductor (fuses the ~100 small kernels of
+    the losses and their backward); captured inside the step graphs."""
+    if not _COMPILED:
+        _COMPILED.append(torch.compile(_padded_losses))
+    return _COMPILED[0]
 
 
 def _drop_entities(net: PolicyNet) -> None:
@@ -351,7 +392,7 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
                 _step(net, opt, cfg, loss)
                 acc += stats
         else:
-            shapes, gru, ints, flts = _padded_epoch(big, bounds, chunks, acts, rec, width, graphs.choose if graphs else _need, transpose)
+            shapes, gru, ints, flts = _padded_epoch(big, bounds, chunks, acts, rec, width, graphs.choose if graphs else _need, transpose, graphs and graphs.choose_gru)
             del big
             if graphs:
                 graphs.run(net, opt, cfg, shapes, gru, ints, flts)

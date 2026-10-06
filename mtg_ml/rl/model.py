@@ -339,9 +339,14 @@ def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | No
     counts = dict(zip(keys, torch.stack([cnt[k] for k in keys]).tolist()))
     sizes = sizes(counts)
 
+    where = {}  # level -> (piece of each item, its position in the padded (pieces, size) layout)
+
     def place(x, lvl, pad, rebase=None):
         D, nl = sizes[lvl], cnt[lvl][:, None]
-        own = torch.repeat_interleave(piece, cnt[lvl], output_size=x.shape[0])
+        if lvl not in where:
+            own = torch.repeat_interleave(piece, cnt[lvl], output_size=x.shape[0])
+            where[lvl] = own, own * D + torch.arange(x.shape[0], device=dev) - start[lvl][own]
+        own, dest = where[lvl]
         if rebase is not None:
             x = x - start[rebase][own]
         j = torch.arange(D, device=dev).expand(M, D)
@@ -357,7 +362,6 @@ def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | No
             grid = to + torch.remainder(j - nl, sizes[pad[6:]] - to)
         else:  # a constant
             grid = torch.full((M, D), int(pad), dtype=torch.long, device=dev)
-        dest = own * D + torch.arange(x.shape[0], device=dev) - start[lvl][own]
         return grid.reshape(-1).index_copy(0, dest, x).view(M, D)
 
     out = {name: place(getattr(b, name).long(), lvl, pad, ref) for name, (lvl, ref, pad) in PAD_FIELDS.items()}

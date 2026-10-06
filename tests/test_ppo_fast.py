@@ -304,13 +304,16 @@ def test_capture_falls_back_to_eager_off_cuda(data):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA graphs")
-@pytest.mark.parametrize("trunk,value_net,memory", [("entity", "shared", "gru"), ("mlp", "separate", "gru"), ("entity", "shared", "none")])
-def test_captured_update_matches_the_eager_one(data, trunk, value_net, memory):
-    """Graph replays give the eager statistics and weights (to CUDA noise:
-    other reduction orders), reuse their graphs across updates, and recapture
-    after the optimizer state is replaced."""
+@pytest.mark.parametrize(
+    "trunk,value_net,memory,capture", [("entity", "shared", "gru", 1), ("mlp", "separate", "gru", 1), ("entity", "shared", "none", 1), ("entity", "shared", "gru", 2)]
+)
+def test_captured_update_matches_the_eager_one(data, trunk, value_net, memory, capture):
+    """Graph replays (capture=2: of the Inductor-compiled losses) give the
+    eager statistics and weights (to CUDA noise: other reduction orders),
+    reuse their graphs across updates, and recapture after the optimizer
+    state is replaced."""
     data = replace(data, logps=[lp + 0.3 * math.sin(i) for i, lp in enumerate(data.logps)])
-    cfg = PPOConfig(epochs=2, minibatch=128, target_kl=None)
+    cfg = PPOConfig(epochs=2, minibatch=128, target_kl=None, capture=capture)
     torch.manual_seed(0)
     nets = [PolicyNet(hidden=32, memory=memory, trunk=trunk, value_net=value_net).cuda()]
     nets.append(copy.deepcopy(nets[0]))

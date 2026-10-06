@@ -75,6 +75,7 @@ def main(argv=None) -> None:
     ap.add_argument("--epochs", type=int, default=4, help="timed epochs")
     ap.add_argument("--warmup-epochs", type=int, default=1)
     ap.add_argument("--iter-decisions", type=int, default=378_000)
+    ap.add_argument("--capture", type=int, default=2, help="PPOConfig.capture (2: also compile the forward and losses)")
     ap.add_argument("--mode", default=None, choices=("eager", "padded", "graph"), help="ppo_update mode (default: graph on CUDA)")
     ap.add_argument("--profile", action="store_true", help="cProfile the timed epochs")
     ap.add_argument("--torch-profile", action="store_true", help="torch.profiler table (CUDA kernels) of the timed epochs")
@@ -100,7 +101,7 @@ def main(argv=None) -> None:
     dev = torch.device(args.device)
     torch.manual_seed(0)
     net = PolicyNet(**config).to(dev)
-    cfg = PPOConfig(minibatch=args.minibatch, epochs=args.warmup_epochs, target_kl=None)
+    cfg = PPOConfig(minibatch=args.minibatch, epochs=args.warmup_epochs, target_kl=None, capture=args.capture)
     opt = make_optimizer(net.parameters(), cfg.lr, dev)
     gen = torch.Generator().manual_seed(0)
     sync = torch.cuda.synchronize if dev.type == "cuda" else (lambda: None)
@@ -112,6 +113,10 @@ def main(argv=None) -> None:
     pr = cProfile.Profile() if args.profile else None
     if pr:
         pr.enable()
+    from mtg_ml.rl import ppo
+
+    g0 = ppo._GRAPHS.get(opt)
+    caps0, cap_s0 = (g0.captures, g0.capture_s) if g0 else (0, 0.0)
     tp = None
     if args.torch_profile:
         from torch.profiler import ProfilerActivity, profile
@@ -133,12 +138,16 @@ def main(argv=None) -> None:
         f"in {dt:.2f}s = {dt / steps * 1000:.2f} ms/step; projected {dt * args.iter_decisions / n:.1f}s per iteration of "
         f"{args.iter_decisions} decisions x {args.epochs} epochs{mem}"
     )
-    from mtg_ml.rl import ppo
-
     g = ppo._GRAPHS.get(opt)
     print(
-        f"mode={args.mode or 'default'} minibatch={args.minibatch}: {dt / args.epochs:.3f} s/epoch = {dt / args.epochs * 250_000 / n:.3f} s per epoch of 250k decisions; "
-        f"warm-up epoch {warm:.2f}s" + (f", {g.captures} graphs captured in {g.capture_s:.2f}s, shapes {[dict(k) | {'gru': sorted(v)} for k, v in g.graphs.items()]}" if g else "")
+        f"mode={args.mode or 'default'} capture={args.capture} minibatch={args.minibatch}: {dt / args.epochs:.3f} s/epoch = {dt / args.epochs * 250_000 / n:.3f} s per epoch of 250k decisions; "
+        f"warm-up {warm:.2f}s"
+        + (
+            f"; {g.captures - caps0} graphs captured in the timed epochs ({g.capture_s - cap_s0:.2f}s; without them {(dt - g.capture_s + cap_s0) / args.epochs:.3f} s/epoch), "
+            f"{g.captures} in all; shapes {[dict(k) | {'gru': sorted(v)} for k, v in g.graphs.items()]}"
+            if g
+            else ""
+        )
     )
     print({k: round(v, 5) if isinstance(v, float) else v for k, v in stats.items()})
     if pr:
