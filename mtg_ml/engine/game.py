@@ -25,13 +25,12 @@ and action history.
 from __future__ import annotations
 
 import inspect
-import itertools
 import random
 from typing import Callable, Iterable
 
 from . import objects as O
 from .mana import ManaCost, RemainingCost, can_pay, pool_units
-from .objects import Card, Decision, Option, PendingTrigger, Player, StackItem, TargetSpec, TempEffect, TriggerDef
+from .objects import Card, Decision, Option, PendingTrigger, Player, StackItem, TargetSpec, TriggerDef
 
 STEPS = (
     "untap",

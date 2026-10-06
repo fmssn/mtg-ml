@@ -1,9 +1,9 @@
 import random
 
-from helpers import choose, new_game, pay, resolve_stack, scenario
+from helpers import choose, new_game, resolve_stack, scenario
 
 from mtg_ml.encode import encode_state, state_features
-from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, expand
+from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, expand
 from mtg_ml.engine.view import determinize, observe
 from mtg_ml.env import MTGEnv
 

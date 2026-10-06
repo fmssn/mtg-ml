@@ -36,7 +36,7 @@ New user-facing apps (replay viewer, dashboards) go under `apps/<name>/` and sho
 
 ## Working in this repo
 
-- Many sessions run in parallel worktrees. Keep PRs to one component, branch from `main`, and avoid editing shared hotspots (README.md, `.gitignore`, `play.py`, golden digests) unless the change needs it.
+- Many sessions run in parallel worktrees. Keep PRs to one component, branch from the default branch (`git remote set-head origin -a`, then `origin/HEAD`), and avoid editing shared hotspots (README.md, `.gitignore`, `play.py`, golden digests) unless the change needs it.
 - CI (`.github/workflows/ci.yml`) runs lint, the Python suite with CPU torch, and the native build + differential fuzz. It must be green before merge.
 - Mark tests that take more than a few seconds `@pytest.mark.slow`; GPU-only tests `@pytest.mark.gpu`.
 - Don't commit checkpoints, `runs/`, or large binaries.

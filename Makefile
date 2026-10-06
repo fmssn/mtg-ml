@@ -3,7 +3,7 @@
 PY ?= python
 export CARGO_TARGET_DIR ?= $(abspath $(shell git rev-parse --git-common-dir)/..)/.cargo-target
 
-.PHONY: setup native test test-fast lint fmt difftest golden
+.PHONY: setup native test test-fast lint lint-fix difftest golden
 
 setup:            ## editable install with dev + rl extras, then the native engine
 	uv pip install -e '.[dev,rl]' ruff "maturin>=1.5,<2"
@@ -21,7 +21,7 @@ test-fast:        ## skip tests marked slow
 lint:
 	ruff check .
 
-fmt:
+lint-fix:         ## apply ruff's safe autofixes (no formatter yet: the tree is not ruff-formatted)
 	ruff check --fix .
 
 difftest:         ## Python vs Rust engine in lockstep
