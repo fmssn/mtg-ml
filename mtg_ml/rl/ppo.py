@@ -216,7 +216,7 @@ class _StepGraphs:
     rate)."""
 
     MAX_SHAPES = 3  # each with a graph per GRU batch (~16)
-    MARGIN = 1.05  # a new shape has room for 5% more than the epoch that needed it: a shape is ~16 captures
+    MARGIN = 1.25  # a new shape has room for 25% more than the epoch that needed it: a shape is ~16-50 captures (seconds), and games grow over a long run (1.05 recaptured every few iterations: 1.7 -> 6 s per update)
 
     def __init__(self, net, opt, cfg):
         self.fingerprint = _StepGraphs.fingerprint_of(net, opt, cfg)
@@ -434,6 +434,9 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
             torch.cuda.empty_cache()
     out = {k: v / max(steps, 1) for k, v in zip(STATS, totals)}
     out["updates"] = steps
+    if graphs:
+        out["captures"] = graphs.captures - captures
+        out["graph_shapes"] = len(graphs.graphs)
     out["early_stop"] = stop
     out["explained_var"] = explained_var
     return out
