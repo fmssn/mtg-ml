@@ -15,21 +15,22 @@ throughput. With `inference="server"`:
   (action, log-prob, value) into the worker's shared output block, then
   answers on that worker's response queue.
 * recurrent state lives on the server: a GPU table of hidden states indexed
-  by (worker, slot), where a worker's slot is one (game, seat) of its job.
-  A request row flags `fresh` at the start of a sequence (zero state).
+  by (worker, slot), where a worker's slot is one (game, seat) of its live
+  games, reused when a game ends. A request row flags `fresh` at the start
+  of a sequence (zero state).
 * policies are identified by (checkpoint path, version) exactly like
-  `rollout.load_policy`; the server loads them on first use and drops older
-  versions of the same path.
+  `rollout.load_policy`; the server loads them on first use, and a new
+  learner version (version > 0) drops the previous ones, whatever their path.
 
-Each worker keeps two requests in flight (its games are split in two
-groups), so the CPU work of one group overlaps the GPU round trip of the
-other.
+Each worker keeps `Job.groups` requests in flight (its live games are split
+into groups), so the CPU work of one group overlaps the GPU round trip of
+the other. `InferenceServer.pool()` also hands every worker the pool's
+shared spec counters, so `rollout.run_specs` can stream games to them.
 """
 
 from __future__ import annotations
 
 import os
-import queue
 import time
 from array import array
 from dataclasses import dataclass
@@ -137,10 +138,14 @@ class InferenceClient:
 _CLIENT: InferenceClient | None = None
 
 
-def init_worker(counter, req_q, resp_qs, cpus=None) -> None:
+def init_worker(counter, req_q, resp_qs, cpus=None, claim=None) -> None:
     """Pool initializer for server mode: claim a worker id, pin to a CPU
-    (round robin over `cpus`, Linux) and connect."""
+    (round robin over `cpus`, Linux), connect, and take the pool's spec
+    counters (`rollout.connect`)."""
     global _CLIENT
+    from .rollout import connect
+
+    connect(claim)
     with counter.get_lock():
         wid = counter.value
         counter.value += 1
@@ -203,17 +208,14 @@ class _Server:
 
     def model(self, key):
         torch = self.torch
-        from .model import PolicyNet
+        from .rollout import load_net
 
         if key not in self.models:
             path, version = key
-            if version:
-                for k in [k for k in self.models if k[0] == path]:
+            if version:  # a new learner version replaces the others, whatever their path
+                for k in [k for k in self.models if k[1]]:
                     del self.models[k]
-            ck = torch.load(path, map_location="cpu", weights_only=False)
-            net = PolicyNet(**ck["config"])
-            net.load_state_dict(ck["model"])
-            net.eval().to(self.device)
+            net = load_net(path).to(self.device)
             if net.memory == "gru" and self.hidden is None:
                 self.hidden = torch.zeros(self.n_workers * SLOTS_PER_WORKER, net.state_size, device=self.device)
             if net.memory == "gru" and self.hidden.shape[1] != net.state_size:
@@ -426,6 +428,8 @@ class InferenceServer:
     def __init__(self, n_workers: int, cfg: ServerConfig | None = None, worker_cpus: tuple[int, ...] | None = None):
         import multiprocessing as mp
 
+        from .rollout import MAX_MATCHUPS
+
         self.ctx = mp.get_context("spawn")
         self.cfg = cfg or ServerConfig()
         self.n_workers = n_workers
@@ -437,11 +441,14 @@ class InferenceServer:
         self.resp_qs = [self.ctx.SimpleQueue() for _ in range(n_workers)]
         self.stats_q = self.ctx.SimpleQueue()
         self.counter = self.ctx.Value("i", 0)
+        self.claim = self.ctx.Array("i", MAX_MATCHUPS)  # spec counters of rollout.run_specs
         self.proc = self.ctx.Process(target=serve, args=(self.cfg, n_workers, self.req_q, self.resp_qs, self.stats_q), daemon=True, name="inference-server")
         self.proc.start()
 
     def pool(self):
-        return self.ctx.Pool(self.n_workers, initializer=init_worker, initargs=(self.counter, self.req_q, self.resp_qs, self.worker_cpus))
+        pool = self.ctx.Pool(self.n_workers, initializer=init_worker, initargs=(self.counter, self.req_q, self.resp_qs, self.worker_cpus, self.claim))
+        pool.claim = self.claim
+        return pool
 
     def stats(self) -> dict:
         self.req_q.put(("stats",))

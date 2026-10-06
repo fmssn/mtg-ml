@@ -55,7 +55,7 @@ def main(argv=None) -> None:
         g = G(match_decks(1), seed=s)
         while not g.over and len(samples) < args.requests * args.rows:
             st, opts = featurize(g, g.decision.player)
-            samples.append((st, opts, encode_event_hashes([1, 2, 3])))
+            samples.append((st, [len(o) for o in opts], [t for o in opts for t in o], encode_event_hashes([1, 2, 3])))  # flat form, as featurize_flat
             g.step(r.randrange(len(g.legal_options())))
         s += 1
     q = _ListQ()
