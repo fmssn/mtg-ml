@@ -295,19 +295,26 @@ class ServerConfig:
     request_ints: int = 1 << 18  # int32 words per request slot (a decision takes ~260)
     policy_slots: int = 32  # policies the stack holds before it grows (growing drops the CUDA graphs)
     graphs: bool = True  # CUDA graphs over padded shape buckets (CUDA only)
+    compile: bool = False  # torch.compile the forward (fuses its ~300 small kernels; CUDA only)
     max_graphs: int = 48
 
 
-def _bucket(n: int, lo: int) -> int:
-    """Smallest of lo * {1, 1.5} * 2^k that holds n."""
-    b = lo
-    while b < n:
-        b = b * 3 // 2 if (b & (b - 1)) == 0 else b * 4 // 3
-    return b
+# Padded shapes come in levels: level k has 32 * 1.5^k rows and, per row,
+# room for 4 options, 256 state, 32 event and 32 option tokens, and 16
+# entities (a decision averages 3, 216, ~10, 20 and 12). A batch runs at
+# the smallest level that holds every one of its sizes, so a run sees about
+# a dozen shapes (one CUDA graph each).
+_UNITS = (1, 4, 256, 32, 32, 16)  # rows, options, state / event / option tokens, entities
+
+
+def _level_dims(need: tuple) -> tuple:
+    rows = 32
+    while any(n > rows * u for n, u in zip(need, _UNITS)):
+        rows = -(-rows * 3 // 2 // 16) * 16
+    return tuple(rows * u for u in _UNITS)
 
 
 _KEEP: list = []
-_MINS = (64, 128, 8192, 1024, 1024, 1024)  # rows, options, state / event / option tokens, entities
 
 
 class _CAI:
@@ -326,6 +333,8 @@ class _Server:
         torch.set_num_threads(cfg.threads)
         self.cfg = cfg
         self.device = torch.device(cfg.device)
+        if self.device.type == "cuda" and self.device.index is None:
+            self.device = torch.device("cuda", torch.cuda.current_device())
         self.layout = L = layout or Layout(n_workers, cfg.groups, cfg.request_ints)
         self.n_workers = n_workers
         self.resp_qs = resp_qs
@@ -375,6 +384,8 @@ class _Server:
         self.state_size = None
         self.graphs: dict = {}
         self.pool = None
+        self.pad_eager = False  # eager forward at the padded shapes (profiling the graphs' kernels)
+        self._compiled = None
         self.stats = {"batches": 0, "rows": 0, "requests": 0, "busy_s": 0.0, "prep_s": 0.0, "infer_s": 0.0, "reply_s": 0.0, "padded_rows": 0, "graphs": 0, "eager": 0, "legacy": 0, "capture_s": 0.0}
 
     # -- policies --------------------------------------------------------
@@ -437,6 +448,8 @@ class _Server:
             new.tables[name][: old.capacity * old.dims[name]].copy_(t[: old.capacity * old.dims[name]])
         for name, t in old.dense.items():
             new.dense[name][: old.capacity].copy_(t)
+        for name, t in old.wt.items():
+            new.wt[name][: old.capacity].copy_(t)
         self.free = list(range(new.capacity - 1, old.capacity - 1, -1))
         self.stack = new
         self.graphs.clear()  # they point at the old tensors
@@ -501,7 +514,7 @@ class _Server:
         R, N, S, Ev, O, E = (int(x) for x in tot)
         need = (R + 1, N + 1, S, Ev, O, E + 1)
         use_graphs = self.device.type == "cuda" and self.cfg.graphs
-        dims = self._choose(need) if use_graphs else need
+        dims = _level_dims(need) if use_graphs or self.pad_eager else need
         R_p = dims[0]
         Q, n = self.Q, len(pend)
         hl = 8 + 7 * Q + 3 * R_p
@@ -533,22 +546,6 @@ class _Server:
             self._forward(hdr, dims)
         if self.device.type == "cuda":
             torch.cuda.current_stream().synchronize()
-
-    def _choose(self, need: tuple) -> tuple:
-        """The padded shape to run: a captured one that covers `need` with at
-        most 2x padding per dimension, else need's own buckets."""
-        own = tuple(_bucket(x, lo) for x, lo in zip(need, _MINS))
-        if own in self.graphs:
-            return own
-        best, cost = None, None
-        for k in self.graphs:
-            if all(a >= b for a, b in zip(k, need)):
-                c = max(a / b for a, b in zip(k, own))
-                if c <= 2 and (cost is None or c < cost):
-                    best, cost = k, c
-        if best is not None or len(self.graphs) >= self.cfg.max_graphs:
-            return best or own
-        return own
 
     def _capture(self, dims: tuple):
         """Capture the forward for padded shape `dims` (None: run eagerly).
@@ -583,9 +580,20 @@ class _Server:
         (action, log-prob, value) into its reply area. Fixed shapes, no
         host syncs: everything a size depends on is in `hdr`."""
         torch = self.torch
+        noise = torch.rand(dims[1], device=self.region.device)
+        if self.cfg.compile and self.device.type == "cuda" and self._compiled is None:
+            self._compiled = torch.compile(self._body, dynamic=True)
+        out, pos, hn, gslot = (self._compiled or self._body)(hdr, noise, *dims)
+        if hn is not None:
+            self.hidden.index_copy_(0, gslot, hn)
+        self.region_f[pos] = out
+
+    def _body(self, hdr, noise, R_p: int, N_p: int, S_p: int, Ev_p: int, O_p: int, E_p: int):
+        """`_forward` without its writes: (replies, their positions in the
+        data block, new hidden states, their rows)."""
+        torch = self.torch
         from .stacked import StepInput, excl_cumsum, segments, step_forward
 
-        R_p, N_p, S_p, Ev_p, O_p, E_p = dims
         Q = self.Q
         region = self.region
         dev = region.device
@@ -622,10 +630,10 @@ class _Server:
             s_len=s_len, e_len=e_len, n_opt=n_opt, s_tok=s_tok, s_row=s_row, s_valid=s_valid, ev_tok=ev_tok, ev_valid=ev_valid,
             o_len=o_len, o_row=o_row, ot_tok=ot_tok, ot_opt=ot_opt, ot_valid=ot_valid, n_ent=E_p,
         )  # fmt: skip
-        act, logp, val = step_forward(self.stack, x, self.hidden)
+        act, logp, val, hn = step_forward(self.stack, x, self.hidden, noise, write_hidden=False)
         out = torch.stack([act.to(torch.float32), logp, val], 1)
         pos = torch.where(rvalid, out_base[req] + 3 * loc, self.layout.dummy_out)
-        self.region_f[(pos[:, None] + ar(3)).view(-1)] = out.view(-1)
+        return out.view(-1), (pos[:, None] + ar(3)).view(-1), hn, x.gslot
 
     def _legacy(self, pend, row_req, row_loc, row_pol) -> None:
         """Policies outside the stack (transformer trunk, another config):

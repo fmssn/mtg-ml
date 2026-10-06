@@ -228,7 +228,7 @@ def test_step_structure_matches_model_structure():
     assert torch.allclose(mine[st["e_bag"][:E]], theirs[ref.e_bag.long()])
     assert torch.equal(st["e_row"][:E], ref.e_row.long())
     # pointers: (option, entity) pairs
-    is_ptr = st["ptr_w"][:, 0].bool()
+    is_ptr = st["ptr_w"].bool()
     mine_ptr = sorted(zip(x.ot_opt[is_ptr].tolist(), st["ptr_ent"][is_ptr].tolist()))
     assert mine_ptr == sorted(zip(ref.p_opt.tolist(), ref.p_ent.tolist())) and mine_ptr
     # padded entities and tokens land in padded rows and bags only

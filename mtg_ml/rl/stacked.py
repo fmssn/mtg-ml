@@ -50,9 +50,10 @@ if triton is not None:
 
     @triton.jit
     def _grouped_linear_kernel(X, W, Bias, Y, POL, M, N: tl.constexpr, K: tl.constexpr, HAS_BIAS: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr):
-        """Y[i] = X[i] @ W[POL[i]].T (+ Bias[POL[i]]) for rows sorted by POL:
-        a tile of rows loops over the few policies it spans, loading only
-        the rows of the current one (fp32, IEEE products: no TF32)."""
+        """Y[i] = X[i] @ W[POL[i]] (+ Bias[POL[i]]) for rows sorted by POL, W
+        (slots, K, N): a tile of rows loops over the few policies it spans,
+        loading only the rows of the current one (fp32, IEEE products: no
+        TF32)."""
         pid_m = tl.program_id(0)
         pid_n = tl.program_id(1)
         rm = pid_m * BM + tl.arange(0, BM)
@@ -68,7 +69,7 @@ if triton is not None:
             for k0 in range(0, K, BK):
                 kk = k0 + rk
                 a = tl.load(X + rm[:, None] * K + kk[None, :], mask=sel[:, None] & (kk[None, :] < K), other=0.0)
-                b = tl.load(W + q * N * K + rn[None, :] * K + kk[:, None], mask=(rn[None, :] < N) & (kk[:, None] < K), other=0.0)
+                b = tl.load(W + q * N * K + kk[:, None] * N + rn[None, :], mask=(rn[None, :] < N) & (kk[:, None] < K), other=0.0)
                 acc += tl.dot(a, b, input_precision="ieee")
             if HAS_BIAS:
                 bias = tl.load(Bias + q * N + rn, mask=rn < N, other=0.0)
@@ -76,21 +77,40 @@ if triton is not None:
         tl.store(Y + rm[:, None] * N + rn[None, :], acc, mask=valid[:, None] & (rn[None, :] < N))
 
 
-def grouped_linear(x: torch.Tensor, w: torch.Tensor, b: torch.Tensor | None, pol: torch.Tensor) -> torch.Tensor:
+if triton is not None:
+    # An opaque op for torch.compile: the compiled forward fuses around it.
+
+    @torch.library.custom_op("mtg::grouped_linear", mutates_args=())
+    def _grouped_linear_op(x: torch.Tensor, wt: torch.Tensor, b: torch.Tensor | None, pol: torch.Tensor) -> torch.Tensor:
+        x = x.contiguous()
+        M, K = x.shape
+        N = wt.shape[2]
+        y = torch.empty(M, N, device=x.device, dtype=x.dtype)
+        # Tiles measured on an H100 (h128, 26 policies): small batches need many programs.
+        BM, BN, BK, warps = (16, 32, 32, 2) if M < 4096 else (32, 128, 32, 4)
+        grid = (triton.cdiv(M, BM), triton.cdiv(N, BN))
+        _grouped_linear_kernel[grid](x, wt, wt if b is None else b, y, pol, M, N, K, b is not None, BM, BN, BK, num_warps=warps)
+        return y
+
+    @_grouped_linear_op.register_fake
+    def _(x, wt, b, pol):
+        return x.new_empty(x.shape[0], wt.shape[2])
+
+
+def grouped_linear(x: torch.Tensor, w, b: torch.Tensor | None, pol: torch.Tensor) -> torch.Tensor:
     """y[i] = x[i] @ w[pol[i]].T + b[pol[i]] for `pol` non-decreasing; w is
-    (slots, out, in) as nn.Linear stores it, b (slots, out)."""
+    (slots, out, in) as nn.Linear stores it, or (that, its (slots, in, out)
+    transpose) as `PolicyStack.lin` holds it; b (slots, out)."""
+    w, wt = w if isinstance(w, tuple) else (w, None)
     M, K = x.shape
     N = w.shape[1]
     if N == 1:  # a dot product per row: gather the weight row
         y = (x * w[pol, 0]).sum(1, keepdim=True)
         return y if b is None else y + b[pol]
     if x.is_cuda and triton is not None:
-        x = x.contiguous()
-        y = torch.empty(M, N, device=x.device, dtype=x.dtype)
-        BM, BN, BK = 32, 64, 32
-        grid = (triton.cdiv(M, BM), triton.cdiv(N, BN))
-        _grouped_linear_kernel[grid](x, w, w if b is None else b, y, pol, M, N, K, b is not None, BM, BN, BK)
-        return y
+        if wt is None:
+            wt = w.transpose(1, 2).contiguous()
+        return torch.ops.mtg.grouped_linear(x, wt, b, pol)
     # Host loop over the runs of equal policy (syncs once on CUDA; fine on the CPU).
     y = x.new_empty(M, N)
     vals, counts = torch.unique_consecutive(pol, return_counts=True)
@@ -135,11 +155,16 @@ class PolicyStack:
         self.dims = _table_dims(config)
         self.tables: dict[str, torch.Tensor] = {}
         self.dense: dict[str, torch.Tensor] = {}
+        self.wt: dict[str, torch.Tensor] = {}  # (slots, in, out) copies of the matrices: the kernel reads them along `out`
         for name, shape in shapes.items():
             if name in self.dims:  # rows of slot k: [k * dim, (k + 1) * dim); the last row stays zero
                 self.tables[name] = torch.zeros(capacity * self.dims[name] + 1, shape[1], device=self.device)
             else:
                 self.dense[name] = torch.zeros(capacity, *shape, device=self.device)
+                if len(shape) == 2 and shape[0] > 1:
+                    self.wt[name] = torch.zeros(capacity, shape[1], shape[0], device=self.device)
+        # what the forward reads: matrices as (w, transposed w), the rest as is
+        self.lin = {k: (v, self.wt[k]) if k in self.wt else v for k, v in self.dense.items()}
 
     @staticmethod
     def supports(config: dict) -> bool:
@@ -155,6 +180,8 @@ class PolicyStack:
                 t[slot * d : (slot + 1) * d].copy_(sd[name], non_blocking=True)
             for name, t in self.dense.items():
                 t[slot].copy_(sd[name], non_blocking=True)
+            for name, t in self.wt.items():
+                t[slot].copy_(self.dense[name][slot].t())
 
     def nbytes(self) -> int:
         return sum(t.numel() * t.element_size() for t in [*self.tables.values(), *self.dense.values()])
@@ -203,21 +230,49 @@ def segments(lengths: torch.Tensor, size: int):
     return seg, pos - (ends - lengths)[seg]
 
 
+PAD_CHUNK = 64
+
+
+def _sum_into(out: torch.Tensor, idx: torch.Tensor, src: torch.Tensor) -> torch.Tensor:
+    """out[idx[i]] += src[i] along dim 0, with atomics (scatter_add: compiled
+    index_add becomes a sort-based index_put, ~1 ms per call)."""
+    if src.dim() == 2:
+        idx = idx.unsqueeze(1).expand(-1, src.shape[1])
+    return out.scatter_add_(0, idx, src)
+
+
+def _bags(bag: torch.Tensor, total: torch.Tensor, n_bags: int):
+    """Offsets for an embedding bag whose first `total` tokens go to `bag`
+    (sorted) and whose padding (the tail) goes to extra bags of PAD_CHUNK
+    tokens after the n_bags real ones: one bag with all the padding would be
+    summed by one thread block, milliseconds at 100k tokens. The ids are
+    sorted, so each offset is a binary search (no atomics)."""
+    size = bag.shape[0]
+    pad = torch.arange(size, device=bag.device) - total
+    bag = torch.where(pad < 0, bag, n_bags + pad.clamp(min=0) // PAD_CHUNK)
+    return torch.searchsorted(bag, torch.arange(n_bags + -(-size // PAD_CHUNK), device=bag.device))
+
+
+def _bag_sum(idx, table, off, n_bags: int, mode: str = "sum"):
+    return F.embedding_bag(idx, table, off, mode=mode)[:n_bags]
+
+
 def _core(stack: PolicyStack, c: str, x: StepInput, st: dict, hidden: torch.Tensor | None):
     """One _Core (policy or value) on the batch: (c (R_p, H), new hidden or None)."""
-    T, D = stack.tables, stack.dense
+    T, D = stack.tables, stack.lin
     pol = x.pol
     if stack.config["trunk"] == "entity":
-        bags = F.embedding_bag(st["s_emb"], T[f"{c}.state.emb.weight"], st["bag_off"], mode="sum")
+        bags = _bag_sum(st["s_emb"], T[f"{c}.state.emb.weight"], st["bag_off"], st["n_bags"])
         e_pol = pol[st["e_row"]]
         ents = torch.relu(grouped_linear(torch.relu(bags.index_select(0, st["e_bag"])), D[f"{c}.state.ent.1.weight"], D[f"{c}.state.ent.1.bias"], e_pol))
-        g = bags.index_select(0, st["g_bag"]).index_add(0, st["e_row"], ents)
+        E_p = ents.shape[0]
+        g = bags.index_select(0, st["g_bag"]) + _bag_sum(torch.arange(E_p, device=ents.device), ents, st["ent_off"], pol.shape[0])
     else:
         ents = None
-        g = F.embedding_bag(st["s_emb"], T[f"{c}.state_emb.weight"], st["s_off"], mode="sum")
+        g = _bag_sum(st["s_emb"], T[f"{c}.state_emb.weight"], st["s_off"], pol.shape[0])
     h = torch.relu(grouped_linear(torch.relu(g), D[f"{c}.trunk.1.weight"], D[f"{c}.trunk.1.bias"], pol))
     s = torch.relu(grouped_linear(h, D[f"{c}.trunk.3.weight"], D[f"{c}.trunk.3.bias"], pol))
-    e = F.embedding_bag(st["ev_emb"], T[f"{c}.event_emb.weight"], st["ev_off"], mode="mean")
+    e = _bag_sum(st["ev_emb"], T[f"{c}.event_emb.weight"], st["ev_off"], pol.shape[0], mode="mean")
     xe = torch.cat([s, e], 1)
     if stack.config["memory"] == "none":
         return s + torch.relu(grouped_linear(xe, D[f"{c}.mix.0.weight"], D[f"{c}.mix.0.bias"], pol)), None, ents
@@ -245,42 +300,45 @@ def structure(stack: PolicyStack, x: StepInput) -> dict:
     if cfg["trunk"] == "entity":
         # Bags in token order: a row's global features, then each of its
         # entities (opened by a separator, which looks up the zero row).
-        sep_l = sep.long()
-        csum = torch.cumsum(sep_l, 0)
-        n_ent = torch.zeros(R_p, dtype=torch.long, device=dev).index_add_(0, x.s_row, sep_l)
+        csum = torch.cumsum(sep.long(), 0)
+        s_start = excl_cumsum(x.s_len)
+        cx = torch.cat([csum.new_zeros(1), csum])
+        n_ent = cx[s_start + x.s_len] - cx[s_start]  # separators per row
         ent_base = excl_cumsum(n_ent)
         base_t = ent_base[x.s_row]
         bag = torch.where(csum > base_t, x.s_row + csum, x.s_row + base_t)
-        bag_cnt = torch.zeros(R_p + E_p, dtype=torch.long, device=dev).index_add_(0, bag, torch.ones_like(bag))
-        st["bag_off"] = excl_cumsum(bag_cnt)
+        st["bag_off"] = _bags(bag, x.s_len.sum(), R_p + E_p)
+        st["n_bags"] = R_p + E_p
         e_row, _ = segments(n_ent, E_p)
         st["e_row"] = e_row
         st["e_bag"] = e_row + torch.arange(E_p, device=dev) + 1
         st["g_bag"] = torch.arange(R_p, device=dev) + ent_base
+        st["ent_off"] = _bags(e_row, n_ent.sum(), R_p)  # each row's entities, as bags over the entity vectors
         st["ent_base"] = ent_base
     else:
-        st["s_off"] = excl_cumsum(x.s_len)
+        st["s_off"] = _bags(x.s_row, x.s_len.sum(), R_p)
     ev_row = segments(x.e_len, x.ev_tok.shape[0])[0]
     st["ev_emb"] = torch.where(x.ev_valid, x.ev_tok + x.pol[ev_row] * od, zero_o)
-    st["ev_off"] = excl_cumsum(x.e_len)
+    st["ev_off"] = _bags(ev_row, x.e_len.sum(), R_p)
     ptr = x.ot_tok >= od
     t_row = x.o_row[x.ot_opt]
     st["o_emb"] = torch.where(x.ot_valid & ~ptr, x.ot_tok + x.pol[t_row] * od, zero_o)
-    st["o_off"] = excl_cumsum(x.o_len)
-    if cfg["trunk"] == "entity":
+    st["o_off"] = _bags(x.ot_opt, x.o_len.sum(), x.o_len.shape[0])
+    if cfg["trunk"] == "entity":  # pointer tokens: bags over the entity vectors, weight 1 (other tokens 0)
         is_ptr = x.ot_valid & ptr
-        st["ptr_w"] = is_ptr.unsqueeze(1).float()
+        st["ptr_w"] = is_ptr.float()
         st["ptr_ent"] = torch.where(is_ptr, st["ent_base"][t_row] + x.ot_tok - od, 0).clamp_(max=E_p - 1)
     return st
 
 
-def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | None, noise: torch.Tensor | None = None):
+def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | None, noise: torch.Tensor | None = None, write_hidden: bool = True):
     """Forward + sampling of a padded batch. Returns (action, log-prob,
     value), each (R_p,); writes the new hidden states into `hidden_table`
-    at `x.gslot`. `noise` (N_p,) uniform in (0, 1) for the Gumbel-max draw
-    (default: drawn here)."""
+    at `x.gslot` (write_hidden=False: returns them as a fourth item, None
+    without memory, for the caller to write). `noise` (N_p,) uniform in
+    (0, 1) for the Gumbel-max draw (default: drawn here)."""
     cfg = stack.config
-    D = stack.dense
+    D = stack.lin
     pol = x.pol
     st = structure(stack, x)
     H = cfg["hidden"]
@@ -298,12 +356,13 @@ def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | 
     else:
         values = grouped_linear(c, D["value_head.weight"], D["value_head.bias"], pol)[:, 0]
     if hn is not None:
-        hidden_table.index_copy_(0, x.gslot, hn)
+        if write_hidden:
+            hidden_table.index_copy_(0, x.gslot, hn)
     # options
     o_pol = pol[x.o_row]
-    a = F.embedding_bag(st["o_emb"], stack.tables["option_emb.weight"], st["o_off"], mode="sum")
+    a = _bag_sum(st["o_emb"], stack.tables["option_emb.weight"], st["o_off"], x.o_len.shape[0])
     if cfg["trunk"] == "entity":  # pointer(sum of entities) = sum of pointer(entity): Linear without bias
-        pe = torch.zeros_like(a).index_add_(0, x.ot_opt, ents.index_select(0, st["ptr_ent"]) * st["ptr_w"])
+        pe = F.embedding_bag(st["ptr_ent"], ents, st["o_off"], mode="sum", per_sample_weights=st["ptr_w"])[: a.shape[0]]
         a = a + grouped_linear(pe, D["pointer.weight"], None, o_pol)
     a = torch.relu(grouped_linear(torch.relu(a), D["option_mlp.1.weight"], D["option_mlp.1.bias"], o_pol))
     cr = c.index_select(0, x.o_row)
@@ -313,7 +372,7 @@ def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | 
     R_p, N_p = pol.shape[0], scores.shape[0]
     neg = torch.full((R_p,), float("-inf"), device=scores.device)
     m = neg.scatter_reduce(0, x.o_row, scores, "amax")
-    lse = m + torch.log(torch.zeros_like(m).index_add_(0, x.o_row, torch.exp(scores - m[x.o_row])))
+    lse = m + torch.log(_sum_into(torch.zeros_like(m), x.o_row, torch.exp(scores - m[x.o_row])))
     if noise is None:
         noise = torch.rand(N_p, device=scores.device)
     key = scores - torch.log(-torch.log(noise.clamp(min=1e-30)))
@@ -324,7 +383,7 @@ def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | 
     act = big.scatter_reduce(0, x.o_row, torch.where(key == km[x.o_row], pos, N_p), "amin")
     chosen = (first + act).clamp_(max=N_p - 1)
     logp = scores.index_select(0, chosen) - lse
-    return act, logp, values
+    return (act, logp, values) if write_hidden else (act, logp, values, hn)
 
 
 # ---------------------------------------------------------------------------
