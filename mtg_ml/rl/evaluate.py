@@ -13,6 +13,8 @@ against `bot` that is the project benchmark (learner Jund vs the Mono Blue
 Terror / Delver bot), see `benchmark`. Scores count a draw as half a win; the
 interval is Wilson 95%. With --bo3 each seed is a best-of-three match
 (`mtg_ml.match` rules: sideboarded games 2/3, loser starts the next game).
+`evaluate_policy` is the trainer's periodic evaluation, run in a process of
+its own (`rl/collect.py`, `rl/train.py`).
 """
 
 from __future__ import annotations
@@ -103,6 +105,25 @@ def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: in
     if bo3_matches:
         s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, jund_only=True)["jund"]
         out.update({"bench/jund_vs_bot_bo3": s, "bench/jund_vs_bot_bo3_ci": ci, "bench/jund_vs_bot_bo3_n": n})
+    return out
+
+
+def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, eval_games: int, eval_bo3_matches: int, bench_games: int, bench_bo3_matches: int, max_turns: int = 100, inference: str = "local") -> dict:
+    """The trainer's evaluation of a policy file: learner vs the random agent,
+    the scripted bots and the oldest pool snapshot `pool0` on paired seeds
+    (game 1 decks), best-of-three matches against the bots, and the
+    benchmark. Keys `eval/<opponent>/<deck>` (+ `_ci`) and `bench/*`. Runs on
+    any pool (`rl.collect` calls it as `fn(pool, *args)`)."""
+    out = {}
+    for name, opp in (("random", RANDOM), ("bot", BOT), ("pool0", pool0)):
+        res = head_to_head(procs, policy, opp, eval_games, n_jobs, version, max_turns, inference)
+        for deck in ("jund", "blue"):
+            out[f"eval/{name}/{deck}"], out[f"eval/{name}/{deck}_ci"], _ = res[deck]
+    if eval_bo3_matches:
+        res = head_to_head_bo3(procs, policy, BOT, eval_bo3_matches, n_jobs, version, max_turns, inference)
+        for deck in ("jund", "blue"):
+            out[f"eval/bot_bo3/{deck}"], out[f"eval/bot_bo3/{deck}_ci"], _ = res[deck]
+    out.update(benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference))
     return out
 
 
