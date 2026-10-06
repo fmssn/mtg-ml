@@ -33,14 +33,14 @@ options of that decision.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 from torch import nn
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
+from torch.nn.utils.rnn import PackedSequence
 
 from .features import OPTION_DIM, STATE_DIM
-from .samples import PackedSamples
+from .samples import FIELDS, PackedSamples
 
 MEMORY_KINDS = ("gru", "none")
 
@@ -56,9 +56,22 @@ class Batch:
     o_row: torch.Tensor  # (N,) decision each option belongs to
     o_pos: torch.Tensor  # (N,) position of the option within its decision
     n_opts: torch.Tensor  # (B,)
+    # The entity structure, precomputed by `structure` for training. When these
+    # are None (rollouts, the inference server) the modules derive it with
+    # boolean masks, each of which waits for the device.
+    st_idx: torch.Tensor | None = None  # state tokens without the entity separators
+    st_off: torch.Tensor | None = None  # (B,) offsets into st_idx
+    bag_off: torch.Tensor | None = None  # (B + E,) bags of st_idx: each sample's global features, then each of its entities
+    g_bag: torch.Tensor | None = None  # (B,) bag of each sample's global features
+    e_bag: torch.Tensor | None = None  # (E,) bag of each entity
+    e_row: torch.Tensor | None = None  # (E,) sample of each entity
+    ot_idx: torch.Tensor | None = None  # option tokens without the entity pointers
+    ot_off: torch.Tensor | None = None  # (N,) offsets into ot_idx
+    p_opt: torch.Tensor | None = None  # (P,) option of each entity pointer
+    p_ent: torch.Tensor | None = None  # (P,) entity it points at (row of the batch's entity vectors)
 
     def to(self, device) -> "Batch":
-        return Batch(*(getattr(self, f).to(device) for f in self.__dataclass_fields__))
+        return Batch(*(None if x is None else x.to(device) for x in (getattr(self, f) for f in self.__dataclass_fields__)))
 
 
 def collate(samples) -> Batch:
@@ -92,39 +105,132 @@ def _excl(x: torch.Tensor) -> torch.Tensor:
 def _segments(flat: torch.Tensor, start: torch.Tensor, length: torch.Tensor):
     """Concatenate flat[start[i] : start[i] + length[i]]; returns (values, offsets)."""
     off = _excl(length)
-    idx = torch.repeat_interleave(start - off, length) + torch.arange(int(length.sum()))
+    idx = torch.repeat_interleave(start - off, length) + torch.arange(int(length.sum()), device=flat.device)
     return flat[idx], off
 
 
-def _packed_tensors(ps: PackedSamples) -> dict:
-    if ps._cache is None:
-        t = {}
-        for f in ("s_len", "e_len", "n_opts", "o_len", "s_idx", "e_idx", "o_idx"):
-            a = getattr(ps, f)
-            t[f] = torch.frombuffer(a, dtype=torch.int32).long() if len(a) else torch.zeros(0, dtype=torch.long)
-        t["s_start"], t["e_start"], t["opt_start"], t["o_start"] = _excl(t["s_len"]), _excl(t["e_len"]), _excl(t["n_opts"]), _excl(t["o_len"])
-        ps._cache = t
-    return ps._cache
+def packed_tensors(ps: PackedSamples, device=None) -> dict:
+    """The fields of `ps` as long tensors plus the start of every segment:
+    cached on the CPU, or built on `device` from the int32 arrays (half the
+    bytes to copy). `collate_packed` takes either."""
+    if device is None or torch.device(device).type == "cpu":
+        if ps._cache is None:
+            ps._cache = _with_starts({f: _ints(getattr(ps, f)).long() for f in FIELDS})
+        return ps._cache
+    return _with_starts({f: _ints(getattr(ps, f)).to(device).long() for f in FIELDS})
 
 
-def collate_packed(ps: PackedSamples, idx=None) -> Batch:
-    """Batch of samples `idx` (default: all, in order) of a PackedSamples."""
-    t = _packed_tensors(ps)
+def _ints(a) -> torch.Tensor:
+    return torch.frombuffer(a, dtype=torch.int32) if len(a) else torch.zeros(0, dtype=torch.int32)
+
+
+def _with_starts(t: dict) -> dict:
+    t["s_start"], t["e_start"], t["opt_start"], t["o_start"] = _excl(t["s_len"]), _excl(t["e_len"]), _excl(t["n_opts"]), _excl(t["o_len"])
+    return t
+
+
+def collate_packed(ps: PackedSamples | dict, idx=None) -> Batch:
+    """Batch of samples `idx` (default: all, in order) of a PackedSamples, or
+    of its `packed_tensors` on a device (then built there)."""
+    t = ps if isinstance(ps, dict) else packed_tensors(ps)
+    dev = t["n_opts"].device
     if idx is None:
         no = t["n_opts"]
         s_v, s_off = t["s_idx"], _excl(t["s_len"])
         e_v, e_off = t["e_idx"], _excl(t["e_len"])
         o_v, o_off = t["o_idx"], _excl(t["o_len"])
     else:
-        rows = torch.as_tensor(idx, dtype=torch.long)
+        rows = torch.as_tensor(idx, dtype=torch.long, device=dev)
         no = t["n_opts"][rows]
         s_v, s_off = _segments(t["s_idx"], t["s_start"][rows], t["s_len"][rows])
         e_v, e_off = _segments(t["e_idx"], t["e_start"][rows], t["e_len"][rows])
-        opt_ids = torch.repeat_interleave(t["opt_start"][rows] - _excl(no), no) + torch.arange(int(no.sum()))
+        opt_ids = torch.repeat_interleave(t["opt_start"][rows] - _excl(no), no) + torch.arange(int(no.sum()), device=dev)
         o_v, o_off = _segments(t["o_idx"], t["o_start"][opt_ids], t["o_len"][opt_ids])
-    o_row = torch.repeat_interleave(torch.arange(no.shape[0]), no)
-    o_pos = torch.arange(o_row.shape[0]) - torch.repeat_interleave(_excl(no), no)
+    o_row = torch.repeat_interleave(torch.arange(no.shape[0], device=dev), no)
+    o_pos = torch.arange(o_row.shape[0], device=dev) - torch.repeat_interleave(_excl(no), no)
     return Batch(s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, no.clone())
+
+
+def structure(b: Batch, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM) -> Batch:
+    """`b` with the entity structure filled in: the state tokens split at the
+    separators (`state_dim`) into each sample's global bag and entity bags,
+    and the option tokens split into hashed tokens and entity pointers
+    (`option_dim + k`). The same derivation as the mask-based paths of
+    `EntityEncoder` and `PolicyNet._options`, with the same host syncs, so it
+    is meant for a whole epoch at once; `split` then cuts minibatches out of
+    it without any."""
+    dev = b.s_idx.device
+    B, N = b.s_off.shape[0], b.o_off.shape[0]
+    s_idx, o_idx = b.s_idx.long(), b.o_idx.long()
+    s_len = _lengths(b.s_off, s_idx.shape[0])
+    rows = torch.repeat_interleave(torch.arange(B, device=dev), s_len)
+    sep = (s_idx == state_dim).long()
+    csum = torch.cumsum(sep, 0)
+    seg = csum - (csum - sep)[b.s_off.long()][rows]  # entity number within the sample, 0 = global
+    n_ent = torch.zeros(B, dtype=torch.long, device=dev).index_add_(0, rows, sep)
+    keep = sep == 0
+    g_bag = torch.arange(B, device=dev) + _excl(n_ent)  # bags in token order: a sample's global features, then its entities
+    bag = (g_bag[rows] + seg)[keep]
+    E = int(n_ent.sum())
+    e_row = torch.repeat_interleave(torch.arange(B, device=dev), n_ent)
+    ptr = o_idx >= option_dim
+    opt = torch.repeat_interleave(torch.arange(N, device=dev), _lengths(b.o_off, o_idx.shape[0]))
+    p_opt = opt[ptr]
+    return replace(
+        b,
+        st_idx=s_idx[keep],
+        st_off=_excl(s_len - n_ent),
+        bag_off=_excl(torch.zeros(B + E, dtype=torch.long, device=dev).index_add_(0, bag, torch.ones_like(bag))),
+        g_bag=g_bag,
+        e_bag=torch.arange(E, device=dev) + e_row + 1,
+        e_row=e_row,
+        ot_idx=o_idx[~ptr],
+        ot_off=_excl(torch.zeros(N, dtype=torch.long, device=dev).index_add_(0, opt, (~ptr).long())),
+        p_opt=p_opt,
+        p_ent=_excl(n_ent)[b.o_row[p_opt]] + o_idx[ptr] - option_dim,
+    )
+
+
+# Batch fields: the level they run over (decisions, state tokens, options...)
+# and the level their values are positions in (None: plain values). `split`
+# slices every field to a range of decisions and re-bases the positions.
+_FIELD_LEVELS = {
+    "s_idx": ("s", None), "s_off": ("row", "s"), "e_idx": ("e", None), "e_off": ("row", "e"),
+    "o_idx": ("o", None), "o_off": ("opt", "o"), "o_row": ("opt", "row"), "o_pos": ("opt", None), "n_opts": ("row", None),
+    "st_idx": ("st", None), "st_off": ("row", "st"), "bag_off": ("bag", "st"), "g_bag": ("row", "bag"), "e_bag": ("ent", "bag"), "e_row": ("ent", "row"),
+    "ot_idx": ("ot", None), "ot_off": ("opt", "ot"), "p_opt": ("ptr", "opt"), "p_ent": ("ptr", "ent"),
+}  # fmt: skip
+
+
+def _level_sizes(b: Batch) -> dict:
+    """Per decision: how many items of each level it owns."""
+    B, dev = b.n_opts.shape[0], b.n_opts.device
+    per_row = lambda rows, x: torch.zeros(B, dtype=torch.long, device=dev).index_add_(0, rows, x)  # noqa: E731
+    n_ent = per_row(b.e_row, torch.ones_like(b.e_row))
+    return {
+        "row": torch.ones_like(b.n_opts), "s": _lengths(b.s_off, b.s_idx.shape[0]), "e": _lengths(b.e_off, b.e_idx.shape[0]),
+        "opt": b.n_opts, "o": per_row(b.o_row, _lengths(b.o_off, b.o_idx.shape[0])), "st": _lengths(b.st_off, b.st_idx.shape[0]),
+        "bag": n_ent + 1, "ent": n_ent, "ot": per_row(b.o_row, _lengths(b.ot_off, b.ot_idx.shape[0])), "ptr": per_row(b.o_row[b.p_opt], torch.ones_like(b.p_opt)),
+    }  # fmt: skip
+
+
+def split(b: Batch, bounds: list[int]) -> list[Batch]:
+    """The decisions [bounds[k], bounds[k + 1]) (all of them) of a
+    `structure`d batch as batches of their own: slices, with positions
+    re-based to start at 0 (one subtraction per field for all pieces). Waits
+    for the device here, for the sizes; using the pieces never does."""
+    sizes = _level_sizes(b)
+    cum = torch.stack(list(sizes.values())).cumsum(1)  # (levels, B): a scan along dim 0 of (B, levels) is ~100x slower on CUDA
+    at = torch.cat([cum.new_zeros(len(sizes), 1), cum], 1)[:, torch.tensor(bounds, device=cum.device)]  # (levels, pieces + 1) starts
+    n = at[:, 1:] - at[:, :-1]
+    counts, level = n.tolist(), {k: i for i, k in enumerate(sizes)}
+    fields = {}
+    for name, (lvl, ref) in _FIELD_LEVELS.items():
+        x = getattr(b, name)
+        if ref is not None:
+            x = x - torch.repeat_interleave(at[level[ref], :-1], n[level[lvl]], output_size=x.shape[0])
+        fields[name] = x.split(counts[level[lvl]])
+    return [Batch(**{name: parts[k] for name, parts in fields.items()}) for k in range(len(bounds) - 1)]
 
 
 TRUNKS = ("mlp", "transformer", "entity")
@@ -155,8 +261,14 @@ class EntityEncoder(nn.Module):
         nn.init.normal_(self.emb.weight, std=0.05)
         self.ent = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
 
-    def forward(self, idx: torch.Tensor, off: torch.Tensor):
-        """Returns (state sum (B, H), entity vectors (E, H), first entity row of each sample (B,))."""
+    def forward(self, b: Batch):
+        """Returns (state sum (B, H), entity vectors (E, H), first entity row
+        of each sample (B,), None when `b` carries the precomputed structure)."""
+        if b.bag_off is not None:  # one bag per sample's globals and per entity, no masks
+            bags = nn.functional.embedding_bag(b.st_idx, self.emb.weight, b.bag_off, mode="sum")
+            ents = self.ent(bags.index_select(0, b.e_bag))
+            return bags.index_select(0, b.g_bag).index_add(0, b.e_row, ents), ents, None
+        idx, off = b.s_idx, b.s_off
         B, dev = off.shape[0], idx.device
         idx = idx.long()
         rows = torch.repeat_interleave(torch.arange(B, device=dev), _lengths(off, idx.shape[0]))
@@ -240,22 +352,54 @@ class _Core(nn.Module):
             h0 = torch.zeros(x.shape[0], self.hidden, device=x.device, dtype=x.dtype) if hidden is None else hidden
             out, hn = self.gru(x[:, None], h0[None])
             return out[:, 0], hn[0]
-        seqs = list(torch.split(x, lengths))
-        packed = pack_padded_sequence(pad_sequence(seqs, batch_first=True), torch.tensor(lengths), batch_first=True, enforce_sorted=False)
-        out, _ = pad_packed_sequence(self.gru(packed)[0], batch_first=True)
-        return torch.cat([out[i, :n] for i, n in enumerate(lengths)]), None
+        # Sequence mode. Padding the trajectories at the end is exact for a
+        # GRU that starts from zero: outputs at real steps never see the
+        # padding, and the padding's outputs get no gradient. Up to hidden
+        # 128 cuDNN runs a padded batch with persistent kernels (H100: 0.7 ms
+        # forward and backward for 2k decisions, against 5 ms packed, which
+        # launches kernels per time step); above that it has none, and padded
+        # is ~15% slower than packed (twice the rows; measured at 256 and
+        # 512). On the CPU padded is faster at every size.
+        if x.is_cuda and self.hidden > 128:
+            rows, batch_sizes = _sequence_layout(lengths, x.device, packed=True)
+            y = self.gru(PackedSequence(x.index_select(0, rows), batch_sizes))[0].data
+            return y.new_empty(y.shape).index_copy(0, rows, y), None
+        pos, steps = _sequence_layout(lengths, x.device, packed=False)
+        xp = x.new_zeros(len(lengths) * steps, x.shape[1]).index_copy(0, pos, x).view(len(lengths), steps, -1)
+        return self.gru(xp)[0].reshape(-1, self.hidden).index_select(0, pos), None
 
     def forward(self, b: Batch, hidden, lengths):
         if self.trunk_kind == "entity":
-            g, ents, base = self.state(b.s_idx, b.s_off)
+            g, ents, base = self.state(b)
             s = self.trunk(g)
             self.entities = (ents, base)
         else:  # these trunks treat entity features as part of the flat bag
-            idx, off = _keep(b.s_idx, b.s_off, b.s_idx != self.sep)
+            idx, off = (b.st_idx, b.st_off) if b.st_idx is not None else _keep(b.s_idx, b.s_off, b.s_idx != self.sep)
             s = self.state(idx, off) if self.trunk_kind == "transformer" else self.trunk(self.state_emb(idx, off))
         e = self.event_emb(b.e_idx, b.e_off)
         z, hn = self._memory(torch.cat([s, e], dim=-1), hidden, lengths)
         return s + z, hn
+
+
+def _sequence_layout(lengths: list[int], device: torch.device, packed: bool):
+    """Sequence mode: where the rows of trajectories laid end to end go in
+    the GRU's input, built on the CPU and copied without waiting for the
+    device, so the GRU needs one gather or scatter each way.
+    packed=False: (position in a (trajectories, longest) batch of each row, longest).
+    packed=True: (row of each position of a PackedSequence, time-major and
+    longest first; its batch sizes, on the CPU as cuDNN takes them)."""
+    L = torch.tensor(lengths)
+    if packed:
+        by_len = torch.sort(L, descending=True, stable=True).indices
+        sizes = (L[by_len][None, :] > torch.arange(max(lengths))[:, None]).sum(1)  # trajectories still running at each step
+        t = torch.repeat_interleave(torch.arange(sizes.shape[0]), sizes)
+        idx, layout = _excl(L)[by_len][torch.arange(t.shape[0]) - _excl(sizes)[t]] + t, sizes
+    else:
+        layout = max(lengths)
+        idx = torch.arange(int(L.sum())) + torch.repeat_interleave(torch.arange(len(lengths)) * layout - _excl(L), L)
+    if device.type == "cuda":
+        idx = idx.pin_memory().to(device, non_blocking=True)
+    return idx, layout
 
 
 class PolicyNet(nn.Module):
@@ -323,7 +467,7 @@ class PolicyNet(nn.Module):
         else:
             values = self.value_head(c).squeeze(-1)
         a = self.option_mlp(self._options(b))
-        cr = c[b.o_row]
+        cr = c.index_select(0, b.o_row)
         scores = self.scorer(torch.cat([cr, a, cr * a], dim=-1)).squeeze(-1)
         width = int(b.n_opts.max()) if max_options is None else max_options
         logits = torch.full((c.shape[0], width), float("-inf"), device=c.device, dtype=scores.dtype)
@@ -333,6 +477,11 @@ class PolicyNet(nn.Module):
     def _options(self, b: Batch) -> torch.Tensor:
         """Summed option token embeddings, plus the projected vectors of the
         entities an option points at (tokens >= option_dim)."""
+        if b.ot_idx is not None:  # pointers already split off (`structure`), no masks
+            a = self.option_emb(b.ot_idx, b.ot_off)
+            if self.pointer is not None:
+                a = a.index_add(0, b.p_opt, self.pointer(self.policy_core.entities[0].index_select(0, b.p_ent)))
+            return a
         ptr = b.o_idx >= self.option_dim
         idx, off = _keep(b.o_idx, b.o_off, ~ptr)
         a = self.option_emb(idx, off)
