@@ -149,8 +149,11 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
             nn.utils.clip_grad_norm_(net.parameters(), cfg.max_grad_norm)
             opt.step()
             with torch.no_grad():
-                kl = ((ratio - 1) - (logp - olp)).mean()
-                acc += torch.stack([pg_loss, v_loss, ent, kl, ((ratio - 1).abs() > cfg.clip).float().mean(), d_loss])
+                # KL and clip fraction over the policy-gradient rows only: a searched
+                # action can have a behaviour probability of 1e-7, and its ratio is not optimized
+                mean_m = lambda x: (x * m).sum() / m.sum().clamp(min=1)  # noqa: E731
+                kl = mean_m((ratio - 1) - (logp - olp))
+                acc += torch.stack([pg_loss, v_loss, ent, kl, mean_m(((ratio - 1).abs() > cfg.clip).float()), d_loss])
         steps += len(chunks)
         epoch = acc.tolist()  # read once per epoch (target_kl), not per step
         totals = [t + x for t, x in zip(totals, epoch)]
