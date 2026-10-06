@@ -31,9 +31,11 @@ for this plan are in the results section at the end.
    the rollout CPU path against 190k for the engine. `prepare`/`apply` loop in Python per decision,
    `featurize_flat` lists re-packed into `array("i")`, `torch.distributions.Categorical` per call, GAE in
    Python. A Rust lockstep loop makes a step one call each way.
-3. **NUMA is backwards.** `nvidia-smi topo -m`: GPUs 0-3 are local to cores 0-15 (node 0), GPUs 4-7 to
-   cores 32-47 (node 2). Today's run pins the trainer and workers to 0-31 and uses GPU 4, so every
-   transfer crosses the sockets.
+3. **NUMA is backwards, but it does not cost anything yet.** `nvidia-smi topo -m`: GPUs 0-3 are local
+   to cores 0-15 (node 0), GPUs 4-7 to cores 32-47 (node 2). Today's run pins the trainer and workers
+   to 0-31 and uses GPU 4. Measured clean (12 iterations each, no profiler): cores 0-31 + GPU 4 gives
+   2.42 s per iteration, cores 32-63 + GPU 4 gives 2.44 s. At today's transfer volumes the sockets do
+   not matter; the layout becomes hygiene for the server path (WS4), not a win on its own.
 4. **The trainer's rollout thread shares the GIL with the update.** `_Rollout` merges results
    (`imap_unordered`, `unpark`, list extends) in a thread of the trainer process while `ppo_update`
    launches kernels from Python. That is the likelier cause of the 30% slower update under pipelining.
