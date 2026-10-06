@@ -152,7 +152,7 @@ def test_vectorised_evaluator_matches_per_row(tmp_path, trunk):
         torch.manual_seed(steps)
         a_old, lp_old, v_old = old.submit(old_items)
         torch.manual_seed(steps)
-        a_new, lp_new, v_new = new.collect(new.submit(0, new_items))
+        a_new, lp_new, v_new, _ = new.collect(new.submit(0, new_items))  # 4th: search extras, none here
         assert a_new == a_old and lp_new == pytest.approx(lp_old, abs=1e-6) and v_new == pytest.approx(v_old, abs=1e-6)
         for it, a in zip(new_items, a_new):
             games[it[1] // 2].step(a)

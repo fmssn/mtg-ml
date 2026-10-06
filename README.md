@@ -55,7 +55,8 @@ print(g.winner, g.end_reason)
 - decision types map to separate policy heads;
 - `Option.key` is a stable, id-free action descriptor for per-deck action vocabularies;
 - `mtg_ml/encode.py` produces hashed sparse state features from what the player can see;
-- `Game.fork()` (exact copy by deterministic replay) and `view.determinize()` (re-sample hidden cards consistently with one player's knowledge) are what MCTS / AlphaZero-style search needs.
+- `Game.fork()` (exact copy by deterministic replay) and `view.determinize()` (re-sample hidden cards consistently with one player's knowledge) are what MCTS / AlphaZero-style search needs;
+- `mtg_ml/rl/search.py` is that search for the learner's own turn: Gumbel AlphaZero over own-turn lines, distilled into the policy (`--search-budget`), built to crack multi-step combos PPO never samples ([`docs/search.md`](docs/search.md)).
 
 **Hidden information.** Every card tracks who knows it (`known_to`). `view.observe(game, player)` exposes:
 - public zones;

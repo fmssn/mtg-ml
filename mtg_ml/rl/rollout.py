@@ -38,7 +38,9 @@ live game, reused when a game ends; a seat's first decision is `fresh`).
 from __future__ import annotations
 
 import itertools
+import math
 import os
+import random
 import time
 from array import array
 from dataclasses import dataclass, field, fields, replace
@@ -51,6 +53,7 @@ from ..engine import Game
 from ..match import match_decks
 from .features import encode_event_hashes, event_hashes, featurize_flat
 from .samples import FIELDS, PackedSamples
+from .search import NetEvaluator, SearchConfig, eligible, search
 
 LEARNER = "learner"
 RANDOM = "random"
@@ -153,6 +156,12 @@ class Job:
     # 0: play all `games` at once. n > 0: keep n games live, claiming more of
     # `games` from the pool's shared counters as games end (`run_specs`).
     inflight: int = 0
+    # Own-turn search (rl/search.py) on the learner's eligible decisions: the
+    # search picks the action and its improved policy is recorded as a
+    # distillation target. `search_frac`: share of eligible decisions searched.
+    # Local inference only.
+    search: SearchConfig | None = None
+    search_frac: float = 1.0
 
 
 @dataclass
@@ -162,6 +171,7 @@ class Trajectory:
     logps: list = field(default_factory=list)
     values: list = field(default_factory=list)
     potentials: list = field(default_factory=list)
+    targets: list = field(default_factory=list)  # per decision: the search's policy (list of floats) or None
 
 
 @dataclass
@@ -174,6 +184,10 @@ class Result:
     logps: list = field(default_factory=list)
     advantages: list = field(default_factory=list)
     returns: list = field(default_factory=list)
+    # distillation targets of searched decisions: per decision the number of
+    # probabilities recorded (0 = not searched), and the probabilities laid end to end
+    target_len: list = field(default_factory=list)
+    targets: list = field(default_factory=list)
     # per game: (seats, winner, end_reason, turns, decisions, seed)
     games: list = field(default_factory=list)
     # per job: (wall seconds, seconds waiting for inference, decisions)
@@ -209,6 +223,10 @@ def _finish(traj: Trajectory, outcome: float, job: Job, out: Result) -> None:
     out.logps += traj.logps
     out.advantages += adv
     out.returns += [a + v for a, v in zip(adv, traj.values)]
+    for t in traj.targets:
+        out.target_len.append(0 if t is None else len(t))
+        if t is not None:
+            out.targets += t
 
 
 class _Seat:
@@ -226,13 +244,14 @@ class _Live:
     """A game in play: its spec, engine, slot (hidden-state rows 2 * slot + seat),
     trajectories, seat memories and scripted agents."""
 
-    __slots__ = ("spec", "game", "slot", "trajs", "seats", "agents")
+    __slots__ = ("spec", "game", "slot", "trajs", "seats", "agents", "rng")
 
     def __init__(self, spec: GameSpec, game: Game, slot: int):
         self.spec, self.game, self.slot = spec, game, slot
         self.trajs = (Trajectory(), Trajectory())
         self.seats = (_Seat(), _Seat())
         self.agents = tuple(RandomAgent(seed=spec.seed * 2 + s) if pol == RANDOM else make_bot(s) if pol == BOT else None for s, pol in enumerate(spec.seats))
+        self.rng = random.Random(spec.seed * 4 + 3)  # search: which decisions, determinization, Gumbel noise
 
 
 def _step(g: Game, seats: tuple[_Seat, _Seat], a: int) -> None:
@@ -284,13 +303,18 @@ class _LocalEvaluator:
         self.learner = load_policy(job.learner_path, job.learner_version)
         self.slots = slots
         self.hidden: dict = {}
+        self.evaluator = NetEvaluator(self.learner) if job.search is not None else None
 
     def submit(self, group: int, items: list):
         return items
 
     def collect(self, items: list):
+        """(actions, log-probs, values, extras): extras[i] is (logits, new
+        recurrent state) for an item flagged for search (`it[7]`), else None."""
         torch = self.torch
         acts, logps, vals = [], [], []
+        extras: list = [None] * len(items)
+        pos = 0
         with torch.inference_mode():
             for pol, run in itertools.groupby(items, key=itemgetter(0)):
                 run = list(run)
@@ -314,7 +338,11 @@ class _LocalEvaluator:
                 acts += a.tolist()
                 logps += dist.log_prob(a).tolist()
                 vals += values.tolist()
-        return acts, logps, vals
+                for k, it in enumerate(run):
+                    if len(it) > 7 and it[7]:
+                        extras[pos + k] = (logits[k, : len(it[3][1])].tolist(), None if hn is None else hn[k].clone())
+                pos += len(run)
+        return acts, logps, vals, extras
 
 
 class _ServerEvaluator:
@@ -416,6 +444,8 @@ def _play(job: Job) -> Result:
     cap = job.inflight or len(job.games)
     if cap > MAX_LIVE:
         raise ValueError(f"a job holds at most {MAX_LIVE} live games")
+    if job.search is not None and job.inference != "local":
+        raise ValueError("Job.search needs inference='local' (the search evaluates positions in the worker)")
     ev = _ServerEvaluator(job, 2 * cap) if job.inference == "server" else _LocalEvaluator(job, 2 * cap)
     claim = _claimer(job)
     free = list(range(cap - 1, -1, -1))  # game slots
@@ -464,7 +494,8 @@ def _play(job: Job) -> Result:
                 x = (array("i", state), array("i", o_len), array("i", o_flat), array("i", encode_event_hashes(seat.events)))
                 seat.events = []
                 pot = _potential(g, p) if job.record and pol == LEARNER else 0.0
-                items.append((pol, 2 * lv.slot + p, seat.fresh, x, lv, p, pot))
+                want = job.search is not None and pol == LEARNER and eligible(g, p, job.search) and lv.rng.random() < job.search_frac
+                items.append((pol, 2 * lv.slot + p, seat.fresh, x, lv, p, pot, want))
                 seat.fresh = False
             todo = [start(i) for i in claim(min(room - len(live), len(free)))]
             if not todo:
@@ -479,9 +510,18 @@ def _play(job: Job) -> Result:
         nonlocal waited
         handle, items = inflight[k]
         tw = time.perf_counter()
-        acts, logps, values = ev.collect(handle)
+        res = ev.collect(handle)
+        acts, logps, values = res[:3]
+        extras = res[3] if len(res) > 3 else None
         waited += time.perf_counter() - tw
-        for (pol, _, _, x, lv, p, pot), a, lp, v in zip(items, acts, logps, values):
+        for i, ((pol, _, _, x, lv, p, pot, want), a, lp, v) in enumerate(zip(items, acts, logps, values)):
+            target = None
+            if want and extras is not None and extras[i] is not None:
+                logits, hn = extras[i]
+                found = search(lv.game, p, ev.evaluator, job.search, lv.rng, root_logits=logits, root_value=v, root_hn=hn)
+                a, target = found.action, found.policy
+                m = max(logits)
+                lp = logits[a] - m - math.log(sum(math.exp(x_ - m) for x_ in logits))  # behaviour log-prob of the searched action
             if job.record and pol == LEARNER:
                 tr = lv.trajs[p]
                 tr.samples.append(x)
@@ -489,6 +529,7 @@ def _play(job: Job) -> Result:
                 tr.logps.append(lp)
                 tr.values.append(v)
                 tr.potentials.append(pot)
+                tr.targets.append(target)
             _step(lv.game, lv.seats, a)
         inflight[k] = None
 

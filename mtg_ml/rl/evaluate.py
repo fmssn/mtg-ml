@@ -24,6 +24,7 @@ import os
 from ..backend import ENV_VAR, engine_name
 from ..match import MatchResult, game_seed
 from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, create_pool, play
+from .search import SearchConfig
 
 EVAL_SEED = 10_000_000
 
@@ -64,12 +65,13 @@ def score(games: list) -> dict:
     return out
 
 
-def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False) -> dict:
+def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, search: SearchConfig | None = None) -> dict:
+    """`search`: play the learner's eligible own-turn decisions with the search (rl/search.py)."""
     specs = paired_specs(opponent, games, jund_only=jund_only)
-    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference), n_jobs).games)
+    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, search=search), n_jobs).games)
 
 
-def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False) -> dict:
+def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, search: SearchConfig | None = None) -> dict:
     """Best-of-three matches on paired seeds (`jund_only`: one match per seed,
     learner on Jund). Each round plays the next game of every unfinished match
     as one batch. Returns match scores like `score`."""
@@ -85,23 +87,23 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
                 todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n))
         if not todo:
             break
-        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference)
+        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, search=search)
         for seats, winner, reason, _, _, seed in play(procs, [sp for _, sp in todo.values()], job, n_jobs).games:
             res, spec = todo[(seed, seats)]
             res.games.append((spec.starting_player, winner, reason))
     return score([(seats, res.winner) for _, seats, res in live])
 
 
-def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local") -> dict:
+def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", search: SearchConfig | None = None) -> dict:
     """The fixed benchmark: the learner plays Jund Wildfire against the scripted
     Mono Blue Terror (Delver) bot. Game-1 decks on paired seeds (each seed once
     per starting player), plus best-of-three matches. Same seeds every call."""
     out = {}
     if games:
-        s, ci, n = head_to_head(procs, learner_path, BOT, games, n_jobs, version, max_turns, inference, jund_only=True)["jund"]
+        s, ci, n = head_to_head(procs, learner_path, BOT, games, n_jobs, version, max_turns, inference, jund_only=True, search=search)["jund"]
         out.update({"bench/jund_vs_bot": s, "bench/jund_vs_bot_ci": ci, "bench/jund_vs_bot_n": n})
     if bo3_matches:
-        s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, jund_only=True)["jund"]
+        s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, jund_only=True, search=search)["jund"]
         out.update({"bench/jund_vs_bot_bo3": s, "bench/jund_vs_bot_bo3_ci": ci, "bench/jund_vs_bot_bo3_n": n})
     return out
 
@@ -115,12 +117,15 @@ def main(argv=None) -> None:
     ap.add_argument("--jund", action="store_true", help="learner always plays Jund (seat 0); with 'bot' this is the benchmark")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")
+    ap.add_argument("--search-budget", type=int, default=0, help="own-turn search with this many expansions per eligible decision (0 = plain policy)")
+    ap.add_argument("--search-depth", type=int, default=8)
     args = ap.parse_args(argv)
     if args.engine:
         os.environ[ENV_VAR] = engine_name(args.engine)
+    search = SearchConfig(budget=args.search_budget, max_depth=args.search_depth) if args.search_budget else None
     with create_pool(args.workers) as procs:
         fn = head_to_head_bo3 if args.bo3 else head_to_head
-        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund)
+        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund, search=search)
     for k, (s, ci, n) in res.items():
         print(f"{k:5s} {s:.3f}  95% CI {ci}  ({n} games)")
 

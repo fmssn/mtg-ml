@@ -25,7 +25,7 @@ from torch import nn
 from .model import PolicyNet, collate_packed, masked_entropy, packed_tensors, split, structure
 from .rollout import Result
 
-STATS = ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac")
+STATS = ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac", "distill_loss")
 
 
 @dataclass
@@ -38,6 +38,10 @@ class PPOConfig:
     ent_coef: float = 0.01
     max_grad_norm: float = 0.5
     target_kl: float | None = 0.03  # stop the epoch loop early past this
+    # Searched decisions (rl/search.py) are trained towards the search's policy
+    # (cross-entropy) instead of the policy-gradient term, whose action they did
+    # not sample from the policy; they still train the value head.
+    distill_coef: float = 1.0
 
 
 def make_optimizer(params, lr: float, device) -> torch.optim.Optimizer:
@@ -101,6 +105,19 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     n_opts = torch.frombuffer(data.samples.n_opts, dtype=torch.int32)  # on the CPU: logit widths without asking the device
     actions = torch.frombuffer(array("q", data.actions), dtype=torch.long).to(dev)
     recorded = torch.stack([old_logp, adv, ret]).to(dev)
+    # distillation targets of searched decisions, dense (n, widest decision); zero rows elsewhere
+    t_len = list(getattr(data, "target_len", ()))
+    searched = sum(1 for t in t_len if t)
+    targets = torch.zeros(n, int(n_opts.max()) if n else 1)
+    pg_mask = torch.ones(n)
+    if searched:
+        pos = 0
+        for i, k in enumerate(t_len):
+            if k:
+                targets[i, :k] = torch.tensor(data.targets[pos : pos + k])
+                pg_mask[i] = 0.0
+                pos += k
+    targets, pg_mask = targets.to(dev), pg_mask.to(dev)
     totals = [0.0] * len(STATS)
     steps = 0
     stop = False
@@ -110,6 +127,7 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
         rows = order.to(dev)
         batches = split(structure(collate_packed(samples, rows), net.config["state_dim"], net.config["option_dim"]), bounds)
         acts, rec, width = actions[rows], recorded[:, rows], n_opts[order]
+        tgt, pgm = targets[rows], pg_mask[rows]
         acc = torch.zeros(len(STATS), dtype=torch.float64, device=dev)
         for b, lens, lo, hi in zip(batches, chunks, bounds, bounds[1:]):
             a, (olp, ad, rt) = acts[lo:hi], rec[:, lo:hi]
@@ -117,17 +135,22 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
             logp_all = torch.log_softmax(logits, dim=-1)
             logp = logp_all.gather(1, a[:, None]).squeeze(1)
             ratio = (logp - olp).exp()
-            pg_loss = -torch.min(ratio * ad, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * ad).mean()
+            m = pgm[lo:hi]
+            pg = -torch.min(ratio * ad, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * ad)
+            pg_loss = (pg * m).sum() / m.sum().clamp(min=1)
             v_loss = 0.5 * (values - rt).pow(2).mean()
             ent = masked_entropy(logits).mean()
-            loss = pg_loss + cfg.vf_coef * v_loss - cfg.ent_coef * ent
+            t = tgt[lo:hi, : logits.shape[1]]
+            distill = -(t * logp_all.masked_fill(torch.isinf(logits), 0.0)).sum(-1)
+            d_loss = (distill * (1 - m)).sum() / (1 - m).sum().clamp(min=1)
+            loss = pg_loss + cfg.vf_coef * v_loss - cfg.ent_coef * ent + cfg.distill_coef * d_loss
             opt.zero_grad(set_to_none=True)
             loss.backward()
             nn.utils.clip_grad_norm_(net.parameters(), cfg.max_grad_norm)
             opt.step()
             with torch.no_grad():
                 kl = ((ratio - 1) - (logp - olp)).mean()
-                acc += torch.stack([pg_loss, v_loss, ent, kl, ((ratio - 1).abs() > cfg.clip).float().mean()])
+                acc += torch.stack([pg_loss, v_loss, ent, kl, ((ratio - 1).abs() > cfg.clip).float().mean(), d_loss])
         steps += len(chunks)
         epoch = acc.tolist()  # read once per epoch (target_kl), not per step
         totals = [t + x for t, x in zip(totals, epoch)]
@@ -138,4 +161,5 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     out["updates"] = steps
     out["early_stop"] = stop
     out["explained_var"] = explained_var
+    out["searched"] = searched
     return out

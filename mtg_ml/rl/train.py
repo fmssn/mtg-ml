@@ -57,6 +57,7 @@ from .evaluate import benchmark, head_to_head, head_to_head_bo3
 from .model import PolicyNet
 from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update
 from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, Result, create_pool, play
+from .search import SearchConfig
 
 KEEP_POLICIES = 3  # the newest, the one a lagged rollout may still be loading, one spare
 
@@ -95,6 +96,13 @@ class TrainConfig:
     inference: str = "local"  # policy inference: local (CPU torch in each worker) or server (one GPU process, rl/inference.py)
     server_device: str = ""  # device of the inference server ("" = --device, or cuda when --device is cpu and a GPU exists)
     server_max_rows: int = 16384  # largest batch the server builds from queued requests
+    # Own-turn search on the learner's eligible decisions (rl/search.py, docs/search.md):
+    # the search picks the action and its policy is a distillation target. Local inference only.
+    search_budget: int = 0  # node expansions per search (0 = off)
+    search_frac: float = 1.0  # share of eligible learner decisions searched
+    search_depth: int = 8  # branching decisions along one search path
+    search_root: int = 8  # root actions considered (Gumbel top-m)
+    search_floor: float = 0.02  # uniform mass mixed into the search's priors
     ppo: PPOConfig = field(default_factory=PPOConfig)
 
 
@@ -136,6 +144,8 @@ class _Rollout:
 class Trainer:
     def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
+        if cfg.search_budget and cfg.inference != "local":
+            raise ValueError("--search-budget needs --inference local (the search evaluates positions in the worker)")
         os.environ[ENV_VAR] = engine_name(cfg.engine)  # spawned rollout workers inherit it
         for d in ("pool", "policy"):
             os.makedirs(os.path.join(cfg.run, d), exist_ok=True)
@@ -217,8 +227,14 @@ class Trainer:
         drawn here, in the main thread (`self.rng`)."""
         c, t, rng = self.cfg, time.perf_counter(), self.rng.getstate()
         shaping = c.shaping * max(0.0, 1 - it / max(c.shaping_anneal_iters, 1))
-        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference)
+        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference, search=self.search_config(), search_frac=c.search_frac)
         return _Rollout(shaping, it - self.iteration, rng, t).start(play, self.procs, self._train_specs(it), job, c.workers)
+
+    def search_config(self) -> SearchConfig | None:
+        c = self.cfg
+        if not c.search_budget:
+            return None
+        return SearchConfig(budget=c.search_budget, max_root=c.search_root, max_depth=c.search_depth, prior_floor=c.search_floor)
 
     def _train_specs(self, it: int) -> list[GameSpec]:
         c, specs = self.cfg, []
@@ -358,7 +374,7 @@ def _rate(games, seat: int) -> float:
 
 
 def _fmt(row: dict) -> str:
-    keys = ["iteration", "decisions", "game_turns", "draws", "jund_wins_selfplay", "win_vs_pool", "entropy", "approx_kl", "explained_var", "decisions_per_s", "wall_s"]
+    keys = ["iteration", "decisions", "searched", "game_turns", "draws", "jund_wins_selfplay", "win_vs_pool", "entropy", "approx_kl", "explained_var", "decisions_per_s", "wall_s"]
     s = " ".join(f"{k}={row[k]:.3f}" if isinstance(row[k], float) else f"{k}={row[k]}" for k in keys if k in row)
     ev = {k.split("/", 1)[1]: v for k, v in row.items() if k.startswith(("eval/", "bench/")) and not k.endswith(("_ci", "_n"))}
     return s + (" | eval " + " ".join(f"{k}={v:.2f}" for k, v in ev.items()) if ev else "")
