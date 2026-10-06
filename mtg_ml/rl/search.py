@@ -73,6 +73,14 @@ class SearchConfig:
     # The tree keeps the full scale: with 0.25 the visits follow the prior and
     # never resolve the sweep (the seed-6 probe misses it at budget 64).
     target_scale: float = 0.25
+    # The search intervenes (its action is played, its policy recorded as a target)
+    # only when its choice differs from the policy's argmax and beats that action's
+    # value by this margin. Across the seed-6 game the search disagreed with the
+    # policy at half of the eligible decisions, mostly within +-0.1 (the critic's
+    # noise plus the max backup's optimism), while the real finds stood out: the
+    # Shaman lines at +0.17, +0.40 and +1.19. Distilling the noisy half dropped the
+    # benchmark from 0.50 to 0.29 in five iterations.
+    margin: float = 0.15
     backup: str = "max"  # "max" (deterministic own-turn tree) or "mean"
     kinds: frozenset = BRANCH_KINDS
     steps: tuple = MAIN_PHASES  # root decisions are searched only in these steps
@@ -90,6 +98,8 @@ class SearchResult:
     policy: list[float]  # improved policy over the root's legal options (the distillation target)
     value: float  # value of the chosen root action
     root_value: float  # value head at the root, for comparison
+    reference: float = 0.0  # value of the policy's own argmax action (same horizon as `value`)
+    improved: bool = False  # the search's action differs from the policy's argmax and beats it by `margin`
     line: list[str] = field(default_factory=list)  # principal variation (option labels)
     expansions: int = 0
     evals: int = 0
@@ -333,6 +343,9 @@ class _Search:
             score = lambda a: gumbel[a] + pri[a] + self._sigma(root, root.q[a])  # noqa: E731
             considered = sorted(considered, key=score, reverse=True)[: max(1, len(considered) // 2)]
         best = considered[0]
+        pol = max(range(n), key=root.logits.__getitem__)
+        reference = root.q[pol] if root.n[pol] else root.value
+        improved = best != pol and root.q[best] - reference >= cfg.margin
         line = []
         node, a = root, best
         while True:
@@ -342,19 +355,22 @@ class _Search:
                 break
             node = child
             a = max(range(len(node.n)), key=lambda i: (node.n[i], node.q[i]))
-        return SearchResult(best, self._improved(root, cfg.target_scale), root.q[best], root.value, line, self.expansions, self.evals)
+        return SearchResult(best, self._improved(root, cfg.target_scale), root.q[best], root.value, reference, improved, line, self.expansions, self.evals)
 
 
-def search(game, player: int, evaluator, cfg: SearchConfig, rng: random.Random, root_hidden=None, root_events=(), root_logits=None, root_value=None, root_hn=None) -> SearchResult:
+def search(game, player: int, evaluator, cfg: SearchConfig, rng: random.Random, root_hidden=None, root_events=(), root_logits=None, root_value=None, root_hn=None, opp_hidden=None, opp_events=()) -> SearchResult:
     """Search the current decision of `game` for `player`. `root_hidden` and
     `root_events` are the player's recurrent state and the events since their
     last decision; if the root was already evaluated, pass `root_logits`,
-    `root_value` and the new state `root_hn` instead. The game is not
+    `root_value` and the new state `root_hn` instead. `opp_hidden` and
+    `opp_events` are the same for the opponent, when known (self-play): the
+    network plays the opponent inside the tree, and a GRU started from zero in
+    the middle of a game is a different, worse player. The game is not
     modified (the tree works on forks, determinized unless disabled)."""
     s = _Search(player, evaluator, cfg, rng)
     s.turn, s.step = game.turn, game.step_name
     base = determinize(game, player, rng) if cfg.determinize else game.fork()
-    seats = tuple(_Seat(root_hidden, root_events) if p == player else _Seat() for p in (0, 1))
+    seats = tuple(_Seat(root_hidden, root_events) if p == player else _Seat(opp_hidden, opp_events) for p in (0, 1))
     root = _Node(base, seats, 0)
     if root_logits is None:
         s._open(root, base)

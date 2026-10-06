@@ -188,6 +188,7 @@ class Result:
     # probabilities recorded (0 = not searched), and the probabilities laid end to end
     target_len: list = field(default_factory=list)
     targets: list = field(default_factory=list)
+    searches: int = 0  # searches run (a target is recorded only when the search improved on the policy by its margin)
     # per game: (seats, winner, end_reason, turns, decisions, seed)
     games: list = field(default_factory=list)
     # per job: (wall seconds, seconds waiting for inference, decisions)
@@ -340,7 +341,10 @@ class _LocalEvaluator:
                 vals += values.tolist()
                 for k, it in enumerate(run):
                     if len(it) > 7 and it[7]:
-                        extras[pos + k] = (logits[k, : len(it[3][1])].tolist(), None if hn is None else hn[k].clone())
+                        lv, p = it[4], it[5]
+                        # the opponent's recurrent state as of their last decision, when the learner plays that seat too
+                        opp = table[2 * lv.slot + (1 - p)].clone() if hn is not None and lv.spec.seats[1 - p] == pol else None
+                        extras[pos + k] = (logits[k, : len(it[3][1])].tolist(), None if hn is None else hn[k].clone(), opp)
                 pos += len(run)
         return acts, logps, vals, extras
 
@@ -517,11 +521,13 @@ def _play(job: Job) -> Result:
         for i, ((pol, _, _, x, lv, p, pot, want), a, lp, v) in enumerate(zip(items, acts, logps, values)):
             target = None
             if want and extras is not None and extras[i] is not None:
-                logits, hn = extras[i]
-                found = search(lv.game, p, ev.evaluator, job.search, lv.rng, root_logits=logits, root_value=v, root_hn=hn)
-                a, target = found.action, found.policy
-                m = max(logits)
-                lp = logits[a] - m - math.log(sum(math.exp(x_ - m) for x_ in logits))  # behaviour log-prob of the searched action
+                logits, hn, opp = extras[i]
+                found = search(lv.game, p, ev.evaluator, job.search, lv.rng, root_logits=logits, root_value=v, root_hn=hn, opp_hidden=opp, opp_events=lv.seats[1 - p].events)
+                out.searches += 1
+                if found.improved:
+                    a, target = found.action, found.policy
+                    m = max(logits)
+                    lp = logits[a] - m - math.log(sum(math.exp(x_ - m) for x_ in logits))  # behaviour log-prob of the searched action
             if job.record and pol == LEARNER:
                 tr = lv.trajs[p]
                 tr.samples.append(x)
@@ -597,8 +603,9 @@ def run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int
     n = max(1, min(inflight, -(-len(specs) // workers)))
     for r in pool.imap_unordered(_run_parked, [replace(job, games=specs, inflight=n) for _ in range(workers)]):
         r.samples.unpark(merged.samples)  # merged as jobs end, while others still play
+        merged.searches += r.searches
         for f in fields(Result):
-            if f.name != "samples":
+            if f.name not in ("samples", "searches"):
                 getattr(merged, f.name).extend(getattr(r, f.name))
     return merged
 
@@ -612,8 +619,10 @@ def play(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int = 64
         return run_specs(pool, specs, job, workers, inflight)
     merged = Result()
     for r in pool.map(run_job, [replace(job, games=chunk) for chunk in split_games(specs, workers)]):
+        merged.searches += r.searches
         for f in fields(Result):
-            getattr(merged, f.name).extend(getattr(r, f.name))
+            if f.name != "searches":
+                getattr(merged, f.name).extend(getattr(r, f.name))
     return merged
 
 

@@ -116,6 +116,29 @@ intervals overlapping. The combo position is rare and the critic scoring the
 leaves is the one that never saw a resolved sweep; the training run tests
 whether distilling the search's choices changes that.
 
+## Second attempt: intervene only by a margin
+
+With the soft target the policy no longer collapsed, but the benchmark still
+fell from about 0.50 to 0.29 within five iterations (0.27 at ten) while the
+win rate against the pool read a healthy 0.6: the learner searches in pool
+games and the pool does not, so that number hides the plain policy's decline.
+Searching every eligible Jund decision of the seed-6 game (56 of them) showed
+why: the search disagreed with the policy at about half of them, mostly by
+value margins inside +-0.1, which is the critic's noise plus the optimism of a
+max backup, and the Gumbel-sampled root pick was sometimes worth less than the
+policy's own line. The real finds stood out: the Shaman lines at +0.17, +0.40
+and +1.19.
+
+So the search now intervenes only when its action differs from the policy's
+argmax and beats that action's own searched value by `margin` (0.15,
+`--search-margin`); otherwise the rollout plays the policy's sampled action
+and records no target. On the seed-6 game that keeps 11 of the 56 decisions,
+all three Shaman lines among them. The in-tree opponent also gets its real
+recurrent state and pending events when the learner plays that seat too
+(self-play games): a GRU started from zero in the middle of a game is a
+different, worse player, and part of the value swings came from it. Metrics:
+`searches` (searches run) next to `searched` (interventions distilled).
+
 ## Cost and open items
 
 - Every node and every auto-played decision is one forward pass: about 13 evals

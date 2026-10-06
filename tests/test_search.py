@@ -42,6 +42,7 @@ def test_search_finds_the_shaman_sweep():
     res = search(g, 0, _BoardOnly(), cfg, random.Random(1))
     labels = [o.label for o in g.decision.options]
     assert res.value == 1.0 and res.root_value == -0.5
+    assert res.improved and res.reference == -0.5  # the flat policy's argmax (option 0, pass) is worth -0.5
     assert res.line[0] == labels[res.action]
     assert any(s.startswith("Target Krark-Clan Shaman") for s in res.line), res.line
     assert SWEEP in res.line, res.line
@@ -58,6 +59,7 @@ def test_search_with_the_sweep_unavailable_prefers_nothing_in_particular():
     g = scenario({"hand": ["Krark-Clan Shaman", "Toxin Analysis"], "battlefield": ["Swamp", "Mountain"]}, TERROR_TAPPED_OUT)
     res = search(g, 0, _BoardOnly(), SearchConfig(budget=40, determinize=False), random.Random(2))
     assert res.value == -0.5 and SWEEP not in res.line
+    assert not res.improved  # nothing beats the policy's line by the margin: the rollout keeps the policy's action
 
 
 def test_eligibility_is_own_turn_main_phase_with_a_real_choice():
@@ -94,13 +96,14 @@ def learner_ckpt(tmp_path, request):
 
 def test_rollout_records_search_targets_and_ppo_distills(learner_ckpt):
     net, path = learner_ckpt
-    cfg = SearchConfig(budget=4, max_depth=2, max_evals=30)
+    cfg = SearchConfig(budget=4, max_depth=2, max_evals=30, margin=-1.0)  # intervene whenever the search disagrees
     specs = [GameSpec(5, (LEARNER, LEARNER)), GameSpec(6, (LEARNER, BOT))]
     res = run_job(Job(specs, path, 1, max_turns=12, search=cfg))
     n = len(res.actions)
     assert n and len(res.target_len) == n
+    assert res.searches > 0, "no eligible decision was searched in 12 turns"
     searched = [i for i, k in enumerate(res.target_len) if k]
-    assert searched, "no eligible decision was searched in 12 turns"
+    assert searched, "no search improved on the policy by the margin (margin 0 here, so any disagreement counts)"
     assert sum(res.target_len) == len(res.targets)
     pos = 0
     for i, k in enumerate(res.target_len):

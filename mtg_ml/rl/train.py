@@ -104,6 +104,7 @@ class TrainConfig:
     search_root: int = 8  # root actions considered (Gumbel top-m)
     search_floor: float = 0.02  # uniform mass mixed into the search's priors
     search_scale: float = 0.25  # target_scale: value scaling of the distillation target (rl/search.py)
+    search_margin: float = 0.15  # the search's action must beat the policy's by this value to be played and distilled
     ppo: PPOConfig = field(default_factory=PPOConfig)
 
 
@@ -235,7 +236,7 @@ class Trainer:
         c = self.cfg
         if not c.search_budget:
             return None
-        return SearchConfig(budget=c.search_budget, max_root=c.search_root, max_depth=c.search_depth, prior_floor=c.search_floor, target_scale=c.search_scale)
+        return SearchConfig(budget=c.search_budget, max_root=c.search_root, max_depth=c.search_depth, prior_floor=c.search_floor, target_scale=c.search_scale, margin=c.search_margin)
 
     def _train_specs(self, it: int) -> list[GameSpec]:
         c, specs = self.cfg, []
@@ -310,6 +311,7 @@ class Trainer:
                 row = {
                     "iteration": self.iteration,
                     "decisions": len(data.actions),
+                    "searches": data.searches,
                     "games": len(data.games),
                     "games_total": self.games_total,
                     "game_turns": sum(g[3] for g in data.games) / max(len(data.games), 1),
@@ -375,7 +377,7 @@ def _rate(games, seat: int) -> float:
 
 
 def _fmt(row: dict) -> str:
-    keys = ["iteration", "decisions", "searched", "game_turns", "draws", "jund_wins_selfplay", "win_vs_pool", "entropy", "approx_kl", "explained_var", "decisions_per_s", "wall_s"]
+    keys = ["iteration", "decisions", "searches", "searched", "game_turns", "draws", "jund_wins_selfplay", "win_vs_pool", "entropy", "approx_kl", "explained_var", "decisions_per_s", "wall_s"]
     s = " ".join(f"{k}={row[k]:.3f}" if isinstance(row[k], float) else f"{k}={row[k]}" for k in keys if k in row)
     ev = {k.split("/", 1)[1]: v for k, v in row.items() if k.startswith(("eval/", "bench/")) and not k.endswith(("_ci", "_n"))}
     return s + (" | eval " + " ".join(f"{k}={v:.2f}" for k, v in ev.items()) if ev else "")

@@ -66,6 +66,7 @@ class ModelAgent:
         self.last_info = {"policy": [round(float(p), 4) for p in probs], "value": round(float(values[0]), 4)}
         if self.search is not None and eligible(game, self.seat, self.search):
             found = search(game, self.seat, self.evaluator, self.search, self.rng, root_logits=logits.tolist(), root_value=float(values[0]), root_hn=self.hidden)
-            a = found.action
-            self.last_info["search"] = {"policy": [round(p, 4) for p in found.policy], "value": round(found.value, 4), "line": found.line, "evals": found.evals}
+            if found.improved:
+                a = found.action
+            self.last_info["search"] = {"policy": [round(p, 4) for p in found.policy], "value": round(found.value, 4), "reference": round(found.reference, 4), "improved": found.improved, "line": found.line, "evals": found.evals}
         return a
