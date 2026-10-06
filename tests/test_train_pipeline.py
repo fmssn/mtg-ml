@@ -106,16 +106,12 @@ def in_process(monkeypatch):
         games = sorted((g.seed, tuple(map(os.path.basename, g.seats)), g.match_game) for j in jobs for g in j.games)
         started.append(SimpleNamespace(train=jobs[0].record, policy=policy, games=games))
 
-    class Pool(ThreadPool):
+    class Pool(ThreadPool):  # no `claim`, so rollout.play takes the fixed-split `map` path
         def map(self, func, jobs, *args, **kwargs):
             record(jobs)
             return super().map(func, jobs, *args, **kwargs)
 
-        def map_async(self, func, jobs, *args, **kwargs):
-            record(jobs)
-            return super().map_async(func, jobs, *args, **kwargs)
-
-    monkeypatch.setattr(train_mod, "mp", SimpleNamespace(get_context=lambda _: SimpleNamespace(Pool=lambda n, initializer: Pool(1))))
+    monkeypatch.setattr(train_mod, "create_pool", lambda workers, inference="local", server=None: Pool(1))
     threads = torch.get_num_threads()
     torch.set_num_threads(1)
     yield started

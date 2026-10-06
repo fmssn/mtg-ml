@@ -43,9 +43,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import multiprocessing as mp
 import os
 import random
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, fields
@@ -56,7 +56,7 @@ from ..backend import ENV_VAR, engine_name
 from .evaluate import benchmark, head_to_head, head_to_head_bo3
 from .model import PolicyNet
 from .ppo import PPOConfig, ppo_update
-from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, Result, run_job, split_games, worker_init
+from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, Result, create_pool, play
 
 KEEP_POLICIES = 3  # the newest, the one a lagged rollout may still be loading, one spare
 
@@ -100,21 +100,36 @@ class TrainConfig:
 
 @dataclass
 class _Rollout:
-    """A training rollout submitted to the worker pool; `wait` collects it."""
+    """A training rollout playing on the worker pool in a thread of its own
+    (`rollout.play` streams games and merges results as jobs end); `wait`
+    collects it. A daemon thread, so a rollout abandoned after an error
+    (`Pool.terminate`) cannot block the exit."""
 
     shaping: float
     lag: int  # updates its weights are behind the update that trains on it
     rng: tuple  # trainer rng state before its games were drawn: the checkpoint of its iteration stores it
     t_submit: float
-    pending: object = None  # AsyncResult of run_job over its jobs
-    t_ready: float = 0.0  # set by the pool's result thread when the last job is done
+    thread: threading.Thread | None = None
+    t_ready: float = 0.0  # when the last job was merged
     data: Result | None = None
+    error: BaseException | None = None
+
+    def start(self, fn, *args) -> _Rollout:
+        def run():
+            try:
+                self.data = fn(*args)
+            except BaseException as e:  # noqa: BLE001 - re-raised by wait()
+                self.error = e
+            self.t_ready = time.perf_counter()
+
+        self.thread = threading.Thread(target=run, name="rollout", daemon=True)
+        self.thread.start()
+        return self
 
     def wait(self) -> _Rollout:
-        self.data = Result()
-        for r in self.pending.get():
-            for f in fields(Result):
-                getattr(self.data, f.name).extend(getattr(r, f.name))
+        self.thread.join()
+        if self.error is not None:
+            raise self.error
         return self
 
 
@@ -153,11 +168,7 @@ class Trainer:
 
             dev = cfg.server_device or (cfg.device if cfg.device != "cpu" else default_device())
             self.server = InferenceServer(cfg.workers, ServerConfig(device=dev, max_rows=cfg.server_max_rows))
-            self.procs = self.server.pool()
-        elif cfg.inference == "local":
-            self.procs = mp.get_context("spawn").Pool(cfg.workers, initializer=worker_init)
-        else:
-            raise ValueError(f"inference must be local or server, not {cfg.inference!r}")
+        self.procs = create_pool(cfg.workers, cfg.inference, self.server)
 
     # -- checkpoints ---------------------------------------------------------
 
@@ -202,16 +213,12 @@ class Trainer:
 
     def _submit(self, it: int) -> _Rollout:
         """Start the training rollout for the update of iteration `it` (0-based)
-        with the newest policy file, without waiting for it."""
+        with the newest policy file, without waiting for it. The games are
+        drawn here, in the main thread (`self.rng`)."""
         c, t, rng = self.cfg, time.perf_counter(), self.rng.getstate()
         shaping = c.shaping * max(0.0, 1 - it / max(c.shaping_anneal_iters, 1))
-        jobs = [
-            Job(chunk, self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference)
-            for chunk in split_games(self._train_specs(it), c.workers)
-        ]
-        roll = _Rollout(shaping, it - self.iteration, rng, t)
-        roll.pending = self.procs.map_async(run_job, jobs, callback=lambda _: setattr(roll, "t_ready", time.perf_counter()))
-        return roll
+        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference)
+        return _Rollout(shaping, it - self.iteration, rng, t).start(play, self.procs, self._train_specs(it), job, c.workers)
 
     def _train_specs(self, it: int) -> list[GameSpec]:
         c, specs = self.cfg, []

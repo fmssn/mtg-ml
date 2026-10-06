@@ -562,6 +562,20 @@ def run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int
     return merged
 
 
+def play(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int = 64) -> Result:
+    """`run_specs` when `pool` carries the shared counters (`create_pool`,
+    `InferenceServer.pool`); otherwise a fixed split over `pool.map` (a plain
+    `Pool`, or an in-process stand-in with `map`). What the trainer and the
+    evaluation call."""
+    if getattr(pool, "claim", None) is not None:
+        return run_specs(pool, specs, job, workers, inflight)
+    merged = Result()
+    for r in pool.map(run_job, [replace(job, games=chunk) for chunk in split_games(specs, workers)]):
+        for f in fields(Result):
+            getattr(merged, f.name).extend(getattr(r, f.name))
+    return merged
+
+
 class _Parked:
     """A job's samples parked in a shared-memory block for the trip back to
     `run_specs`. Through the result pipe they cost the parent four copies
