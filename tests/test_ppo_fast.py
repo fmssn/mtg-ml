@@ -20,7 +20,7 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_se
 
 from mtg_ml.backend import native_available  # noqa: E402
 from mtg_ml.rl.features import OPTION_DIM, STATE_DIM  # noqa: E402
-from mtg_ml.rl.model import MEMORY_KINDS, TRUNKS, VALUE_NETS, Batch, PolicyNet, _Core, _sequence_layout, collate_packed, masked_entropy, packed_tensors, split, structure  # noqa: E402
+from mtg_ml.rl.model import MEMORY_KINDS, PAD_FIELDS, TRUNKS, VALUE_NETS, Batch, PolicyNet, _Core, _sequence_layout, collate_packed, masked_entropy, packed_tensors, pad_fits, pad_sequences, pad_split, split, structure  # noqa: E402
 from mtg_ml.rl.ppo import PPOConfig, make_optimizer, ppo_update, trajectory_minibatches  # noqa: E402
 from mtg_ml.rl.rollout import LEARNER, RANDOM, GameSpec, Job, run_job  # noqa: E402
 
@@ -146,6 +146,8 @@ def test_split_minibatches_equal_collate(data, device, seed):
         direct = structure(ref)
         assert direct.p_opt.numel() and direct.e_row.numel()
         for f in fields(Batch):
+            if f.name == "bag_t":  # padded pieces only
+                continue
             want = getattr(ref if f.name in SHARED else direct, f.name)
             assert torch.equal(getattr(b, f.name).cpu(), want), f.name
 
@@ -233,3 +235,124 @@ def test_make_optimizer_fuses_on_cuda_only():
     assert not make_optimizer(p, 1e-3, "cpu").param_groups[0]["fused"]
     if torch.cuda.is_available():
         assert make_optimizer([nn.Parameter(torch.zeros(3, device="cuda"))], 1e-3, "cuda").param_groups[0]["fused"]
+
+
+# -- padded minibatches and the captured step ----------------------------------------
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_padded_pieces_hold_the_split_pieces(data, device):
+    """Each padded piece starts with exactly the fields of its `split` piece;
+    padding points only at padding (never a real row, option, entity or
+    bag); every padded row owns one option."""
+    order, chunks = trajectory_minibatches(data.lengths, 150, torch.Generator().manual_seed(0))
+    bounds = list(accumulate((sum(c) for c in chunks), initial=0))
+    big = structure(collate_packed(packed_tensors(data.samples, device), order.to(device)))
+    fields, sizes, counts = pad_split(big, bounds)
+    assert pad_fits(sizes, counts)
+    for k, b in enumerate(split(big, bounds)):
+        cnt = {lvl: c[k] for lvl, c in counts.items()}
+        for name, (lvl, ref, _) in PAD_FIELDS.items():
+            got = fields[name][k].cpu()
+            assert got.shape == (sizes[lvl],)
+            assert torch.equal(got[: cnt[lvl]], getattr(b, name).cpu().long()), name
+            if ref is not None:  # padding positions point at padding, real ones inside the real items
+                assert (got[cnt[lvl] :] >= cnt[ref]).all() and (got[: cnt[lvl]] < cnt[ref]).all(), name
+        o_row = fields["o_row"][k].cpu()
+        assert (torch.bincount(o_row, minlength=sizes["row"])[cnt["row"] :] >= 1).all()  # finite logits
+        for name, lvl in (("bag_off", "st"), ("st_off", "st"), ("e_off", "e"), ("ot_off", "ot")):  # padded tokens: in padded bags only
+            off = fields[name][k].cpu()
+            assert (off.diff() >= 0).all() and off[cnt[PAD_FIELDS[name][0]]] == cnt[lvl] and off[-1] < sizes[lvl], name
+
+
+def test_pad_sequences_matches_the_padded_layout():
+    chunks, gru = [[5, 1, 9], [3, 9, 2, 1], [4]], [(3, 9), (5, 12), (2, 4)]
+    pos_in, pos_out = pad_sequences(chunks, 24, gru)
+    for k, (c, (T, S)) in enumerate(zip(chunks, gru)):
+        idx, steps = _sequence_layout(c, torch.device("cpu"), packed=False)
+        want = torch.div(idx, steps, rounding_mode="floor") * S + idx % steps
+        assert torch.equal(pos_in[k, : sum(c)], want) and torch.equal(pos_out[k, : sum(c)], want)
+        assert (pos_in[k, sum(c) :] == T * S).all() and (pos_out[k] < T * S).all()
+
+
+@pytest.mark.parametrize(
+    "trunk,value_net,memory,epochs,target_kl",
+    [("entity", "shared", "gru", 2, None), ("mlp", "separate", "gru", 1, None), ("entity", "separate", "none", 1, None), ("entity", "shared", "gru", 3, 0.0)],
+)
+def test_padded_update_matches_the_eager_one(data, trunk, value_net, memory, epochs, target_kl):
+    """The padded path (what the CUDA graphs replay), run eagerly on the CPU:
+    same statistics and weights as the unpadded minibatches."""
+    data = replace(data, logps=[lp + 0.3 * math.sin(i) for i, lp in enumerate(data.logps)])
+    cfg = PPOConfig(epochs=epochs, minibatch=128, target_kl=target_kl)
+    torch.manual_seed(0)
+    nets = [PolicyNet(hidden=32, memory=memory, trunk=trunk, value_net=value_net)]
+    nets.append(copy.deepcopy(nets[0]))
+    stats = [ppo_update(net, make_optimizer(net.parameters(), cfg.lr, "cpu"), data, cfg, gen=torch.Generator().manual_seed(3), mode=mode) for net, mode in zip(nets, ("padded", "eager"))]
+    assert stats[0]["updates"] == stats[1]["updates"] > 2 and stats[0]["early_stop"] == stats[1]["early_stop"]
+    assert stats[1]["clip_frac"] > 0.1
+    for k in ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac", "explained_var"):
+        assert stats[0][k] == pytest.approx(stats[1][k], rel=1e-5, abs=1e-7), k
+    assert all(torch.allclose(p, q, atol=1e-6) for p, q in zip(*(n.parameters() for n in nets)))
+
+
+def test_capture_falls_back_to_eager_off_cuda(data):
+    cfg = PPOConfig(epochs=1, minibatch=256)
+    net = PolicyNet(hidden=16, trunk="entity")
+    ppo_update(net, make_optimizer(net.parameters(), cfg.lr, "cpu"), data, cfg)  # default: eager on the CPU
+    with pytest.raises(ValueError):
+        ppo_update(net, make_optimizer(net.parameters(), cfg.lr, "cpu"), data, cfg, mode="graph")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA graphs")
+@pytest.mark.parametrize(
+    "trunk,value_net,memory,capture", [("entity", "shared", "gru", 1), ("mlp", "separate", "gru", 1), ("entity", "shared", "none", 1), ("entity", "shared", "gru", 2)]
+)
+def test_captured_update_matches_the_eager_one(data, trunk, value_net, memory, capture):
+    """Graph replays (capture=2: of the Inductor-compiled losses) give the
+    eager statistics and weights (to CUDA noise: other reduction orders),
+    reuse their graphs across updates, and recapture after the optimizer
+    state is replaced."""
+    data = replace(data, logps=[lp + 0.3 * math.sin(i) for i, lp in enumerate(data.logps)])
+    cfg = PPOConfig(epochs=2, minibatch=128, target_kl=None, capture=capture)
+    torch.manual_seed(0)
+    nets = [PolicyNet(hidden=32, memory=memory, trunk=trunk, value_net=value_net).cuda()]
+    nets.append(copy.deepcopy(nets[0]))
+    opts = [make_optimizer(n.parameters(), cfg.lr, "cuda") for n in nets]
+    with torch.backends.cudnn.flags(enabled=True, allow_tf32=False):
+        for it in range(2):
+            stats = [ppo_update(n, o, data, cfg, device="cuda", gen=torch.Generator().manual_seed(it), mode=m) for n, o, m in zip(nets, opts, ("graph", "eager"))]
+            for k in ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac", "explained_var"):
+                assert stats[0][k] == pytest.approx(stats[1][k], rel=1e-3, abs=1e-5), (it, k)
+            assert all(torch.allclose(p, q, atol=1e-4) for p, q in zip(*(n.parameters() for n in nets)))
+    from mtg_ml.rl import ppo
+
+    graphs = ppo._GRAPHS[opts[0]]
+    captures = graphs.captures
+    assert 1 <= captures < 2 * stats[0]["updates"]
+    ppo_update(nets[0], opts[0], data, cfg, device="cuda", gen=torch.Generator().manual_seed(1), mode="graph")  # the minibatches of the second update
+    assert ppo._GRAPHS[opts[0]] is graphs and graphs.captures == captures
+    opts[0].load_state_dict(copy.deepcopy(opts[0].state_dict()))  # new state tensors: the old graphs would write to freed memory
+    ppo_update(nets[0], opts[0], data, cfg, device="cuda", mode="graph")
+    assert ppo._GRAPHS[opts[0]] is not graphs
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA graphs")
+def test_captured_update_survives_emptying_the_cache(data):
+    """Graphs must not depend on memory that `empty_cache` (or the
+    allocator's out-of-memory recovery) releases: cuBLAS's workspaces. After
+    dropping them, emptying the cache and refilling freed memory with junk,
+    the replays still give the eager result."""
+    data = replace(data, logps=[lp + 0.3 * math.sin(i) for i, lp in enumerate(data.logps)])
+    cfg = PPOConfig(epochs=1, minibatch=128, target_kl=None, capture=1)
+    torch.manual_seed(0)
+    nets = [PolicyNet(hidden=32).cuda()]
+    nets.append(copy.deepcopy(nets[0]))
+    opts = [make_optimizer(n.parameters(), cfg.lr, "cuda") for n in nets]
+    for it in range(3):
+        stats = [ppo_update(n, o, data, cfg, device="cuda", gen=torch.Generator().manual_seed(it % 2), mode=m) for n, o, m in zip(nets, opts, ("graph", "eager"))]
+        assert stats[0]["approx_kl"] == pytest.approx(stats[1]["approx_kl"], rel=1e-3, abs=1e-5)
+        assert all(torch.allclose(p, q, atol=1e-4) for p, q in zip(*(n.parameters() for n in nets)))
+        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda.empty_cache()
+        junk = [torch.full((1 << 20,), float("nan"), device="cuda") for _ in range(64)]  # reuse what was freed
+        del junk
