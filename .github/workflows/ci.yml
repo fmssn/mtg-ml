@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check
+
+  python:
+    # Reference engine only: rules, cards, bots, golden digests, RL on CPU torch.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          activate-environment: true
+          enable-cache: true
+      - run: uv pip install -e '.[dev]' && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pytest -q -m "not slow"
+
+  native:
+    # Rust engine: cargo tests, then the full suite with native variants and differential tests.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          activate-environment: true
+          enable-cache: true
+      - run: uv pip install -e '.[dev]' "maturin>=1.5,<2"
+      - run: cargo test --no-default-features
+        working-directory: native
+      - run: maturin develop --release
+        working-directory: native
+      - run: python -m pytest -q -m "not slow"   # torch tests skip here; the python job covers them
+      - run: python -m mtg_ml.difftest fuzz --games 300 --jobs 4
