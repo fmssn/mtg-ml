@@ -122,39 +122,64 @@ def collate_packed(ps: PackedSamples, idx=None) -> Batch:
     return Batch(s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, no.clone())
 
 
-class PolicyNet(nn.Module):
-    def __init__(self, hidden: int = 128, memory: str = "gru", state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM):
+TRUNKS = ("mlp", "transformer")
+VALUE_NETS = ("shared", "separate")
+
+
+class TokenEncoder(nn.Module):
+    """Transformer over the active state features of a decision (each hashed
+    feature is a token, as in MageZero), masked mean-pooled to one vector."""
+
+    def __init__(self, dim: int, hidden: int, layers: int = 2, heads: int = 4):
         super().__init__()
-        if memory not in MEMORY_KINDS:
-            raise ValueError(f"memory must be one of {MEMORY_KINDS}")
-        self.config = {"hidden": hidden, "memory": memory, "state_dim": state_dim, "option_dim": option_dim}
+        self.emb = nn.Embedding(dim, hidden)
+        nn.init.normal_(self.emb.weight, std=0.05)
+        layer = nn.TransformerEncoderLayer(hidden, heads, 2 * hidden, dropout=0.0, batch_first=True, norm_first=True)
+        self.enc = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
+        self.out = nn.Sequential(nn.LayerNorm(hidden), nn.Linear(hidden, hidden), nn.ReLU())
+
+    def forward(self, idx: torch.Tensor, off: torch.Tensor) -> torch.Tensor:
+        B = off.shape[0]
+        lengths = torch.diff(off, append=torch.tensor([idx.shape[0]], device=off.device, dtype=off.dtype)).long()
+        rows = torch.repeat_interleave(torch.arange(B, device=idx.device), lengths)
+        pos = torch.arange(idx.shape[0], device=idx.device) - torch.repeat_interleave(off.long(), lengths)
+        width = max(int(lengths.max()) if B else 1, 1)
+        tok = torch.zeros(B, width, self.emb.embedding_dim, device=idx.device, dtype=self.emb.weight.dtype)
+        tok[rows, pos] = self.emb(idx.long())
+        pad = torch.ones(B, width, dtype=torch.bool, device=idx.device)
+        pad[rows, pos] = False
+        h = self.enc(tok, src_key_padding_mask=pad)
+        keep = (~pad).unsqueeze(-1).to(h.dtype)
+        return self.out((h * keep).sum(1) / keep.sum(1).clamp(min=1))
+
+
+class _Core(nn.Module):
+    """State + events -> c, with optional recurrent memory over a player's decisions."""
+
+    def __init__(self, hidden: int, memory: str, trunk: str, state_dim: int, option_dim: int):
+        super().__init__()
         self.hidden = hidden
         self.memory = memory
-        self.state_emb = nn.EmbeddingBag(state_dim, hidden, mode="sum")
+        if trunk == "transformer":
+            self.state = TokenEncoder(state_dim, hidden)
+        else:
+            emb = nn.EmbeddingBag(state_dim, hidden, mode="sum")
+            nn.init.normal_(emb.weight, std=0.05)
+            self.state_emb = emb
+            self.trunk = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
+        self.trunk_kind = trunk
         self.event_emb = nn.EmbeddingBag(option_dim, hidden, mode="mean")
-        self.option_emb = nn.EmbeddingBag(option_dim, hidden, mode="sum")
-        self.trunk = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
+        nn.init.normal_(self.event_emb.weight, std=0.05)
         if memory == "gru":
             self.gru = nn.GRU(2 * hidden, hidden, batch_first=True)
         else:
             self.mix = nn.Sequential(nn.Linear(2 * hidden, hidden), nn.ReLU())
-        self.option_mlp = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
-        self.scorer = nn.Sequential(nn.Linear(3 * hidden, hidden), nn.ReLU(), nn.Linear(hidden, 1))
-        self.value_head = nn.Linear(hidden, 1)
-        nn.init.normal_(self.state_emb.weight, std=0.05)
-        nn.init.normal_(self.event_emb.weight, std=0.05)
-        nn.init.normal_(self.option_emb.weight, std=0.05)
-        nn.init.zeros_(self.value_head.weight)
-        nn.init.zeros_(self.value_head.bias)
-
-    def initial_state(self, n: int = 1) -> torch.Tensor:
-        return torch.zeros(n, self.hidden)
 
     def _memory(self, x: torch.Tensor, hidden, lengths):
         if self.memory == "none":
             return self.mix(x), None
         if lengths is None:  # step mode
-            h0 = self.initial_state(x.shape[0]).to(x) if hidden is None else hidden
+            h0 = torch.zeros(x.shape[0], self.hidden, device=x.device, dtype=x.dtype) if hidden is None else hidden
             out, hn = self.gru(x[:, None], h0[None])
             return out[:, 0], hn[0]
         seqs = list(torch.split(x, lengths))
@@ -162,20 +187,89 @@ class PolicyNet(nn.Module):
         out, _ = pad_packed_sequence(self.gru(packed)[0], batch_first=True)
         return torch.cat([out[i, :n] for i, n in enumerate(lengths)]), None
 
-    def forward(self, b: Batch, hidden: torch.Tensor | None = None, lengths: list[int] | None = None, max_options: int | None = None):
-        """Returns (logits (B, max_opts), values (B,), new hidden (B, H) or None).
-        `max_options` (= n_opts.max()) can be passed to avoid a device sync."""
-        s = self.trunk(self.state_emb(b.s_idx, b.s_off))
+    def forward(self, b: Batch, hidden, lengths):
+        s = self.state(b.s_idx, b.s_off) if self.trunk_kind == "transformer" else self.trunk(self.state_emb(b.s_idx, b.s_off))
         e = self.event_emb(b.e_idx, b.e_off)
         z, hn = self._memory(torch.cat([s, e], dim=-1), hidden, lengths)
-        c = s + z
+        return s + z, hn
+
+
+class PolicyNet(nn.Module):
+    """hidden: policy width. trunk: "mlp" (EmbeddingBag + MLP) or
+    "transformer" (2 layers over the active state features). value_net:
+    "shared" (a linear value head on the policy core) or "separate" (its own
+    embeddings, trunk and memory of width value_hidden, no shared gradients;
+    Andrychowicz et al. 2020 found separate, wider value networks better).
+    The recurrent state of a separate value net is appended to the policy's,
+    so `state_size` = hidden (+ value_hidden)."""
+
+    def __init__(
+        self,
+        hidden: int = 128,
+        memory: str = "gru",
+        state_dim: int = STATE_DIM,
+        option_dim: int = OPTION_DIM,
+        trunk: str = "mlp",
+        value_net: str = "shared",
+        value_hidden: int = 0,
+    ):
+        super().__init__()
+        if memory not in MEMORY_KINDS or trunk not in TRUNKS or value_net not in VALUE_NETS:
+            raise ValueError(f"memory in {MEMORY_KINDS}, trunk in {TRUNKS}, value_net in {VALUE_NETS}")
+        value_hidden = value_hidden or hidden
+        self.config = {"hidden": hidden, "memory": memory, "state_dim": state_dim, "option_dim": option_dim, "trunk": trunk, "value_net": value_net, "value_hidden": value_hidden}
+        self.hidden = hidden
+        self.memory = memory
+        self.value_net = value_net
+        self.policy_core = _Core(hidden, memory, trunk, state_dim, option_dim)
+        self.option_emb = nn.EmbeddingBag(option_dim, hidden, mode="sum")
+        nn.init.normal_(self.option_emb.weight, std=0.05)
+        self.option_mlp = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
+        self.scorer = nn.Sequential(nn.Linear(3 * hidden, hidden), nn.ReLU(), nn.Linear(hidden, 1))
+        if value_net == "separate":
+            self.value_core = _Core(value_hidden, memory, trunk, state_dim, option_dim)
+            self.value_head = nn.Sequential(nn.Linear(value_hidden, value_hidden), nn.ReLU(), nn.Linear(value_hidden, 1))
+            last = self.value_head[-1]
+        else:
+            self.value_head = nn.Linear(hidden, 1)
+            last = self.value_head
+        nn.init.zeros_(last.weight)
+        nn.init.zeros_(last.bias)
+        self.value_hidden = value_hidden if value_net == "separate" else 0
+        self.state_size = hidden + self.value_hidden
+
+    def initial_state(self, n: int = 1) -> torch.Tensor:
+        return torch.zeros(n, self.state_size)
+
+    def forward(self, b: Batch, hidden: torch.Tensor | None = None, lengths: list[int] | None = None, max_options: int | None = None):
+        """Returns (logits (B, max_opts), values (B,), new hidden (B, state_size) or None).
+        `max_options` (= n_opts.max()) can be passed to avoid a device sync."""
+        hp = hv = None
+        if hidden is not None:
+            hp, hv = hidden[:, : self.hidden].contiguous(), hidden[:, self.hidden :].contiguous()
+        c, hn = self.policy_core(b, hp, lengths)
+        if self.value_net == "separate":
+            cv, hvn = self.value_core(b, hv, lengths)
+            values = self.value_head(cv).squeeze(-1)
+            if hn is not None:
+                hn = torch.cat([hn, hvn], dim=-1)
+        else:
+            values = self.value_head(c).squeeze(-1)
         a = self.option_mlp(self.option_emb(b.o_idx, b.o_off))
         cr = c[b.o_row]
         scores = self.scorer(torch.cat([cr, a, cr * a], dim=-1)).squeeze(-1)
         width = int(b.n_opts.max()) if max_options is None else max_options
         logits = torch.full((c.shape[0], width), float("-inf"), device=c.device, dtype=scores.dtype)
         logits[b.o_row, b.o_pos] = scores
-        return logits, self.value_head(c).squeeze(-1), hn
+        return logits, values, hn
+
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        """Accepts checkpoints from before the core refactor (state_emb, trunk,
+        event_emb, gru/mix at the top level)."""
+        old = ("state_emb.", "trunk.", "event_emb.", "gru.", "mix.")
+        if any(k.startswith(old) for k in state_dict):
+            state_dict = {("policy_core." + k if k.startswith(old) else k): v for k, v in state_dict.items()}
+        return super().load_state_dict(state_dict, strict=strict, assign=assign)
 
 
 def masked_entropy(logits: torch.Tensor) -> torch.Tensor:

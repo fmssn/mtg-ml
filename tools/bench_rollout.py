@@ -31,6 +31,8 @@ def main(argv=None) -> None:
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--memory", default="gru")
+    ap.add_argument("--trunk", default="mlp", choices=("mlp", "transformer"))
+    ap.add_argument("--value-net", default="shared", choices=("shared", "separate"))
     ap.add_argument("--max-rows", type=int, default=16384)
     ap.add_argument("--server-cpus", default=None, help="CPUs reserved for the server, e.g. 32-33")
     ap.add_argument("--worker-cpus", default=None, help="CPUs the workers are pinned to (one each, round robin)")
@@ -62,7 +64,7 @@ def main(argv=None) -> None:
     paths = []
     for k in range(2):
         torch.manual_seed(k)
-        net = PolicyNet(hidden=args.hidden, memory=args.memory)
+        net = PolicyNet(hidden=args.hidden, memory=args.memory, trunk=args.trunk, value_net=args.value_net)
         paths.append(os.path.join(tmp, f"p{k}.pt"))
         torch.save({"config": net.config, "model": net.state_dict()}, paths[-1])
     server = None
@@ -95,7 +97,7 @@ def main(argv=None) -> None:
             walls = sorted(t[0] for t in tm)
             wait = sum(t[1] for t in tm) / max(sum(t[0] for t in tm), 1e-9)
             print(f"round {r}: {n} decisions in {dt:.1f}s = {n / dt:,.0f} decisions/s; job wall min/median/max {walls[0]:.1f}/{walls[len(walls) // 2]:.1f}/{walls[-1]:.1f}s, waiting for inference {wait:.0%}", flush=True)
-        line = f"{args.engine} {args.inference} workers={args.workers} games/round={args.games}: {sum(rates) / len(rates):,.0f} decisions/s"
+        line = f"h{args.hidden} {args.trunk} value={args.value_net} {args.engine} {args.inference} workers={args.workers} games/round={args.games}: {sum(rates) / len(rates):,.0f} decisions/s"
         if server is not None:
             st = server.stats()
             line += f" | server: {st['rows'] / max(st['batches'], 1):.0f} decisions/batch, {st['requests'] / max(st['batches'], 1):.1f} requests/batch, busy {st['busy_s']:.1f}s (parse {st['parse_s']:.1f}, infer {st['infer_s']:.1f}, reply {st['reply_s']:.1f}), device {server.cfg.device}{' DRY RUN' if args.dry_run else ''}"

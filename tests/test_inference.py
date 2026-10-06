@@ -14,10 +14,10 @@ from mtg_ml.rl.model import PolicyNet, collate  # noqa: E402
 from mtg_ml.rl.rollout import BOT, LEARNER, RANDOM, GameSpec, Job, run_job, split_games  # noqa: E402
 
 
-def _ckpt(tmp_path, memory="gru", seed=0):
+def _ckpt(tmp_path, memory="gru", seed=0, trunk="mlp", value_net="shared"):
     torch.manual_seed(seed)
-    net = PolicyNet(hidden=32, memory=memory)
-    path = str(tmp_path / f"net_{memory}_{seed}.pt")
+    net = PolicyNet(hidden=32, memory=memory, trunk=trunk, value_net=value_net, value_hidden=48)
+    path = str(tmp_path / f"net_{memory}_{trunk}_{value_net}_{seed}.pt")
     torch.save({"config": net.config, "model": net.state_dict()}, path)
     return net, path
 
@@ -32,10 +32,13 @@ def _replay_matches(net, res, tol=1e-4):
     assert torch.allclose(values, rec_values, atol=tol), (values - rec_values).abs().max()
 
 
-@pytest.mark.parametrize("memory", ["gru", "none"])
-def test_server_rollouts_replay_exactly(tmp_path, memory):
-    net, path = _ckpt(tmp_path, memory)
-    _, pool_path = _ckpt(tmp_path, memory, seed=1)
+VARIANTS = [("gru", "mlp", "shared"), ("none", "mlp", "shared"), ("gru", "mlp", "separate"), ("gru", "transformer", "separate"), ("none", "transformer", "shared")]
+
+
+@pytest.mark.parametrize("memory,trunk,value_net", VARIANTS)
+def test_server_rollouts_replay_exactly(tmp_path, memory, trunk, value_net):
+    net, path = _ckpt(tmp_path, memory, trunk=trunk, value_net=value_net)
+    _, pool_path = _ckpt(tmp_path, memory, seed=1, trunk=trunk, value_net=value_net)
     specs = [GameSpec(seed=s, seats=seats, match_game=1 + s % 2) for s, seats in enumerate(
         [(LEARNER, LEARNER), (LEARNER, pool_path), (pool_path, LEARNER), (LEARNER, BOT), (RANDOM, LEARNER), (LEARNER, LEARNER)] * 3
     )]  # fmt: skip
@@ -54,8 +57,9 @@ def test_server_rollouts_replay_exactly(tmp_path, memory):
         _replay_matches(net, r)
 
 
-def test_local_rollouts_replay_exactly(tmp_path):
-    net, path = _ckpt(tmp_path)
+@pytest.mark.parametrize("memory,trunk,value_net", VARIANTS)
+def test_local_rollouts_replay_exactly(tmp_path, memory, trunk, value_net):
+    net, path = _ckpt(tmp_path, memory, trunk=trunk, value_net=value_net)
     specs = [GameSpec(seed=s, seats=(LEARNER, LEARNER)) for s in range(4)]
     _replay_matches(net, run_job(Job(specs, path, 1, max_turns=30)))
 
@@ -73,3 +77,12 @@ def test_server_workers_do_not_import_torch(tmp_path):
     finally:
         srv.close()
     assert not loaded
+
+
+def test_old_checkpoints_still_load():
+    """Checkpoints from before the policy/value core split (top-level state_emb, trunk, gru...)."""
+    net = PolicyNet(hidden=16)
+    old = {k.replace("policy_core.", ""): v for k, v in net.state_dict().items()}
+    fresh = PolicyNet(hidden=16)
+    fresh.load_state_dict(old)
+    assert all(torch.equal(a, b) for a, b in zip(net.state_dict().values(), fresh.state_dict().values()))

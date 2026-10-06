@@ -65,6 +65,20 @@ CUDA_VISIBLE_DEVICES=4 python tools/profile_server.py --device cuda --requests 3
 
 `bench_rollout.py` also prints per-job wall times and the share of time workers wait for inference. The server prints its busy time split into parse, infer and reply.
 
+## Network size (2026-10-06)
+
+`PolicyNet` now takes `trunk` ("mlp" | "transformer": 2 layers over the active state features, MageZero-style), `value_net` ("shared" | "separate": its own embeddings, trunk and memory, as recommended by Andrychowicz et al. 2020) and `value_hidden`. Training now defaults to **hidden 512, MLP trunk, separate value net**. That puts it in the range of tuned PPO card-game agents (7×455 MLP for LOCM, 6×512 MLP in DouZero). Old checkpoints still load (`PolicyNet` constructor defaults are unchanged, and old parameter names are mapped). Exact-replay tests cover every variant on both inference paths.
+
+h100-private, 60 workers, one GPU (bus 87):
+
+| decisions/s | local inference | server on GPU |
+|---|---:|---:|
+| h128 MLP, shared value (old default) | 558k | 334k |
+| h512 MLP, separate value (new default) | 153k | **291k** |
+| h512 transformer, separate value | 5k | 30k |
+
+Training iterations (2048 games, update on GPU, learner decisions only): h128 shared 1.6 s rollout + 7.7 s update; h512 separate 4.7 s + 19.8 s (server); h512 transformer 17.7 s + 149 s. **The PPO update is now the bottleneck** for every variant. The transformer attends over ~100-250 tokens per decision, so it needs mixed precision and fewer tokens (one per object rather than per feature) before it is practical. The new default should run with `--inference server`. Which size plays best is still to be measured against the bots.
+
 ## Next steps
 
 1. Cut the server's fixed cost per batch: CUDA graphs or `torch.compile` for the forward pass, and pinned staging buffers.

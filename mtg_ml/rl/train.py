@@ -44,7 +44,10 @@ class TrainConfig:
     iterations: int = 100
     games_per_iter: int = 256  # >= ~32 per worker keeps batched inference cheap next to the engine
     workers: int = max(1, (os.cpu_count() or 2) - 1)
-    hidden: int = 128
+    hidden: int = 512  # policy width (128 before 2026-10; 7x455 / 6x512 MLPs are typical for PPO card-game agents)
+    trunk: str = "mlp"  # "mlp" or "transformer" (2 layers over the active state features)
+    value_net: str = "separate"  # "separate": own embeddings, trunk and memory; "shared": linear head on the policy core
+    value_hidden: int = 0  # width of a separate value net (0 = hidden)
     memory: str = "gru"  # "gru" (recurrent over the player's decisions) or "none"
     gamma: float = 0.995
     lam: float = 0.95
@@ -76,7 +79,7 @@ class Trainer:
         self.latest = os.path.join(cfg.run, "latest.pt")
         torch.manual_seed(cfg.seed)
         self.rng = random.Random(cfg.seed)
-        self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory).to(cfg.device)
+        self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden).to(cfg.device)
         self.opt = torch.optim.Adam(self.net.parameters(), lr=cfg.ppo.lr, eps=1e-5)
         self.iteration = 0
         self.pool: list[str] = []

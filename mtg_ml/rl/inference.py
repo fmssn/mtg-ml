@@ -215,8 +215,8 @@ class _Server:
             net.load_state_dict(ck["model"])
             net.eval().to(self.device)
             if net.memory == "gru" and self.hidden is None:
-                self.hidden = torch.zeros(self.n_workers * SLOTS_PER_WORKER, net.hidden, device=self.device)
-            if net.memory == "gru" and self.hidden.shape[1] != net.hidden:
+                self.hidden = torch.zeros(self.n_workers * SLOTS_PER_WORKER, net.state_size, device=self.device)
+            if net.memory == "gru" and self.hidden.shape[1] != net.state_size:
                 raise ValueError("all recurrent policies served together must share the hidden size")
             self.models[key] = net
         return self.models[key]
