@@ -152,6 +152,25 @@ can have thousands of options, so it reached 25 GB on the GPU and varied per
 iteration, which looked like a leak until it crashed the run at iteration 316.
 Targets are flat now and expanded per minibatch to that minibatch's width.
 
+## Attempt 5 verdict, and the search value as critic target
+
+Attempt 5 (margin gate, soft target, minibatch-normalized distillation) ran 75
+iterations without damage but without gain: benchmark 0.39 to 0.43 against the
+baseline's final 0.52, entropy 0.31 to 0.41. The plain policy moved at the
+probed positions (seed 6, frame 168: pass 0.68 to 0.34, Shaman 0.10 to 0.23;
+frame 321: the sweep from 1e-7 to 0.006) but the mass spread over several
+options rather than concentrating on the line: soft targets from noisy leaf
+values broaden the policy more than they teach the combo.
+
+The bottleneck is the critic's view of intermediate states (Shaman on board,
+Toxin in hand is worth nothing to it until the sweep has resolved), which
+forces the deep horizon and makes every margin noisy. Attempt 6 therefore
+trains the value head at searched decisions towards a mix of the game return
+and the search's value of the action taken, its line to the horizon
+(`--ppo-search-value-coef`, default 0.5; `Result.search_values`). That value
+exists for every searched decision, intervention or not, so about 6,000
+decisions per iteration get it. Metric `search_valued`.
+
 ## Cost and open items
 
 - Every node and every auto-played decision is one forward pass: about 13 evals

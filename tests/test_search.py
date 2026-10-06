@@ -105,6 +105,10 @@ def test_rollout_records_search_targets_and_ppo_distills(learner_ckpt):
     searched = [i for i, k in enumerate(res.target_len) if k]
     assert searched, "no search improved on the policy by the margin (margin 0 here, so any disagreement counts)"
     assert sum(res.target_len) == len(res.targets)
+    assert len(res.search_values) == n
+    valued = [v for v in res.search_values if v == v]  # not nan
+    assert valued and len(valued) >= len(searched) and all(-1.0 <= v <= 1.0 for v in valued)
+    assert res.search_values[searched[0]] == res.search_values[searched[0]]  # an intervention always carries its searched value
     pos = 0
     for i, k in enumerate(res.target_len):
         if k:
@@ -120,7 +124,9 @@ def test_rollout_records_search_targets_and_ppo_distills(learner_ckpt):
     opt = torch.optim.Adam(net.parameters(), lr=1e-3)
     stats = ppo_update(net, opt, res, PPOConfig(epochs=2, minibatch=64, target_kl=None))
     assert stats["searched"] == len(searched)
+    assert stats["search_valued"] == len(valued)
     assert math.isfinite(stats["distill_loss"]) and stats["distill_loss"] > 0
+    assert math.isfinite(stats["v_loss"])
 
 
 def test_search_rejects_server_inference(learner_ckpt):

@@ -42,6 +42,11 @@ class PPOConfig:
     # (cross-entropy) instead of the policy-gradient term, whose action they did
     # not sample from the policy; they still train the value head.
     distill_coef: float = 1.0  # the distillation term is a mean over all rows, so ~0.5% searched rows weigh ~0.5% of a one-hot cross-entropy
+    # Searched decisions: the value target is (1 - coef) * return + coef * the search's
+    # value of the action taken (its line to the horizon). The game outcome alone leaves
+    # the critic blind to what a state is worth with the right line; the searched value
+    # propagates the resolved board (the sweep gone through) back to the decision.
+    search_value_coef: float = 0.5
 
 
 def make_optimizer(params, lr: float, device) -> torch.optim.Optimizer:
@@ -99,6 +104,11 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     var = ret.var().item()
     explained_var = float("nan") if n < 2 or var == 0 else 1 - adv.var().item() / var  # values = ret - adv
     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+    sv = floats(getattr(data, "search_values", None) or [float("nan")] * n) if n else torch.zeros(0)
+    valued = ~torch.isnan(sv)
+    search_valued = int(valued.sum())
+    if search_valued and cfg.search_value_coef:
+        ret = torch.where(valued, (1 - cfg.search_value_coef) * ret + cfg.search_value_coef * sv.nan_to_num(), ret)
     net.train()
     dev = torch.device(device)
     samples = packed_tensors(data.samples, dev)
@@ -173,4 +183,5 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     out["early_stop"] = stop
     out["explained_var"] = explained_var
     out["searched"] = searched
+    out["search_valued"] = search_valued
     return out

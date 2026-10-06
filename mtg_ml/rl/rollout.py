@@ -172,6 +172,7 @@ class Trajectory:
     values: list = field(default_factory=list)
     potentials: list = field(default_factory=list)
     targets: list = field(default_factory=list)  # per decision: the search's policy (list of floats) or None
+    search_values: list = field(default_factory=list)  # per decision: searched value of the action taken, or None
 
 
 @dataclass
@@ -189,6 +190,10 @@ class Result:
     target_len: list = field(default_factory=list)
     targets: list = field(default_factory=list)
     searches: int = 0  # searches run (a target is recorded only when the search improved on the policy by its margin)
+    # per decision: the search's value of the action taken (its line to the horizon,
+    # from the value head there), nan where the decision was not searched or the
+    # action never visited. A critic target that sees past the intermediate state.
+    search_values: list = field(default_factory=list)
     # per game: (seats, winner, end_reason, turns, decisions, seed)
     games: list = field(default_factory=list)
     # per job: (wall seconds, seconds waiting for inference, decisions)
@@ -228,6 +233,7 @@ def _finish(traj: Trajectory, outcome: float, job: Job, out: Result) -> None:
         out.target_len.append(0 if t is None else len(t))
         if t is not None:
             out.targets += t
+    out.search_values += [float("nan") if q is None else q for q in traj.search_values]
 
 
 class _Seat:
@@ -519,7 +525,7 @@ def _play(job: Job) -> Result:
         extras = res[3] if len(res) > 3 else None
         waited += time.perf_counter() - tw
         for i, ((pol, _, _, x, lv, p, pot, want), a, lp, v) in enumerate(zip(items, acts, logps, values)):
-            target = None
+            target = sv = None
             if want and extras is not None and extras[i] is not None:
                 logits, hn, opp = extras[i]
                 found = search(lv.game, p, ev.evaluator, job.search, lv.rng, root_logits=logits, root_value=v, root_hn=hn, opp_hidden=opp, opp_events=lv.seats[1 - p].events)
@@ -528,6 +534,7 @@ def _play(job: Job) -> Result:
                     a, target = found.action, found.policy
                     m = max(logits)
                     lp = logits[a] - m - math.log(sum(math.exp(x_ - m) for x_ in logits))  # behaviour log-prob of the searched action
+                sv = found.q[a]
             if job.record and pol == LEARNER:
                 tr = lv.trajs[p]
                 tr.samples.append(x)
@@ -536,6 +543,7 @@ def _play(job: Job) -> Result:
                 tr.values.append(v)
                 tr.potentials.append(pot)
                 tr.targets.append(target)
+                tr.search_values.append(sv)
             _step(lv.game, lv.seats, a)
         inflight[k] = None
 

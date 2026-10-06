@@ -377,7 +377,7 @@ def _rate(games, seat: int) -> float:
 
 
 def _fmt(row: dict) -> str:
-    keys = ["iteration", "decisions", "searches", "searched", "game_turns", "draws", "jund_wins_selfplay", "win_vs_pool", "entropy", "approx_kl", "explained_var", "decisions_per_s", "wall_s"]
+    keys = ["iteration", "decisions", "searches", "searched", "search_valued", "game_turns", "draws", "jund_wins_selfplay", "win_vs_pool", "entropy", "approx_kl", "explained_var", "decisions_per_s", "wall_s"]
     s = " ".join(f"{k}={row[k]:.3f}" if isinstance(row[k], float) else f"{k}={row[k]}" for k in keys if k in row)
     ev = {k.split("/", 1)[1]: v for k, v in row.items() if k.startswith(("eval/", "bench/")) and not k.endswith(("_ci", "_n"))}
     return s + (" | eval " + " ".join(f"{k}={v:.2f}" for k, v in ev.items()) if ev else "")

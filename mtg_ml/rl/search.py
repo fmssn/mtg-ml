@@ -100,6 +100,7 @@ class SearchResult:
     root_value: float  # value head at the root, for comparison
     reference: float = 0.0  # value of the policy's own argmax action (same horizon as `value`)
     improved: bool = False  # the search's action differs from the policy's argmax and beats it by `margin`
+    q: list = field(default_factory=list)  # searched value per root action (None where never visited)
     line: list[str] = field(default_factory=list)  # principal variation (option labels)
     expansions: int = 0
     evals: int = 0
@@ -355,7 +356,8 @@ class _Search:
                 break
             node = child
             a = max(range(len(node.n)), key=lambda i: (node.n[i], node.q[i]))
-        return SearchResult(best, self._improved(root, cfg.target_scale), root.q[best], root.value, reference, improved, line, self.expansions, self.evals)
+        q = [root.q[a] if root.n[a] else None for a in range(n)]
+        return SearchResult(best, self._improved(root, cfg.target_scale), root.q[best], root.value, reference, improved, q, line, self.expansions, self.evals)
 
 
 def search(game, player: int, evaluator, cfg: SearchConfig, rng: random.Random, root_hidden=None, root_events=(), root_logits=None, root_value=None, root_hn=None, opp_hidden=None, opp_events=()) -> SearchResult:
