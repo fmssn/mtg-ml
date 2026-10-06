@@ -79,6 +79,10 @@ h100-private, 60 workers, one GPU (bus 87):
 
 Training iterations (2048 games, update on GPU, learner decisions only): h128 shared 1.6 s rollout + 7.7 s update; h512 separate 4.7 s + 19.8 s (server); h512 transformer 17.7 s + 149 s. **The PPO update is now the bottleneck** for every variant. The transformer attends over ~100-250 tokens per decision, so it needs mixed precision and fewer tokens (one per object rather than per feature) before it is practical. The new default should run with `--inference server`. Which size plays best is still to be measured against the bots.
 
+## Entity trunk and the streamed rollout (2026-10-06)
+
+The rollout pipeline changed in the training speed pass ([training-speed-plan.md](training-speed-plan.md)): workers keep a constant number of games live and claim the next from pool-wide counters (`rollout.create_pool` + `run_specs`/`play`), hidden states live in slot tables on both inference paths, recorded samples come back through shared memory, and checkpoints are memory-mapped. For the h128 entity trunk, local inference does 182k decisions/s at 31 workers (240k at 60) while the server does 15k with 26 policies in play and 68k with 2: the server's cost per batch is ~3 ms per policy of kernel launches and host syncs in the step-mode forward, not GPU time. So `--inference local` is the default choice for this network; the server stays the path for a trunk whose CPU forward is expensive (transformer), and would need the sync-free step-mode forward first.
+
 ## Next steps
 
 1. Cut the server's fixed cost per batch: CUDA graphs or `torch.compile` for the forward pass, and pinned staging buffers.

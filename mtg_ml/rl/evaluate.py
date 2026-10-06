@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import argparse
 import math
-import multiprocessing as mp
 import os
 
 from ..backend import ENV_VAR, engine_name
 from ..match import MatchResult, game_seed
-from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, run_job, split_games, worker_init
+from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, create_pool, play
 
 EVAL_SEED = 10_000_000
 
@@ -67,8 +66,7 @@ def score(games: list) -> dict:
 
 def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False) -> dict:
     specs = paired_specs(opponent, games, jund_only=jund_only)
-    jobs = [Job(chunk, learner_path, version, record=False, max_turns=max_turns, inference=inference) for chunk in split_games(specs, n_jobs)]
-    return score([g for r in procs.map(run_job, jobs) for g in r.games])
+    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference), n_jobs).games)
 
 
 def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False) -> dict:
@@ -87,11 +85,10 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
                 todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n))
         if not todo:
             break
-        jobs = [Job(chunk, learner_path, version, record=False, max_turns=max_turns, inference=inference) for chunk in split_games([sp for _, sp in todo.values()], n_jobs)]
-        for r in procs.map(run_job, jobs):
-            for seats, winner, reason, _, _, seed in r.games:
-                res, spec = todo[(seed, seats)]
-                res.games.append((spec.starting_player, winner, reason))
+        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference)
+        for seats, winner, reason, _, _, seed in play(procs, [sp for _, sp in todo.values()], job, n_jobs).games:
+            res, spec = todo[(seed, seats)]
+            res.games.append((spec.starting_player, winner, reason))
     return score([(seats, res.winner) for _, seats, res in live])
 
 
@@ -121,7 +118,7 @@ def main(argv=None) -> None:
     args = ap.parse_args(argv)
     if args.engine:
         os.environ[ENV_VAR] = engine_name(args.engine)
-    with mp.get_context("spawn").Pool(args.workers, initializer=worker_init) as procs:
+    with create_pool(args.workers) as procs:
         fn = head_to_head_bo3 if args.bo3 else head_to_head
         res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund)
     for k, (s, ci, n) in res.items():

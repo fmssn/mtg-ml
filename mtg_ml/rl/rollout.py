@@ -1,6 +1,6 @@
 """Self-play rollouts: many games in lockstep with batched policy inference.
 
-A job is a list of games. Each game has a policy per seat:
+A job plays games (`GameSpec`). Each game has a policy per seat:
     "learner"   the current weights; its decisions are recorded for PPO,
     "random"    `agents.RandomAgent` (evaluation baseline),
     "bot"       the scripted bot for that seat's deck (`mtg_ml.bots`),
@@ -9,18 +9,40 @@ Each (game, seat) carries its own recurrent state and the events it saw
 since its last decision. Every recorded player trajectory gets terminal reward +1 / -1 / 0 plus
 optional potential-based life shaping, then GAE.
 
+A worker advances all its live games by one policy decision per step, with
+one forward pass per policy present. On a Xeon core a pass of the h128
+entity net costs ~0.5 ms plus 20-40 µs per decision, so what matters is
+how many games share a step and how many policies they bring. Two ways to
+spread games over a pool:
+  * fixed split (`split_games`, `pool.map(run_job, jobs)`): each job plays
+    its own games, all at once. Its batch shrinks as games end, the round
+    waits for the slowest job, and with the opponent pool a job's games
+    bring a dozen checkpoints, so a dozen passes per step.
+  * shared game queue (`create_pool` + `run_specs`): every job gets all
+    specs, keeps `Job.inflight` games live and claims the next spec from
+    pool-wide counters whenever a game ends, so batches stay full and jobs
+    end close together. Specs are grouped by matchup (the opponent
+    network) and a worker sticks to one matchup at a time, so a step needs
+    about two passes. Recorded samples come back through shared memory.
+
 Policies are evaluated either in the worker (`inference="local"`: a CPU
-copy of each network, one torch thread; checkpoints are loaded from disk and
+copy of each network, one torch thread; checkpoints are memory-mapped and
 cached per process, pool checkpoints never change, the learner is keyed by
 its version), or by the central GPU server (`inference="server"`,
 `rl/inference.py`), in which case the worker never imports torch and keeps
-two groups of games in flight so its CPU work overlaps the server round trip.
+`Job.groups` groups of games in flight so its CPU work overlaps the server
+round trip. Both keep recurrent state in a table indexed by slot (two per
+live game, reused when a game ends; a seat's first decision is `fresh`).
 """
 
 from __future__ import annotations
 
+import itertools
+import os
 import time
-from dataclasses import dataclass, field
+from array import array
+from dataclasses import dataclass, field, fields, replace
+from operator import itemgetter
 
 from ..agents import RandomAgent
 from ..bots import make_bot
@@ -28,15 +50,19 @@ from ..backend import game_class
 from ..engine import Game
 from ..match import match_decks
 from .features import encode_event_hashes, event_hashes, featurize_flat
-from .samples import PackedSamples
+from .samples import FIELDS, PackedSamples
 
 LEARNER = "learner"
 RANDOM = "random"
 BOT = "bot"
 SCRIPTED = (RANDOM, BOT)
+MAX_LIVE = 4096  # games in play per job: the server keeps 8192 hidden-state slots per worker
+MAX_MATCHUPS = 1024  # claim counters a pool shares (run_specs)
 
 _DECKS: dict[int, tuple] = {}
 _MODELS: dict[tuple, object] = {}
+_CLAIM = None  # the pool's shared next-spec index per matchup (multiprocessing Array), set by the pool initializer
+_PROFILE = None
 
 
 def _decks(match_game: int = 1):
@@ -47,28 +73,60 @@ def _decks(match_game: int = 1):
     return _DECKS[key]
 
 
-def load_policy(path: str, version: int = 0):
+def load_net(path: str):
+    """A checkpoint's network on the CPU, in eval mode. The file is
+    memory-mapped and only `model` is read: built on the meta device and
+    given the mapped tensors (`assign`), so there is no random init, no copy,
+    and the optimizer state that makes up 2/3 of a training checkpoint is
+    never touched (~5 ms instead of ~220 ms for the h128 entity net). Workers
+    share the pages through the page cache. Checkpoints must be replaced
+    atomically (write + os.replace, as the trainer does), never rewritten in
+    place while mapped."""
     import torch
 
     from .model import PolicyNet
 
+    ckpt = torch.load(path, map_location="cpu", mmap=True, weights_only=False)
+    with torch.device("meta"):
+        net = PolicyNet(**ckpt["config"])
+    net.load_state_dict(ckpt["model"], assign=True)
+    return net.eval()
+
+
+def load_policy(path: str, version: int = 0):
+    """`load_net`, cached per process. Frozen checkpoints (version 0) stay
+    cached; a learner version replaces every other learner version, whatever
+    its path (the trainer may write a new file per iteration)."""
     key = (path, version)
     if key not in _MODELS:
-        if version:  # drop older learner versions
-            for k in [k for k in _MODELS if k[0] == path]:
+        if version:
+            for k in [k for k in _MODELS if k[1]]:
                 del _MODELS[k]
-        ckpt = torch.load(path, map_location="cpu", weights_only=False)
-        net = PolicyNet(**ckpt["config"])
-        net.load_state_dict(ckpt["model"])
-        net.eval()
-        _MODELS[key] = net
+        _MODELS[key] = load_net(path)
     return _MODELS[key]
 
 
-def worker_init() -> None:
+def worker_init(claim=None, ids=None, cpus=None) -> None:
+    """Initializer of a local-inference pool: one torch thread. `create_pool`
+    also hands over the pool's spec counters and, to pin worker i to
+    cpus[i % len(cpus)] (Linux), a shared id counter."""
     import torch
 
     torch.set_num_threads(1)
+    connect(claim)
+    if ids is not None and cpus and hasattr(os, "sched_setaffinity"):
+        with ids.get_lock():
+            wid = ids.value
+            ids.value += 1
+        os.sched_setaffinity(0, {cpus[wid % len(cpus)]})
+
+
+def connect(claim) -> None:
+    """Use `claim` (a shared `Array("i", MAX_MATCHUPS)`) as this process's
+    spec counters for streaming jobs. Shared arrays cannot be pickled into
+    tasks, only inherited, so pool initializers call this."""
+    global _CLAIM
+    _CLAIM = claim
 
 
 @dataclass
@@ -91,12 +149,15 @@ class Job:
     max_turns: int = 100
     engine: str | None = None  # None: $MTG_ENGINE, else python
     inference: str = "local"  # "local": CPU torch in the worker; "server": the central inference server
-    groups: int = 2  # server mode: requests in flight per worker (its games are split into this many groups)
+    groups: int = 2  # server mode: requests in flight per worker (its live games are split into this many groups)
+    # 0: play all `games` at once. n > 0: keep n games live, claiming more of
+    # `games` from the pool's shared counters as games end (`run_specs`).
+    inflight: int = 0
 
 
 @dataclass
 class Trajectory:
-    samples: list = field(default_factory=list)  # (state, opts, events)
+    samples: list = field(default_factory=list)  # (state, option lengths, option tokens, events), int32 arrays
     actions: list = field(default_factory=list)
     logps: list = field(default_factory=list)
     values: list = field(default_factory=list)
@@ -151,13 +212,27 @@ def _finish(traj: Trajectory, outcome: float, job: Job, out: Result) -> None:
 
 
 class _Seat:
-    """Per (game, seat) memory: recurrent state and events since the last decision."""
+    """Per (game, seat) memory: events since the last decision; `fresh`
+    until the seat's first policy decision (its recurrent state starts at zero)."""
 
-    __slots__ = ("hidden", "events")
+    __slots__ = ("events", "fresh")
 
     def __init__(self):
-        self.hidden = None
         self.events: list[int] = []  # hashed event tokens
+        self.fresh = True
+
+
+class _Live:
+    """A game in play: its spec, engine, slot (hidden-state rows 2 * slot + seat),
+    trajectories, seat memories and scripted agents."""
+
+    __slots__ = ("spec", "game", "slot", "trajs", "seats", "agents")
+
+    def __init__(self, spec: GameSpec, game: Game, slot: int):
+        self.spec, self.game, self.slot = spec, game, slot
+        self.trajs = (Trajectory(), Trajectory())
+        self.seats = (_Seat(), _Seat())
+        self.agents = tuple(RandomAgent(seed=spec.seed * 2 + s) if pol == RANDOM else make_bot(s) if pol == BOT else None for s, pol in enumerate(spec.seats))
 
 
 def _step(g: Game, seats: tuple[_Seat, _Seat], a: int) -> None:
@@ -169,150 +244,252 @@ def _step(g: Game, seats: tuple[_Seat, _Seat], a: int) -> None:
     g.step(a)
 
 
-class _LocalEvaluator:
-    """Runs the policies in this process (CPU torch), hidden states per (game, seat)."""
+def _batch(torch, xs: list):
+    """Step-mode model input of decisions xs = (state, option lengths, option
+    tokens, events) as int32 arrays: values and offsets go into one int32
+    buffer with array copies (no per-token Python work), viewed as one tensor
+    and split. Returns (Batch, most options of a decision)."""
+    from .model import Batch
 
-    def __init__(self, job: Job):
+    s, e, o = array("i"), array("i"), array("i")
+    s_off, e_off, o_off, o_row, o_pos, n_opts = (array("i") for _ in range(6))
+    for r, (st, ol, of, ev) in enumerate(xs):
+        s_off.append(len(s))
+        s.extend(st)
+        e_off.append(len(e))
+        e.extend(ev)
+        k = len(ol)
+        n_opts.append(k)
+        o_row.extend([r] * k)
+        o_pos.extend(range(k))
+        o_off.extend(itertools.accumulate(ol[:-1], initial=len(o)))
+        o.extend(of)
+    parts = (s, s_off, e, e_off, o, o_off, o_row, o_pos, n_opts)
+    flat = array("i")
+    for p in parts:
+        flat.extend(p)
+    return Batch(*torch.split(torch.frombuffer(flat, dtype=torch.int32), [len(p) for p in parts])), max(n_opts)
+
+
+class _LocalEvaluator:
+    """Runs the policies in this process (CPU torch). Items are (policy, slot,
+    fresh, x), sorted by policy; `collect` runs one forward per policy (so
+    the time a job waits for inference is the inference time) and keeps
+    recurrent state in a (slots, state size) table per policy."""
+
+    def __init__(self, job: Job, slots: int):
         import torch
 
         self.torch = torch
         self.learner = load_policy(job.learner_path, job.learner_version)
+        self.slots = slots
         self.hidden: dict = {}
 
     def submit(self, group: int, items: list):
-        from .model import collate
+        return items
 
+    def collect(self, items: list):
         torch = self.torch
-        acts_out, logp_out, val_out = [0] * len(items), [0.0] * len(items), [0.0] * len(items)
-        by_pol: dict = {}
-        for k, it in enumerate(items):
-            by_pol.setdefault(it[0], []).append(k)
-        with torch.no_grad():
-            for pol, ks in by_pol.items():
+        acts, logps, vals = [], [], []
+        with torch.inference_mode():
+            for pol, run in itertools.groupby(items, key=itemgetter(0)):
+                run = list(run)
                 net = self.learner if pol == LEARNER else load_policy(pol)
+                batch, width = _batch(torch, [it[3] for it in run])
                 hidden = None
                 if net.memory != "none":
-                    hs = [self.hidden.get((items[k][1], items[k][2])) for k in ks]
-                    hidden = torch.stack([net.initial_state(1)[0] if h is None else h for h in hs])
-                ps = PackedSamples()
-                ps.extend(items[k][3] for k in ks)
-                logits, values, hn = net(collate(ps), hidden)
-                dist = torch.distributions.Categorical(logits=logits)
-                acts = dist.sample()
-                logps = dist.log_prob(acts)
-                for r, k in enumerate(ks):
-                    if hn is not None:
-                        self.hidden[(items[k][1], items[k][2])] = hn[r]
-                    acts_out[k], logp_out[k], val_out[k] = int(acts[r]), float(logps[r]), float(values[r])
-        return acts_out, logp_out, val_out
-
-    def collect(self, handle):
-        return handle
+                    table = self.hidden.get(pol)
+                    if table is None:
+                        table = self.hidden[pol] = torch.zeros(self.slots, net.state_size)
+                    slots = torch.tensor([it[1] for it in run])
+                    hidden = table[slots]
+                    fresh = [k for k, it in enumerate(run) if it[2]]
+                    if fresh:
+                        hidden[fresh] = 0.0
+                logits, values, hn = net(batch, hidden, max_options=width)
+                if hn is not None:
+                    table[slots] = hn
+                dist = torch.distributions.Categorical(logits=logits, validate_args=False)
+                a = dist.sample()
+                acts += a.tolist()
+                logps += dist.log_prob(a).tolist()
+                vals += values.tolist()
+        return acts, logps, vals
 
 
 class _ServerEvaluator:
     """Sends decisions to the central inference server (rl/inference.py)."""
 
-    def __init__(self, job: Job):
+    def __init__(self, job: Job, slots: int):
         from .inference import client
 
         self.client = client()
         self.learner_key = (job.learner_path, job.learner_version)
-        self.started: set = set()
 
     def submit(self, group: int, items: list):
-        rows = []
-        for pol, i, p, x in sorted(items, key=lambda it: it[0]):
-            key = self.learner_key if pol == LEARNER else (pol, 0)
-            fresh = (i, p) not in self.started
-            self.started.add((i, p))
-            rows.append((key, 2 * i + p, int(fresh), x[0], x[1], x[2], x[3]))
-        order = sorted(range(len(items)), key=lambda k: items[k][0])
-        return self.client.submit(group, rows), order
+        key = self.learner_key
+        return self.client.submit(group, [(key if it[0] == LEARNER else (it[0], 0), it[1], it[2], *it[3]) for it in items])
 
     def collect(self, handle):
-        h, order = handle
-        acts, logps, vals = self.client.collect(h)
-        n = len(order)
-        a, lp, v = [0] * n, [0.0] * n, [0.0] * n
-        for r, k in enumerate(order):
-            a[k], lp[k], v[k] = acts[r], logps[r], vals[r]
-        return a, lp, v
+        return self.client.collect(handle)
 
 
 def run_job(job: Job) -> Result:
-    Game = game_class(job.engine)
-    if 2 * len(job.games) > 8192:
-        raise ValueError("a job holds at most 4096 games")
-    ev = _ServerEvaluator(job) if job.inference == "server" else _LocalEvaluator(job)
-    games, trajs, mem, scripted = [], [], [], {}
-    for i, spec in enumerate(job.games):
-        games.append(
-            Game(_decks(spec.match_game), seed=spec.seed, starting_player=spec.starting_player, max_turns=job.max_turns, match_game=spec.match_game)
-        )
-        trajs.append((Trajectory(), Trajectory()))
-        mem.append((_Seat(), _Seat()))
-        for seat, pol in enumerate(spec.seats):
-            if pol == RANDOM:
-                scripted[(i, seat)] = RandomAgent(seed=spec.seed * 2 + seat)
-            elif pol == BOT:
-                scripted[(i, seat)] = make_bot(seat)
-    t_start = time.perf_counter()
-    out = Result()
-    n_groups = max(1, min(job.groups, len(games))) if job.inference == "server" else 1
-    groups = [[i for i in range(len(games)) if i % n_groups == k] for k in range(n_groups)]
-    inflight: list = [None] * n_groups  # (handle, items) per group
+    """Play a job. `MTG_WORKER_PROFILE=path` cProfiles every call in each
+    worker process (cumulative per process, written to path.<pid>)."""
+    path = os.environ.get("MTG_WORKER_PROFILE")
+    if not path:
+        return _play(job)
+    global _PROFILE
+    import cProfile
 
-    def finish(i: int) -> None:
-        g, spec = games[i], job.games[i]
+    _PROFILE = _PROFILE or cProfile.Profile()
+    _PROFILE.enable()
+    try:
+        return _play(job)
+    finally:
+        _PROFILE.disable()
+        _PROFILE.dump_stats(f"{path}.{os.getpid()}")
+
+
+def _matchup(spec: GameSpec) -> tuple:
+    """The networks a game needs besides the learner's (() for self-play and
+    games against scripted seats)."""
+    return tuple(sorted(set(spec.seats) - {LEARNER, *SCRIPTED}))
+
+
+def _matchup_bounds(specs: list[GameSpec]) -> list[int]:
+    """Starts of the runs of equal `_matchup` in `specs` (sorted by it in
+    `run_specs`), then the end. Run 0 is always the learner-only one,
+    possibly empty; runs past MAX_MATCHUPS are merged into the last."""
+    keys = [_matchup(sp) for sp in specs]
+    starts = [0] + [i for i in range(1, len(keys)) if keys[i] != keys[i - 1]]
+    if keys and keys[0]:
+        starts.insert(0, 0)
+    return starts[:MAX_MATCHUPS] + [len(specs)]
+
+
+def _claimer(job: Job):
+    """claim(n) -> indices of up to n more of `job.games`: all of them for a
+    plain job. For a streaming job they come from the pool's shared array of
+    next index per matchup, under its lock (a few µs per claim). A worker
+    sticks to one opponent network: it claims from its current matchup,
+    then learner-only games, then switches to the matchup with the most
+    games left. So a step needs ~2 forward passes, not one per pool
+    checkpoint its games happen to bring."""
+    if not job.inflight:
+        rest = iter(range(len(job.games)))
+        return lambda n: list(itertools.islice(rest, n))
+    if _CLAIM is None:
+        raise RuntimeError("Job.inflight needs a pool from rollout.create_pool or InferenceServer.pool (run_specs)")
+    ends = _matchup_bounds(job.games)[1:]
+    pos = _CLAIM.get_obj()
+    left = lambda m: ends[m] - pos[m]  # noqa: E731
+    largest = lambda: max(range(1, len(ends)), key=left, default=0)  # noqa: E731
+    cur, dry = None, False
+
+    def take(n: int) -> list[int]:
+        nonlocal cur, dry
+        got: list[int] = []
+        if n <= 0 or dry:
+            return got
+        with _CLAIM.get_lock():
+            if cur is None:
+                cur = largest()
+            while len(got) < n:
+                m = cur if left(cur) > 0 else 0 if left(0) > 0 else largest()
+                k = min(n - len(got), left(m))
+                if k <= 0:
+                    dry = True
+                    break
+                cur = m or cur
+                got.extend(range(pos[m], pos[m] + k))
+                pos[m] += k
+        return got
+
+    return take
+
+
+def _play(job: Job) -> Result:
+    t_start = time.perf_counter()
+    Game = game_class(job.engine)
+    cap = job.inflight or len(job.games)
+    if cap > MAX_LIVE:
+        raise ValueError(f"a job holds at most {MAX_LIVE} live games")
+    ev = _ServerEvaluator(job, 2 * cap) if job.inference == "server" else _LocalEvaluator(job, 2 * cap)
+    claim = _claimer(job)
+    free = list(range(cap - 1, -1, -1))  # game slots
+    n_groups = max(1, min(job.groups, cap)) if job.inference == "server" else 1
+    room = -(-cap // n_groups)  # live games per group
+    groups: list[list[_Live]] = [[] for _ in range(n_groups)]
+    inflight: list = [None] * n_groups  # (handle, items) per group
+    out = Result()
+
+    def start(i: int) -> _Live:
+        spec = job.games[i]
+        g = Game(_decks(spec.match_game), seed=spec.seed, starting_player=spec.starting_player, max_turns=job.max_turns, match_game=spec.match_game)
+        return _Live(spec, g, free.pop())
+
+    def finish(lv: _Live) -> None:
+        g, spec = lv.game, lv.spec
         out.games.append((spec.seats, g.winner, g.end_reason, g.turn, len(g.actions), spec.seed))
         if job.record:
             for p in (0, 1):
                 if spec.seats[p] == LEARNER:
                     outcome = 0.0 if g.winner is None else (1.0 if g.winner == p else -1.0)
-                    _finish(trajs[i][p], outcome, job, out)
-        trajs[i] = mem[i] = None
+                    _finish(lv.trajs[p], outcome, job, out)
+        free.append(lv.slot)
 
     def prepare(k: int) -> list:
-        """Play scripted moves until each live game of group k needs a policy; featurize those."""
-        items, live = [], []
-        for i in groups[k]:
-            g = games[i]
-            while not g.over:
-                p = g.decision.player
-                pol = job.games[i].seats[p]
-                if pol not in SCRIPTED:
-                    break
-                _step(g, mem[i], scripted[(i, p)].act(g))
-            if g.over:
-                finish(i)
-                continue
-            live.append(i)
-            seat = mem[i][p]
-            state, o_len, o_flat = featurize_flat(g, p)
-            x = (state, o_len, o_flat, encode_event_hashes(seat.events))
-            seat.events = []
-            pot = _potential(g, p) if job.record and pol == LEARNER else 0.0
-            items.append((pol, i, p, x, pot))
+        """Play scripted moves until each game of group k needs a policy (top
+        the group up with newly claimed games as others end); featurize
+        those decisions. Items come back sorted by policy."""
+        items, live, todo = [], [], groups[k]
+        while True:
+            for lv in todo:
+                g, seats = lv.game, lv.spec.seats
+                while not g.over:
+                    p = g.decision.player
+                    pol = seats[p]
+                    if pol not in SCRIPTED:
+                        break
+                    _step(g, lv.seats, lv.agents[p].act(g))
+                if g.over:
+                    finish(lv)
+                    continue
+                live.append(lv)
+                seat = lv.seats[p]
+                state, o_len, o_flat = featurize_flat(g, p)
+                # int32 arrays once: batching and recording then only copy memory
+                x = (array("i", state), array("i", o_len), array("i", o_flat), array("i", encode_event_hashes(seat.events)))
+                seat.events = []
+                pot = _potential(g, p) if job.record and pol == LEARNER else 0.0
+                items.append((pol, 2 * lv.slot + p, seat.fresh, x, lv, p, pot))
+                seat.fresh = False
+            todo = [start(i) for i in claim(min(room - len(live), len(free)))]
+            if not todo:
+                break
         groups[k] = live
+        items.sort(key=itemgetter(0))
         return items
 
-    waited = [0.0]
+    waited = 0.0
 
     def apply(k: int) -> None:
+        nonlocal waited
         handle, items = inflight[k]
         tw = time.perf_counter()
         acts, logps, values = ev.collect(handle)
-        waited[0] += time.perf_counter() - tw
-        for (pol, i, p, x, pot), a, lp, v in zip(items, acts, logps, values):
+        waited += time.perf_counter() - tw
+        for (pol, _, _, x, lv, p, pot), a, lp, v in zip(items, acts, logps, values):
             if job.record and pol == LEARNER:
-                tr = trajs[i][p]
+                tr = lv.trajs[p]
                 tr.samples.append(x)
                 tr.actions.append(a)
                 tr.logps.append(lp)
                 tr.values.append(v)
                 tr.potentials.append(pot)
-            _step(games[i], mem[i], a)
+            _step(lv.game, lv.seats, a)
         inflight[k] = None
 
     while True:
@@ -322,11 +499,11 @@ def run_job(job: Job) -> Result:
                 apply(k)
             items = prepare(k)
             if items:
-                inflight[k] = (ev.submit(k, [it[:4] for it in items]), items)
+                inflight[k] = (ev.submit(k, items), items)
                 busy = True
         if not busy and all(f is None for f in inflight):
             break
-    out.timing.append((time.perf_counter() - t_start, waited[0], sum(g[4] for g in out.games)))
+    out.timing.append((time.perf_counter() - t_start, waited, sum(g[4] for g in out.games)))
     return out
 
 
@@ -334,3 +511,105 @@ def split_games(specs: list[GameSpec], n_jobs: int) -> list[list[GameSpec]]:
     n_jobs = max(1, min(n_jobs, len(specs)))
     return [specs[k::n_jobs] for k in range(n_jobs)]
 
+
+def create_pool(workers: int, inference: str = "local", server=None, worker_cpus: tuple[int, ...] | None = None):
+    """A worker pool for `run_specs` (`pool.map(run_job, jobs)` works too),
+    carrying its shared spec counters as `pool.claim`. Local inference:
+    spawned workers with one torch thread each, pinned one per CPU of
+    `worker_cpus` (Linux). Server: `server.pool()` (the server pins its
+    workers itself). `Trainer` switches with `self.procs =
+    create_pool(cfg.workers, cfg.inference, self.server)`."""
+    if inference == "server":
+        if server is None:
+            raise ValueError("inference='server' needs the InferenceServer")
+        return server.pool()
+    if inference != "local":
+        raise ValueError(f"inference must be local or server, not {inference!r}")
+    import multiprocessing as mp
+
+    ctx = mp.get_context("spawn")
+    claim = ctx.Array("i", MAX_MATCHUPS)
+    pool = ctx.Pool(workers, initializer=worker_init, initargs=(claim, ctx.Value("i", 0), worker_cpus))
+    pool.claim = claim
+    return pool
+
+
+def run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int = 64) -> Result:
+    """Play `specs` on `pool` (from `create_pool`) through a shared game queue
+    and merge the results; `job` gives everything but the games. Each of the
+    `workers` jobs gets every spec (2048 pickle to ~60 KB) and keeps up to
+    `inflight` games live, fewer when there are too few specs to go round
+    (2048 games on 31 workers: 64 measured best; 32-48 lose more to smaller
+    batches than they gain in balance). Specs are sorted by matchup (the networks they need besides the
+    learner's) so each worker can stick to one opponent (`_claimer`).
+    Results come in finishing order (trajectories are independent).
+    `Trainer._run` and `evaluate.head_to_head(_bo3)` switch to it with
+    `run_specs(procs, specs, Job([], ...), n_jobs)` (one merged Result
+    instead of a list) once their pool comes from `create_pool`."""
+    merged = Result()
+    if not specs:
+        return merged
+    specs = sorted(specs, key=_matchup)
+    starts = _matchup_bounds(specs)[:-1]
+    with pool.claim.get_lock():
+        pool.claim.get_obj()[: len(starts)] = starts
+    n = max(1, min(inflight, -(-len(specs) // workers)))
+    for r in pool.imap_unordered(_run_parked, [replace(job, games=specs, inflight=n) for _ in range(workers)]):
+        r.samples.unpark(merged.samples)  # merged as jobs end, while others still play
+        for f in fields(Result):
+            if f.name != "samples":
+                getattr(merged, f.name).extend(getattr(r, f.name))
+    return merged
+
+
+def play(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int = 64) -> Result:
+    """`run_specs` when `pool` carries the shared counters (`create_pool`,
+    `InferenceServer.pool`); otherwise a fixed split over `pool.map` (a plain
+    `Pool`, or an in-process stand-in with `map`). What the trainer and the
+    evaluation call."""
+    if getattr(pool, "claim", None) is not None:
+        return run_specs(pool, specs, job, workers, inflight)
+    merged = Result()
+    for r in pool.map(run_job, [replace(job, games=chunk) for chunk in split_games(specs, workers)]):
+        for f in fields(Result):
+            getattr(merged, f.name).extend(getattr(r, f.name))
+    return merged
+
+
+class _Parked:
+    """A job's samples parked in a shared-memory block for the trip back to
+    `run_specs`. Through the result pipe they cost the parent four copies
+    (read, unpickle, frombytes, merge; ~25 ms per job of 12 MB, in one
+    thread, mostly after the last job ends); from the block, one."""
+
+    def __init__(self, ps: PackedSamples):
+        from multiprocessing import shared_memory
+
+        parts = [memoryview(getattr(ps, f)).cast("B") for f in FIELDS]
+        self.sizes = [len(b) for b in parts]
+        shm = shared_memory.SharedMemory(create=True, size=max(sum(self.sizes), 1))
+        pos = 0
+        for b in parts:
+            shm.buf[pos : pos + len(b)] = b
+            pos += len(b)
+        self.name = shm.name
+        shm.close()
+
+    def unpark(self, into: PackedSamples) -> None:
+        """Append the samples to `into` (being built: its cached views are not
+        reset) and free the block."""
+        from multiprocessing import shared_memory
+
+        shm = shared_memory.SharedMemory(name=self.name)
+        pos = 0
+        for f, n in zip(FIELDS, self.sizes):
+            getattr(into, f).frombytes(shm.buf[pos : pos + n])
+            pos += n
+        shm.close()
+        shm.unlink()
+
+
+def _run_parked(job: Job) -> Result:
+    out = run_job(job)
+    out.samples = _Parked(out.samples)
+    return out
