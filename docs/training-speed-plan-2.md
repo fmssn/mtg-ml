@@ -423,3 +423,48 @@ without `eval/*`). The evaluation process uses local CPU inference even with `--
 `metrics.jsonl` is rewritten (through `os.replace`) at every merged evaluation, so `tail -f` readers must
 reopen it. torch's global rng is not in `latest.pt`, so a resumed run plays the same games but samples
 different actions than an uninterrupted one (as before).
+
+### End to end, all three merged (2026-10-06, box, cores 32-63, 29 workers, GPU 4 for the update)
+
+h128 entity, 2048 games per iteration, 16-20 iterations, means over iterations 4+. Cores 0-31 and
+GPU 5 were held by another session's run throughout; `--pipeline 1` unless noted.
+
+| | rollout_s | update_s | wall_s | µs / decision |
+|---|---:|---:|---:|---:|
+| before this pass (`d90af0e`, 27 workers, WS6's measurement) | 1.82 | 2.52 | 2.55 | 10.0 |
+| merged, `--inference local` | 2.01 | 1.28 | 1.97 | 8.2 |
+| merged, `--inference server`, server on the update's GPU | 1.93 | 1.84 | 2.04 | 8.7 |
+| **merged, `--inference server --server-device cuda:1` (GPU 7)** | **0.89** | **1.40** | **1.41** | **5.9** |
+| merged, server on GPU 7, `--pipeline 0` | 0.87 | 2.28 | 3.15 | |
+| merged, server on GPU 4, `--pipeline 0` | 0.89 | 1.61 | 2.50 | |
+| merged, local, `--pipeline 0` | 1.95 | 1.55 | 3.51 | |
+
+- The server and the update must not share a GPU: with both on GPU 4 the server's 0.5 ms batches
+  queue behind the update's graphs and both stages slow to the old numbers. On its own GPU the rollout
+  is 2.2x faster than local inference (0.89 vs 1.95 s alone), as in WS4's benchmark.
+- The iteration is now update-bound (1.40 s of 1.41) with the rollout at 0.89 s. 500k games take
+  about 6 minutes (17 after the first pass, 72 originally).
+- The first iteration costs ~20 s: Inductor compile of the update (~8 s), the graph captures, and the
+  server's compile (10-20 s, overlapped).
+- Unexplained: with two GPUs visible and `--pipeline 0` the update alone measured 2.28 s against
+  1.61 s with one GPU visible; pipelined it is 1.40 s either way. Not investigated.
+
+Recommended command (box, one run on cores 32-63; GPUs 4, 5, 7 are local to that node):
+
+```bash
+OMP_NUM_THREADS=8 CUDA_VISIBLE_DEVICES=<update gpu uuid>,<server gpu uuid> taskset -c 32-63 \
+  python -m mtg_ml.rl.train --run runs/X --hidden 128 --trunk entity --value-net shared \
+  --inference server --server-device cuda:1 --engine native --device cuda \
+  --workers 29 --games-per-iter 2048 --total-games 2000000 --iterations 100000 --eval-every 5
+```
+
+### What is next, in order
+
+1. **Update** (1.40 s, now the wall): minibatch 8192 at lr 6e-4 (0.206 vs 0.255 s per 250k decisions,
+   within noise of 2048 over 82k games; needs a 500k-game check), the GRU (0.75 ms of a 2.0 ms step),
+   or more games per iteration so the fixed costs amortise.
+2. **Rollout** (0.89 s): 20% of a round is outside the jobs (start, tail, merge) and workers spend
+   75% of a job in Python glue at ~41 µs per decision. WS7, the Rust lockstep loop.
+3. **Continuous queue** (WS6 item 5) once the rollout is well under the update.
+4. The evaluation process still uses local inference; give it a server of its own or share the
+   rollout server once it can hold two learner versions.
