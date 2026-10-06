@@ -18,3 +18,15 @@ include = ["mtg_ml*"]
 
 [tool.setuptools.package-data]
 "mtg_ml.engine" = ["cards.toml"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["native/target"]
+
+[tool.ruff.lint]
+# Start with real bugs only (syntax errors, undefined names, unused imports/variables); widen later.
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]

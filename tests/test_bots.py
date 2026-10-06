@@ -4,7 +4,7 @@ from helpers import choose, new_game, pass_priority, pay, scenario, settle
 
 from mtg_ml.agents import RandomAgent, play_game
 from mtg_ml.bots import BlueBot, JundBot, make_bot
-from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, expand
+from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, expand
 from mtg_ml.engine.view import determinize
 
 DECKS = (expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR))
