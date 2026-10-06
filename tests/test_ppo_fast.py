@@ -334,3 +334,25 @@ def test_captured_update_matches_the_eager_one(data, trunk, value_net, memory, c
     opts[0].load_state_dict(copy.deepcopy(opts[0].state_dict()))  # new state tensors: the old graphs would write to freed memory
     ppo_update(nets[0], opts[0], data, cfg, device="cuda", mode="graph")
     assert ppo._GRAPHS[opts[0]] is not graphs
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA graphs")
+def test_captured_update_survives_emptying_the_cache(data):
+    """Graphs must not depend on memory that `empty_cache` (or the
+    allocator's out-of-memory recovery) releases: cuBLAS's workspaces. After
+    dropping them, emptying the cache and refilling freed memory with junk,
+    the replays still give the eager result."""
+    data = replace(data, logps=[lp + 0.3 * math.sin(i) for i, lp in enumerate(data.logps)])
+    cfg = PPOConfig(epochs=1, minibatch=128, target_kl=None, capture=1)
+    torch.manual_seed(0)
+    nets = [PolicyNet(hidden=32).cuda()]
+    nets.append(copy.deepcopy(nets[0]))
+    opts = [make_optimizer(n.parameters(), cfg.lr, "cuda") for n in nets]
+    for it in range(3):
+        stats = [ppo_update(n, o, data, cfg, device="cuda", gen=torch.Generator().manual_seed(it % 2), mode=m) for n, o, m in zip(nets, opts, ("graph", "eager"))]
+        assert stats[0]["approx_kl"] == pytest.approx(stats[1]["approx_kl"], rel=1e-3, abs=1e-5)
+        assert all(torch.allclose(p, q, atol=1e-4) for p, q in zip(*(n.parameters() for n in nets)))
+        torch._C._cuda_clearCublasWorkspaces()
+        torch.cuda.empty_cache()
+        junk = [torch.full((1 << 20,), float("nan"), device="cuda") for _ in range(64)]  # reuse what was freed
+        del junk

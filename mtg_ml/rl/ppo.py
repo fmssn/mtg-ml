@@ -304,6 +304,7 @@ class _StepGraphs:
         side.wait_stream(main)
         try:  # not `torch.cuda.graph`, which synchronizes and empties the allocator's cache on entry: ~100 ms per capture
             with torch.cuda.stream(side):
+                _clear_cublas_workspaces()  # so that the capture allocates its own, in its pool
                 graph.capture_begin(pool=pool)
                 try:
                     loss, stats = losses(net, cfg, shapes, gru, si, sf)
@@ -312,6 +313,7 @@ class _StepGraphs:
                     del loss, stats
                 finally:
                     graph.capture_end()
+                    _clear_cublas_workspaces()  # ... and eager matmuls never share it
             main.wait_stream(side)
         finally:
             for g, c in zip(opt.param_groups, capturable):
@@ -320,6 +322,20 @@ class _StepGraphs:
         self.captures += 1
         self.capture_s += time.perf_counter() - t
         return graph, si, sf
+
+
+def _clear_cublas_workspaces() -> None:
+    """cuBLAS keeps a workspace per (handle, stream), allocated on first use
+    and released by `torch.cuda.empty_cache` (and the allocator's recovery
+    from an out-of-memory). A graph captured while one exists bakes in its
+    address, and replays after it is released write to freed memory
+    (illegal-address errors in the trainer). Dropping the workspaces right
+    before a capture makes the capture allocate one inside the graph's pool,
+    owned by the graph; dropping them right after keeps eager code off it.
+    (Inductor's CUDA graph trees do the same.)"""
+    clear = getattr(torch._C, "_cuda_clearCublasWorkspaces", None)
+    if clear is not None:
+        clear()
 
 
 _COMPILED = []
