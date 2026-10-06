@@ -35,6 +35,7 @@ from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 
 from .features import OPTION_DIM, STATE_DIM
+from .samples import PackedSamples
 
 MEMORY_KINDS = ("gru", "none")
 
@@ -55,8 +56,11 @@ class Batch:
         return Batch(*(getattr(self, f).to(device) for f in self.__dataclass_fields__))
 
 
-def collate(samples: list[tuple[list[int], list[list[int]], list[int]]]) -> Batch:
-    """samples: (state indices, [option indices, ...], event indices)."""
+def collate(samples) -> Batch:
+    """samples: (state indices, [option indices, ...], event indices), or a
+    `PackedSamples` (then all of it; see `collate_packed` for subsets)."""
+    if isinstance(samples, PackedSamples):
+        return collate_packed(samples)
     s_idx, s_off, e_idx, e_off, o_idx, o_off, o_row, o_pos, n_opts = [], [], [], [], [], [], [], [], []
     for row, (state, opts, events) in enumerate(samples):
         s_off.append(len(s_idx))
@@ -71,6 +75,51 @@ def collate(samples: list[tuple[list[int], list[list[int]], list[int]]]) -> Batc
             o_pos.append(pos)
     t = lambda x: torch.tensor(x, dtype=torch.long)  # noqa: E731
     return Batch(t(s_idx), t(s_off), t(e_idx), t(e_off), t(o_idx), t(o_off), t(o_row), t(o_pos), t(n_opts))
+
+
+def _excl(x: torch.Tensor) -> torch.Tensor:
+    out = torch.zeros_like(x)
+    if x.numel() > 1:
+        torch.cumsum(x[:-1], 0, out=out[1:])
+    return out
+
+
+def _segments(flat: torch.Tensor, start: torch.Tensor, length: torch.Tensor):
+    """Concatenate flat[start[i] : start[i] + length[i]]; returns (values, offsets)."""
+    off = _excl(length)
+    idx = torch.repeat_interleave(start - off, length) + torch.arange(int(length.sum()))
+    return flat[idx], off
+
+
+def _packed_tensors(ps: PackedSamples) -> dict:
+    if ps._cache is None:
+        t = {}
+        for f in ("s_len", "e_len", "n_opts", "o_len", "s_idx", "e_idx", "o_idx"):
+            a = getattr(ps, f)
+            t[f] = torch.frombuffer(a, dtype=torch.int32).long() if len(a) else torch.zeros(0, dtype=torch.long)
+        t["s_start"], t["e_start"], t["opt_start"], t["o_start"] = _excl(t["s_len"]), _excl(t["e_len"]), _excl(t["n_opts"]), _excl(t["o_len"])
+        ps._cache = t
+    return ps._cache
+
+
+def collate_packed(ps: PackedSamples, idx=None) -> Batch:
+    """Batch of samples `idx` (default: all, in order) of a PackedSamples."""
+    t = _packed_tensors(ps)
+    if idx is None:
+        no = t["n_opts"]
+        s_v, s_off = t["s_idx"], _excl(t["s_len"])
+        e_v, e_off = t["e_idx"], _excl(t["e_len"])
+        o_v, o_off = t["o_idx"], _excl(t["o_len"])
+    else:
+        rows = torch.as_tensor(idx, dtype=torch.long)
+        no = t["n_opts"][rows]
+        s_v, s_off = _segments(t["s_idx"], t["s_start"][rows], t["s_len"][rows])
+        e_v, e_off = _segments(t["e_idx"], t["e_start"][rows], t["e_len"][rows])
+        opt_ids = torch.repeat_interleave(t["opt_start"][rows] - _excl(no), no) + torch.arange(int(no.sum()))
+        o_v, o_off = _segments(t["o_idx"], t["o_start"][opt_ids], t["o_len"][opt_ids])
+    o_row = torch.repeat_interleave(torch.arange(no.shape[0]), no)
+    o_pos = torch.arange(o_row.shape[0]) - torch.repeat_interleave(_excl(no), no)
+    return Batch(s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, no.clone())
 
 
 class PolicyNet(nn.Module):

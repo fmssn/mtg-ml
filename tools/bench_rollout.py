@@ -35,6 +35,7 @@ def main(argv=None) -> None:
     ap.add_argument("--server-cpus", default=None, help="CPUs reserved for the server, e.g. 32-33")
     ap.add_argument("--worker-cpus", default=None, help="CPUs the workers are pinned to (one each, round robin)")
     ap.add_argument("--groups", type=int, default=2, help="requests in flight per worker")
+    ap.add_argument("--dry-run", action="store_true", help="server returns random options without running the network (pipeline overhead only)")
     args = ap.parse_args(argv)
 
     import multiprocessing as mp
@@ -67,7 +68,7 @@ def main(argv=None) -> None:
     server = None
     if args.inference == "server":
         server = InferenceServer(
-            args.workers, ServerConfig(device=args.device or default_device(), max_rows=args.max_rows, cpus=cpus(args.server_cpus)), worker_cpus=cpus(args.worker_cpus)
+            args.workers, ServerConfig(device=args.device or default_device(), max_rows=args.max_rows, cpus=cpus(args.server_cpus), dry_run=args.dry_run), worker_cpus=cpus(args.worker_cpus)
         )
         procs = server.pool()
     else:
@@ -90,11 +91,14 @@ def main(argv=None) -> None:
                     server.stats()
                 continue
             rates.append(n / dt)
-            print(f"round {r}: {n} decisions in {dt:.1f}s = {n / dt:,.0f} decisions/s", flush=True)
+            tm = [t for x in res for t in x.timing]
+            walls = sorted(t[0] for t in tm)
+            wait = sum(t[1] for t in tm) / max(sum(t[0] for t in tm), 1e-9)
+            print(f"round {r}: {n} decisions in {dt:.1f}s = {n / dt:,.0f} decisions/s; job wall min/median/max {walls[0]:.1f}/{walls[len(walls) // 2]:.1f}/{walls[-1]:.1f}s, waiting for inference {wait:.0%}", flush=True)
         line = f"{args.engine} {args.inference} workers={args.workers} games/round={args.games}: {sum(rates) / len(rates):,.0f} decisions/s"
         if server is not None:
             st = server.stats()
-            line += f" | server: {st['rows'] / max(st['batches'], 1):.0f} decisions/batch, {st['requests'] / max(st['batches'], 1):.1f} requests/batch, busy {st['busy_s']:.1f}s, device {server.cfg.device}"
+            line += f" | server: {st['rows'] / max(st['batches'], 1):.0f} decisions/batch, {st['requests'] / max(st['batches'], 1):.1f} requests/batch, busy {st['busy_s']:.1f}s (parse {st['parse_s']:.1f}, infer {st['infer_s']:.1f}, reply {st['reply_s']:.1f}), device {server.cfg.device}{' DRY RUN' if args.dry_run else ''}"
         print(line)
     finally:
         procs.close()

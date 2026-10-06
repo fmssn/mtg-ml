@@ -270,6 +270,10 @@ impl PyGame {
             .into_py(py)
     }
 
+    fn life(&self, p: usize) -> i32 {
+        self.st().players[p].life
+    }
+
     fn set_life(&mut self, p: usize, v: i32) {
         self.mutate().players[p].life = v;
     }

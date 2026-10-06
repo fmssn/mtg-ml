@@ -12,7 +12,8 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 
-from .model import PolicyNet, collate, masked_entropy
+from .model import PolicyNet, collate, collate_packed, masked_entropy
+from .samples import PackedSamples
 from .rollout import Result
 
 
@@ -62,7 +63,7 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     for _ in range(cfg.epochs):
         epoch_kl = []
         for idx, lens in trajectory_minibatches(data.lengths, cfg.minibatch, gen):
-            b = collate([data.samples[i] for i in idx]).to(device)
+            b = (collate_packed(data.samples, idx) if isinstance(data.samples, PackedSamples) else collate([data.samples[i] for i in idx])).to(device)
             it = torch.tensor(idx)
             a, olp, ad, rt = (x[it].to(device) for x in (actions, old_logp, adv, ret))
             logits, values, _ = net(b, lengths=lens)

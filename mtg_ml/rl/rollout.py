@@ -19,6 +19,7 @@ two groups of games in flight so its CPU work overlaps the server round trip.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from ..agents import RandomAgent
@@ -27,6 +28,7 @@ from ..backend import game_class
 from ..engine import Game
 from ..match import match_decks
 from .features import encode_event_hashes, event_hashes, featurize
+from .samples import PackedSamples
 
 LEARNER = "learner"
 RANDOM = "random"
@@ -105,7 +107,7 @@ class Trajectory:
 class Result:
     """Recorded decisions, whole trajectories laid end to end (`lengths`)."""
 
-    samples: list = field(default_factory=list)
+    samples: PackedSamples = field(default_factory=PackedSamples)  # (state, opts, events), packed
     lengths: list = field(default_factory=list)
     actions: list = field(default_factory=list)
     logps: list = field(default_factory=list)
@@ -113,9 +115,13 @@ class Result:
     returns: list = field(default_factory=list)
     # per game: (seats, winner, end_reason, turns, decisions, seed)
     games: list = field(default_factory=list)
+    # per job: (wall seconds, seconds waiting for inference, decisions)
+    timing: list = field(default_factory=list)
 
 
 def _potential(game: Game, p: int) -> float:
+    if getattr(game, "NATIVE", False):
+        return (game._g.life(p) - game._g.life(1 - p)) / 20.0
     return (game.players[p].life - game.players[1 - p].life) / 20.0
 
 
@@ -249,6 +255,7 @@ def run_job(job: Job) -> Result:
                 scripted[(i, seat)] = RandomAgent(seed=spec.seed * 2 + seat)
             elif pol == BOT:
                 scripted[(i, seat)] = make_bot(seat)
+    t_start = time.perf_counter()
     out = Result()
     n_groups = max(1, min(job.groups, len(games))) if job.inference == "server" else 1
     groups = [[i for i in range(len(games)) if i % n_groups == k] for k in range(n_groups)]
@@ -288,9 +295,13 @@ def run_job(job: Job) -> Result:
         groups[k] = live
         return items
 
+    waited = [0.0]
+
     def apply(k: int) -> None:
         handle, items = inflight[k]
+        tw = time.perf_counter()
         acts, logps, values = ev.collect(handle)
+        waited[0] += time.perf_counter() - tw
         for (pol, i, p, x, pot), a, lp, v in zip(items, acts, logps, values):
             if job.record and pol == LEARNER:
                 tr = trajs[i][p]
@@ -313,6 +324,7 @@ def run_job(job: Job) -> Result:
                 busy = True
         if not busy and all(f is None for f in inflight):
             break
+    out.timing.append((time.perf_counter() - t_start, waited[0], sum(g[4] for g in out.games)))
     return out
 
 

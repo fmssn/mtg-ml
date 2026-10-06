@@ -170,6 +170,7 @@ class ServerConfig:
     min_rows: int = 512
     threads: int = 2
     cpus: tuple[int, ...] | None = None  # pin the server process (Linux); give it cores of its own
+    dry_run: bool = False  # benchmark aid: uniform random options, no network (measures the pipeline alone)
 
 
 def _attach(cache: dict, name: str):
@@ -197,7 +198,7 @@ class _Server:
         self.hidden = None  # (n_workers * SLOTS_PER_WORKER, H) on device
         self.n_workers = n_workers
         self.shm: dict = {}
-        self.stats = {"batches": 0, "rows": 0, "requests": 0, "busy_s": 0.0}
+        self.stats = {"batches": 0, "rows": 0, "requests": 0, "busy_s": 0.0, "parse_s": 0.0, "infer_s": 0.0, "reply_s": 0.0}
 
     def model(self, key):
         torch = self.torch
@@ -252,6 +253,12 @@ class _Server:
         else:
             pol = torch.repeat_interleave(torch.tensor([k for k, _ in row_pol]), torch.tensor([n for _, n in row_pol]))
             groups = [(key, torch.nonzero(pol == k).squeeze(1)) for key, k in keys.items()]
+        t1 = time.perf_counter()
+        if self.cfg.dry_run:
+            acts = (torch.rand(B) * n_opts).long()
+            logp = -torch.log(n_opts.float())
+            vals = torch.zeros(B)
+            groups = []
         with torch.no_grad():
             outs = []
             for key, rows in groups:
@@ -263,6 +270,7 @@ class _Server:
                     acts, logp, vals = res[0].long(), res[1], res[2]
                 else:
                     acts[rows], logp[rows], vals[rows] = res[0].long(), res[1], res[2]
+        t2 = time.perf_counter()
         r = 0
         for (wid_, ticket, in_name, out_name, counts, policies), n in zip(msgs, n_rows):
             buf = _attach(self.shm, out_name).buf
@@ -275,7 +283,11 @@ class _Server:
         self.stats["batches"] += 1
         self.stats["requests"] += len(msgs)
         self.stats["rows"] += B
-        self.stats["busy_s"] += time.perf_counter() - t0
+        t3 = time.perf_counter()
+        self.stats["busy_s"] += t3 - t0
+        self.stats["parse_s"] += t1 - t0
+        self.stats["infer_s"] += t2 - t1
+        self.stats["reply_s"] += t3 - t2
 
     def _run(self, net, cpu: list):
         """Forward + sampling on the device for one policy's prepared batch."""
