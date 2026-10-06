@@ -41,3 +41,11 @@ New user-facing apps (replay viewer, dashboards) go under `apps/<name>/` and sho
 - Mark tests that take more than a few seconds `@pytest.mark.slow`; GPU-only tests `@pytest.mark.gpu`.
 - Don't commit checkpoints, `runs/`, or large binaries.
 - Benchmark numbers in docs should say which machine they were measured on.
+
+## PR workflow (GitHub Copilot reviews every PR)
+
+1. **Open a draft PR early**, as soon as the first meaningful commit is pushed: `gh pr create --draft`. This starts CI and Copilot's review while work continues.
+2. Keep pushing to the draft. Address Copilot and CI feedback as it comes in.
+3. **When the user confirms the work is ready:** `gh pr ready <n>`, then `gh pr edit <n> --add-reviewer @copilot` to request a fresh review of the final state.
+4. **Turn on Auto-fix** for the PR in the desktop app (or tell the user to), then wait for Copilot's review and CI instead of polling. On each event: fix, verify, push, reply in each review thread saying what changed, and resolve the thread.
+5. Don't merge until CI is green and Copilot's latest review has no open findings. Merging is the user's call.
