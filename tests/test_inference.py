@@ -1,17 +1,29 @@
 """Central inference server: rollouts through the server record exactly what
 the network computes when it replays the recorded trajectories from scratch
-(sequence mode, as in the PPO update). That checks the server-side hidden
-state table (slots, fresh flags), the cross-worker batching and the scatter
-of results back to the right decision."""
+(sequence mode, as in the PPO update). That checks the shared-memory
+transport, the server-side hidden state table (slots, fresh flags), the
+cross-worker batching, the stacked multi-policy forward and the scatter of
+results back to the right decision. The stacked step forward is also
+checked directly against per-policy `PolicyNet` forwards, and its entity
+structure against `model.structure`."""
+
+import random
+from array import array
 
 import pytest
 
 torch = pytest.importorskip("torch")
 
-from mtg_ml.backend import native_available  # noqa: E402
+from mtg_ml.backend import game_class, native_available  # noqa: E402
+from mtg_ml.match import match_decks  # noqa: E402
+from mtg_ml.rl import stacked  # noqa: E402
+from mtg_ml.rl.features import OPTION_DIM, STATE_DIM, encode_event_hashes, featurize_flat  # noqa: E402
 from mtg_ml.rl.inference import InferenceServer, ServerConfig  # noqa: E402
-from mtg_ml.rl.model import PolicyNet, collate  # noqa: E402
-from mtg_ml.rl.rollout import BOT, LEARNER, RANDOM, GameSpec, Job, run_job, split_games  # noqa: E402
+from mtg_ml.rl.model import PolicyNet, collate, structure  # noqa: E402
+from mtg_ml.rl.rollout import BOT, LEARNER, RANDOM, GameSpec, Job, _batch, run_job, split_games  # noqa: E402
+
+ENGINE = "native" if native_available() else "python"
+DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 
 
 def _ckpt(tmp_path, memory="gru", seed=0, trunk="mlp", value_net="shared"):
@@ -35,26 +47,50 @@ def _replay_matches(net, res, tol=1e-4):
 VARIANTS = [("gru", "mlp", "shared"), ("none", "mlp", "shared"), ("gru", "mlp", "separate"), ("gru", "transformer", "separate"), ("none", "transformer", "shared"), ("gru", "entity", "shared"), ("none", "entity", "separate")]
 
 
+@pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("memory,trunk,value_net", VARIANTS)
-def test_server_rollouts_replay_exactly(tmp_path, memory, trunk, value_net):
+def test_server_rollouts_replay_exactly(tmp_path, memory, trunk, value_net, device):
     net, path = _ckpt(tmp_path, memory, trunk=trunk, value_net=value_net)
     _, pool_path = _ckpt(tmp_path, memory, seed=1, trunk=trunk, value_net=value_net)
     specs = [GameSpec(seed=s, seats=seats, match_game=1 + s % 2) for s, seats in enumerate(
         [(LEARNER, LEARNER), (LEARNER, pool_path), (pool_path, LEARNER), (LEARNER, BOT), (RANDOM, LEARNER), (LEARNER, LEARNER)] * 3
     )]  # fmt: skip
-    engine = "native" if native_available() else "python"
-    srv = InferenceServer(3, ServerConfig(device="cpu", max_wait_ms=2.0, threads=2))
+    srv = InferenceServer(3, ServerConfig(device=device, max_wait_ms=2.0, min_rows=64, threads=2))
     try:
         with srv.pool() as procs:
-            results = procs.map(run_job, [Job(c, path, 1, max_turns=30, engine=engine, inference="server") for c in split_games(specs, 3)])
+            results = procs.map(run_job, [Job(c, path, 1, max_turns=30, engine=ENGINE, inference="server") for c in split_games(specs, 3)])
         stats = srv.stats()
     finally:
         srv.close()
     assert sum(len(r.games) for r in results) == len(specs)
     assert stats["rows"] > 0 and stats["batches"] < stats["requests"]  # requests from several workers were batched together
+    assert (stats["legacy"] > 0) == (trunk == "transformer")  # mlp and entity run stacked
     for r in results:
         assert r.actions
         _replay_matches(net, r)
+
+
+def test_server_shards_workers_over_devices(tmp_path):
+    """Two servers (here both on the CPU), workers split between them."""
+    net, path = _ckpt(tmp_path, "gru", trunk="entity")
+    specs = [GameSpec(seed=s, seats=(LEARNER, LEARNER)) for s in range(8)]
+    srv = InferenceServer(4, ServerConfig(device="cpu", threads=1), devices=["cpu", "cpu"])
+    try:
+        with srv.pool() as procs:
+            results = procs.map(run_job, [Job(c, path, 1, max_turns=20, engine=ENGINE, inference="server") for c in split_games(specs, 4)])
+        stats = srv.stats()
+    finally:
+        srv.close()
+    assert len(stats["servers"]) == 2 and all(s["rows"] > 0 for s in stats["servers"])
+    for r in results:
+        _replay_matches(net, r)
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_local_rollouts_replay_exactly_smoke(tmp_path, device):
+    net, path = _ckpt(tmp_path, "gru", trunk="entity")
+    specs = [GameSpec(seed=s, seats=(LEARNER, LEARNER)) for s in range(4)]
+    _replay_matches(net, run_job(Job(specs, path, 1, max_turns=30)))
 
 
 @pytest.mark.parametrize("memory,trunk,value_net", VARIANTS)
@@ -86,3 +122,125 @@ def test_old_checkpoints_still_load():
     fresh = PolicyNet(hidden=16)
     fresh.load_state_dict(old)
     assert all(torch.equal(a, b) for a, b in zip(net.state_dict().values(), fresh.state_dict().values()))
+
+
+# ---------------------------------------------------------------------------
+# The stacked step forward (rl/stacked.py)
+# ---------------------------------------------------------------------------
+
+
+def _decisions(n=60, seed=0):
+    """Real featurized decisions (entities, pointers) with random events."""
+    G = game_class(ENGINE)
+    out, r, s = [], random.Random(seed), 0
+    while len(out) < n:
+        g = G(match_decks(1 + s % 2), seed=s, match_game=1 + s % 2)
+        while not g.over and len(out) < n:
+            st, ol, of = featurize_flat(g, g.decision.player)
+            out.append(tuple(array("i", x) for x in (st, ol, of, encode_event_hashes([r.randrange(OPTION_DIM) for _ in range(r.randrange(6))]))))
+            g.step(r.randrange(len(ol)))
+        s += 1
+    return out
+
+
+STACKABLE = [("gru", "entity", "shared"), ("none", "entity", "separate"), ("gru", "entity", "separate"), ("gru", "mlp", "separate"), ("none", "mlp", "shared")]
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("memory,trunk,value_net", STACKABLE)
+def test_stacked_forward_matches_per_policy_forwards(memory, trunk, value_net, device):
+    """One stacked forward over rows of three policies (sorted by policy, two
+    padded rows) gives each row what its own PolicyNet gives in step mode:
+    log-prob of the sampled option, value, new hidden state."""
+    decs = _decisions()
+    slots = [3, 0, 2]  # stack slots of the three nets (capacity 4, slot 1 empty)
+    nets = []
+    for k in range(3):
+        torch.manual_seed(k)
+        net = PolicyNet(hidden=32, memory=memory, trunk=trunk, value_net=value_net, value_hidden=48).eval()
+        with torch.no_grad():
+            for p in net.parameters():
+                p += 0.02 * torch.randn_like(p)  # non-zero value heads
+        nets.append(net)
+    stack = stacked.PolicyStack(nets[0].config, 4, device)
+    for s, n in zip(slots, nets):
+        stack.load(s, n)
+    pols = sorted(random.Random(1).choices(slots, k=len(decs)))
+    fresh = [i % 3 == 0 for i in range(len(decs))]
+    table = torch.randn(len(decs) + 1, nets[0].state_size)
+    dev_table = table.clone().to(device)  # updated in place
+    x = stacked.step_input(decs, pols, list(range(len(decs))), fresh, device=device, pad=2)
+    with torch.no_grad():
+        act, logp, val = stacked.step_forward(stack, x, dev_table if memory == "gru" else None)
+        act, logp, val, dev_table = act.cpu(), logp.cpu(), val.cpu(), dev_table.cpu()
+        for s, net in zip(slots, nets):
+            rows = [i for i, p in enumerate(pols) if p == s]
+            batch, width = _batch(torch, [decs[i] for i in rows])
+            h = None
+            if memory == "gru":
+                h = torch.where(torch.tensor([fresh[i] for i in rows])[:, None], 0.0, table[rows])
+            logits, v, hn = net(batch, h, max_options=width)
+            a = act[rows]
+            assert (a < batch.n_opts).all()
+            assert torch.allclose(torch.log_softmax(logits, -1).gather(1, a[:, None])[:, 0], logp[rows], atol=1e-5)
+            assert torch.allclose(v, val[rows], atol=1e-5)
+            if hn is not None:
+                assert torch.allclose(hn, dev_table[rows], atol=1e-5)
+
+
+def test_stacked_sampling_follows_the_policy():
+    """Gumbel-max draws match the softmax: one decision drawn 4000 times."""
+    decs = _decisions(40)
+    d = max(decs, key=lambda x: len(x[1]))
+    torch.manual_seed(0)
+    net = PolicyNet(hidden=32, memory="none", trunk="entity").eval()
+    stack = stacked.PolicyStack(net.config, 1, "cpu")
+    stack.load(0, net)
+    n = 4000
+    x = stacked.step_input([d] * n, [0] * n, list(range(n)), [True] * n)
+    with torch.no_grad():
+        act, logp, _ = stacked.step_forward(stack, x, None)
+        logits, _, _ = net(_batch(torch, [d])[0], None)
+    p = torch.softmax(logits[0], -1)
+    freq = torch.bincount(act[:n], minlength=len(p)).float() / n
+    assert (freq - p).abs().max() < 0.03, (freq, p)
+    assert torch.allclose(logp[:n], torch.log(p)[act[:n]], atol=1e-5)
+
+
+def test_step_structure_matches_model_structure():
+    """The fixed-shape structure of the step forward (separators and pointers
+    looked up as zero rows, no compaction) puts the same tokens in each bag
+    as `model.structure`, and points options at the same entities."""
+    decs = _decisions(50, seed=3)
+    torch.manual_seed(0)
+    net = PolicyNet(hidden=16, memory="none", trunk="entity")
+    stack = stacked.PolicyStack(net.config, 1, "cpu")
+    stack.load(0, net)
+    x = stacked.step_input(decs, [0] * len(decs), list(range(len(decs))), [True] * len(decs), pad=3, n_ent=sum(list(d[0]).count(STATE_DIM) for d in decs) + 7)
+    st = stacked.structure(stack, x)
+    table = torch.randn(STATE_DIM + 1, 16, dtype=torch.float64)
+    table[-1] = 0  # the zero row
+    mine = torch.nn.functional.embedding_bag(st["s_emb"], table, st["bag_off"], mode="sum")
+    ref = structure(_batch(torch, decs)[0])
+    theirs = torch.nn.functional.embedding_bag(ref.st_idx.long(), table, ref.bag_off.long(), mode="sum")
+    R, E = len(decs), ref.e_row.shape[0]
+    assert torch.allclose(mine[st["g_bag"][:R]], theirs[ref.g_bag.long()])
+    assert torch.allclose(mine[st["e_bag"][:E]], theirs[ref.e_bag.long()])
+    assert torch.equal(st["e_row"][:E], ref.e_row.long())
+    # pointers: (option, entity) pairs
+    is_ptr = st["ptr_w"][:, 0].bool()
+    mine_ptr = sorted(zip(x.ot_opt[is_ptr].tolist(), st["ptr_ent"][is_ptr].tolist()))
+    assert mine_ptr == sorted(zip(ref.p_opt.tolist(), ref.p_ent.tolist())) and mine_ptr
+    # padded entities and tokens land in padded rows and bags only
+    assert (st["e_row"][E:] == x.pol.shape[0] - 1).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
+def test_grouped_linear_kernel_matches_per_policy_matmuls():
+    torch.manual_seed(0)
+    P, M, K, N = 5, 777, 96, 80
+    w, b = torch.randn(P, N, K, device="cuda"), torch.randn(P, N, device="cuda")
+    pol = torch.randint(0, P, (M,), device="cuda").sort().values
+    x = torch.randn(M, K, device="cuda")
+    ref = torch.bmm(x[:, None, :].double(), w[pol].double().transpose(1, 2))[:, 0] + b[pol].double()
+    assert (stacked.grouped_linear(x, w, b, pol).double() - ref).abs().max() < 1e-4

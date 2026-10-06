@@ -46,7 +46,9 @@ def main(argv=None) -> None:
     ap.add_argument("--split", action="store_true", help="fixed split of the games over the jobs (before the shared queue)")
     ap.add_argument("--inflight", type=int, default=64, help="live games per worker with the shared queue")
     ap.add_argument("--max-rows", type=int, default=16384)
-    ap.add_argument("--server-cpus", default=None, help="CPUs reserved for the server, e.g. 32-33")
+    ap.add_argument("--server-cpus", default=None, help="CPUs reserved for the server, e.g. 32-33; one spec per server separated by ';' with --devices")
+    ap.add_argument("--devices", default=None, help="one inference server per device, e.g. cuda:0,cuda:1 (workers sharded over them)")
+    ap.add_argument("--no-graphs", action="store_true", help="server runs the forward eagerly (no CUDA graphs)")
     ap.add_argument("--worker-cpus", default=None, help="CPUs the workers are pinned to (one each, round robin)")
     ap.add_argument("--groups", type=int, default=2, help="requests in flight per worker")
     ap.add_argument("--dry-run", action="store_true", help="server returns random options without running the network (pipeline overhead only)")
@@ -61,14 +63,7 @@ def main(argv=None) -> None:
 
     os.environ[ENV_VAR] = engine_name(args.engine)
 
-    def cpus(spec):
-        if not spec:
-            return None
-        out = []
-        for part in spec.split(","):
-            a, _, b = part.partition("-")
-            out += list(range(int(a), int(b or a) + 1))
-        return tuple(out)
+    from mtg_ml.rl.inference import parse_cpus as cpus
 
     if args.run:
         learner = os.path.join(args.run, "latest.pt")
@@ -84,8 +79,13 @@ def main(argv=None) -> None:
         learner, pool = paths[0], paths[1:]
     server = None
     if args.inference == "server":
-        cfg = ServerConfig(device=args.device or default_device(), max_rows=args.max_rows, cpus=cpus(args.server_cpus), dry_run=args.dry_run)
-        server = InferenceServer(args.workers, cfg, worker_cpus=cpus(args.worker_cpus))
+        devices = args.devices.split(",") if args.devices else None
+        per_server = [cpus(x) for x in args.server_cpus.split(";")] if args.server_cpus and ";" in args.server_cpus else None
+        cfg = ServerConfig(
+            device=args.device or default_device(), max_rows=args.max_rows, cpus=None if per_server else cpus(args.server_cpus),
+            dry_run=args.dry_run, graphs=not args.no_graphs, groups=max(4, args.groups),
+        )  # fmt: skip
+        server = InferenceServer(args.workers, cfg, worker_cpus=cpus(args.worker_cpus), devices=devices, server_cpus=per_server)
     procs = create_pool(args.workers, args.inference, server, cpus(args.worker_cpus))
     try:
         rates = []
@@ -109,7 +109,7 @@ def main(argv=None) -> None:
             if r == 0:
                 print(f"warm-up: {n / dt:,.0f} decisions/s", flush=True)
                 if server is not None:
-                    server.stats()
+                    st0 = server.stats()  # counters from here on: the measured rounds only
                 continue
             rates.append(n / dt)
             walls = sorted(t[0] for t in res.timing)
@@ -123,7 +123,14 @@ def main(argv=None) -> None:
         line = f"h{args.hidden} {args.trunk} value={args.value_net} {args.engine} {args.inference} {mode} workers={args.workers} games/round={args.games} policies={1 + len(pool)}: {sum(rates) / len(rates):,.0f} decisions/s"
         if server is not None:
             st = server.stats()
-            line += f" | server: {st['rows'] / max(st['batches'], 1):.0f} decisions/batch, {st['requests'] / max(st['batches'], 1):.1f} requests/batch, busy {st['busy_s']:.1f}s (parse {st['parse_s']:.1f}, infer {st['infer_s']:.1f}, reply {st['reply_s']:.1f}), device {server.cfg.device}{' DRY RUN' if args.dry_run else ''}"
+            st = {k: v - st0[k] if k in ("batches", "rows", "requests", "padded_rows", "eager", "legacy") or k.endswith("_s") else v for k, v in st.items()}
+            b = max(st["batches"], 1)
+            line += (
+                f" | server x{len(server.devices)}: {st['rows'] / b:.0f} decisions/batch (padded {st['padded_rows'] / b:.0f}), {st['requests'] / b:.1f} requests/batch, "
+                f"{st['busy_s'] / b * 1000:.2f} ms/batch busy (prep {st['prep_s'] / b * 1000:.2f}, infer {st['infer_s'] / b * 1000:.2f}, reply {st['reply_s'] / b * 1000:.2f}), "
+                f"busy {st['busy_s']:.1f}s, {st['graphs']} graphs ({st['capture_s']:.1f}s capturing), {st['eager']} eager, {st['legacy']} legacy batches, "
+                f"devices {','.join(server.devices)}{' DRY RUN' if args.dry_run else ''}"
+            )
         print(line)
     finally:
         procs.close()
