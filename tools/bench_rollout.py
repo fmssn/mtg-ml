@@ -50,7 +50,7 @@ def main(argv=None) -> None:
     ap.add_argument("--devices", default=None, help="one inference server per device, e.g. cuda:0,cuda:1 (workers sharded over them)")
     ap.add_argument("--no-graphs", action="store_true", help="server runs the forward eagerly (no CUDA graphs)")
     ap.add_argument("--no-compile", action="store_true", help="server runs its forward uncompiled (no torch.compile)")
-    ap.add_argument("--streams", type=int, default=2, help="batches the server keeps on the GPU at once")
+    ap.add_argument("--streams", type=int, default=1, help="batches the server keeps on the GPU at once")
     ap.add_argument("--worker-cpus", default=None, help="CPUs the workers are pinned to (one each, round robin)")
     ap.add_argument("--groups", type=int, default=2, help="requests in flight per worker")
     ap.add_argument("--dry-run", action="store_true", help="server returns random options without running the network (pipeline overhead only)")

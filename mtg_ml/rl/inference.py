@@ -297,7 +297,7 @@ class ServerConfig:
     graphs: bool = True  # CUDA graphs over padded shape buckets (CUDA only)
     compile: bool = True  # torch.compile the forward (fuses its ~300 small kernels; CUDA only; ~10 s at the first batch)
     max_graphs: int = 48  # per stream
-    streams: int = 2  # batches on the GPU at once (CUDA): a new batch need not wait for the running one
+    streams: int = 1  # batches on the GPU at once (CUDA); 2 measured no faster at 15 and 27 workers (h128 entity)
 
 
 # Padded shapes come in levels: level k has 32 * 1.5^k rows and, per row,
