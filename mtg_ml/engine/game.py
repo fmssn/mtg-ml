@@ -545,6 +545,7 @@ class Game:
             c.transformed,
             tuple((tuple(sorted(t.keywords)), t.power, t.toughness) for t in c.temp),
             c.oid in self.attackers,
+            c.oid in self.blocked,
         )
 
     def _dedupe_by_equiv(self, cards: Iterable[Card]) -> list[Card]:
@@ -711,6 +712,10 @@ class Game:
         """target: ('player', idx) or ('perm', oid)."""
         if amount <= 0:
             return
+        # A source still on the battlefield uses its current characteristics
+        # (e.g. deathtouch granted in response); last known information only
+        # once it has left (rule 608.2h).
+        source = self.live(source) or source
         kws = self.keywords(source)
         if target[0] == "player":
             self.players[target[1]].life -= amount
