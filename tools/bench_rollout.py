@@ -3,20 +3,28 @@ way `rl.train` collects games, without the PPO update.
 
     python tools/bench_rollout.py --engine native --inference server --workers 32 --games 4096
     taskset -c 0-31 python tools/bench_rollout.py ...      # pin the whole run (workers inherit it)
+    python tools/bench_rollout.py --run runs/x ...         # a trained run's learner and opponent pool
 
-A fresh network (default size) plays training-like games: half self-play,
-half against a second checkpoint (two policies, as with the opponent pool).
-Prints decisions/s per round after one warm-up round and, for the server,
-its batch statistics.
+Fresh networks (or a run's checkpoints) play training-shaped games, drawn as
+`Trainer._train_specs` draws them: half self-play, half against the opponent
+pool (the newest snapshot half the time), half of all games post-sideboard.
+The learner gets a new version every round, so workers reload it as in
+training. Games go through the shared game queue (`rollout.run_specs`), or
+with `--split` through the fixed split (`split_games` + `run_job`). Prints
+decisions/s per round after one warm-up round, the spread of job wall times
+(loading the learner included), the share of time jobs wait for inference
+(local inference: run it) and, for the server, its batch statistics.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import random
 import sys
 import tempfile
 import time
+from dataclasses import replace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -31,8 +39,12 @@ def main(argv=None) -> None:
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--memory", default="gru")
-    ap.add_argument("--trunk", default="mlp", choices=("mlp", "transformer"))
+    ap.add_argument("--trunk", default="mlp", choices=("mlp", "transformer", "entity"))
     ap.add_argument("--value-net", default="shared", choices=("shared", "separate"))
+    ap.add_argument("--pool", type=int, default=1, help="fresh frozen opponents (each one more policy, like the opponent pool)")
+    ap.add_argument("--run", default=None, help="a training run's checkpoints instead of fresh nets: RUN/latest.pt and RUN/pool/*.pt")
+    ap.add_argument("--split", action="store_true", help="fixed split of the games over the jobs (before the shared queue)")
+    ap.add_argument("--inflight", type=int, default=64, help="live games per worker with the shared queue")
     ap.add_argument("--max-rows", type=int, default=16384)
     ap.add_argument("--server-cpus", default=None, help="CPUs reserved for the server, e.g. 32-33")
     ap.add_argument("--worker-cpus", default=None, help="CPUs the workers are pinned to (one each, round robin)")
@@ -40,14 +52,12 @@ def main(argv=None) -> None:
     ap.add_argument("--dry-run", action="store_true", help="server returns random options without running the network (pipeline overhead only)")
     args = ap.parse_args(argv)
 
-    import multiprocessing as mp
-
     import torch
 
     from mtg_ml.backend import ENV_VAR, engine_name
     from mtg_ml.rl.inference import InferenceServer, ServerConfig, default_device
     from mtg_ml.rl.model import PolicyNet
-    from mtg_ml.rl.rollout import LEARNER, GameSpec, Job, run_job, split_games, worker_init
+    from mtg_ml.rl.rollout import LEARNER, GameSpec, Job, Result, create_pool, run_job, run_specs, split_games
 
     os.environ[ENV_VAR] = engine_name(args.engine)
 
@@ -60,44 +70,57 @@ def main(argv=None) -> None:
             out += list(range(int(a), int(b or a) + 1))
         return tuple(out)
 
-    tmp = tempfile.mkdtemp(prefix="bench_rollout_")
-    paths = []
-    for k in range(2):
-        torch.manual_seed(k)
-        net = PolicyNet(hidden=args.hidden, memory=args.memory, trunk=args.trunk, value_net=args.value_net)
-        paths.append(os.path.join(tmp, f"p{k}.pt"))
-        torch.save({"config": net.config, "model": net.state_dict()}, paths[-1])
+    if args.run:
+        learner = os.path.join(args.run, "latest.pt")
+        pool = sorted(os.path.join(args.run, "pool", f) for f in os.listdir(os.path.join(args.run, "pool")))
+    else:
+        tmp = tempfile.mkdtemp(prefix="bench_rollout_")
+        paths = []
+        for k in range(1 + args.pool):
+            torch.manual_seed(k)
+            net = PolicyNet(hidden=args.hidden, memory=args.memory, trunk=args.trunk, value_net=args.value_net)
+            paths.append(os.path.join(tmp, f"p{k}.pt"))
+            torch.save({"config": net.config, "model": net.state_dict()}, paths[-1])
+        learner, pool = paths[0], paths[1:]
     server = None
     if args.inference == "server":
-        server = InferenceServer(
-            args.workers, ServerConfig(device=args.device or default_device(), max_rows=args.max_rows, cpus=cpus(args.server_cpus), dry_run=args.dry_run), worker_cpus=cpus(args.worker_cpus)
-        )
-        procs = server.pool()
-    else:
-        procs = mp.get_context("spawn").Pool(args.workers, initializer=worker_init)
+        cfg = ServerConfig(device=args.device or default_device(), max_rows=args.max_rows, cpus=cpus(args.server_cpus), dry_run=args.dry_run)
+        server = InferenceServer(args.workers, cfg, worker_cpus=cpus(args.worker_cpus))
+    procs = create_pool(args.workers, args.inference, server, cpus(args.worker_cpus))
     try:
         rates = []
         for r in range(args.rounds + 1):
-            specs = []
+            specs, rng = [], random.Random(r)
             for g in range(args.games):
-                seats = (LEARNER, LEARNER) if g % 2 == 0 else ((LEARNER, paths[1]) if g % 4 == 1 else (paths[1], LEARNER))
-                specs.append(GameSpec(seed=r * 1_000_000 + g, seats=seats, match_game=1 + g % 2))
-            jobs = [Job(c, paths[0], 1, record=True, inference=args.inference, groups=args.groups) for c in split_games(specs, args.workers)]
+                opp = pool[-1] if rng.random() < 0.5 else rng.choice(pool)
+                seats = (LEARNER, LEARNER) if g % 2 == 0 else ((LEARNER, opp) if rng.random() < 0.5 else (opp, LEARNER))
+                specs.append(GameSpec(seed=r * 1_000_000 + g, seats=seats, match_game=1 + (rng.random() < 0.5)))
+            job = Job([], learner, r + 1, record=True, inference=args.inference, groups=args.groups)  # a new learner version every round
             t = time.perf_counter()
-            res = procs.map(run_job, jobs)
+            if args.split:
+                res = Result()
+                for x in procs.map(run_job, [replace(job, games=c) for c in split_games(specs, args.workers)]):
+                    for f in ("games", "actions", "timing"):
+                        getattr(res, f).extend(getattr(x, f))
+            else:
+                res = run_specs(procs, specs, job, args.workers, args.inflight)
             dt = time.perf_counter() - t
-            n = sum(sum(gm[4] for gm in x.games) for x in res)
+            n = sum(gm[4] for gm in res.games)
             if r == 0:
                 print(f"warm-up: {n / dt:,.0f} decisions/s", flush=True)
                 if server is not None:
                     server.stats()
                 continue
             rates.append(n / dt)
-            tm = [t for x in res for t in x.timing]
-            walls = sorted(t[0] for t in tm)
-            wait = sum(t[1] for t in tm) / max(sum(t[0] for t in tm), 1e-9)
-            print(f"round {r}: {n} decisions in {dt:.1f}s = {n / dt:,.0f} decisions/s; job wall min/median/max {walls[0]:.1f}/{walls[len(walls) // 2]:.1f}/{walls[-1]:.1f}s, waiting for inference {wait:.0%}", flush=True)
-        line = f"h{args.hidden} {args.trunk} value={args.value_net} {args.engine} {args.inference} workers={args.workers} games/round={args.games}: {sum(rates) / len(rates):,.0f} decisions/s"
+            walls = sorted(t[0] for t in res.timing)
+            wait = sum(t[1] for t in res.timing) / max(sum(t[0] for t in res.timing), 1e-9)
+            print(
+                f"round {r}: {n} decisions ({len(res.actions)} recorded) in {dt:.2f}s = {n / dt:,.0f} decisions/s; "
+                f"job wall min/median/max {walls[0]:.2f}/{walls[len(walls) // 2]:.2f}/{walls[-1]:.2f}s, waiting for inference {wait:.0%}",
+                flush=True,
+            )
+        mode = "split" if args.split else f"queue inflight={args.inflight}"
+        line = f"h{args.hidden} {args.trunk} value={args.value_net} {args.engine} {args.inference} {mode} workers={args.workers} games/round={args.games} policies={1 + len(pool)}: {sum(rates) / len(rates):,.0f} decisions/s"
         if server is not None:
             st = server.stats()
             line += f" | server: {st['rows'] / max(st['batches'], 1):.0f} decisions/batch, {st['requests'] / max(st['batches'], 1):.1f} requests/batch, busy {st['busy_s']:.1f}s (parse {st['parse_s']:.1f}, infer {st['infer_s']:.1f}, reply {st['reply_s']:.1f}), device {server.cfg.device}{' DRY RUN' if args.dry_run else ''}"
