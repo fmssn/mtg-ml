@@ -30,7 +30,7 @@ jobs:
           activate-environment: true
           enable-cache: true
       - run: uv pip install -e '.[dev]' && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: python -m pytest -q -m "not slow"
+      - run: python -m pytest -q -m "not slow and not gpu"
 
   native:
     # Rust engine: cargo tests, then the full suite with native variants and differential tests.
@@ -51,5 +51,5 @@ jobs:
         working-directory: native
       - run: maturin develop --release
         working-directory: native
-      - run: python -m pytest -q -m "not slow"   # torch tests skip here; the python job covers them
+      - run: python -m pytest -q -m "not slow and not gpu"   # torch tests skip here; the python job covers them
       - run: python -m mtg_ml.difftest fuzz --games 300 --jobs 4

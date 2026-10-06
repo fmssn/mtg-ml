@@ -12,7 +12,7 @@ make lint         # ruff check (CI blocks on it)
 make difftest     # Python vs Rust in lockstep
 ```
 
-`MTG_ENGINE=native` (or `--engine native`) switches any command to the Rust engine.
+`MTG_ENGINE=native` switches play, training, evaluation and trace commands to the Rust engine; `mtg_ml.play`, `mtg_ml.rl.evaluate` and `mtg_ml.trace` also take `--engine native`. The test suite picks engines itself (see `tests/conftest.py`), and `mtg_ml.difftest` always runs both.
 
 ## Invariants — do not break
 
@@ -38,7 +38,7 @@ New user-facing apps (replay viewer, dashboards) go under `apps/<name>/` and sho
 
 - Many sessions run in parallel worktrees. Keep PRs to one component, branch from the default branch (`git remote set-head origin -a`, then `origin/HEAD`), and avoid editing shared hotspots (README.md, `.gitignore`, `play.py`, golden digests) unless the change needs it.
 - CI (`.github/workflows/ci.yml`) runs lint, the Python suite with CPU torch, and the native build + differential fuzz. It must be green before merge.
-- Mark tests that take more than a few seconds `@pytest.mark.slow`; GPU-only tests `@pytest.mark.gpu`.
+- Mark tests that take more than a few seconds `@pytest.mark.slow`; GPU-only tests `@pytest.mark.gpu` (CI runs on CPU and deselects both).
 - Don't commit checkpoints, `runs/`, or large binaries.
 - Benchmark numbers in docs should say which machine they were measured on.
 
