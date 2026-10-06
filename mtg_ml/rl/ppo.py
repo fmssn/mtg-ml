@@ -41,7 +41,7 @@ class PPOConfig:
     # Searched decisions (rl/search.py) are trained towards the search's policy
     # (cross-entropy) instead of the policy-gradient term, whose action they did
     # not sample from the policy; they still train the value head.
-    distill_coef: float = 1.0
+    distill_coef: float = 0.3  # 1.0 with c_scale 1.0 collapsed the policy in three updates; see search.py
 
 
 def make_optimizer(params, lr: float, device) -> torch.optim.Optimizer:

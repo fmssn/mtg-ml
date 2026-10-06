@@ -50,7 +50,10 @@ from ..engine import objects as O
 from ..engine.view import determinize
 from .features import encode_event_hashes, event_hashes, featurize_flat
 
-BRANCH_KINDS = frozenset({O.PRIORITY, O.TARGET, O.SACRIFICE, O.CHOOSE_X, O.CHOOSE_MODE, O.DECLARE_ATTACKER})
+# Sacrifice costs are left to the policy (it picks the Wellspring at 0.998): then an
+# "activate, pay by sacrificing" line is one node whose child is the resolved board,
+# instead of a sacrifice node the critic cannot judge plus one level more to resolve.
+BRANCH_KINDS = frozenset({O.PRIORITY, O.TARGET, O.CHOOSE_X, O.CHOOSE_MODE, O.DECLARE_ATTACKER})
 MAIN_PHASES = ("main1", "main2")
 
 
@@ -60,8 +63,16 @@ class SearchConfig:
     max_root: int = 8  # Gumbel top-m root actions considered
     max_depth: int = 8  # branching decisions along one path
     prior_floor: float = 0.02  # uniform mass mixed into the policy priors
-    c_visit: float = 50.0  # Gumbel AlphaZero sigma(q) = (c_visit + max N) * c_scale * q
+    c_visit: float = 50.0  # Gumbel AlphaZero sigma(q) = (c_visit + max N) * c_scale * q, inside the tree
     c_scale: float = 1.0
+    # The distillation target uses its own, softer scale. At 1.0 a 0.05 difference
+    # in leaf value, the critic's noise level here, is 3+ logits: the targets were
+    # one-hot on whichever leaf the critic overrated, and distilling them collapsed
+    # the policy within three updates (win rate vs the pool 0.56 -> 0.31). At 0.25
+    # that noise stays under a logit while the Shaman sweep's +0.5 is still 6+.
+    # The tree keeps the full scale: with 0.25 the visits follow the prior and
+    # never resolve the sweep (the seed-6 probe misses it at budget 64).
+    target_scale: float = 0.25
     backup: str = "max"  # "max" (deterministic own-turn tree) or "mean"
     kinds: frozenset = BRANCH_KINDS
     steps: tuple = MAIN_PHASES  # root decisions are searched only in these steps
@@ -248,18 +259,18 @@ class _Search:
         n, eps = len(logits), self.cfg.prior_floor
         return [math.log((1 - eps) * math.exp(x - m) / z + eps / n) for x in logits]
 
-    def _sigma(self, node: _Node, q: float) -> float:
-        return (self.cfg.c_visit + max(node.n, default=0)) * self.cfg.c_scale * q
+    def _sigma(self, node: _Node, q: float, scale: float | None = None) -> float:
+        return (self.cfg.c_visit + max(node.n, default=0)) * (self.cfg.c_scale if scale is None else scale) * q
 
     def _completed_q(self, node: _Node) -> list[float]:
         """Q per edge: the backed-up value where visited, else the node's own
         value head estimate (what the policy would get without search)."""
         return [node.q[a] if node.n[a] else node.value for a in range(len(node.n))]
 
-    def _improved(self, node: _Node) -> list[float]:
+    def _improved(self, node: _Node, scale: float | None = None) -> list[float]:
         """pi' = softmax(prior + sigma(completed Q))."""
         pri = self._priors(node.logits)
-        s = [p + self._sigma(node, q) for p, q in zip(pri, self._completed_q(node))]
+        s = [p + self._sigma(node, q, scale) for p, q in zip(pri, self._completed_q(node))]
         m = max(s)
         e = [math.exp(x - m) for x in s]
         z = sum(e)
@@ -331,7 +342,7 @@ class _Search:
                 break
             node = child
             a = max(range(len(node.n)), key=lambda i: (node.n[i], node.q[i]))
-        return SearchResult(best, self._improved(root), root.q[best], root.value, line, self.expansions, self.evals)
+        return SearchResult(best, self._improved(root, cfg.target_scale), root.q[best], root.value, line, self.expansions, self.evals)
 
 
 def search(game, player: int, evaluator, cfg: SearchConfig, rng: random.Random, root_hidden=None, root_events=(), root_logits=None, root_value=None, root_hn=None) -> SearchResult:

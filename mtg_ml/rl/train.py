@@ -103,6 +103,7 @@ class TrainConfig:
     search_depth: int = 8  # branching decisions along one search path
     search_root: int = 8  # root actions considered (Gumbel top-m)
     search_floor: float = 0.02  # uniform mass mixed into the search's priors
+    search_scale: float = 0.25  # target_scale: value scaling of the distillation target (rl/search.py)
     ppo: PPOConfig = field(default_factory=PPOConfig)
 
 
@@ -234,7 +235,7 @@ class Trainer:
         c = self.cfg
         if not c.search_budget:
             return None
-        return SearchConfig(budget=c.search_budget, max_root=c.search_root, max_depth=c.search_depth, prior_floor=c.search_floor)
+        return SearchConfig(budget=c.search_budget, max_root=c.search_root, max_depth=c.search_depth, prior_floor=c.search_floor, target_scale=c.search_scale)
 
     def _train_specs(self, it: int) -> list[GameSpec]:
         c, specs = self.cfg, []

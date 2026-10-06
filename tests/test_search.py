@@ -45,6 +45,7 @@ def test_search_finds_the_shaman_sweep():
     assert res.line[0] == labels[res.action]
     assert any(s.startswith("Target Krark-Clan Shaman") for s in res.line), res.line
     assert SWEEP in res.line, res.line
+    assert not any(s.startswith("Sacrifice") for s in res.line)  # the sacrifice cost is the policy's call, not a node
     assert len(res.policy) == len(labels) and math.isclose(sum(res.policy), 1.0, abs_tol=1e-6)
     assert res.policy[res.action] == max(res.policy)
     # the improved policy keeps mass off a line that cannot reach the sweep: Toxin first

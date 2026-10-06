@@ -88,6 +88,34 @@ opponent's upkeep vs +0.10 for the Clue line), which is why the search works
 with the current critic at all: the blind spot is in the policy's last step and
 in the critic's view of the intermediate states, not in the leaf.
 
+## What the first training attempt taught
+
+Resumed from the 500k checkpoint with budget 64, 10% of eligible decisions,
+`c_scale` 1.0 and `distill_coef` 1.0, the policy collapsed within three
+updates: win rate against its own pool 0.56 -> 0.31, entropy 0.31 -> 0.64,
+games three turns shorter. Two causes, both fixed:
+
+- `approx_kl` included the searched rows, whose behaviour probability can be
+  1e-7, so it read 8.6e7 and `target_kl` stopped every epoch after one
+  minibatch. The KL and clip statistics now cover policy-gradient rows only.
+- With `c_scale` 1.0 a 0.05 difference in leaf value, the critic's noise level,
+  is 3+ logits, so the distillation targets were one-hot on whichever leaf the
+  critic overrated, and 6,000 such targets per iteration dragged the shared
+  trunk. The target now has its own scale (`target_scale` 0.25,
+  `--search-scale`): noise stays under a logit, the Shaman sweep's +0.5 is
+  still 6+. The tree keeps the full scale, because with 0.25 inside the tree
+  the visits follow the prior and never resolve the sweep. `distill_coef` is
+  0.3 by default now. Sacrifice costs are no longer branching nodes: the
+  policy picks the Wellspring at 0.998 anyway, and the sweep's child is then
+  the resolved board instead of a sacrifice decision the critic cannot judge.
+  With that, budget 32 finds the line too.
+
+Search at play time alone does not move the aggregate: 80 benchmark games on
+the Mac, 61.3% with search (budget 64, before these fixes) vs 62.5% without,
+intervals overlapping. The combo position is rare and the critic scoring the
+leaves is the one that never saw a resolved sweep; the training run tests
+whether distilling the search's choices changes that.
+
 ## Cost and open items
 
 - Every node and every auto-played decision is one forward pass: about 13 evals
