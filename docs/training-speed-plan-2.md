@@ -128,4 +128,68 @@ while both run.
 
 ### WS6 results
 
-(pending)
+Box, cores 32-59 (`taskset`), GPU 4, 27 workers, h128 entity, local inference, 2048 games per
+iteration, 12 iterations, means over iterations 3-12. Old code (`d90af0e`) and new code were run back
+to back several times (the box is shared; other runs used cores 0-31 and 60-63 meanwhile).
+
+| | update_s | µs update / decision | wall_s | wait_s |
+|---|---:|---:|---:|---:|
+| old, `--pipeline 1` (3 runs) | 2.52-2.58 | 9.98-10.33 | 2.54-2.60 | 0.00 |
+| **new, `--pipeline 1`** (4 runs) | **2.21-2.26** | **9.03-9.15** | **2.22-2.27** | 0.00-0.01 |
+| old, `--pipeline 0` (update alone) | 1.94 | 7.91 | 4.07 | |
+| new, `--pipeline 0` | 1.93 | 8.05 | 3.97 | |
+| new, `--pipeline 0`, trainer pinned to 1 core, 1 thread | 2.04 | 8.28 | 4.17 | |
+| new, `--pipeline 1`, 12 workers on node 3 only (48-59) | 1.93 | 7.75 | 3.35 | 1.43 |
+| new, `--pipeline 1`, 14 workers on node 2 only (33-46) | 2.18 | 8.71 | 3.11 | 0.93 |
+
+- **Collection in its own process** (`rl/collect.py`, `--collector process`, the default): the pool
+  belongs to a collector process that streams the games, merges the results and parks the merged batch
+  in one shared-memory block; the trainer maps it (no copy of the samples; the float fields are one
+  memcpy each) and unmaps it after the update. A test checks that the mapped batch trains bit for bit
+  like the original. py-spy of the trainer process while pipelining, after: `ppo_update` 68% of its
+  samples, `_publish` (the 68 MB policy file) 2%, the checkpoint thread 4% (start and end only); the
+  rollout thread, `unpark`, the per-iteration Adam-state copy and `latest.pt` pickling are gone (before:
+  `ppo_update` 25%, rollout thread 14%, `_save` 6%, `_cpu` 3%). The collector is pinned to the workers'
+  cores off the trainer's node (~1%, kept).
+- **The update is 12-13% faster pipelined and the iteration with it (2.58 -> 2.24 s), but still
+  ~12% slower than alone.** The rest is not the GIL: it is the trainer's NUMA node. With the workers
+  only on another node the pipelined update runs exactly as fast as alone (1.93 s, 12 workers on
+  48-59), with 14 workers on the trainer's node it is 2.18 s; core clocks stay at 3.4-3.6 GHz either
+  way (sampled from `scaling_cur_freq`), so it is the node's shared L3 slice / memory controller
+  (sub-NUMA clustering, 4 nodes of 16). Two trainer cores and threads (26 workers) did not help (2.28 s).
+  The +-5% criterion is met when the trainer's node carries no workers; on a 28-core budget that
+  costs more rollout than it saves update, so the measured config keeps 15 workers on node 2. The
+  default layout fills the trainer's node with workers last, so on the whole box (63 cores, 31-48
+  workers) the trainer's node stays free.
+- **Evaluation off the loop**: `--eval-every 5`, default eval sizes (~2,000 games per evaluation).
+
+  | | wall_s, no eval | wall_s, eval every 5 | cost per iteration |
+  |---|---:|---:|---:|
+  | old (inline, 27 workers, ~2.5 s blocked per evaluation) | 2.58 | 3.08 | +0.50 s (+19%) |
+  | new, 27 workers, evaluation shares their cores niced (4 eval workers; 2 runs) | 2.22-2.26 | 2.23-2.32 | +0.00-0.06 s (<= 3%) |
+  | new, 24 workers + 3 evaluation cores | 2.27 | 2.37 | +0.10 s (+4%) |
+
+  The evaluation process reads the policy file of the iteration it evaluates (pinned against pruning),
+  takes 5-16 s and lands 2-7 iterations later in that iteration's row (`eval_s`, `eval_lag`). The
+  remaining cost is again the trainer's node: the 3 dedicated evaluation cores are on it. Benchmark
+  values match the inline evaluation (0.001-0.007 at iterations 5 and 10 in both).
+- **Checkpoint cost**: `latest.pt` (204 MB with Adam state) every `--checkpoint-every` iterations
+  (default 10) and at the end; the weights-only policy file stays per iteration. Resume tested in
+  `tests/test_train_pipeline.py` (killed between checkpoints, both pipeline modes: same games as an
+  uninterrupted run, lost rows moved to `metrics-dropped.jsonl`, lost policy files and snapshots removed)
+  and on the box: SIGKILL of the trainer at iteration 8 with `--checkpoint-every 5` left no process
+  behind (collector, evaluator and their 31 workers exit on the closed pipe within 20 s), the restart
+  resumed at 5, dropped rows 6-8 and finished 12 iterations with evaluations merged.
+- **Layout** printed at start (box, `taskset -c 32-59`, 27 workers):
+  `cpu layout (GPU NUMA node 2): trainer 32 | workers 33-59 | collector 48-59 | evaluation 33-59 shared with the workers, niced`.
+  With 24 workers: `trainer 32 | workers 36-59 | collector 48-59 | evaluation 33-35`.
+  `--trainer-cpus`, `--worker-cpus`, `--eval-cpus` override; the GPU's node comes from
+  `torch.cuda.get_device_properties` (PCI ids) and sysfs.
+
+Open: the continuous-queue mode (`--pipeline 2+`) is not built: the loop waits 0.00-0.01 s per
+iteration now, so at this worker count it has nothing to remove; it matters once the server makes the
+rollout much faster than the update. An evaluation in flight when the trainer dies is lost (its row stays
+without `eval/*`). The evaluation process uses local CPU inference even with `--inference server`.
+`metrics.jsonl` is rewritten (through `os.replace`) at every merged evaluation, so `tail -f` readers must
+reopen it. torch's global rng is not in `latest.pt`, so a resumed run plays the same games but samples
+different actions than an uninterrupted one (as before).
