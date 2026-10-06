@@ -18,7 +18,16 @@ python -m mtg_ml.rl.train --engine native --inference server ...     # one GPU p
 | 60 workers, local inference, hidden 256 / 512 | n/a | 433k / 237k |
 | 60 workers, server pipeline without the network (`--dry-run`) | 146k (30 workers) | **640k** |
 
-The GPU half of the server could not be measured end to end in this pass: CUDA on h100-private failed on 2026-10-06. Only 7 of 8 H100s were listed, and `cudaGetDeviceCount` returned error 101 for every device; an admin has to reset the driver or reboot. On 2026-10-05, before the fixes below, the server reached 89k decisions/s on GPU against 110k for local inference at 30 workers. In isolation, the server handles a batch of about 1,000 decisions from two policies in about 3.4 ms on an H100 (≈290k decisions/s), and 8,192 decisions of one policy in 5.6 ms (≈1.45M/s): `tools/profile_server.py`.
+**With the GPU** (after a reboot fixed CUDA on 2026-10-06; one H100, 60 workers, server on 2 cores):
+
+| decisions/s | local inference | server on GPU |
+|---|---:|---:|
+| hidden 128 (current model) | 520k | 337k |
+| hidden 512 | 237k | **332k** |
+
+The server's throughput hardly depends on network size; for the current tiny network local CPU inference is still faster. The server is now limited by its own inference step: 23 of 27 busy seconds, about 8.7 ms per batch of ~1,800 decisions from two policies, almost the same at hidden 128 and 512. That cost is launch and preparation overhead, not GPU compute, which makes it the next thing to cut (CUDA graphs, fusing the two policies' batches). In isolation the server handles ~1,000 decisions from two policies in 3.4 ms, and 8,192 decisions of one policy in 5.6 ms (`tools/profile_server.py`).
+
+One GPU on h100-private (PCI 0000:be:00.0, index 6 when all 8 are present) fell off the bus on 2026-10-06 and took CUDA down for every process until the reboot. Select GPUs by UUID or bus id and avoid that card.
 
 ## Finding 1: unpickling samples capped every rollout
 
@@ -58,6 +67,5 @@ CUDA_VISIBLE_DEVICES=4 python tools/profile_server.py --device cuda --requests 3
 
 ## Next steps
 
-1. Measure the server on a working GPU (the commands above), at hidden 128 and 512.
-2. Cut the server's fixed cost per batch: CUDA graphs or `torch.compile` for the forward pass, and pinned staging buffers.
-3. Raise the worker ceiling: the Rust side could write requests and samples straight into the shared buffers, saving the remaining Python packing.
+1. Cut the server's fixed cost per batch: CUDA graphs or `torch.compile` for the forward pass, and pinned staging buffers.
+2. Raise the worker ceiling: the Rust side could write requests and samples straight into the shared buffers, saving the remaining Python packing.
