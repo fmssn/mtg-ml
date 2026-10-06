@@ -3,18 +3,29 @@
 Minibatches are sets of whole trajectories (about `minibatch` decisions
 each), so the recurrent core is replayed from the start of every game with
 the current weights instead of reusing stale hidden states.
+
+The network is small and a minibatch is ~2k decisions, so a step costs
+kernel launches, not arithmetic, and any wait for the device stalls the
+whole pipeline. So the loop never waits: the decisions go to the device once
+per update; each epoch lays them out in minibatch order and derives the
+entity structure in one go (`model.structure`, which does wait), minibatches
+are slices of that (`model.split`), and the statistics are summed on the
+device and read once per epoch.
 """
 
 from __future__ import annotations
 
+from array import array
 from dataclasses import dataclass
+from itertools import accumulate
 
 import torch
 from torch import nn
 
-from .model import PolicyNet, collate, collate_packed, masked_entropy
-from .samples import PackedSamples
+from .model import PolicyNet, collate_packed, masked_entropy, packed_tensors, split, structure
 from .rollout import Result
+
+STATS = ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac")
 
 
 @dataclass
@@ -29,44 +40,63 @@ class PPOConfig:
     target_kl: float | None = 0.03  # stop the epoch loop early past this
 
 
-def trajectory_minibatches(lengths: list[int], size: int, gen=None) -> list[tuple[list[int], list[int]]]:
-    """Shuffle trajectories and group them into (step indices, lengths) chunks of >= size steps."""
-    starts, acc = [], 0
-    for n in lengths:
-        starts.append(acc)
+def make_optimizer(params, lr: float, device) -> torch.optim.Optimizer:
+    """Adam with eps 1e-5; on CUDA fused (one kernel for all parameters
+    instead of a few per tensor), elsewhere plain. `Optimizer.load_state_dict`
+    restores the `fused` flag from the checkpoint's param groups, so after
+    resuming callers must set `group["fused"]` again, and for a checkpoint
+    of an unfused optimizer also move every `state["step"]` to its
+    parameter's device (plain Adam keeps it on the CPU; fused Adam fails on that)."""
+    return torch.optim.Adam(params, lr=lr, eps=1e-5, fused=torch.device(device).type == "cuda")
+
+
+def trajectory_minibatches(lengths: list[int], size: int, gen=None) -> tuple[torch.Tensor, list[list[int]]]:
+    """Shuffle trajectories and group them into chunks of >= size steps.
+    Returns the decision order (the shuffled trajectories laid end to end)
+    and the trajectory lengths of each chunk; chunks are consecutive in that
+    order."""
+    L = torch.tensor(lengths, dtype=torch.long)
+    perm = torch.randperm(len(lengths), generator=gen)
+    Lp = L[perm]
+    chunks, cur, acc = [], [], 0
+    for n in Lp.tolist():
+        cur.append(n)
         acc += n
-    out, idx, lens = [], [], []
-    for t in torch.randperm(len(lengths), generator=gen).tolist():
-        idx.extend(range(starts[t], starts[t] + lengths[t]))
-        lens.append(lengths[t])
-        if len(idx) >= size:
-            out.append((idx, lens))
-            idx, lens = [], []
-    if idx:
-        out.append((idx, lens))
-    return out
+        if acc >= size:
+            chunks.append(cur)
+            cur, acc = [], 0
+    if cur:
+        chunks.append(cur)
+    order = torch.repeat_interleave((L.cumsum(0) - L)[perm] - (Lp.cumsum(0) - Lp), Lp) + torch.arange(int(L.sum()))
+    return order, chunks
 
 
 def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PPOConfig, device="cpu", gen=None) -> dict:
     n = len(data.actions)
-    actions = torch.tensor(data.actions, dtype=torch.long)
-    old_logp = torch.tensor(data.logps, dtype=torch.float32)
-    adv = torch.tensor(data.advantages, dtype=torch.float32)
-    ret = torch.tensor(data.returns, dtype=torch.float32)
+    floats = lambda xs: torch.frombuffer(array("f", xs), dtype=torch.float32)  # noqa: E731 - 3x faster than torch.tensor(list)
+    old_logp, adv, ret = floats(data.logps), floats(data.advantages), floats(data.returns)
     var = ret.var().item()
     explained_var = float("nan") if n < 2 or var == 0 else 1 - adv.var().item() / var  # values = ret - adv
     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
     net.train()
-    stats = {"pg_loss": 0.0, "v_loss": 0.0, "entropy": 0.0, "approx_kl": 0.0, "clip_frac": 0.0}
+    dev = torch.device(device)
+    samples = packed_tensors(data.samples, dev)
+    n_opts = torch.frombuffer(data.samples.n_opts, dtype=torch.int32)  # on the CPU: logit widths without asking the device
+    actions = torch.frombuffer(array("q", data.actions), dtype=torch.long).to(dev)
+    recorded = torch.stack([old_logp, adv, ret]).to(dev)
+    totals = [0.0] * len(STATS)
     steps = 0
     stop = False
     for _ in range(cfg.epochs):
-        epoch_kl = []
-        for idx, lens in trajectory_minibatches(data.lengths, cfg.minibatch, gen):
-            b = (collate_packed(data.samples, idx) if isinstance(data.samples, PackedSamples) else collate([data.samples[i] for i in idx])).to(device)
-            it = torch.tensor(idx)
-            a, olp, ad, rt = (x[it].to(device) for x in (actions, old_logp, adv, ret))
-            logits, values, _ = net(b, lengths=lens)
+        order, chunks = trajectory_minibatches(data.lengths, cfg.minibatch, gen)
+        bounds = list(accumulate((sum(c) for c in chunks), initial=0))
+        rows = order.to(dev)
+        batches = split(structure(collate_packed(samples, rows), net.config["state_dim"], net.config["option_dim"]), bounds)
+        acts, rec, width = actions[rows], recorded[:, rows], n_opts[order]
+        acc = torch.zeros(len(STATS), dtype=torch.float64, device=dev)
+        for b, lens, lo, hi in zip(batches, chunks, bounds, bounds[1:]):
+            a, (olp, ad, rt) = acts[lo:hi], rec[:, lo:hi]
+            logits, values, _ = net(b, lengths=lens, max_options=int(width[lo:hi].max()))
             logp_all = torch.log_softmax(logits, dim=-1)
             logp = logp_all.gather(1, a[:, None]).squeeze(1)
             ratio = (logp - olp).exp()
@@ -79,18 +109,15 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
             nn.utils.clip_grad_norm_(net.parameters(), cfg.max_grad_norm)
             opt.step()
             with torch.no_grad():
-                kl = ((ratio - 1) - (logp - olp)).mean().item()
-                epoch_kl.append(kl)
-                stats["pg_loss"] += pg_loss.item()
-                stats["v_loss"] += v_loss.item()
-                stats["entropy"] += ent.item()
-                stats["approx_kl"] += kl
-                stats["clip_frac"] += ((ratio - 1).abs() > cfg.clip).float().mean().item()
-            steps += 1
-        if cfg.target_kl is not None and sum(epoch_kl) / len(epoch_kl) > cfg.target_kl:
+                kl = ((ratio - 1) - (logp - olp)).mean()
+                acc += torch.stack([pg_loss, v_loss, ent, kl, ((ratio - 1).abs() > cfg.clip).float().mean()])
+        steps += len(chunks)
+        epoch = acc.tolist()  # read once per epoch (target_kl), not per step
+        totals = [t + x for t, x in zip(totals, epoch)]
+        if cfg.target_kl is not None and epoch[STATS.index("approx_kl")] / len(chunks) > cfg.target_kl:
             stop = True
             break
-    out = {k: v / max(steps, 1) for k, v in stats.items()}
+    out = {k: v / max(steps, 1) for k, v in zip(STATS, totals)}
     out["updates"] = steps
     out["early_stop"] = stop
     out["explained_var"] = explained_var
