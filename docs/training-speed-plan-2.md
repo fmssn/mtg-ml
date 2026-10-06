@@ -120,7 +120,77 @@ while both run.
 
 ### WS4 results
 
-(pending)
+h128 entity, shared value, native engine, `tools/bench_rollout.py --games 2048 --rounds 4`. The final numbers
+were taken on cores 32-63 while they were otherwise idle (a foreign training run held cores 0-31 the whole time,
+so there is no 31-worker number on 0-31): 27 workers on cores 33-59, server on core 32, GPU 4
+(GPU-3e32a273, node 2). "Old server" is commit d90af0e run from a scratch copy on the same cores.
+
+| decisions/s, 27 workers | 25 pool opponents (26 policies) | 2 pool opponents (3 policies) |
+|---|---:|---:|
+| local CPU inference (8 OMP threads, cores 32-59) | 158.5k | 178k |
+| old server | 13.5k | 50.6k |
+| **new server** | **374k (2.36x local)** | **422k (2.38x local)** |
+
+15 workers on node 2 alone (cores 33-47, server on 32): server 254k, local 90k (2.8x). The 31-worker baseline
+taken before the work on cores 0-31, GPU 0 (box idle): local 176k, old server 14.2k (pool 25) and 49k (pool 2).
+
+Per batch, in isolation (`tools/profile_server.py`, 26 policies, real decisions): the old server spent ~36 ms on
+a batch of ~510 decisions from 26 policies (one forward and one `.cpu()` per policy) and ~8 ms with 3. Now the
+host spends ~0.1 ms per batch (numpy header, one copy, one graph replay) and the GPU 0.54 ms for ~200
+decisions, 0.72 ms for ~1,000 (padded to 1,488 rows), independent of the number of policies: up to ~1.07M
+decisions/s per server. In the 27-worker runs the server answers a batch of ~290 decisions 0.63 ms after
+launching it; its host work is ~15% of the wall time, and a batch is on the GPU ~85% of it (~1,400 batches per
+1.06 s round), so the GPU's latency per batch is what the workers wait on.
+
+What changed (`rl/inference.py`, new `rl/stacked.py`):
+
+1. **Transport without pipes or pickling.** Each server owns a control block (request headers, reply tickets)
+   and a data block (request and reply area per worker group), shared memory registered with CUDA and mapped
+   into the GPU's address space. A worker writes its decisions and header, publishes a ticket and spins on its
+   reply ticket; the server polls all tickets with one numpy compare. The graph reads the requests straight from
+   host memory and writes (action, log-prob, value) straight into the reply areas. The dry run (no network) at
+   31 workers was 225k decisions/s with the old transport, the server's Python parse and reply alone ~1.8 ms
+   per batch.
+2. **One forward for all policies** (`PolicyStack`): embedding tables stacked into one table per kind with a
+   block per policy and one zero row (separators, pointers, padding look it up, which is what removing them
+   does), dense weights stacked (slots, in, out). Rows are sorted by policy on the host, so entities and options
+   are too, and every dense layer is one grouped matmul (Triton kernel over policy-sorted rows, fp32 IEEE; tiles
+   16x32x32 for small batches: 3-10x faster than the first version). The learner is replaced in place.
+3. **Sync-free step structure.** Every size comes from the request headers (the worker counts its entity
+   separators with numpy); bags, entity rows and pointers are derived with fixed-shape ops (searchsorted,
+   cumsum differences, embedding bags over the entity vectors with per-sample weights for pointers). No
+   `.item()`, no boolean indexing, no atomics on the hot path.
+4. **CUDA graphs + torch.compile.** One graph per size level (rows 32 * 1.5^k; other sizes in fixed ratios to
+   rows), ~11 per run; padding goes to extra 64-token bags. `torch.compile` (default on CUDA) fuses the ~300 small
+   kernels: 1.25 -> 0.72 ms GPU per 1,000-decision batch. Sampling is Gumbel-max with log-prob = score -
+   logsumexp of the row's options.
+5. **One server per GPU**: `InferenceServer(..., devices=["cuda:0", "cuda:1"])` shards workers in contiguous
+   blocks; a server without `cpus` pins itself to its GPU's NUMA node minus the workers' CPUs (from
+   `/sys/bus/pci/devices/<bus>/local_cpulist`). Checked with GPU 0 + GPU 4 and 14 workers (246k decisions/s,
+   the same per worker as one server: at these worker counts one H100 is enough).
+
+What did not pay: `torch._grouped_mm` (fp32 falls back to a host loop with a sync, 0.5 ms); `include_last_offset`
+to drop padding from embedding bags (CUDA still sums the tail into the last bag, 2 ms per call); compiled
+`index_add` (becomes a sort-based `index_put`, 1 ms per call, so scatter-free formulations instead); two CUDA
+streams with concurrent batches (361k vs 374k at 27 workers, equal at 15; kept as `ServerConfig.streams`,
+default 1); `--groups 3 --inflight 96` (+4%, defaults unchanged).
+
+Exactness: `tests/test_inference.py` passes on the CPU and on the H100: server rollouts replay exactly for every
+trunk (mlp and entity through the stack, transformer through the per-policy path), graphs with and without
+`torch.compile` and the eager forward; the stacked forward matches per-policy `PolicyNet` forwards (log-prob,
+value, hidden state within 1e-5 for 5 variants, CPU and CUDA); the step structure puts the same tokens in each
+bag and the same pointers as `model.structure`; Gumbel-max draws follow the softmax. The verification suite
+(`test_rl`, `test_inference`, `test_rollout_stream`, `test_ppo_fast`, `test_train_pipeline`): 125 passed on the
+box.
+
+Where the time goes now (27 workers, pool 25): workers spend ~75% of a job on the CPU (engine, featurize,
+Python glue: ~41 us per decision) and ~25% waiting for the server's ~0.6 ms round trip; a 2048-game round takes
+~1.06 s of which the median job runs 0.82 s, so ~20% of the round is outside the jobs (start, tail, merging
+samples in `run_specs`). Both are WS7 territory (Rust lockstep loop, continuous collection).
+
+Open: the 31- and 63-worker numbers on an idle box; a trunk with real compute (transformer) in the stack; the
+GPU floor of ~0.5 ms per batch (kernel count; a hand-fused gather + structure kernel would cut it); the server
+holds 2.2 GB per 26 h128 policies (32 slots preallocated, grows by doubling, which recaptures the graphs).
 
 ### WS5 results
 
