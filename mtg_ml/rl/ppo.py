@@ -220,7 +220,8 @@ class _StepGraphs:
 
     def __init__(self, net, opt, cfg):
         self.fingerprint = _StepGraphs.fingerprint_of(net, opt, cfg)
-        self.pool = torch.cuda.graph_pool_handle()  # shared: the graphs never run concurrently
+        self.pools: dict[tuple, tuple] = {}  # shapes -> memory pool, shared by its graphs (they never run concurrently); dropped with them
+        self.stream = torch.cuda.Stream()  # one for every warm-up and capture: the allocator caches blocks per stream, so a new stream per capture strands its warm-up's memory
         self.graphs: dict[tuple, dict[tuple, tuple]] = {}  # shapes -> GRU batch -> (graph, static ints, static floats)
         self.acc = torch.zeros(len(STATS), dtype=torch.float64, device=next(net.parameters()).device)
         self.captures, self.capture_s = 0, 0.0
@@ -261,8 +262,9 @@ class _StepGraphs:
         key = tuple(sorted(shapes.items()))
         if key not in self.graphs:
             if len(self.graphs) >= self.MAX_SHAPES:
-                del self.graphs[next(iter(self.graphs))]
-            self.graphs[key] = {}
+                old = next(iter(self.graphs))
+                del self.graphs[old], self.pools[old]
+            self.graphs[key], self.pools[key] = {}, torch.cuda.graph_pool_handle()
         graphs = self.graphs[key]
         for m in range(ints.shape[0]):
             if gru[m] not in graphs:
@@ -274,18 +276,18 @@ class _StepGraphs:
                     del loss, stats  # a live autograd graph would break the capture
                     self.fingerprint = _StepGraphs.fingerprint_of(net, opt, cfg)
                     continue
-                graphs[gru[m]] = self._capture(net, opt, cfg, shapes, gru[m], ints[m], flts[m])
+                graphs[gru[m]] = self._capture(net, opt, cfg, shapes, gru[m], ints[m], flts[m], self.pools[key])
             graph, si, sf = graphs[gru[m]]
             si.copy_(ints[m])
             sf.copy_(flts[m])
             graph.replay()
 
-    def _capture(self, net, opt, cfg, shapes, gru, ints, flts) -> tuple:
+    def _capture(self, net, opt, cfg, shapes, gru, ints, flts, pool) -> tuple:
         t = time.perf_counter()
         losses = _compiled_losses() if cfg.capture >= 2 else _padded_losses  # compiles in the warm-up, outside the capture
         si, sf = ints.clone(), flts.clone()
         _drop_entities(net)
-        side, main = torch.cuda.Stream(), torch.cuda.current_stream()
+        side, main = self.stream, torch.cuda.current_stream()
         side.wait_stream(main)
         with torch.cuda.stream(side):  # lazy initialisation (cuDNN, cuBLAS) must not happen while capturing
             opt.zero_grad(set_to_none=True)
@@ -302,7 +304,7 @@ class _StepGraphs:
         side.wait_stream(main)
         try:  # not `torch.cuda.graph`, which synchronizes and empties the allocator's cache on entry: ~100 ms per capture
             with torch.cuda.stream(side):
-                graph.capture_begin(pool=self.pool)
+                graph.capture_begin(pool=pool)
                 try:
                     loss, stats = losses(net, cfg, shapes, gru, si, sf)
                     _step(net, opt, cfg, loss, FOLD_CLIP)
@@ -369,6 +371,7 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     if mode not in ("eager", "padded", "graph") or (mode == "graph" and dev.type != "cuda"):
         raise ValueError(f"mode {mode!r} on {dev}")
     graphs = _graphs_for(net, opt, cfg) if mode == "graph" else None
+    captures = graphs.captures if graphs else 0
     sd, od = net.config["state_dim"], net.config["option_dim"]
     transpose = {"st": (sd, "bag_off" if net.config["trunk"] == "entity" else "st_off"), "e": (od, "e_off"), "ot": (od, "ot_off")} if TRANSPOSED_BAGS else None
     samples = packed_tensors(data.samples, dev)
@@ -411,6 +414,8 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
             break
     if graphs:
         opt.zero_grad(set_to_none=True)  # the gradients live in the graphs' pool
+        if graphs.captures > captures:  # the warm-ups leave cached blocks of new sizes behind: ~1 GiB per capture at minibatch 8192
+            torch.cuda.empty_cache()
     out = {k: v / max(steps, 1) for k, v in zip(STATS, totals)}
     out["updates"] = steps
     out["early_stop"] = stop
