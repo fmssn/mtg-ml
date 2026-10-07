@@ -115,7 +115,7 @@ impl Remaining {
         self.generic == 0 && self.colored.iter().all(|(_, n)| *n == 0)
     }
 
-    fn colored_get(&self, c: u8) -> i32 {
+    pub fn colored_get(&self, c: u8) -> i32 {
         self.colored.iter().find(|(k, _)| *k == c).map(|e| e.1).unwrap_or(0)
     }
 

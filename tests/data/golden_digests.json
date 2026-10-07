@@ -9,9 +9,10 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "5cf4788d15ed3938"
+"digest": "782bdb1f498770cd"
 },
 {
 "scenario": {
@@ -23,9 +24,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "75c0ff08b7e07f5d"
+"digest": "5afa5aa077b0efc5"
 },
 {
 "scenario": {
@@ -37,9 +39,10 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "d39ab2491e2ae827"
+"digest": "dcf93d6b03138d15"
 },
 {
 "scenario": {
@@ -51,7 +54,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "831ba372f156a13a"
 },
@@ -65,7 +69,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "7ea6d0f2b01b0137"
 },
@@ -79,7 +84,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "3f2c709804ddfc3f"
 },
@@ -93,9 +99,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
-"digest": "ac95bde017675e11"
+"digest": "7f1c9b3f9da639ea"
 },
 {
 "scenario": {
@@ -107,9 +114,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "d74b5116a11e395e"
+"digest": "1d530fef7dbc3f6e"
 },
 {
 "scenario": {
@@ -121,7 +129,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "655d9ad6f721cf67"
 },
@@ -135,7 +144,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "f1bfb3b838ce9271"
 },
@@ -149,7 +159,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "9b7ebd989f82fc5a"
 },
@@ -163,9 +174,10 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "1adc66adc444f44e"
+"digest": "e18ed866bec7d2a2"
 },
 {
 "scenario": {
@@ -177,7 +189,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "c479131faf3027cd"
 },
@@ -191,7 +204,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "27debc1796641aac"
 },
@@ -205,9 +219,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "6d97be1f76854a20"
+"digest": "90eca711e442e2fd"
 },
 {
 "scenario": {
@@ -219,7 +234,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "cc48ca37ebc037ea"
 },
@@ -233,9 +249,10 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "63f419fb3654e264"
+"digest": "16ebcb3a579d0fa1"
 },
 {
 "scenario": {
@@ -247,9 +264,10 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "a73cfcb44d2d217c"
+"digest": "4d33cb7d29d11d46"
 },
 {
 "scenario": {
@@ -261,9 +279,10 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "70f7cd0b96df660e"
+"digest": "a99c6ce31fc44cfc"
 },
 {
 "scenario": {
@@ -275,7 +294,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "9d9412cd1d9ef86b"
 },
@@ -289,9 +309,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
-"digest": "6095fd8110ecd637"
+"digest": "7d39429547fee4d6"
 },
 {
 "scenario": {
@@ -303,9 +324,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "c91e4118540625ba"
+"digest": "22d3e332b71db28e"
 },
 {
 "scenario": {
@@ -317,9 +339,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "6e73c9984913eadf"
+"digest": "ee6593a53fc4f583"
 },
 {
 "scenario": {
@@ -331,9 +354,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "a0d872bfede84827"
+"digest": "654e4b552e7dadf0"
 },
 {
 "scenario": {
@@ -345,7 +369,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "64a57f39ceeb278b"
 },
@@ -359,7 +384,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "fd2d19181239a9d1"
 },
@@ -373,9 +399,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
-"digest": "3b8ac8266e89755c"
+"digest": "f1b925c259e68da0"
 },
 {
 "scenario": {
@@ -387,9 +414,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "f84daa9b85b7f57c"
+"digest": "50977a46816b5790"
 },
 {
 "scenario": {
@@ -401,7 +429,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "ab81161b368ceb40"
 },
@@ -415,7 +444,8 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "c546b8c2f19d1229"
 },
@@ -429,9 +459,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "bf0909293b6c85d7"
+"digest": "0f071b5965ccd010"
 },
 {
 "scenario": {
@@ -443,9 +474,10 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "0c6a4e86334fd6c1"
+"digest": "14680f3a93be2d51"
 },
 {
 "scenario": {
@@ -457,7 +489,8 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "ab58c9b9cc0237e3"
 },
@@ -471,7 +504,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "34a37609a89f211c"
 },
@@ -485,9 +519,10 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "159ec02bb90e9222"
+"digest": "0eccc0772508a4ae"
 },
 {
 "scenario": {
@@ -499,7 +534,8 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "f02c173d2b82a77e"
 },
@@ -513,9 +549,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "461f653c8587c37a"
+"digest": "b02ded6dabd1d3ef"
 },
 {
 "scenario": {
@@ -527,9 +564,10 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "f21a8d0a6ef9ab92"
+"digest": "9bed495219b57a0a"
 },
 {
 "scenario": {
@@ -541,9 +579,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "1c4b3e3614918de8"
+"digest": "6a9ae93c05170eda"
 },
 {
 "scenario": {
@@ -555,7 +594,8 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "321a99ef8967c5b5"
 },
@@ -569,7 +609,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "749070b52104d235"
 },
@@ -583,9 +624,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "89b5d26277be0ef2"
+"digest": "f33076c0129d665e"
 },
 {
 "scenario": {
@@ -597,9 +639,10 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "79bfecba8e9d2b76"
+"digest": "43eef977e544166c"
 },
 {
 "scenario": {
@@ -611,9 +654,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "45bc9072fca11aa4"
+"digest": "aedde0b459643784"
 },
 {
 "scenario": {
@@ -625,9 +669,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "ef54226c4b949489"
+"digest": "38da1bc18e85a6aa"
 },
 {
 "scenario": {
@@ -639,9 +684,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "a9b8fcaba7a26c8a"
+"digest": "c43bde9d7fef299a"
 },
 {
 "scenario": {
@@ -653,7 +699,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "3bbf4abc9e955cb5"
 },
@@ -667,7 +714,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "e54f69070585921a"
 },
@@ -681,9 +729,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "2d85ac9332ea5fe4"
+"digest": "65865724dcc8b1fa"
 },
 {
 "scenario": {
@@ -695,7 +744,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "930ec50244796a15"
 },
@@ -709,9 +759,10 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "6ff90a9d48c7cc83"
+"digest": "794183842a4b5004"
 },
 {
 "scenario": {
@@ -723,7 +774,8 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "f2e20d52265de9fa"
 },
@@ -737,7 +789,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "dd091cf2690a3132"
 },
@@ -751,7 +804,8 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "1d5f0e7e8d01cc03"
 },
@@ -765,7 +819,8 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "84e63f0f521992c8"
 },
@@ -779,7 +834,8 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "c99639b8de91cfac"
 },
@@ -793,9 +849,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "9363de40cb4a4124"
+"digest": "801a5dc35fa66147"
 },
 {
 "scenario": {
@@ -807,9 +864,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "a9eda3bcca73bf69"
+"digest": "89b929b20a549f0e"
 },
 {
 "scenario": {
@@ -821,9 +879,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": false,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
-"digest": "ecbeafb2fe90b239"
+"digest": "100d26a196ab7846"
 },
 {
 "scenario": {
@@ -835,9 +894,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "3b713bbf6fb34374"
+"digest": "5c6cfafaba7af19b"
 },
 {
 "scenario": {
@@ -849,9 +909,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "e536f68a1e3f7aef"
+"digest": "f10441135aea4be6"
 },
 {
 "scenario": {
@@ -863,7 +924,8 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "56775dc0afb45cbe"
 },
@@ -877,7 +939,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "1debf716aabb49f0"
 },
@@ -891,7 +954,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "8f725212585f48fd"
 },
@@ -905,7 +969,8 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "8ddb0f7140ff4fdf"
 },
@@ -919,7 +984,8 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "7caa77b43c9ace32"
 },
@@ -933,7 +999,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "5b6cf3f8b8e16387"
 },
@@ -947,7 +1014,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "67411fd7bda5b6d1"
 },
@@ -961,7 +1029,8 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "2217ef40d2771970"
 },
@@ -975,9 +1044,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "86ff0bb698d459e5"
+"digest": "4a54de5736cf2414"
 },
 {
 "scenario": {
@@ -989,9 +1059,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "f5b90d2cfdbd36ca"
+"digest": "b5b69c53e5448ed5"
 },
 {
 "scenario": {
@@ -1003,7 +1074,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "236bf1b353bcba03"
 },
@@ -1017,9 +1089,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "592f3a47ac69e06b"
+"digest": "54069318dd33c896"
 },
 {
 "scenario": {
@@ -1031,7 +1104,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "01b4a07f913348fc"
 },
@@ -1045,9 +1119,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "26b4b18f184f2c7b"
+"digest": "105152e7e377a154"
 },
 {
 "scenario": {
@@ -1059,9 +1134,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "b7dc5728a64aaaca"
+"digest": "aa721b03c7c3de23"
 },
 {
 "scenario": {
@@ -1073,9 +1149,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "397eec8ce5b6cce6"
+"digest": "9d3dbe8e5e31ff38"
 },
 {
 "scenario": {
@@ -1087,9 +1164,10 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
-"digest": "a467491136f8e5b1"
+"digest": "9a9a51dc738eddf3"
 },
 {
 "scenario": {
@@ -1101,9 +1179,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "34c95385d2e20ea7"
+"digest": "17b9b9b64e8cebb7"
 },
 {
 "scenario": {
@@ -1115,9 +1194,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "444fa918cccf023f"
+"digest": "548d31885b609210"
 },
 {
 "scenario": {
@@ -1129,9 +1209,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "d13cf0656b52f312"
+"digest": "8fc5ce86ecd2eb8c"
 },
 {
 "scenario": {
@@ -1143,9 +1224,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "71434e1d9178d6a3"
+"digest": "eeb00e07170a9387"
 },
 {
 "scenario": {
@@ -1157,7 +1239,8 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "7bd91374212d4828"
 },
@@ -1171,7 +1254,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "ea29c40e341a738a"
 },
@@ -1185,9 +1269,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "439294c5a939bd59"
+"digest": "b8bca5091c634fb8"
 },
 {
 "scenario": {
@@ -1199,9 +1284,10 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "24a1ff33f4ba8110"
+"digest": "977cf33454519f2f"
 },
 {
 "scenario": {
@@ -1213,9 +1299,10 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "668d3729bb86409d"
+"digest": "dcc2933e8a7dc182"
 },
 {
 "scenario": {
@@ -1227,9 +1314,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "3565ee2bb4d8d9df"
+"digest": "b81b34d65a81342a"
 },
 {
 "scenario": {
@@ -1241,7 +1329,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "bca1ca8834182586"
 },
@@ -1255,9 +1344,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "4c7ea5c2136e9aed"
+"digest": "649e6024b525af95"
 },
 {
 "scenario": {
@@ -1269,9 +1359,10 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "1152d4b26245e474"
+"digest": "a6e2be487bd6a80e"
 },
 {
 "scenario": {
@@ -1283,9 +1374,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "29e6b798de747f93"
+"digest": "c1cc7ce7d9081534"
 },
 {
 "scenario": {
@@ -1297,9 +1389,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "f29960567a4fb5e6"
+"digest": "2370b79a1a250e12"
 },
 {
 "scenario": {
@@ -1311,7 +1404,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "0de6297765f7cf61"
 },
@@ -1325,9 +1419,10 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "fe3a58371fdef51e"
+"digest": "9442d20914d27a28"
 },
 {
 "scenario": {
@@ -1339,7 +1434,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "ca7bc055381da0ea"
 },
@@ -1353,7 +1449,8 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "c6e1e9e7bb8ed96a"
 },
@@ -1367,9 +1464,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "9ef9ed7e55087293"
+"digest": "d0629f679b083964"
 },
 {
 "scenario": {
@@ -1381,9 +1479,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "f478432f0b28e6e0"
+"digest": "d99481fcc0063a53"
 },
 {
 "scenario": {
@@ -1395,7 +1494,8 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "95bc81fbae06c679"
 },
@@ -1409,9 +1509,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "d7c8437634777222"
+"digest": "27b0170faee73fc6"
 },
 {
 "scenario": {
@@ -1423,7 +1524,8 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "c89da2971a01d4bf"
 },
@@ -1437,7 +1539,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "e641cfe9e18b455b"
 },
@@ -1451,7 +1554,8 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "ea73f79d324dba27"
 },
@@ -1465,9 +1569,10 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "a8aac08654ae1af3"
+"digest": "74ab2475190717d7"
 },
 {
 "scenario": {
@@ -1479,7 +1584,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "0cc83a47e8f991d7"
 },
@@ -1493,9 +1599,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "b0a5996706e05994"
+"digest": "39fced4d76c73c96"
 },
 {
 "scenario": {
@@ -1507,9 +1614,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "e3db6a3b4e76c3ac"
+"digest": "1aeee5a234c22fbb"
 },
 {
 "scenario": {
@@ -1521,7 +1629,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "fbd814853d3dbdfb"
 },
@@ -1535,9 +1644,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "6d3caf1f7a7ae3d4"
+"digest": "7cf62523177f2437"
 },
 {
 "scenario": {
@@ -1549,7 +1659,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "c0337b8f31e41859"
 },
@@ -1563,9 +1674,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "a28afcad194fd9d9"
+"digest": "c7ceb62a7d4c0e18"
 },
 {
 "scenario": {
@@ -1577,7 +1689,8 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "e61b98804093c5f2"
 },
@@ -1591,7 +1704,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "8737f23c0c14d103"
 },
@@ -1605,9 +1719,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "efb7809d9cf4e7f3"
+"digest": "f99ffe0fe852961f"
 },
 {
 "scenario": {
@@ -1619,9 +1734,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "cb3c7cbaedb0784f"
+"digest": "f73b00c06a48b75e"
 },
 {
 "scenario": {
@@ -1633,9 +1749,10 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "97e9460b86e90265"
+"digest": "1dfa7799f6c10441"
 },
 {
 "scenario": {
@@ -1647,7 +1764,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "a81612fdffc6dde2"
 },
@@ -1661,9 +1779,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "677ce4be1a1bef7c"
+"digest": "88f9be75d1a3d802"
 },
 {
 "scenario": {
@@ -1675,9 +1794,10 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "91aa2b14a18d70e6"
+"digest": "0f6f44671b292d27"
 },
 {
 "scenario": {
@@ -1689,9 +1809,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "016dc5446ce91ae1"
+"digest": "cb21e75ab3e98a58"
 },
 {
 "scenario": {
@@ -1703,9 +1824,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "1cd4422f9d5c345b"
+"digest": "47076c69d5b4ff17"
 },
 {
 "scenario": {
@@ -1717,7 +1839,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "6f7e09a1897bf3a7"
 },
@@ -1731,7 +1854,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "b9d51d8619005753"
 },
@@ -1745,9 +1869,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
-"digest": "9b7a89ba3956e595"
+"digest": "ccfdf112739d7163"
 },
 {
 "scenario": {
@@ -1759,9 +1884,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "4626a96d36d29cdc"
+"digest": "f4c9f46e56560596"
 },
 {
 "scenario": {
@@ -1773,9 +1899,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "6e30a36746c7dd46"
+"digest": "ceb536ffb64b49ce"
 },
 {
 "scenario": {
@@ -1787,9 +1914,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "8e7c7e14e27941a4"
+"digest": "8fec00dc1b796f0f"
 },
 {
 "scenario": {
@@ -1801,7 +1929,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "3439826eb28245f2"
 },
@@ -1815,7 +1944,8 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "0eda2f9e4c8f25c6"
 },
@@ -1829,7 +1959,8 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "9f613c36139c342a"
 },
@@ -1843,7 +1974,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "74ff840d9ae8fd18"
 },
@@ -1857,9 +1989,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "b103a7ebd96c43bc"
+"digest": "ab77787c948fa319"
 },
 {
 "scenario": {
@@ -1871,9 +2004,10 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "f420320f1a15610a"
+"digest": "c26fb7674e051885"
 },
 {
 "scenario": {
@@ -1885,7 +2019,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "af75482a25bdf8bd"
 },
@@ -1899,9 +2034,10 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "949f2c692a6c39b2"
+"digest": "ad46bc0203e0a606"
 },
 {
 "scenario": {
@@ -1913,7 +2049,8 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "7c1149932f34ea6e"
 },
@@ -1927,7 +2064,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "217cf203fab36a55"
 },
@@ -1941,7 +2079,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "2a104461db08d96e"
 },
@@ -1955,9 +2094,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "f165e5a8a7d84986"
+"digest": "704b398593eba38c"
 },
 {
 "scenario": {
@@ -1969,7 +2109,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "3188389e380c8c00"
 },
@@ -1983,9 +2124,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "5b4578d548adb35d"
+"digest": "0a13fea21cb4e41f"
 },
 {
 "scenario": {
@@ -1997,7 +2139,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "1538ca1e8433afe3"
 },
@@ -2011,9 +2154,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "246d675d4e7bade0"
+"digest": "b4ed66c5248076bb"
 },
 {
 "scenario": {
@@ -2025,7 +2169,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "dada043886249928"
 },
@@ -2039,7 +2184,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "f98ae36ee6e98df3"
 },
@@ -2053,9 +2199,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "50f4db0007e1547a"
+"digest": "ec64c675780cca11"
 },
 {
 "scenario": {
@@ -2067,9 +2214,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "81730e05aed5a47a"
+"digest": "01a426825fd43d34"
 },
 {
 "scenario": {
@@ -2081,7 +2229,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "02b4c83aedaddf00"
 },
@@ -2095,7 +2244,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "84f6ec622472f32d"
 },
@@ -2109,9 +2259,10 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "3340e844a46690d7"
+"digest": "823364b4387ac431"
 },
 {
 "scenario": {
@@ -2123,7 +2274,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "e205a4050f6fe4ec"
 },
@@ -2137,7 +2289,8 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "59827de311a5cf02"
 },
@@ -2151,9 +2304,10 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "209f5ff5cab06991"
+"digest": "dce4bea2ae948166"
 },
 {
 "scenario": {
@@ -2165,7 +2319,8 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": false,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "4bb36d4c7031fe00"
 },
@@ -2179,7 +2334,8 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "2525def3e33ba158"
 },
@@ -2193,7 +2349,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "7266db517b6d2419"
 },
@@ -2207,9 +2364,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "fbe12eda4d56c886"
+"digest": "6e086f556efc6f42"
 },
 {
 "scenario": {
@@ -2221,7 +2379,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "1f8058c0ec605045"
 },
@@ -2235,9 +2394,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "54f1f983aaa58c99"
+"digest": "cc1e520239047f3a"
 },
 {
 "scenario": {
@@ -2249,9 +2409,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "9291698cccd8ef9a"
+"digest": "148bc584fb594aca"
 },
 {
 "scenario": {
@@ -2263,9 +2424,10 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "d410913041979121"
+"digest": "def35f91478702ab"
 },
 {
 "scenario": {
@@ -2277,7 +2439,8 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "eecc1a4ca14d16f6"
 },
@@ -2291,9 +2454,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "ebb4ea6120acef98"
+"digest": "5377cfec25e5536c"
 },
 {
 "scenario": {
@@ -2305,9 +2469,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "44a308ce619dcfba"
+"digest": "0f6df0d1bf9b84d9"
 },
 {
 "scenario": {
@@ -2319,7 +2484,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "dcc1642ca8aade90"
 },
@@ -2333,7 +2499,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "a4d0f13d85e191d1"
 },
@@ -2347,9 +2514,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "1b6e001ca184cc4f"
+"digest": "51b3c13cc99ca0fc"
 },
 {
 "scenario": {
@@ -2361,7 +2529,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "3ad34d1de448af81"
 },
@@ -2375,9 +2544,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "3753eca950d108fd"
+"digest": "9d4a027cefaa3ffb"
 },
 {
 "scenario": {
@@ -2389,9 +2559,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "44fc5e701601e495"
+"digest": "44fbe86efd9f44b0"
 },
 {
 "scenario": {
@@ -2403,7 +2574,8 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "6113ca4655a808d6"
 },
@@ -2417,7 +2589,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "0ecf63f1b3838ad6"
 },
@@ -2431,9 +2604,10 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "1a8c74df0dc89469"
+"digest": "46f508126f1efefa"
 },
 {
 "scenario": {
@@ -2445,9 +2619,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "863f3668359cc9b5"
+"digest": "40fe238de89e15e2"
 },
 {
 "scenario": {
@@ -2459,9 +2634,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "0eb34978ef50b645"
+"digest": "a149a66a4c6e2edf"
 },
 {
 "scenario": {
@@ -2473,9 +2649,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "75ed5025afe4806c"
+"digest": "27349caf261f6f8b"
 },
 {
 "scenario": {
@@ -2487,9 +2664,10 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "b366bf1565391325"
+"digest": "dfc482c40561d333"
 },
 {
 "scenario": {
@@ -2501,9 +2679,10 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "1cd7ab8115ebbc65"
+"digest": "b4c2202f9724ed44"
 },
 {
 "scenario": {
@@ -2515,7 +2694,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "0785b4a07976bf69"
 },
@@ -2529,7 +2709,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "c9a094f0d0f61d67"
 },
@@ -2543,9 +2724,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
-"digest": "3fbe38242d5f7990"
+"digest": "b2ebfe982db0dca7"
 },
 {
 "scenario": {
@@ -2557,7 +2739,8 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "46eafa1ad1be3fb5"
 },
@@ -2571,9 +2754,10 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "4dbb3c2140857088"
+"digest": "dde7257b3dcb9ac5"
 },
 {
 "scenario": {
@@ -2585,9 +2769,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "333e93f2dd390013"
+"digest": "752c83a9a30731bc"
 },
 {
 "scenario": {
@@ -2599,9 +2784,10 @@
 "match_game": 3,
 "starting_player": 1,
 "mulligans": false,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "3ff24201460e10ef"
+"digest": "d6a0fb2b470034e5"
 },
 {
 "scenario": {
@@ -2613,7 +2799,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "79bec07ff392f920"
 },
@@ -2627,7 +2814,8 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "d48c3c5192269918"
 },
@@ -2641,7 +2829,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "3cca4b466d343944"
 },
@@ -2655,7 +2844,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "aebaf6d62d6d0a7d"
 },
@@ -2669,9 +2859,10 @@
 "match_game": 1,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "4a76d8d2c7a1cd96"
+"digest": "06b7307606695fb2"
 },
 {
 "scenario": {
@@ -2683,9 +2874,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "1a0d24185cc4f5e4"
+"digest": "3b0f8c549d4032e8"
 },
 {
 "scenario": {
@@ -2697,9 +2889,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "926cc26303b46282"
+"digest": "2bd9da36787fb4ef"
 },
 {
 "scenario": {
@@ -2711,9 +2904,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "93390fc4cd4619db"
+"digest": "3d1f83aad36a6761"
 },
 {
 "scenario": {
@@ -2725,7 +2919,8 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "b500a5404def3ef9"
 },
@@ -2739,9 +2934,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "f8bcb2e6e8c1ffa1"
+"digest": "85af1af8ad9a8996"
 },
 {
 "scenario": {
@@ -2753,7 +2949,8 @@
 "match_game": 3,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "17f9de16c5afaae2"
 },
@@ -2767,9 +2964,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "71403569e61161ab"
+"digest": "12f814661c5c6dba"
 },
 {
 "scenario": {
@@ -2781,7 +2979,8 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "64a379a0a91b918c"
 },
@@ -2795,9 +2994,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "035f21936d33fe49"
+"digest": "8ee0f65bc40724b1"
 },
 {
 "scenario": {
@@ -2809,7 +3009,8 @@
 "match_game": 2,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "b20f0360b0e76f66"
 },
@@ -2823,9 +3024,10 @@
 "match_game": 3,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "b1554d95398b490f"
+"digest": "79952dac8d9de8b6"
 },
 {
 "scenario": {
@@ -2837,7 +3039,8 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
 "digest": "8278ec2fa34615cb"
 },
@@ -2851,9 +3054,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "5572ef89874c9a69"
+"digest": "4d75241d4543b9fb"
 },
 {
 "scenario": {
@@ -2865,9 +3069,10 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "75a552c262afd401"
+"digest": "3e1baf252825bfea"
 },
 {
 "scenario": {
@@ -2879,9 +3084,10 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "2d7049c5a790b13a"
+"digest": "445eaef5b6f63fa4"
 },
 {
 "scenario": {
@@ -2893,9 +3099,10 @@
 "match_game": 2,
 "starting_player": null,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "ebda07f1a3fcf9f8"
+"digest": "885cd3ee411f8e6a"
 },
 {
 "scenario": {
@@ -2907,9 +3114,10 @@
 "match_game": 2,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
-"digest": "5c60a54045c5476a"
+"digest": "0c6a59a657c6fefc"
 },
 {
 "scenario": {
@@ -2921,7 +3129,8 @@
 "match_game": 1,
 "starting_player": 1,
 "mulligans": true,
-"max_turns": 100
+"max_turns": 100,
+"extra": []
 },
 "digest": "2fbdfa4d21cb6956"
 },
@@ -2935,8 +3144,9 @@
 "match_game": 1,
 "starting_player": 0,
 "mulligans": true,
-"max_turns": 12
+"max_turns": 12,
+"extra": []
 },
-"digest": "32bb395350e11beb"
+"digest": "2d8f152df2e90f07"
 }
 ]

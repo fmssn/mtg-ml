@@ -18,11 +18,18 @@ Each iteration:
      iterations and at the end, the resume checkpoint `latest.pt` (weights,
      Adam state, counters, rng; ~3x the weights) in a background thread;
      every `snapshot_every` iterations freeze the weights into `pool/`;
-     every `eval_every` iterations evaluate: against the random agent, the
-     scripted bots and the oldest pool checkpoint on fixed paired seeds
-     (both seats, both starting players), best-of-three vs the bots, and the
-     benchmark (`evaluate.benchmark`: learner as Jund Wildfire vs the blue
-     Delver bot), logged as `eval/*` and `bench/*`.
+     every `eval_every` iterations (and/or every `eval_every_games` training
+     games) evaluate: against the opponents of `eval_blocks` (the random
+     agent, the scripted bots, the oldest pool checkpoint; all three are
+     saturated sanity checks, hence the small `eval_games`) on fixed paired
+     seeds (both seats, both starting players), best-of-three vs the bots,
+     the benchmark (`evaluate.benchmark`: learner as Jund Wildfire vs the
+     blue Delver bot, `bench_games` sampled and `bench_greedy_games` greedy)
+     and, with `--ladder a.pt,b.pt,...`, the reference ladder in place of the
+     oldest pool checkpoint (`ladder_games` games against each rung and the
+     learner's Elo on the ladder's scale; the rung ratings come from
+     `--ladder-ratings`, else `<run>/ladder.json`, rated once by the first
+     evaluation if missing); logged as `eval/*`, `bench/*` and `ladder/*`.
 
 Processes (`rl/collect.py`). The trainer's main thread only updates and
 publishes. The rollout workers belong to a collector process, which
@@ -63,6 +70,11 @@ iterations after k left behind: pool snapshots and `metrics.jsonl` rows of
 later iterations (the rows are moved to `metrics-dropped.jsonl`).
 
 Metrics: `<run>/metrics.jsonl`, one JSON row per iteration, in order.
+Besides the PPO statistics (`ppo.ppo_update`: entropy and KL overall, of
+the first and last epoch, over the non-trivial decisions and per decision
+kind) a row has `rollout_stats`: win rates against the pool (bot games
+excluded), per pool opponent and against the bots, decisions per game and
+the share of `pay_mana` decisions.
 Evaluation results are merged into the row of the iteration they evaluate
 when they arrive, a few iterations later (the file is rewritten through a
 temporary file and `os.replace`, so a reader sees the old or the new file),
@@ -90,13 +102,26 @@ import torch
 
 from ..backend import ENV_VAR, engine_name
 from .collect import PoolProcess, PoolThread, cpu_layout, release
-from .evaluate import evaluate_policy
+from .evaluate import EVAL_BLOCKS, evaluate_policy
 from .model import PolicyNet, load_partial
 from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update
-from .rollout import BOT, LEARNER, GameSpec, Job, create_pool, play
+from .rollout import BOT, KIND_ID, LEARNER, GameSpec, Job, create_pool, play
 
 TRAIN_SEED_BASE = 1 << 40  # training game seeds start here: disjoint from the fixed evaluation/benchmark seeds (EVAL_SEED + s, and 4x that for best-of-three games)
 KEEP_POLICIES = 3  # the newest, the one a lagged rollout may still be loading, one spare (plus those pinned by evaluations)
+
+
+REQUEST_INTS_PER_GAME = 1 << 15  # worst seen in the overnight run: ~17k int32 words per decision (state, events since the last one, options)
+
+
+def request_ints_for(games_per_iter: int, workers: int, groups: int = Job.groups) -> int:
+    """Request slot size for the inference server: one decision per live game of
+    a worker's request group, at REQUEST_INTS_PER_GAME each, rounded up to a
+    power of two and at least 1 << 18. With 13 workers and 2048 games per
+    iteration a request carries ~79 decisions; 1 << 18 overflowed at 1.3M."""
+    games = -(-games_per_iter // max(workers, 1))
+    per_request = -(-games // max(groups, 1))
+    return max(1 << 18, 1 << (per_request * REQUEST_INTS_PER_GAME - 1).bit_length())
 
 
 @dataclass
@@ -126,19 +151,30 @@ class TrainConfig:
     eval_bo3_matches: int = 100  # best-of-three matches vs the bots at each evaluation (0 = off)
     snapshot_every: int = 10
     pool_recent_frac: float = 0.5  # share of pool games against the newest snapshot
-    eval_every: int = 10
+    eval_every: int = 10  # evaluate every this many iterations (0 = only by eval_every_games)
+    eval_every_games: int = 0  # also evaluate whenever the training games cross a multiple of this (e.g. 250000)
     eval_process: int = 1  # 1: evaluate in a process of its own, never waiting for it; 0: on the training pool, blocking
     eval_workers: int = 0  # workers of the evaluation process (0: one per evaluation core, at most 8)
-    eval_games: int = 100  # per opponent, split over both seats
-    bench_games: int = 1000  # benchmark games at each evaluation: learner Jund vs blue bot (0 = off)
+    eval_blocks: str = ",".join(EVAL_BLOCKS)  # opponents of the eval/<opponent>/<deck> games, among random, bot, pool0 ("" = none)
+    eval_games: int = 40  # per eval block, split over both seats (they saturate: a sanity check)
+    bench_games: int = 1000  # benchmark games at each evaluation: learner Jund vs blue bot, sampled (0 = off)
+    bench_greedy_games: int = 1000  # the same with greedy play (0 = off)
     bench_bo3_matches: int = 200  # benchmark best-of-three matches at each evaluation (0 = off)
+    ladder: str = ""  # reference ladder: comma-separated fixed checkpoints, replacing the pool0 block
+    ladder_games: int = 200  # paired games against each rung
+    ladder_ratings: str = ""  # JSON with the rungs' Elo (`evaluate ladder`); "" = <run>/ladder.json, rated by the first evaluation if missing
+    ladder_greedy: int = 0  # 1: ladder games (and the rating round robin) with greedy play
     max_turns: int = 100
+    auto_mana: int = 0  # 1: pay non-strategic mana costs automatically (colour-preserving payer; docs/action-decomposition.md)
+    auto_pass: int = 0  # 1: auto-pass priority when the only other options are side-effect-free sacrifice-for-mana abilities
     seed: int = 0
     device: str = "cpu"
     engine: str = "python"  # rules engine for rollouts: python (reference) or native (Rust, mtg_ml_native)
     inference: str = "local"  # policy inference: local (CPU torch in each worker) or server (one GPU process, rl/inference.py)
     server_device: str = ""  # device of the inference server ("" = --device, or cuda when --device is cpu and a GPU exists)
     server_max_rows: int = 16384  # largest batch the server builds from queued requests
+    server_request_ints: int = 0  # int32 words per worker request slot (0 = auto: `request_ints_for`, from the games each request carries)
+    server_policy_slots: int = 32  # policies the server's stack holds before it grows (pool snapshots + learner versions; each ~68 MB for h128 entity)
     trainer_cpus: str = ""  # CPUs of the trainer process, e.g. "32" or "32-35" ("": see the CPU layout)
     worker_cpus: str = ""  # CPUs of the rollout workers, one worker per CPU round robin
     eval_cpus: str = ""  # CPUs of the evaluation workers
@@ -186,6 +222,15 @@ class Trainer:
             os.makedirs(os.path.join(cfg.run, d), exist_ok=True)
         self.latest = os.path.join(cfg.run, "latest.pt")
         self.metrics = os.path.join(cfg.run, "metrics.jsonl")
+        self.blocks = tuple(b for b in cfg.eval_blocks.split(",") if b)
+        if set(self.blocks) - set(EVAL_BLOCKS):
+            raise ValueError(f"eval blocks must be among {EVAL_BLOCKS}, not {cfg.eval_blocks!r}")
+        self.ladder = tuple(p for p in cfg.ladder.split(",") if p)
+        for path in self.ladder + ((cfg.ladder_ratings,) if cfg.ladder_ratings else ()):
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"ladder file {path} does not exist")
+        self.ladder_ratings = cfg.ladder_ratings or os.path.join(cfg.run, "ladder.json")
+        self.evaluating = bool(cfg.eval_every or cfg.eval_every_games)
         torch.manual_seed(cfg.seed)
         self.rng = random.Random(cfg.seed)
         self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, entity_attn=cfg.entity_attn).to(cfg.device)
@@ -221,13 +266,13 @@ class Trainer:
         if not self.pool:
             self._snapshot(weights)
             self._checkpoint(weights, self.rng.getstate())
-        self.layout = cpu_layout(cfg.workers, cfg.device, cfg.inference == "server", bool(cfg.eval_every and cfg.eval_process),
+        self.layout = cpu_layout(cfg.workers, cfg.device, cfg.inference == "server", bool(self.evaluating and cfg.eval_process),
                                  cfg.trainer_cpus, cfg.worker_cpus, cfg.eval_cpus, available_cpus())
         print(self.layout.describe(), flush=True)
         self.server = None
         self.collector = self._collector()
         self.evaluator = None
-        if cfg.eval_every and cfg.eval_process:
+        if self.evaluating and cfg.eval_process:
             ev = self.layout.evaluator
             self.eval_workers = cfg.eval_workers or (4 if self.layout.shared_eval else max(1, min(8, len(ev))))
             self.evaluator = PoolProcess(self.eval_workers, "local", worker_cpus=ev or None, cpus=ev or None, nice=10, name="evaluator")
@@ -256,7 +301,7 @@ class Trainer:
             from .inference import ServerConfig, default_device
 
             dev = c.server_device or (c.device if c.device != "cpu" else default_device())
-            server_cfg = ServerConfig(device=dev, max_rows=c.server_max_rows, cpus=lay.server or None)
+            server_cfg = ServerConfig(device=dev, max_rows=c.server_max_rows, request_ints=c.server_request_ints or request_ints_for(c.games_per_iter, c.workers), policy_slots=c.server_policy_slots, cpus=lay.server or None)
         if c.collector == "process":  # merging as jobs end, off the trainer's NUMA node if it can
             return PoolProcess(c.workers, c.inference, server_cfg, lay.workers or None, lay.collector or None)
         if c.collector != "thread":
@@ -349,7 +394,7 @@ class Trainer:
         drawn here, in the main thread (`self.rng`)."""
         c, rng = self.cfg, self.rng.getstate()
         shaping = c.shaping * max(0.0, 1 - it / max(c.shaping_anneal_iters, 1))
-        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference)
+        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference, auto_mana=bool(c.auto_mana), auto_pass=bool(c.auto_pass))
         specs = self._train_specs(it)
         return _Rollout(self.collector.call(play, specs, job, c.workers), shaping, it - self.iteration, rng)
 
@@ -373,7 +418,8 @@ class Trainer:
 
     def _eval_args(self, e: _Eval, n_jobs: int, inference: str) -> tuple:
         c = self.cfg
-        return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference)
+        return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference,
+                self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass))
 
     def _request_eval(self) -> dict:
         """Evaluate the newest policy file. Inline (`--eval-process 0`): on the
@@ -416,6 +462,11 @@ class Trainer:
 
     # -- main loop -----------------------------------------------------------
 
+    def _eval_due(self, games: int) -> bool:
+        """Whether the iteration just done (which played `games`) is evaluated."""
+        c, g = self.cfg, self.cfg.eval_every_games
+        return bool((c.eval_every and self.iteration % c.eval_every == 0) or (g and self.games_total // g > (self.games_total - games) // g))
+
     def _more(self, iteration: int, games_total: int) -> bool:
         """Whether an iteration starting at these counters runs."""
         c = self.cfg
@@ -453,8 +504,6 @@ class Trainer:
                     self._checkpoint(weights, nxt.rng if nxt else self.rng.getstate())
                 t2 = time.monotonic()
 
-                learner_games = [(g, s) for g in data.games for s in (0, 1) if g[0][s] == LEARNER and g[0][1 - s] not in (LEARNER, BOT)]
-                bot_games = [(g, s) for g in data.games for s in (0, 1) if g[0][s] == LEARNER and g[0][1 - s] == BOT]
                 row = {
                     "iteration": self.iteration,
                     "decisions": len(data.actions),
@@ -463,8 +512,7 @@ class Trainer:
                     "game_turns": sum(g[3] for g in data.games) / max(len(data.games), 1),
                     "draws": sum(g[1] is None for g in data.games) / max(len(data.games), 1),
                     "jund_wins_selfplay": _rate([g for g in data.games if g[0] == (LEARNER, LEARNER)], 0),
-                    "win_vs_pool": sum(g[1] == s for g, s in learner_games) / max(len(learner_games), 1),
-                    "win_vs_bot": sum(g[1] == s for g, s in bot_games) / max(len(bot_games), 1),
+                    **rollout_stats(data.games, data.kinds),
                     "shaping": roll.shaping,
                     "pool_size": len(self.pool),
                     "rollout_s": round(roll.rollout_s, 2),
@@ -473,7 +521,7 @@ class Trainer:
                     "decisions_per_s": round(len(data.actions) / max(roll.rollout_s, 1e-9)),
                     **{k: round(v, 4) if isinstance(v, float) else v for k, v in stats.items()},
                 }
-                if c.eval_every and self.iteration % c.eval_every == 0:
+                if self._eval_due(len(data.games)):
                     row.update(self._request_eval())
                 if nxt:
                     nxt.wait()
@@ -552,6 +600,40 @@ def _amend(path: str, iteration: int, values: dict) -> None:
             _write_lines(path, lines)
             return
     _append(path, {"iteration": iteration, **values})
+
+
+def rollout_stats(games: list, kinds) -> dict:
+    """Row statistics of a training rollout from its `Result.games` rows
+    (seats, winner, end reason, turns, decisions, seed) and recorded decision
+    kinds: the learner's win rate against pool checkpoints (`win_vs_pool`;
+    self-play and bot games excluded), per pool opponent
+    (`win_vs_pool_by_opp`: {snapshot name: [win rate, learner games]}),
+    against the scripted bots (`win_vs_bot`), decisions per game (every
+    seat's, forced moves included) and the share of the recorded learner
+    decisions that are mana payments (`pay_mana_share`)."""
+    by_opp: dict[str, list[int]] = {}
+    pool_won = pool_n = bot_won = bot_n = 0
+    for g in games:
+        for s in (0, 1):
+            opp = g[0][1 - s]
+            if g[0][s] != LEARNER or opp == LEARNER:
+                continue
+            won = int(g[1] == s)
+            if opp == BOT:
+                bot_won, bot_n = bot_won + won, bot_n + 1
+                continue
+            pool_won, pool_n = pool_won + won, pool_n + 1
+            w = by_opp.setdefault(os.path.basename(opp).removesuffix(".pt"), [0, 0])
+            w[0] += won
+            w[1] += 1
+    pay = KIND_ID["pay_mana"]
+    return {
+        "win_vs_pool": pool_won / max(pool_n, 1),
+        "win_vs_pool_by_opp": {k: [round(w / n, 4), n] for k, (w, n) in sorted(by_opp.items())},
+        "win_vs_bot": bot_won / max(bot_n, 1),
+        "decisions_per_game": sum(g[4] for g in games) / max(len(games), 1),
+        "pay_mana_share": kinds.count(pay) / len(kinds) if len(kinds) else float("nan"),
+    }
 
 
 def _rate(games, seat: int) -> float:

@@ -148,7 +148,7 @@ impl PyGame {
 #[pymethods]
 impl PyGame {
     #[new]
-    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=100, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1))]
+    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=100, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1, auto_mana=false, auto_pass=false))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         decks: (Vec<String>, Vec<String>),
@@ -161,6 +161,8 @@ impl PyGame {
         start_step: String,
         mulligans: bool,
         match_game: i32,
+        auto_mana: bool,
+        auto_pass: bool,
     ) -> PyResult<Self> {
         if let Some(p) = starting_player {
             Self::pidx(p as usize)?;
@@ -168,7 +170,7 @@ impl PyGame {
         if !STEPS.contains(&start_step.as_str()) {
             return Err(PyValueError::new_err(format!("{start_step:?} is not in list")));
         }
-        let args = Args { decks: [decks.0, decks.1], seed, starting_player, auto_single, max_turns, log, has_setup, start_step, mulligans, match_game };
+        let args = Args { decks: [decks.0, decks.1], seed, starting_player, auto_single, max_turns, log, has_setup, start_step, mulligans, match_game, auto_mana, auto_pass };
         let g = Game::new(args).map_err(PyValueError::new_err)?;
         Ok(PyGame { g, version: 0 })
     }

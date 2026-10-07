@@ -13,10 +13,11 @@ def new_game(*args, **kw) -> Game:
     return game_class()(*args, **kw)
 
 
-def scenario(p0: dict | None = None, p1: dict | None = None, active: int = 0, step: str = "main1", auto_single: bool = False) -> Game:
+def scenario(p0: dict | None = None, p1: dict | None = None, active: int = 0, step: str = "main1", auto_single: bool = False, **game_kw) -> Game:
     """p0/p1: dict with optional keys hand, battlefield, graveyard, exile,
     library (top first), life, drawn. Battlefield entries are names or
-    (name, kwargs-for-add_card). Libraries default to 20 basic lands."""
+    (name, kwargs-for-add_card). Libraries default to 20 basic lands.
+    `game_kw` go to the Game constructor (e.g. auto_mana=True)."""
 
     def setup(g: Game) -> None:
         for idx, spec in ((0, p0 or {}), (1, p1 or {})):
@@ -31,7 +32,7 @@ def scenario(p0: dict | None = None, p1: dict | None = None, active: int = 0, st
             g.players[idx].life = spec.get("life", 20)
             g.players[idx].cards_drawn_this_turn = spec.get("drawn", 0)
 
-    g = new_game(([], []), seed=0, starting_player=active, setup=setup, start_step=step, auto_single=auto_single, log=True)
+    g = new_game(([], []), seed=0, starting_player=active, setup=setup, start_step=step, auto_single=auto_single, log=True, **game_kw)
     settle(g)
     return g
 
