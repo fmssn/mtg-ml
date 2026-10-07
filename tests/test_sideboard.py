@@ -301,11 +301,14 @@ def test_postboard_decks_are_legal():
         assert set(pb) - set(DECKS[d]) <= set(SIDEBOARDS[d])
     for a, b in MATCHUPS.values():
         assert (a, b) in SIDEBOARD_PLANS and (b, a) in SIDEBOARD_PLANS
+    for d in DECKS:
+        assert sum(SIDEBOARDS[d].values()) == 15, d
     g1, g2 = match_decks(1), match_decks(2)
-    assert "Duress" not in g1[0] and "Duress" in g2[0] and "Dispel" in g2[1]
+    assert "Duress" not in g1[0] and g2[0].count("Duress") == 3 and g2[1].count("Annul") == 4 and "Force Spike" not in g2[1]
     g1, g2 = match_decks(1, "jund_madness"), match_decks(2, "jund_madness")
-    assert "Fiery Temper" in g1[1] and "Electrickery" not in g1[1] and "Electrickery" in g2[1]
-    assert g2[0].count("Weather the Storm") == 3 and g2[0].count("Cleansing Wildfire") == 2 and "Red Elemental Blast" not in g2[0]
+    assert "Fiery Temper" in g1[1] and "End the Festivities" not in g1[1] and g2[1].count("End the Festivities") == 2
+    assert g2[0].count("Weather the Storm") == 3 and "Cleansing Wildfire" not in g2[0] and "Pyroblast" not in g2[0]
+    assert match_decks(3, "blue_madness") == match_decks(2, "blue_madness") and match_decks(2, "blue_madness")[0].count("Hydroblast") == 4
 
 
 def test_deck_names_only_for_non_default_decks():
