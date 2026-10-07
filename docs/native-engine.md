@@ -119,7 +119,7 @@ Benchmark (`python tools/bench_copy.py --engine {python,native} --games 40`): sc
 | 200 | 27 | 8.78 ms | 0.24 ms | 37× | 0.458 ms | 0.022 ms | 21× |
 | 400 | 7 | 20.3 ms | 0.25 ms | 83× | 1.032 ms | 0.018 ms | 58× |
 
-Copy cost no longer grows with the game: it is the state copy plus the actions since the step began (median 1, max 33 in this run). A Rust copy is ~12 µs to build and ~5 µs to drop (unwinding the suspended coroutine). The price is a snapshot at every step start in a game that has been copied: per decision under random play, Rust 5.9 → 6.5 µs, Python 92 → 261 µs (random play crosses several steps per decision; the Python state copy is ~80 µs).
+Copy cost no longer grows with the game: it is the state copy plus the actions since the step began (median 1, max 33 in this run). A Rust copy is ~12 µs to build and was ~5 µs to drop (unwinding the suspended coroutine); since feature set 6 a suspended game is dropped by resuming its `ask` with an abort index, which returns `Stop::Abort` up to `main` through ordinary returns (`Game::release_co`), about 4× cheaper. The price is a snapshot at every step start in a game that has been copied: per decision under random play, Rust 5.9 → 6.5 µs, Python 92 → 261 µs (random play crosses several steps per decision; the Python state copy is ~80 µs).
 
 ## Determinism: how the two engines stay identical
 

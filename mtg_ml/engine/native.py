@@ -646,14 +646,28 @@ class NativeGame:
     def entity_features(self, viewer: int, features: int) -> tuple[list[list[str]], dict[int, int]]:
         return self._g.entity_features(viewer, features)
 
+    def _sim_ready(self, features: int) -> None:
+        """Feature set 6 simulates options on copies, which the engine makes
+        from a step-start snapshot: a game never copied gets one here
+        (`encode._sim_ready`; the first copy replays the game once)."""
+        if features >= 6 and not self._g.has_snapshot and not self._g.edited:
+            self.copy()
+
     def featurize(self, player: int, state_dim: int, option_dim: int, features: int):
+        self._sim_ready(features)
         return self._g.featurize(player, state_dim, option_dim, features)
 
     def featurize_flat(self, player: int, state_dim: int, option_dim: int, features: int):
+        self._sim_ready(features)
         return self._g.featurize_flat(player, state_dim, option_dim, features)
 
     def option_preview(self, player: int, index: int, features: int) -> list[str]:
+        self._sim_ready(features)
         return self._g.option_preview(player, index, features)
+
+    def option_previews(self, player: int, features: int) -> list[list[str]]:
+        self._sim_ready(features)
+        return self._g.option_previews(player, features)
 
     def event_hashes(self, index: int, option_dim: int):
         return self._g.event_hashes(index, option_dim)

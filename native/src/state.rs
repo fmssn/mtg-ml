@@ -412,7 +412,15 @@ pub fn color_str(c: u8) -> &'static str {
 pub enum Stop {
     GameOver { winner: Option<u8>, reason: &'static str },
     Rules(String),
+    /// The driver is dropping a suspended game (`Game::release_co`): `ask`
+    /// returns this so the coroutine finishes through ordinary returns, much
+    /// cheaper than unwinding it (simulation copies are dropped by the dozen
+    /// per decision).
+    Abort,
 }
+
+/// The resume input that makes a suspended `ask` return `Stop::Abort`.
+pub const ABORT: usize = usize::MAX;
 
 pub type R<T> = Result<T, Stop>;
 
@@ -506,6 +514,14 @@ pub struct State {
     pub skip_first_draw: bool,
     pub mulligan_phase: bool,
     pub mulligans_taken: [i32; 2],
+    /// `Game.sim_viewer`: on a simulation copy (feature set 6), the player
+    /// whose option is simulated; the other player's decisions are asked
+    /// even with one option, and the next priority stops the engine.
+    pub sim_viewer: Option<u8>,
+    /// `Game.sim_assume_pass`: ... and the other player passes at every priority.
+    pub sim_assume_pass: bool,
+    /// `Game.shuffles`: library shuffles so far.
+    pub shuffles: u32,
 }
 
 /// `str.capitalize()` (first character upper, the rest lower).
@@ -575,6 +591,9 @@ impl State {
             skip_first_draw: false,
             mulligan_phase: false,
             mulligans_taken: [0, 0],
+            sim_viewer: None,
+            sim_assume_pass: false,
+            shuffles: 0,
             snapshots: false,
             snap: None,
             edited: false,
@@ -1013,6 +1032,7 @@ impl State {
     }
 
     pub fn shuffle(&mut self, p: usize) {
+        self.shuffles += 1;
         let mut lib = std::mem::take(&mut self.players[p].library);
         self.rng.shuffle(&mut lib);
         for &c in &lib {

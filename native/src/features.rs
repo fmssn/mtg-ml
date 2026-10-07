@@ -64,9 +64,9 @@ fn thermo<O: FeatureOut>(o: &mut O, name: &str, n: i64, steps: &[i64]) {
 /// 2026-10-06; 2: + readiness, known positions, skip_untap, stack targets, X,
 /// option previews; 3: + `opp:deck:`; 4: + combat relations, incoming
 /// damage, choose_x previews and pointer, mana colours; 5: + card shapes,
-/// hand entities).
-pub const FEATURES: u8 = 5;
-pub const FEATURE_VERSIONS: &[u8] = &[1, 2, 3, 4, 5];
+/// hand entities; 6: + simulated option previews, `sim.rs`).
+pub const FEATURES: u8 = 6;
+pub const FEATURE_VERSIONS: &[u8] = &[1, 2, 3, 4, 5, 6];
 
 pub fn check_features(features: u8) -> Result<u8, String> {
     if FEATURE_VERSIONS.contains(&features) {
@@ -265,7 +265,7 @@ fn combat_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
 }
 
 /// encode.py `_mana_colors`: bitmask of the colours (WUBRG) the card's mana ability makes.
-fn mana_colors(c: &Card) -> u8 {
+pub(crate) fn mana_colors(c: &Card) -> u8 {
     let colors = PREVIEW_COLORS.iter().fold(0u8, |m, &col| m | bit(col));
     c.face().abilities.iter().find_map(|a| a.mana.as_ref()).map_or(0, |v| v.iter().fold(0u8, |m, &col| m | bit(col)) & colors)
 }
@@ -595,7 +595,7 @@ pub fn option_object_ids(st: &State, o: &Opt, kind: Kind, features: u8) -> Vec<u
 
 /// encode.py `MANA_LEFT_CAP` / `PREVIEW_COLORS`.
 const MANA_LEFT_CAP: i32 = 8;
-const PREVIEW_COLORS: [u8; 5] = [b'W', b'U', b'B', b'R', b'G'];
+pub(crate) const PREVIEW_COLORS: [u8; 5] = [b'W', b'U', b'B', b'R', b'G'];
 
 /// encode.py `_dies_to`: would `n` more damage destroy creature `c`?
 fn dies_to(st: &State, c: &Card, n: i32, deathtouch: bool) -> bool {
@@ -1137,7 +1137,9 @@ pub fn option_token_hashes(kind: Kind, key: &Key, tag: &str, dim: u32, out: &mut
 }
 
 /// `rl.features.featurize(game, player, state_dim, option_dim, features)`.
-pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32, features: u8) -> Option<(Vec<u32>, Vec<Vec<u32>>)> {
+/// `sims`: each option's hashed simulated previews (set 6, `sim.rs`), which
+/// need the game, not only its state.
+pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32, features: u8, sims: Option<&[Vec<u32>]>) -> Option<(Vec<u32>, Vec<Vec<u32>>)> {
     let d = st.decision.as_ref()?;
     let mut s = HashOut { buf: String::with_capacity(64), out: Vec::with_capacity(200), dim: state_dim, counted: Vec::with_capacity(96) };
     state_features_into(st, player, features, &mut s);
@@ -1157,9 +1159,13 @@ pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32, featur
     let opts = d
         .options
         .iter()
-        .map(|o| {
+        .enumerate()
+        .map(|(i, o)| {
             let mut v = Vec::with_capacity(2 * o.key.len() + 3);
             option_token_hashes(d.kind, &o.key, "", option_dim, &mut v);
+            if let Some(s) = sims {
+                v.extend_from_slice(&s[i]);
+            }
             if features >= 2 {
                 option_preview(st, player, d.kind, o, features, &mut |a| {
                     pbuf.clear();
