@@ -231,6 +231,41 @@ pub enum Op {
     Madness,
 }
 
+impl Op {
+    /// The op's name in cards.toml; None for the engine-internal ward and
+    /// madness triggers (their Python effects have no ops).
+    pub fn name(&self) -> Option<&'static str> {
+        Some(match self {
+            Op::Draw { .. } => "draw",
+            Op::Mill { .. } => "mill",
+            Op::CounterTarget { .. } => "counter_target",
+            Op::CounterTargetUnlessPaid { .. } => "counter_target_unless_paid",
+            Op::DestroyTarget { .. } => "destroy_target",
+            Op::BounceTarget => "bounce_target",
+            Op::TapTarget { .. } => "tap_target",
+            Op::GrantTarget { .. } => "grant_target",
+            Op::CreateToken { .. } => "create_token",
+            Op::GainLife { .. } => "gain_life",
+            Op::LoseLife { .. } => "lose_life",
+            Op::CounterOnSource => "counter_on_source",
+            Op::DamageTarget { .. } => "damage_target",
+            Op::DamageEachOpponent { .. } => "damage_each_opponent",
+            Op::DamageEachCreature { .. } => "damage_each_creature",
+            Op::Discard { .. } => "discard",
+            Op::ReturnToBattlefield { .. } => "return_to_battlefield",
+            Op::ExileGraveyard => "exile_graveyard",
+            Op::ExileAllGraveyards => "exile_all_graveyards",
+            Op::SearchLibrary { .. } => "search_library",
+            Op::OptionalPayment { .. } => "optional_payment",
+            Op::Scry { .. } => "scry",
+            Op::ExploreTarget => "explore_target",
+            Op::ShuffleIntoLibrary => "shuffle_into_library",
+            Op::Custom(_) => "custom",
+            Op::Ward | Op::Madness => return None,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AbilityDef {
     pub name: String,
@@ -303,6 +338,9 @@ pub struct CardDef {
     pub etb_x_counters: bool,
     pub back: Option<DefId>,
     pub modes: Vec<SpellMode>,
+    /// cards.py `card_shape`: what the card does, as entity tokens read from
+    /// its spec (feature set 5). Computed once at load.
+    pub shape: Vec<String>,
 }
 
 impl CardDef {
@@ -496,7 +534,37 @@ fn get_str_list(t: &Table, k: &str) -> Result<Vec<String>, String> {
 fn check_keys(t: &Table, allowed: &[&str], what: &str) -> Result<(), String> {
     for k in t.keys() {
         if !allowed.contains(&k.as_str()) {
-            return Err(format!("unknown {what} field {k:?}"));
+            return Err(format!("unknown {what} field {k:?}: add it to the allowed keys and the parser here (native/src/cards.rs) and in mtg_ml/engine/cards.py; docs/adding-cards.md"));
+        }
+    }
+    Ok(())
+}
+
+/// cards.py `SHAPE_*_FIELDS` / `NON_SHAPE_*_FIELDS`: the spec fields of a
+/// card, ability and trigger, split by whether `card_shape` turns them into
+/// shape tokens (feature set 5). Both engines list the same fields
+/// (`test_spec_field_sets_identical`).
+pub const SHAPE_CARD_FIELDS: &[&str] = &[
+    "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow", "plot",
+    "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect", "modes",
+    "overload_effect", "abilities", "triggers",
+];
+pub const NON_SHAPE_CARD_FIELDS: &[&str] = &["name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"];
+pub const SHAPE_ABILITY_FIELDS: &[&str] =
+    &["effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone", "sorcery_speed", "mana", "targets"];
+pub const NON_SHAPE_ABILITY_FIELDS: &[&str] = &["name"];
+pub const SHAPE_TRIGGER_FIELDS: &[&str] = &["event", "effect", "condition"];
+pub const NON_SHAPE_TRIGGER_FIELDS: &[&str] = &["name"];
+
+/// cards.py `_check_fields`: an unclassified field names the lists to extend.
+fn check_fields(t: &Table, shape: &[&str], non_shape: &[&str], what: &str) -> Result<(), String> {
+    for k in t.keys() {
+        if !shape.contains(&k.as_str()) && !non_shape.contains(&k.as_str()) {
+            let w = what.to_uppercase();
+            return Err(format!(
+                "unknown {what} field {k:?}: add it to SHAPE_{w}_FIELDS (if it changes what the card does; then also to card_shape) or NON_SHAPE_{w}_FIELDS, \
+                 in both mtg_ml/engine/cards.py and native/src/cards.rs, and parse it in card_def / _ability / _trigger and parse_card; docs/adding-cards.md"
+            ));
         }
     }
     Ok(())
@@ -678,15 +746,7 @@ fn land_sac(t: &Table, k: &str) -> Result<Option<(SacFilter, i32)>, String> {
 }
 
 fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>, tokens: &HashMap<String, DefId>) -> Result<CardDef, String> {
-    check_keys(
-        t,
-        &[
-            "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward", "targets", "effect",
-            "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped", "etb_x_counters", "back", "modes",
-            "abilities", "triggers", "madness", "plot", "overload", "overload_effect", "additional_discard", "alternative_cost", "flashback_cost",
-        ],
-        "card",
-    )?;
+    check_fields(t, SHAPE_CARD_FIELDS, NON_SHAPE_CARD_FIELDS, "card")?;
     let cost_text = get_str(t, "cost")?;
     let colors = match get_str(t, "colors")? {
         Some(c) => c.split_whitespace().fold(0, |m, s| m | color_bit(s.as_bytes()[0])),
@@ -701,11 +761,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
     if let Some(v) = t.get("abilities") {
         for a in v.as_array().ok_or("abilities must be a list")? {
             let a = a.as_table().ok_or("abilities must be tables")?;
-            check_keys(
-                a,
-                &["name", "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone", "sorcery_speed", "mana", "targets"],
-                "ability",
-            )?;
+            check_fields(a, SHAPE_ABILITY_FIELDS, NON_SHAPE_ABILITY_FIELDS, "ability")?;
             let x_target_mv = get_int(a, "x_target_mv")?.unwrap_or(0);
             if x_target_mv != 0 && targets(a)?.len() != 1 {
                 return Err("x_target_mv needs exactly one target".into());
@@ -741,7 +797,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
     if let Some(v) = t.get("triggers") {
         for tr in v.as_array().ok_or("triggers must be a list")? {
             let tr = tr.as_table().ok_or("triggers must be tables")?;
-            check_keys(tr, &["name", "event", "effect", "condition"], "trigger")?;
+            check_fields(tr, SHAPE_TRIGGER_FIELDS, NON_SHAPE_TRIGGER_FIELDS, "trigger")?;
             let (mut sacrificed_subtype, mut cast_filter) = (None, None);
             match tr.get("condition") {
                 None => {}
@@ -785,10 +841,12 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
             });
         }
     }
+    let cost = ManaCost::parse(cost_text)?;
+    let shape = card_shape(t, &cost, colors)?;
     Ok(CardDef {
         id,
         name: req_str(t, "name")?.to_string(),
-        cost: ManaCost::parse(cost_text)?,
+        cost,
         types,
         subtypes: words(t, "subtypes")?,
         supertypes: words(t, "supertypes")?,
@@ -831,7 +889,159 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
             Some(b) => Some(*faces.get(b).ok_or_else(|| format!("unknown back face {b:?}"))?),
         },
         modes,
+        shape,
     })
+}
+
+/// cards.py `SHAPE_MV_STEPS` / `SHAPE_AB_MV_CAP` / `SHAPE_COST_KEYS`.
+const SHAPE_MV_STEPS: [i32; 7] = [1, 2, 3, 4, 5, 6, 7];
+const SHAPE_AB_MV_CAP: i32 = 3;
+const SHAPE_COST_KEYS: [&str; 6] = ["flashback", "escape", "madness", "bestow", "plot", "overload"];
+
+fn tables(v: Option<&Value>) -> Vec<&Table> {
+    match v {
+        Some(Value::Array(a)) => a.iter().filter_map(|x| x.as_table()).collect(),
+        _ => vec![],
+    }
+}
+
+/// cards.py `SHAPE_N_STEPS`.
+const SHAPE_N_STEPS: [i64; 4] = [1, 2, 3, 4];
+
+/// cards.py `_op_tokens`: `{prefix}{op}` per op in order, its amount `n` as
+/// a thermometer, the same under `e:op:`, an `optional_payment`'s ops after it.
+fn op_names(v: Option<&Value>, out: &mut Vec<String>, prefix: &str) {
+    for op in tables(v) {
+        if let Some(name) = op.get("op").and_then(|x| x.as_str()) {
+            for p in [prefix, "e:op:"] {
+                out.push(format!("{p}{name}"));
+                if let Some(Value::Integer(n)) = op.get("n") {
+                    out.extend(SHAPE_N_STEPS.iter().filter(|&&k| *n >= k).map(|k| format!("{p}{name}:n>={k}")));
+                }
+            }
+            if name == "optional_payment" {
+                op_names(op.get("then"), out, prefix);
+            }
+        }
+    }
+}
+
+fn truthy(t: &Table, k: &str) -> bool {
+    match t.get(k) {
+        None | Some(Value::Boolean(false)) => false,
+        Some(Value::Integer(0)) => false,
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(_) => true,
+    }
+}
+
+/// cards.py `card_shape`: the same token list from the same spec table.
+fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, String> {
+    let mut v: Vec<String> = vec![];
+    let mv = cost.mana_value();
+    v.extend(SHAPE_MV_STEPS.iter().filter(|&&k| mv >= k).map(|k| format!("e:mv>={k}")));
+    if get_str(t, "cost")?.unwrap_or("").contains("{X}") {
+        v.push("e:cost:x".into());
+    }
+    for c in [b'W', b'U', b'B', b'R', b'G'] {
+        if colors & color_bit(c) != 0 {
+            v.push(format!("e:color:{}", c as char));
+        }
+    }
+    if let Some(r) = get_str(t, "cost_reduction")? {
+        v.push(format!("e:cost:reduction:{r}"));
+    }
+    if let Some(s) = get_str(t, "additional_sac")? {
+        v.push("e:cost:additional_sac".into());
+        v.push(format!("e:cost:additional_sac:{s}"));
+    }
+    if truthy(t, "additional_discard") {
+        v.push("e:cost:additional_discard".into());
+    }
+    for k in SHAPE_COST_KEYS {
+        if t.contains_key(k) {
+            v.push(format!("e:cost:{k}"));
+        }
+    }
+    if t.contains_key("flashback_cost") {
+        v.push("e:cost:flashback".into());
+        v.push("e:cost:sac_lands".into());
+    }
+    if t.contains_key("alternative_cost") {
+        v.push("e:cost:alternative".into());
+        v.push("e:cost:sac_lands".into());
+    }
+    if truthy(t, "ward") {
+        v.push("e:ward".into());
+    }
+    for k in ["enters_tapped", "etb_x_counters"] {
+        if truthy(t, k) {
+            v.push(format!("e:{k}"));
+        }
+    }
+    if t.contains_key("back") {
+        v.push("e:transforms".into());
+    }
+    // cards.py `_target_tokens`.
+    let targets = |t: &Table, prefix: &str, v: &mut Vec<String>| -> Result<(), String> {
+        for k in get_str_list(t, "targets")? {
+            v.push(format!("{prefix}{k}"));
+            v.push(format!("e:target:{k}"));
+        }
+        Ok(())
+    };
+    targets(t, "e:spell:target:", &mut v)?;
+    op_names(t.get("effect"), &mut v, "e:spell:op:");
+    let modes = tables(t.get("modes"));
+    if !modes.is_empty() {
+        v.push("e:spell:modal".into());
+    }
+    for m in modes {
+        targets(m, "e:spell:target:", &mut v)?;
+        op_names(m.get("effect"), &mut v, "e:spell:op:");
+    }
+    op_names(t.get("overload_effect"), &mut v, "e:spell:op:");
+    for a in tables(t.get("abilities")) {
+        v.push(format!("e:ab:zone:{}", get_str(a, "zone")?.unwrap_or("battlefield")));
+        if a.contains_key("mana") {
+            v.push("e:ab:mana".into());
+            for c in get_str_list(a, "mana")? {
+                v.push(format!("e:ab:mana:{c}"));
+            }
+        }
+        let mv = ManaCost::parse(get_str(a, "cost")?)?.mana_value();
+        if mv > 0 {
+            v.push(format!("e:ab:mv:{}", mv.min(SHAPE_AB_MV_CAP)));
+        }
+        for k in ["tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self"] {
+            if truthy(a, k) {
+                v.push(format!("e:ab:{k}"));
+            }
+        }
+        if let Some(s) = get_str(a, "sac_other")? {
+            v.push(format!("e:ab:sac_other:{s}"));
+        }
+        if truthy(a, "x_target_mv") || a.contains_key("x_reveal") {
+            v.push("e:ab:x".into());
+        }
+        if truthy(a, "sorcery_speed") {
+            v.push("e:ab:sorcery_speed".into());
+        }
+        targets(a, "e:ab:target:", &mut v)?;
+        op_names(a.get("effect"), &mut v, "e:ab:op:");
+    }
+    for tr in tables(t.get("triggers")) {
+        v.push(format!("e:trig:{}", req_str(tr, "event")?));
+        if let Some(Value::Table(c)) = tr.get("condition") {
+            for (k, x) in c {
+                v.push(format!("e:trig:cond:{k}:{}", x.as_str().unwrap_or("")));
+            }
+        }
+        op_names(tr.get("effect"), &mut v, "e:trig:op:");
+    }
+    let mut seen = std::collections::HashSet::new();
+    v.retain(|x| seen.insert(x.clone()));
+    Ok(v)
 }
 
 #[cfg(test)]

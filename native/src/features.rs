@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 use crc32fast::Hasher;
 
-use crate::cards::{db, Op, SacFilter, TYPE_NAMES};
+use crate::cards::{db, type_names, CardDef, Op, SacFilter, TYPE_NAMES};
 use crate::mana::{bit, ManaCost, Remaining};
 use crate::state::*;
 
@@ -63,14 +63,16 @@ fn thermo<O: FeatureOut>(o: &mut O, name: &str, n: i64, steps: &[i64]) {
 /// encode.py `FEATURES` / `FEATURE_VERSIONS`: feature-set versions (1: up to
 /// 2026-10-06; 2: + readiness, known positions, skip_untap, stack targets, X,
 /// option previews; 3: + `opp:deck:`; 4: + combat relations, incoming
-/// damage, choose_x previews and pointer, mana colours).
-pub const FEATURES: u8 = 4;
+/// damage, choose_x previews and pointer, mana colours; 5: + card shapes,
+/// hand entities).
+pub const FEATURES: u8 = 5;
+pub const FEATURE_VERSIONS: &[u8] = &[1, 2, 3, 4, 5];
 
 pub fn check_features(features: u8) -> Result<u8, String> {
-    if (1..=FEATURES).contains(&features) {
+    if FEATURE_VERSIONS.contains(&features) {
         Ok(features)
     } else {
-        Err(format!("unknown feature-set version {features} (known: 1..={FEATURES})"))
+        Err(format!("unknown feature-set version {features} (known: {FEATURE_VERSIONS:?})"))
     }
 }
 
@@ -370,9 +372,9 @@ fn combat_entity<E: EntityOut>(st: &State, c: &Card, o: &mut E) {
 }
 
 /// `encode.entity_features(game, viewer)`: permanents in battlefield order,
-/// then the stack from the top. Returns the object id of each entity.
+/// then the stack from the top, then (set 5) the viewer's hand. Returns the object id of each entity.
 pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, o: &mut E) -> Vec<u32> {
-    let v2 = features >= 2;
+    let (v2, v5) = (features >= 2, features >= 5);
     let mut ids = Vec::with_capacity(st.battlefield.len() + st.stack.len());
     for &ci in &st.battlefield {
         if ids.len() == MAX_ENTITIES {
@@ -434,6 +436,9 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, 
             }
             combat_entity(st, c, o);
         }
+        if v5 {
+            shape(c.face(), o);
+        }
         ids.push(c.oid);
     }
     for (i, it) in st.stack.iter().rev().enumerate() {
@@ -462,9 +467,74 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, 
             tok!(o, "e:targets:{kind}:{}", rel(who, viewer));
         }
         targeted_by(st, viewer, Ref::Stack(it.sid), o);
+        if v5 {
+            if it.kind == SKind::Spell {
+                shape(st.c(it.card.expect("spell has a card")).face(), o);
+            }
+            res_ops(it.effect.unwrap_or(&[]), o);
+        }
         ids.push(it.sid);
     }
+    if v5 {
+        hand_entities(st, viewer, o, &mut ids);
+    }
     ids
+}
+
+fn shape<E: EntityOut>(d: &CardDef, o: &mut E) {
+    for t in &d.shape {
+        tok!(o, "{t}");
+    }
+}
+
+/// encode.py `op_names(_ops(item.effect))` as `e:res:op:` tokens.
+fn res_ops<E: EntityOut>(ops: &[Op], o: &mut E) {
+    for op in ops {
+        if let Some(n) = op.name() {
+            tok!(o, "e:res:op:{n}");
+        }
+        if let Op::OptionalPayment { then, .. } = op {
+            res_ops(then, o);
+        }
+    }
+}
+
+/// encode.py `_hand_entities`: the viewer's own hand cards (set 5).
+fn hand_entities<E: EntityOut>(st: &State, viewer: u8, o: &mut E, ids: &mut Vec<u32>) {
+    let mut castable: Vec<&str> = vec![];
+    if let Some(d) = st.decision.as_ref().filter(|d| d.player == viewer && d.kind == Kind::Priority) {
+        for opt in &d.options {
+            if let [KI::S("cast"), KI::S(name), KI::S("hand"), ..] = opt.key.as_slice() {
+                castable.push(name);
+            }
+        }
+    }
+    for &ci in &st.players[viewer as usize].hand {
+        if ids.len() == MAX_ENTITIES {
+            return;
+        }
+        let c = st.c(ci);
+        let f = c.face();
+        o.begin();
+        tok!(o, "e:zone:hand");
+        tok!(o, "e:name:{}", c.name());
+        tok!(o, "e:ctrl:self");
+        for t in type_names(f.types) {
+            tok!(o, "e:type:{t}");
+        }
+        for k in db().keyword_list(f.keywords) {
+            tok!(o, "e:kw:{k}");
+        }
+        if let (Some(p), Some(t)) = (f.power, f.toughness) {
+            ent_thermo(o, "e:power", p as i64);
+            ent_thermo(o, "e:toughness", t as i64);
+        }
+        shape(f, o);
+        if castable.contains(&c.name()) {
+            tok!(o, "e:castable");
+        }
+        ids.push(c.oid);
+    }
 }
 
 fn ref_exists(st: &State, r: Ref) -> bool {
@@ -509,8 +579,11 @@ pub fn option_object_ids(st: &State, o: &Opt, kind: Kind, features: u8) -> Vec<u
             i += 1;
         }
     }
-    if let Val::Activate(c, _) | Val::Mana(c, _) = o.value {
-        ids.push(st.c(c).oid);
+    match o.value {
+        Val::Activate(c, _) | Val::Mana(c, _) => ids.push(st.c(c).oid),
+        // Set 5: the hand card (other zones' cards are no entities).
+        Val::Cast(c, _, _) | Val::Land(c) | Val::Plot(c) if features >= 5 => ids.push(st.c(c).oid),
+        _ => {}
     }
     if features >= 4 && kind == Kind::ChooseX {
         if let Some(it) = st.stack.last() {

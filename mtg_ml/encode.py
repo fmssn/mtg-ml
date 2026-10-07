@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 import zlib
 
+from .engine.cards import op_names
 from .engine.view import PLOTTED, observe
 
 DEFAULT_DIM = 1 << 16
@@ -34,8 +35,11 @@ DEFAULT_DIM = 1 << 16
 #      block previews), incoming combat damage, choose_x previews and an X
 #      option -> spell pointer, mana colours (sources, hand needs, colour
 #      previews on land plays, basic searches and mana payment)
-FEATURES = 4  # the latest; what new runs train on
-FEATURE_VERSIONS = (1, 2, 3, 4)
+#   5: + cards described by what they do: shape tokens from the card spec on
+#      permanents and stack items, the decider's own hand cards as entities,
+#      cast / play / plot options pointing at them (docs/features.md)
+FEATURES = 5  # the latest; what new runs train on
+FEATURE_VERSIONS = (1, 2, 3, 4, 5)
 
 
 def check_features(features: int) -> int:
@@ -293,12 +297,13 @@ def _combat_entity(game, c, slots: dict[int, int]) -> list[str]:
 
 
 ENT_STEPS = (*range(1, 9), 10, 12, 15)
-MAX_ENTITIES = 64  # permanents and stack items beyond this are left out
+MAX_ENTITIES = 64  # permanents, stack items and hand cards beyond this are left out (in that order)
 
 
 def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[list[str]], dict[int, int]]:
     """One feature list per object the cards can point at: every permanent
-    (battlefield order), then the stack from the top. Returns the lists and
+    (battlefield order), then the stack from the top, then (set 5 on) the
+    viewer's own hand cards in hand order. Returns the lists and
     {oid or stack id: entity index}; the two id spaces are shared, so labels
     like `Tolarian Terror#12` resolve unambiguously. Everything about one
     object stays together, so two Tolarian Terrors, one tapped and damaged,
@@ -308,11 +313,11 @@ def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[l
         return game.entity_features(viewer, features)
     o = observe(game, viewer)
     ents, index = [], {}
-    v2 = features >= 2
+    v2, v5 = features >= 2, features >= 5
     targeted = _targeted_by(o["stack"]) if v2 else {}
     v4 = features >= 4
     slots = {a: j for j, a in enumerate(game.attackers)} if v4 else {}
-    for p in o["battlefield"]:
+    for p, card in zip(o["battlefield"], game.battlefield):
         e = [f"e:name:{p['name']}", f"e:ctrl:{p['controller']}"]
         e += [f"e:type:{t}" for t in p["types"]]
         e += [f"e:kw:{k}" for k in p["keywords"]]
@@ -338,9 +343,11 @@ def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[l
             c = game.perm(p["oid"])
             e += [f"e:produces:{col}" for col in _mana_colors(c.face)]
             e += _combat_entity(game, c, slots)
+        if v5:
+            e += card.face.shape
         index[p["oid"]] = len(ents)
         ents.append(e)
-    for i, it in enumerate(reversed(o["stack"])):
+    for i, (it, item) in enumerate(zip(reversed(o["stack"]), reversed(game.stack))):
         index[it["sid"]] = len(ents)
         e = ["e:stack", f"e:name:{it['name']}", f"e:ctrl:{it['controller']}", f"e:stack_pos:{min(i, 3)}", f"e:stack_kind:{it['kind']}"]
         if v2 and it["x"] > 0:
@@ -349,11 +356,41 @@ def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[l
             kind, rel = _parse_target(label)
             e.append(f"e:targets:{kind}:{rel}")
         e += targeted.get(it["sid"], [])
+        if v5:
+            if item.kind == "spell":
+                e += item.card.face.shape
+            e += [f"e:res:op:{op}" for op in op_names(_ops(item.effect))]
         ents.append(e)
+    if v5:
+        _hand_entities(game, viewer, ents, index)
     if len(ents) > MAX_ENTITIES:
         ents = ents[:MAX_ENTITIES]
         index = {k: v for k, v in index.items() if v < MAX_ENTITIES}
     return ents, index
+
+
+def _hand_entities(game, viewer: int, ents: list, index: dict) -> None:
+    """Feature set 5: the viewer's own hand cards as entities (never the
+    opponent's: its size stays a state feature), with the card's printed
+    types, keywords, P/T and shape tokens, and `e:castable` when the viewer
+    is at a priority decision with an option to cast it from hand."""
+    d = game.decision
+    castable = set()
+    if d is not None and d.player == viewer and d.kind == "priority":
+        castable = {o.key[1] for o in d.options if o.key[0] == "cast" and o.key[2] == "hand"}
+    for c in game.players[viewer].hand:
+        f = c.face
+        e = ["e:zone:hand", f"e:name:{c.name}", "e:ctrl:self"]
+        e += [f"e:type:{t}" for t in sorted(f.types)]
+        e += [f"e:kw:{k}" for k in sorted(f.keywords)]
+        if f.power is not None:
+            e += _thermo("e:power", f.power, ENT_STEPS)
+            e += _thermo("e:toughness", f.toughness, ENT_STEPS)
+        e += f.shape
+        if c.name in castable:
+            e.append("e:castable")
+        index[c.oid] = len(ents)
+        ents.append(e)
 
 
 def _parse_target(label: str) -> tuple[str, str]:
@@ -382,13 +419,17 @@ def _targeted_by(stack: list[dict]) -> dict[int, list[str]]:
 def option_object_ids(option, game=None, kind: str = "", features: int = 1) -> list[int]:
     """Ids of the objects an option is about: every `Name#id` in its label
     (attackers, blockers, mana sources, sacrifices, targets, damage
-    assignment), plus the source of an activated or mana ability; in set 4
-    also the spell or ability on top of the stack for a choose_x option
-    (needs `game` and the decision `kind`)."""
+    assignment), plus the source of an activated or mana ability and the
+    card a cast, land or plot option is about (an entity only while in the
+    decider's hand, feature set 5 on); in set 4 also the spell or ability on
+    top of the stack for a choose_x option (needs `game` and the decision
+    `kind`)."""
     ids = [int(m) for m in _ID.findall(option.label)]
     v = option.value
     if isinstance(v, tuple) and len(v) == 3 and v[0] in ("activate", "mana"):
         ids.append(v[1].oid)
+    elif features >= 5 and isinstance(v, tuple) and len(v) >= 2 and v[0] in ("cast", "land", "plot"):
+        ids.append(v[1].oid)  # the hand card (other zones' cards are no entities)
     if features >= 4 and kind == "choose_x" and game.stack:
         ids.append(game.stack[-1].sid)
     return ids

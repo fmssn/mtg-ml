@@ -417,6 +417,88 @@ def test_feature_sets_2_and_3_are_unchanged():
             assert features_digest(m, n, s, features) == want[f"{m}:{n}:{s}:{features}"], (m, n, s, features)
 
 
+def test_feature_set_4_is_unchanged():
+    """Set 4 is byte for byte what it was before set 5 was added: digests
+    recorded with that code (`tests/data/features_v4_digests.json`) on the
+    games of the set 2 and 3 digests (decks pinned in feature_decks.json)."""
+    import json
+    import os
+
+    with open(os.path.join(os.path.dirname(__file__), "data", "features_v4_digests.json")) as f:
+        want = json.load(f)
+    assert len(want) == len(V3_DIGEST_GAMES)
+    for m, n, s in V3_DIGEST_GAMES:
+        assert features_digest(m, n, s, 4) == want[f"{m}:{n}:{s}:4"], (m, n, s)
+
+
+def _pointers(g, label: str, features: int) -> list[int]:
+    """Entity indices the option with this label points at."""
+    from mtg_ml.rl.features import OPTION_DIM, featurize
+
+    _, opts = featurize(g, g.decision.player, features=features)
+    i = next(i for i, o in enumerate(g.legal_options()) if o.label == label)
+    return [t - OPTION_DIM for t in opts[i] if t >= OPTION_DIM]
+
+
+def _name(e: list[str]) -> str:
+    return next(t for t in e if t.startswith("e:name:"))
+
+
+def test_set_5_hand_cards_are_entities_and_cast_options_point_at_them():
+    from mtg_ml.encode import entity_features
+
+    g = scenario(p0={"hand": ["Lightning Bolt", "Counterspell", "Lightning Bolt", "Mountain"], "battlefield": ["Mountain"]}, p1={"hand": ["Brainstorm"], "battlefield": ["Delver of Secrets"]})
+    ents, index = entity_features(g, 0, features=5)
+    assert [_name(e) for e in ents] == ["e:name:Mountain", "e:name:Delver of Secrets", "e:name:Lightning Bolt", "e:name:Counterspell", "e:name:Lightning Bolt", "e:name:Mountain"]
+    bolt, spell = ents[2], ents[3]
+    assert bolt[0] == "e:zone:hand" and {"e:type:Instant", "e:spell:target:any", "e:spell:op:damage_target:n>=3", "e:castable"} <= set(bolt)
+    assert "e:castable" not in spell and "e:castable" not in ents[5]  # {U}{U}; a land is played, not cast
+    assert ents[0][-1] == "e:ab:tap" and "e:transforms" in ents[1]  # shapes on permanents too
+    assert _pointers(g, "Cast Lightning Bolt", 5) == [2]
+    assert _pointers(g, "Play Mountain", 5) == [5]
+    assert _pointers(g, "Cast Lightning Bolt", 3) == []  # no hand entities before set 5
+    # The opponent sees its own hand, never the decider's; no castable flag off its decision.
+    opp, _ = entity_features(g, 1, features=5)
+    assert [_name(e) for e in opp] == ["e:name:Mountain", "e:name:Delver of Secrets", "e:name:Brainstorm"] and "e:castable" not in opp[2]
+    from mtg_ml.engine.cards import CARDS
+
+    shapes = [CARDS["Mountain"].shape, CARDS["Delver of Secrets"].shape]
+    assert entity_features(g, 0, features=4)[0] == [e[: len(e) - len(sh)] for e, sh in zip(ents, shapes)]  # set 5 appends the shape
+
+
+def test_set_5_stack_items_carry_their_shape_and_resolving_ops():
+    from mtg_ml.encode import entity_features
+
+    g = scenario(p0={"hand": ["Lightning Bolt"], "battlefield": ["Mountain"]}, p1={"battlefield": ["Delver of Secrets"]})
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target Delver of Secrets")
+    ents, index = entity_features(g, g.decision.player, features=5)
+    item = next(e for e in ents if e[0] == "e:stack")
+    assert {"e:spell:target:any", "e:spell:op:damage_target", "e:res:op:damage_target", "e:mv>=1"} <= set(item)
+    g = scenario(p0={"battlefield": ["Krark-Clan Shaman", "Ichor Wellspring"]})
+    choose(g, "Krark-Clan Shaman")
+    ents, _ = entity_features(g, g.decision.player, features=5)
+    item = next(e for e in ents if e[0] == "e:stack" and _name(e).startswith("e:name:Krark-Clan Shaman"))
+    assert "e:res:op:damage_each_creature" in item and not any(t.startswith("e:spell:") for t in item)  # an ability: its own ops
+
+
+def test_set_5_cards_that_work_alike_share_every_token_but_name_and_type():
+    """Generalization at the input level: two different cards with the same
+    shape (same ops, targets, costs) differ only by their name (and printed
+    type), so a card the network never saw starts from what alike cards taught."""
+    from mtg_ml.encode import entity_features
+
+    g = scenario(p0={"hand": ["Brainstorm", "Ponder", "Lightning Bolt", "Fiery Temper"], "battlefield": ["Swamp", "Vault of Whispers"]})
+    ents, _ = entity_features(g, 0, features=5)
+
+    def rest(e):
+        return {t for t in e if not t.startswith(("e:name:", "e:type:"))}
+
+    swamp, vault, brainstorm, ponder, bolt, temper = ents
+    assert rest(swamp) == rest(vault) and rest(brainstorm) == rest(ponder)
+    assert {"e:spell:target:any", "e:spell:op:damage_target", "e:spell:op:damage_target:n>=3", "e:color:R"} <= rest(bolt) & rest(temper)
+
+
 if __name__ == "__main__":  # re-record tests/data/features_v3_digests.json (only with the pre-set-4 code)
     import json
     import os

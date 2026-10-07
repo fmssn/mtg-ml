@@ -122,8 +122,9 @@ SET4_TOKENS = (
 def test_entity_and_preview_strings_identical():
     """`featurize` hashes are compared in lockstep; this compares the strings
     behind them (state, entities, option previews) so a mismatch is
-    readable, in set 3 and the latest set, over all three matchups."""
-    from mtg_ml.encode import FEATURES, entity_features, option_preview, state_features
+    readable, in sets 3 and up, over all three matchups. Entities of both
+    seats (set 5 adds the viewer's own hand) and the ids options point at."""
+    from mtg_ml.encode import FEATURE_VERSIONS, entity_features, option_object_ids, option_preview, state_features
     from mtg_ml.match import MATCHUPS, game_args
 
     seen = set()
@@ -134,12 +135,13 @@ def test_entity_and_preview_strings_identical():
         r = random.Random(seed)
         while not py.over:
             p = py.decision.player
-            for f in (3, FEATURES):
+            for f in FEATURE_VERSIONS[2:]:
                 for v in (0, 1):
                     assert state_features(py, v, f) == state_features(nat, v, f)
-                assert entity_features(py, p, f) == entity_features(nat, p, f)
-                for i in range(len(py.legal_options())):
-                    assert option_preview(py, p, i, f) == option_preview(nat, p, i, f), py.legal_options()[i].label
+                    assert entity_features(py, v, f) == entity_features(nat, v, f), (v, f)
+                for i, (o, no) in enumerate(zip(py.legal_options(), nat.legal_options())):
+                    assert option_preview(py, p, i, f) == option_preview(nat, p, i, f), o.label
+                    assert option_object_ids(o, py, py.decision.kind, f) == option_object_ids(no, nat, nat.decision.kind, f), o.label
             strings = state_features(py, p) + [t for e in entity_features(py, p)[0] for t in e]
             strings += [t for i in range(len(py.legal_options())) for t in option_preview(py, p, i)]
             seen |= {k for k in SET4_TOKENS if any(k in t for t in strings)}
@@ -147,6 +149,25 @@ def test_entity_and_preview_strings_identical():
             py.step(a)
             nat.step(a)
     assert seen == set(SET4_TOKENS), sorted(set(SET4_TOKENS) - seen)
+
+
+def test_spec_field_sets_identical():
+    """Both engines classify the same card-spec fields as shape / non-shape."""
+    import mtg_ml_native
+
+    from mtg_ml.engine import cards
+
+    want = {lvl: (getattr(cards, f"SHAPE_{lvl.upper()}_FIELDS"), getattr(cards, f"NON_SHAPE_{lvl.upper()}_FIELDS")) for lvl in ("card", "ability", "trigger")}
+    assert {k: (frozenset(a), frozenset(b)) for k, (a, b) in mtg_ml_native.spec_fields().items()} == want
+
+
+def test_card_shapes_identical():
+    """Both engines derive the same shape tokens from cards.toml (set 5)."""
+    import mtg_ml_native
+
+    from mtg_ml.engine.cards import CARDS, FACES, TOKENS
+
+    assert mtg_ml_native.card_shapes() == {name: list(d.shape) for reg in (CARDS, FACES, TOKENS) for name, d in reg.items()}
 
 
 def test_divergence_json_keeps_fork_every():
