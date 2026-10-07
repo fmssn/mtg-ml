@@ -16,12 +16,13 @@ feature set is versioned and travels with the model:
 | 1 | everything up to 2026-10-06 |
 | 2 | + the readiness/lethal and known-position state features, the `e:skip_untap` / `e:targets` / `e:targeted_by` / `e:x` entity features and the `pv:` option previews below; from PR #23 the `self:deck:{deck}` state feature (a seat not on its usual deck) and the ` (plotted)` mark on exiled card names (`view._exiled`; set 1 uses the plain name, the view text keeps the mark) |
 | 3 | + `opp:deck:{deck}` (the opponent not on its seat's usual deck), so one network can play every matchup of a `--matchup` mix; on jund_blue identical to set 2, so `--init <set-2 checkpoint> --features 3` changes nothing there |
+| 4 | + the rules-level gaps found by the r4-control game review ([below](#feature-set-4)): combat relations (who blocks whom, blocked / unblocked attackers, block previews), incoming combat damage, `choose_x` previews and an X option -> spell pointer, mana colours (sources, hand needs, colour previews on land plays, basic searches and mana payment). Only adds strings: every set-3 string is still there. New rows start untrained, so a set-3 checkpoint needs a fine-tune with `--features 4` |
 
 - `PolicyNet(features=...)` stores it in `config["features"]`, only when it
   is not 1, so a config without the key (every checkpoint before this) is
   set 1.
 - Training (`--features`, default 0 = unset): a new run takes the latest
-  (3); `--init` and `--exploit` keep the source checkpoint's version (no
+  (4); `--init` and `--exploit` keep the source checkpoint's version (no
   weights depend on it, so `--features N` may move a fine-tune to another
   set, but then the parent sees inputs it never learned); a resumed run keeps
   its checkpoint's, and `--features N` on a resume overrides it and writes it
@@ -47,6 +48,9 @@ feature set is versioned and travels with the model:
   recorded with the code before set 2 existed;
   `test_feature_set_1_reproduces_the_features_before_set_2` checks both
   engines against it, and `make difftest` compares both versions.
+  `tests/data/features_v3_digests.json` does the same for sets 2 and 3
+  (recorded before set 4, all three matchups, with option previews):
+  `test_feature_sets_2_and_3_are_unchanged`.
 
 ### Models trained on set 2 without the key
 
@@ -132,3 +136,89 @@ new card that uses `damage_each_creature` or `damage_target` gets previews
 without code. Not covered yet: hand cards are still not entities, so cast
 options point at nothing; `destroy_target` and other removal get no lethality
 preview.
+
+## Feature set 4
+
+Rules-level gaps from the review of 50 r4-control games (PR #31's game
+review, `docs/representation-plan.md` step 1): inputs that are the same in
+every deck. Card-specific gaps (Delver's reveal, Munitions-style reach) are
+left to the plan's generic later steps. `tests/data/feature_fixtures.json`
+holds the review decisions as constructor arguments plus action prefixes;
+`tests/test_view_env.py::test_feature_set_4_*` checks them on both engines.
+
+### Combat
+
+At s1000 d153 two attacking Tolarian Terrors, one already blocked, were
+bit-identical entities and the policy split 0.50 / 0.50 between blocking
+them. Now:
+
+| feature | on | meaning |
+|---|---|---|
+| `{side}:attacking_power>=k` | state | total power of the attacking creatures (`{side}`: the attacker); `{side}:ready_power` drops the attackers once they tap |
+| `{side}:unblocked_power>=k` | state | power of the attackers not blocked by the blocks declared so far (`Game.blocked`: an attacker stays blocked when its blockers leave; trample excess not counted) |
+| `{side}:incoming_lethal` | state | that unblocked power >= the defender's life |
+| `{side}:life_after_unblocked>=k` | state | the defender's life minus it (`{side}`: the defender) |
+| `e:attack_slot:{j}` | attacker | its place in the declaration order (`Game.attackers`) |
+| `e:blocked` / `e:unblocked` | attacker | blocked or not |
+| `e:blockers>=k` | attacker | creatures blocking it |
+| `e:block_power>=k` | attacker | their summed power |
+| `e:block_lethal` | attacker | that power (or a deathtouch blocker) destroys it (`_dies_to`: damage marked, indestructible) |
+| `e:blocking:slot:{j}` | blocker | the `e:attack_slot` of the attacker it blocks |
+| `e:blocking:name:{name}` | blocker | that attacker's name |
+| `e:blocking:power>=k` / `e:blocking:toughness>=k` | blocker | that attacker's power and toughness |
+| `e:blocking:kills` / `e:blocking:dies` | blocker | one on one, it destroys the attacker / the attacker destroys it |
+
+The blocker -> attacker relation is a set of tokens on the blocker, not an
+entity pointer. Entity tokens are hashed into the state embedding, and an
+entity-to-entity pointer would need a new input kind in the model
+(`Batch` structure, the native batcher, the inference server and new
+weights), which is step 5 of the representation plan (a relation table
+read by entity attention). Until then the slot pair (`e:attack_slot:{j}` on
+the attacker, `e:blocking:slot:{j}` on the blocker) is the identity link
+an attention layer can match, and the name and P/T tokens carry the content
+for a model without attention. The option pointers of a `declare_blocker`
+option already reach both the blocker and the attacker entity, so the
+blocked / unblocked flags are what tells two same-name attackers apart.
+
+`option_preview` for `declare_blocker` (the blocker is the first id in the
+option label):
+
+| token | meaning |
+|---|---|
+| `pv:attacker_already_blocked` | the attacker is already blocked |
+| `pv:attacker_dies` | its blockers plus this one destroy it (power summed, any deathtouch) |
+| `pv:blocker_dies` | the attacker's power destroys this blocker |
+| `pv:unblocked_damage_left>=k` | power of the attackers still unblocked if this option is taken and no further blocks follow ("does not block": all currently unblocked) |
+| `pv:lethal_left` | that power >= the decider's life |
+
+### Choose X
+
+`choose_x` options were hashed categories (`X=5` unrelated to `X=4`), and
+the Hydra was cast with X = 0 while mana was spare.
+
+| token | meaning |
+|---|---|
+| `pv:x>=k` | X as a thermometer (k = 1..10) |
+| `pv:x_is_max` | the largest X offered |
+| `pv:mana_left_after:{k}`, `pv:colors_left:{C}` | the cast preview's tokens with this X included in the cost (`_item_cost` of the item on top of the stack) |
+| `pv:enters_power>=k` | `etb_x_counters` spells: the base power plus X |
+
+Each X option also points at the spell or ability on top of the stack
+(`option_object_ids(option, game, kind, features)`, both engines), so it
+reads that entity's vector.
+
+### Colours
+
+Nothing said which colours a land makes or what the hand needs, so the
+policy tapped the only black source for a generic and fetched Swamps with
+red cards stranded in hand.
+
+| feature | on | meaning |
+|---|---|---|
+| `self:sources:{C}>=k` | state | the viewer's permanents whose mana ability makes colour C (WUBRG), tapped or not |
+| `self:hand_needs:{C}` | state | a card in the viewer's hand has C in its mana cost |
+| `self:hand_missing:{C}` | state | needed, and no permanent of the viewer makes it |
+| `e:produces:{C}` | permanent | its mana ability makes C |
+| `pv:adds_color:{C}` | land play, `('search', <card>)` options | the land makes C |
+| `pv:adds_missing_color` | same | one of those colours is needed by the hand and made by nothing the player controls |
+| `pv:colors_left:{C}` | `pay_mana` option | C can still be produced after this unit and the rest of the cost are paid (exact: the remaining cost minus this unit plus {C} is payable without this source). The engines keep the pending payment in `Game.paying` for it; it changes no rule |
