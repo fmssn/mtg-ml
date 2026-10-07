@@ -847,7 +847,7 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 59);
+        assert_eq!(db.cards.len(), 60);
         let blaze = db.def(db.cards["Searing Blaze"]);
         assert_eq!(blaze.targets, vec![TK::PlayerWithCreature, TK::CreatureOfTargetPlayer]);
         assert_eq!(db.def(db.cards["Lava Dart"]).flashback_sac, Some((SacFilter::Mountain, 1)));
