@@ -168,9 +168,10 @@ def test_padded_update_matches_the_eager_one(data, value_net, memory, epochs):
     assert stats[0]["updates"] == stats[1]["updates"] > 2
     for k in ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac"):
         assert stats[0][k] == pytest.approx(stats[1][k], rel=1e-5, abs=1e-7), k
-    # torch.allclose(p, q, atol=1e-6) per parameter, naming the worst ones when it fails
+    # torch.allclose(p, q, atol=1e-5) per parameter, naming the worst ones when it fails. Float noise
+    # between the two paths grows through Adam's steps: up to 3e-6 on CI's Linux CPU torch (1e-7 on a Mac).
     diff = {name: ((p - q).abs() - 1e-5 * q.abs()).max().item() for (name, p), q in zip(nets[0].named_parameters(), nets[1].parameters())}
-    assert max(diff.values()) <= 1e-6, sorted(diff.items(), key=lambda kv: -kv[1])[:5]
+    assert max(diff.values()) <= 1e-5, sorted(diff.items(), key=lambda kv: -kv[1])[:5]
     before = _net(memory=memory, value_net=value_net, entity_attn=1)
     assert any(not torch.equal(p, q) for (n, p), q in zip(nets[0].named_parameters(), before.parameters()) if ATTN in n)  # attention trains
 
