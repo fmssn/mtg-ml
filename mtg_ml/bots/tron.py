@@ -259,6 +259,20 @@ class TronBot(Bot):
             return 2.0 if self.end_of_their_turn(g) and gy else NEG
         return NEG
 
+    # -- combat ----------------------------------------------------------------------
+
+    def alpha_strike(self, g: Game) -> bool:
+        """Everything attacks when the attackers they cannot block are lethal
+        (their untapped creatures block our biggest attackers)."""
+        ready = sorted((g.power(c) for c in self.creatures(g, self.p) if not c.tapped and not c.sick and g.power(c) > 0), reverse=True)
+        blockers = sum(1 for c in self.creatures(g, self.opp) if not c.tapped)
+        return bool(ready) and sum(ready[blockers:]) >= g.players[self.opp].life
+
+    def score_declare_attacker(self, g: Game, d: Decision, o: Option) -> float:
+        if o.value is not None and self.alpha_strike(g):
+            return 50.0
+        return super().score_declare_attacker(g, d, o)
+
     # -- costs and choices ---------------------------------------------------------
 
     def score_pay_mana(self, g: Game, d: Decision, o: Option) -> float:

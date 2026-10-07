@@ -2,13 +2,17 @@
 multi-mana lands, mana filters, prototype, station, cascade, triggers with
 targets, scry 2, surveil, graveyard abilities. Every test runs on both engines."""
 
+import random
+
 import pytest
 from helpers import bf, choose, find, has, labels, names, new_game, pay, resolve_stack, scenario
 
+from mtg_ml.agents import RandomAgent
 from mtg_ml.bots import make_bot
 from mtg_ml.engine import objects as O
 from mtg_ml.engine.cards import CARDS
 from mtg_ml.engine.decks import DECKS, SIDEBOARDS, TRON, TRON_SIDEBOARD
+from mtg_ml.engine.view import determinize
 from mtg_ml.match import MATCHUPS, game_args
 
 TRON_LANDS = ["Urza's Mine", "Urza's Power Plant", "Urza's Tower"]
@@ -460,3 +464,49 @@ def test_bot_game_runs(matchup):
         while not g.over:
             g.step(bots[g.decision.player].act(g))
         assert g.turn > 2
+
+
+def test_tron_bot_beats_random():
+    n = 30
+    wins = 0
+    for s in range(n):
+        g = new_game(**game_args(1, "jund_tron"), seed=s)
+        agents = [RandomAgent(s), make_bot(1, "tron")]
+        while not g.over:
+            g.step(agents[g.decision.player].act(g))
+        wins += g.winner == 1
+    assert wins >= 0.85 * n
+
+
+def test_tron_bot_does_not_use_hidden_information():
+    """Re-sampling every card the bot cannot see never changes its choice."""
+    checked = 0
+    for s in range(4):
+        g, r = new_game(**game_args(1, "blue_tron"), seed=s), random.Random(s)
+        bots = [make_bot(0, "mono_blue_terror"), make_bot(1, "tron")]
+        while not g.over and checked < 150:
+            d = g.decision
+            if d.player == 1 and r.random() < 0.3:
+                want = g.legal_options()[make_bot(1, "tron").act(g)].label
+                for k in range(2):
+                    h = determinize(g, 1, random.Random(1000 * s + k))
+                    assert h.legal_options()[make_bot(1, "tron").act(h)].label == want, (d, g.turn)
+                checked += 1
+            g.step(bots[d.player].act(g))
+    assert checked > 50
+
+
+def test_tron_bot_maps_for_the_missing_piece_and_crop_rotates_into_tron():
+    bot = make_bot(0, "tron")
+    g = scenario(p0={"battlefield": ["Expedition Map", "Urza's Mine", "Urza's Power Plant"], "library": ["Bramble Wurm", "Forest", "Urza's Tower", "Urza's Mine"]})
+    assert g.legal_options()[bot.act(g)].label.startswith("Expedition Map: search")
+    choose(g, "Expedition Map: search")
+    pay(g)
+    resolve_stack(g)
+    assert g.legal_options()[bot.act(g)].label == "Find Urza's Tower"
+    g = scenario(p0={"hand": ["Crop Rotation"], "battlefield": ["Forest", "Urza's Mine", "Urza's Power Plant"], "library": ["Urza's Tower", "Forest"]})
+    assert g.legal_options()[bot.act(g)].label == "Cast Crop Rotation"
+    g.step(bot.act(g))
+    while g.stack or g.decision.kind != O.PRIORITY:
+        g.step(bot.act(g))
+    assert sorted(bf(g, 0)) == sorted(TRON_LANDS)
