@@ -73,8 +73,8 @@ out = { "Black Mage's Rod" = 2, "Sewer-veillance Cam" = 1, "Makeshift Munitions"
 [[plan]]
 deck = "jund_wildfire"
 opponent = "grixis_affinity"
-why = "Artifact hate: Troublemaker Ouphe and Ancient Grudge for the threats and Spellbombs, Breath Weapon sweeps the 2-toughness creatures, Pyroblast for Thoughtcast and the blue creatures; the slow value cards and the Hydra go out."
-in = { "Troublemaker Ouphe" = 2, "Breath Weapon" = 2, "Ancient Grudge" = 1, "Pyroblast" = 2 }
+why = "Artifact hate: Troublemaker Ouphe for the threats and Spellbombs, Breath Weapon sweeps the 2-toughness creatures, Red Elemental Blast for Thoughtcast and the blue creatures, Terminate for a big Enforcer or Monitor; the slow value cards and the Hydra go out."
+in = { "Troublemaker Ouphe" = 2, "Breath Weapon" = 2, "Red Elemental Blast" = 2, "Terminate" = 1 }
 out = { "Lembas" = 2, "Gixian Infiltrator" = 2, "Eviscerator's Insight" = 2, "Nyxborn Hydra" = 1 }
 
 [[plan]]
@@ -87,8 +87,8 @@ out = { "Toxin Analysis" = 2, "Makeshift Munitions" = 1, "Sewer-veillance Cam" =
 [[plan]]
 deck = "mono_blue_terror"
 opponent = "grixis_affinity"
-why = "Annul and Steel Sabotage for the artifact threats, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
-in = { "Annul" = 4, "Steel Sabotage" = 2, "Gut Shot" = 2 }
+why = "Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+in = { "Annul" = 4, "Envelop" = 1, "Gut Shot" = 3 }
 out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Plunder the Trollshaws" = 1, "Ponder" = 2 }
 
 [[plan]]
