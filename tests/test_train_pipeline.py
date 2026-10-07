@@ -29,7 +29,7 @@ from mtg_ml.rl.train import Trainer, parse_args  # noqa: E402
 
 TINY = ["--hidden", "16", "--games-per-iter", "4", "--workers", "2", "--max-turns", "6"]
 NO_EVAL = ["--eval-every", "0"]
-SMALL_EVAL = ["--eval-games", "4", "--eval-bo3-matches", "2", "--bench-games", "4", "--bench-bo3-matches", "2", "--eval-workers", "1"]
+SMALL_EVAL = ["--eval-games", "4", "--eval-bo3-matches", "2", "--bench-games", "4", "--bench-greedy-games", "4", "--bench-bo3-matches", "2", "--eval-workers", "1"]
 TIMING = {"rollout_s", "update_s", "wait_s", "wall_s", "decisions_per_s", "eval_s", "eval_lag"}
 IN_PROCESS = ["--collector", "thread", "--eval-process", "0"]
 
@@ -133,7 +133,7 @@ def test_shared_result_round_trip(tmp_path):
     res = run_job(Job(specs, path, 1, shaping=0.1, max_turns=8))
     got = SharedResult(res).attach()
     assert len(got.samples) == len(res.samples) and list(got.samples) == list(res.samples)
-    assert list(got.actions) == res.actions and got.lengths == res.lengths and got.games == res.games
+    assert list(got.actions) == res.actions and list(got.kinds) == res.kinds and got.lengths == res.lengths and got.games == res.games
     assert torch.allclose(torch.tensor(list(got.logps)), torch.tensor(res.logps))
     stats = []
     for data in (res, got):
@@ -201,7 +201,7 @@ def test_sequential_runs_are_reproducible(tmp_path, in_process):
 @pytest.mark.parametrize("pipeline", [0, 1])
 def test_rollouts_play_the_newest_weights_or_one_update_behind(tmp_path, in_process, pipeline):
     Trainer(_cfg(tmp_path / "run", "--pipeline", str(pipeline), "--iterations", "3", "--eval-every", "2", *IN_PROCESS,
-                 "--eval-games", "4", "--eval-bo3-matches", "0", "--bench-games", "0", "--bench-bo3-matches", "0")).train()
+                 "--eval-games", "4", "--eval-bo3-matches", "0", "--bench-games", "0", "--bench-greedy-games", "0", "--bench-bo3-matches", "0")).train()
     train = [r.policy for r in in_process if r.train]
     if pipeline:  # the games of iteration k+1 are started before the update of iteration k
         assert train == [("v00000.pt", 1), ("v00000.pt", 1), ("v00001.pt", 2)]
@@ -363,3 +363,11 @@ def test_training_seeds_and_metrics(tmp_path, in_process):
     assert min(seeds) >= train_mod.TRAIN_SEED_BASE > game_seed(EVAL_SEED + 10**6, 3)
     assert all(sp.seed >= train_mod.TRAIN_SEED_BASE for it in (9, 39) for sp in t._train_specs(it))  # it=9 used to hit EVAL_SEED + s
     assert all({"win_vs_pool", "win_vs_bot"} <= r.keys() for r in _rows(run))
+
+
+def test_request_ints_for_sizes_the_server_slot_from_the_games_per_request():
+    from mtg_ml.rl.train import request_ints_for
+
+    assert request_ints_for(2048, 13) == 1 << 22  # the overnight run: 79 decisions per request, 1.3M ints seen
+    assert request_ints_for(256, 63) == 1 << 18  # many workers: the floor
+    assert request_ints_for(2048, 1, groups=1) >= 2048 * (1 << 15)

@@ -102,13 +102,13 @@ def test_ppo_update_runs_and_changes_weights(learner_ckpt):
 def test_trainer_smoke_and_resume(tmp_path):
     cfg = parse_args(["--run", str(tmp_path / "run"), "--iterations", "2", "--games-per-iter", "4", "--workers", "2",
                       "--hidden", "16", "--max-turns", "6", "--snapshot-every", "1", "--eval-every", "2", "--eval-games", "4",
-                      "--eval-bo3-matches", "2", "--bench-games", "4", "--bench-bo3-matches", "2"])
+                      "--eval-bo3-matches", "2", "--bench-games", "4", "--bench-greedy-games", "4", "--bench-bo3-matches", "2"])
     assert isinstance(cfg, TrainConfig)
     Trainer(cfg).train()
     lines = (tmp_path / "run" / "metrics.jsonl").read_text().splitlines()
     assert len(lines) == 2 and "eval/random/jund" in lines[-1]
     last = json.loads(lines[-1])
-    assert last["bench/jund_vs_bot_n"] == 4 and last["bench/jund_vs_bot_bo3_n"] == 2 and last["games_total"] == 8
+    assert last["bench/jund_vs_bot_n"] == 4 and last["bench/jund_vs_bot_greedy_n"] == 4 and "pay_mana_share" in last and "nt_frac" in last and last["bench/jund_vs_bot_bo3_n"] == 2 and last["games_total"] == 8
     assert len(list((tmp_path / "run" / "pool").iterdir())) == 3
     cfg.iterations = 3
     t = Trainer(cfg)
@@ -138,6 +138,14 @@ def test_benchmark_keeps_learner_on_jund(learner_ckpt):
     _, path = learner_ckpt
     res = benchmark(_InProcess(), path, games=4, bo3_matches=2, n_jobs=2, version=1, max_turns=8)
     assert res["bench/jund_vs_bot_n"] == 4 and res["bench/jund_vs_bot_bo3_n"] == 2
+
+
+def test_benchmark_with_action_decomposition(learner_ckpt):
+    from mtg_ml.rl.evaluate import benchmark
+
+    _, path = learner_ckpt
+    res = benchmark(_InProcess(), path, games=4, bo3_matches=0, n_jobs=2, version=1, max_turns=8, auto_mana=True, auto_pass=True)
+    assert res["bench/jund_vs_bot_n"] == 4
 
 
 def test_bo3_eval_plays_two_or_three_games_per_match(learner_ckpt):

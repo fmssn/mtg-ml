@@ -34,4 +34,4 @@ python -m mtg_ml.rl.train --run runs/exploit-jund --exploit runs/main/policy/vNN
 python -m mtg_ml.rl.train --run runs/exploit-blue --exploit runs/main/policy/vNNNNN.pt --exploit-deck blue --iterations 150
 ```
 
-- `--init PATH` (any mode): a fresh run (no `latest.pt` yet) starts from the weights and architecture of a policy file or checkpoint. Flags such as `--hidden` are ignored, and `--value-bound` is applied on top. The optimizer state is not loaded.
+- `--init PATH` (any mode): a fresh run (no `latest.pt` yet) starts from the weights and architecture of a policy file or checkpoint. Flags such as `--hidden` are ignored. `--value-bound` is applied on top, and so is `--entity-attn N`: attention layers the source lacks start as the identity (`model.load_partial`), so the first rollouts play like the source. The optimizer state is not loaded. A resumed run takes its architecture from `latest.pt` and refuses an `--entity-attn` that differs from it.

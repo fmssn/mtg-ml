@@ -22,6 +22,7 @@ tests check it on the CPU.
 
 from __future__ import annotations
 
+import math
 import time
 import weakref
 from array import array
@@ -32,9 +33,15 @@ import torch
 from torch import nn
 
 from .model import PAD_FIELDS, PolicyNet, SequenceLayout, bucket, collate_packed, packed_tensors, pad_fits, pad_sequences, pad_sizes, pad_split, padded_batch, split, structure
-from .rollout import Result
+from .rollout import KINDS, Result
 
-STATS = ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac")
+STATS = ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac")  # minibatch means
+# After them, per decision kind (`rollout.KINDS`), sums over the non-trivial
+# decisions only: their count, entropy and approx KL (`_losses`).
+KIND_STATS = ("n", "entropy", "approx_kl")
+N_STATS = len(STATS) + len(KINDS) * len(KIND_STATS)
+TRIVIAL_P = 0.99  # a decision whose behaviour probability of the taken option is at least this is trivial
+_LOG_TRIVIAL_P = math.log(TRIVIAL_P)
 
 
 @dataclass
@@ -128,10 +135,18 @@ def trajectory_minibatches(lengths: list[int], size: int, gen=None) -> tuple[tor
     return order, chunks
 
 
-def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, rt, w=None, n=None):
-    """The PPO loss of one minibatch and its statistics (5,), detached. With
+def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, rt, w=None, n=None, kind=None):
+    """The PPO loss of one minibatch and its statistics (N_STATS,), detached:
+    the STATS means, then per decision kind (`kind`, ids into KINDS; None:
+    all "other") the KIND_STATS sums over the non-trivial decisions. With
     row weights `w` (0 for padded rows) and their sum `n`: means over the
-    real rows only."""
+    real rows only.
+
+    Non-trivial: the behaviour policy gave the taken option less than
+    TRIVIAL_P. That is p_max < TRIVIAL_P except for the rare draws of a
+    <1% option from a near-certain decision, which count as non-trivial;
+    the rollout records only the taken option's log-prob, so this is the
+    test it allows for free. Forced moves (one option) never count."""
     logits, values, _ = net(b, lengths=lengths, max_options=width)
     logp_all = torch.log_softmax(logits, dim=-1)
     logp = logp_all.gather(1, a[:, None]).squeeze(1)
@@ -139,11 +154,21 @@ def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, 
     mean = (lambda x: x.mean()) if w is None else (lambda x: (w * x).sum() / n)  # noqa: E731
     pg_loss = -mean(torch.min(ratio * ad, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * ad))
     v_loss = 0.5 * mean((values - rt).pow(2))
-    ent = mean(-(logp_all.exp() * logp_all.masked_fill(torch.isinf(logits), 0.0)).sum(-1))  # masked_entropy, sharing the log_softmax
+    row_ent = -(logp_all.exp() * logp_all.masked_fill(torch.isinf(logits), 0.0)).sum(-1)  # masked_entropy, sharing the log_softmax
+    ent = mean(row_ent)
     loss = pg_loss + cfg.vf_coef * v_loss - cfg.ent_coef * ent
     with torch.no_grad():
-        kl = mean((ratio - 1) - (logp - olp))
-        stats = torch.stack([pg_loss, v_loss, ent, kl, mean(((ratio - 1).abs() > cfg.clip).float())])
+        row_kl = (ratio - 1) - (logp - olp)
+        kl = mean(row_kl)
+        base = torch.stack([pg_loss, v_loss, ent, kl, mean(((ratio - 1).abs() > cfg.clip).float())])
+        nt = (olp < _LOG_TRIVIAL_P).to(row_kl.dtype)
+        if w is not None:
+            nt = nt * w
+        per = torch.stack([nt, nt * row_ent.detach(), nt * row_kl], 1)
+        if kind is None:
+            kind = torch.zeros_like(a)
+        by_kind = per.new_zeros(len(KINDS), len(KIND_STATS)).index_add_(0, kind, per)
+        stats = torch.cat([base, by_kind.view(-1)])
     return loss, stats
 
 
@@ -178,7 +203,8 @@ def _inputs(shapes: dict) -> list[tuple[str, str, int]]:
     R, keys = shapes["row"], [k for k in ("st", "e", "ot") if f"u_{k}" in shapes]
     out = [(name, "i", shapes[lvl]) for name, (lvl, _, _) in PAD_FIELDS.items()]
     out += [(f"t_{k}_{x}", "i", shapes[k] if x == "bag" else shapes[f"u_{k}"]) for k in keys for x in ("bag", "off", "uid")]
-    out += [(name, "i", R) for name in ("pos_in", "pos_out", "action")] + [(name, "f", R) for name in ("old_logp", "adv", "ret", "weight")]
+    out += [(name, "i", R) for name in ("pos_in", "pos_out", "action", "kind")] + [(name, "f", R) for name in ("old_logp", "adv", "ret", "weight")]
+    out += [("e_pos", "i", shapes["ent"])] if "entw" in shapes else []  # entity attention
     return out + [("n", "f", 1)] + ([("t_e_w", "f", shapes["e"])] if "e" in keys else [])
 
 
@@ -197,7 +223,7 @@ def _padded_losses(net, cfg, shapes, gru, ints, flts):
     its GRU batch of shape gru = (sequences, steps)."""
     v = {k: (ints if buf == "i" else flts).narrow(0, at, size) for k, (buf, at, size) in _layout(shapes).items()}
     seq = SequenceLayout(v["pos_in"], v["pos_out"], *gru)
-    return _losses(net, cfg, padded_batch(v), seq, shapes["width"], v["action"], v["old_logp"], v["adv"], v["ret"], v["weight"], v["n"][0])
+    return _losses(net, cfg, padded_batch(v, shapes.get("entw")), seq, shapes["width"], v["action"], v["old_logp"], v["adv"], v["ret"], v["weight"], v["n"][0], v["kind"])
 
 
 def _need(counts: dict, extra: dict) -> dict:
@@ -206,16 +232,17 @@ def _need(counts: dict, extra: dict) -> dict:
     return pad_sizes(counts) | {"width": extra["width"]}
 
 
-def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None, choose_gru=None):
+def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None, choose_gru=None, kinds=None, ent_width=False):
     """The minibatches of an epoch padded to one set of shapes, packed as
     (pieces, ·) int64 and float32 tensors in `_layout` order, and the GRU
     batch of each, (trajectories, longest), rounded to 4 sizes per octave:
     the GRU's time is ~linear in both. `choose(counts, extra)` picks the
     shapes (`_need` or a cached one they fit), `choose_gru(shapes, gru)`
-    may pick a bigger GRU batch; `transpose` goes to `pad_split`."""
+    may pick a bigger GRU batch; `transpose` and `ent_width` (entity
+    attention) go to `pad_split`."""
     dev = acts.device
     extra = {"width": int(width.max())}
-    fields, shapes, counts = pad_split(big, bounds, lambda counts: choose(counts, extra), transpose)
+    fields, shapes, counts = pad_split(big, bounds, lambda counts: choose(counts, extra), transpose, ent_width)
     M, R = len(chunks), shapes["row"]
     gru = [(bucket(len(c), 4), bucket(max(c), 4)) for c in chunks]
     if choose_gru:
@@ -225,7 +252,8 @@ def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None,
     piece = torch.repeat_interleave(torch.arange(M), n)
     dest = (piece * R + torch.arange(int(n.sum())) - torch.tensor(bounds[:-1])[piece]).to(dev)
     padded = lambda x: x.new_zeros(M * R).index_copy(0, dest, x).view(M, R)  # noqa: E731
-    fields.update(pos_in=pos_in.to(dev), pos_out=pos_out.to(dev), action=padded(acts), old_logp=padded(rec[0]), adv=padded(rec[1]), ret=padded(rec[2]))
+    kinds = torch.zeros_like(acts) if kinds is None else kinds
+    fields.update(pos_in=pos_in.to(dev), pos_out=pos_out.to(dev), action=padded(acts), kind=padded(kinds), old_logp=padded(rec[0]), adv=padded(rec[1]), ret=padded(rec[2]))
     fields.update(weight=padded(torch.ones_like(rec[0])), n=n.to(dev, torch.float32)[:, None])
     spec = _inputs(shapes)
     ints = torch.cat([fields[name] for name, buf, _ in spec if buf == "i"], 1)
@@ -247,14 +275,14 @@ class _StepGraphs:
     value: the graphs read it, so `set_lr` changes it without a recapture."""
 
     MAX_SHAPES = 3  # each with a graph per GRU batch (~16)
-    MARGIN = 1.05  # a new shape has room for 5% more than the epoch that needed it: a shape is ~16 captures
+    MARGIN = 1.25  # a new shape has room for 25% more than the epoch that needed it: a shape is ~16-50 captures (seconds), and games grow over a long run (1.05 recaptured every few iterations: 1.7 -> 6 s per update)
 
     def __init__(self, net, opt, cfg):
         self.fingerprint = _StepGraphs.fingerprint_of(net, opt, cfg)
         self.pools: dict[tuple, tuple] = {}  # shapes -> memory pool, shared by its graphs (they never run concurrently); dropped with them
         self.stream = torch.cuda.Stream()  # one for every warm-up and capture: the allocator caches blocks per stream, so a new stream per capture strands its warm-up's memory
         self.graphs: dict[tuple, dict[tuple, tuple]] = {}  # shapes -> GRU batch -> (graph, static ints, static floats)
-        self.acc = torch.zeros(len(STATS), dtype=torch.float64, device=next(net.parameters()).device)
+        self.acc = torch.zeros(N_STATS, dtype=torch.float64, device=next(net.parameters()).device)
         self.captures, self.capture_s = 0, 0.0
 
     @staticmethod
@@ -400,7 +428,14 @@ def _graphs_for(net, opt, cfg) -> _StepGraphs:
 
 
 def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PPOConfig, device="cpu", gen=None, mode: str | None = None) -> dict:
-    """`cfg.epochs` PPO epochs over `data`. mode: "eager" (each minibatch as
+    """`cfg.epochs` PPO epochs over `data`. Returns the STATS (means over
+    every step), `updates`, `early_stop`, `explained_var`, the approx KL of
+    the first and the last epoch run (`approx_kl_first`, `approx_kl_last`),
+    and over the non-trivial decisions (`_losses`): their share `nt_frac`,
+    `nt_entropy`, `nt_approx_kl` (all epochs), `nt_approx_kl_first` /
+    `_last`, and per decision kind with any: `kind/<kind>/share` (of the
+    non-trivial decisions), `kind/<kind>/entropy`, `kind/<kind>/approx_kl`.
+    mode: "eager" (each minibatch as
     it is), "padded" (minibatches padded to static shapes, run eagerly: the
     math of the captured path, so it is testable on the CPU) or "graph"
     (padded, every step a CUDA graph replay). Default: "graph" on CUDA when
@@ -408,7 +443,7 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     for the device), else "eager"."""
     n = len(data.actions)
     if n == 0:  # nothing to learn from (and no minibatches to average over)
-        return {**{k: 0.0 for k in STATS}, "updates": 0, "early_stop": False, "explained_var": float("nan")}
+        return {**{k: 0.0 for k in STATS}, "updates": 0, "early_stop": False, "explained_var": float("nan")}  # no breakdowns
     floats = lambda xs: torch.frombuffer(array("f", xs), dtype=torch.float32)  # noqa: E731 - 3x faster than torch.tensor(list)
     old_logp, adv, ret = floats(data.logps), floats(data.advantages), floats(data.returns)
     var = ret.var().item() if n > 1 else 0.0
@@ -428,24 +463,30 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     n_opts = torch.frombuffer(data.samples.n_opts, dtype=torch.int32)  # on the CPU: logit widths without asking the device
     actions = torch.frombuffer(array("q", data.actions), dtype=torch.long).to(dev)
     recorded = torch.stack([old_logp, adv, ret]).to(dev)
-    totals = [0.0] * len(STATS)
+    kinds = data.kinds if len(data.kinds) == n else array("b", bytes(n))  # Results built by hand may lack them: all "other"
+    kinds = torch.frombuffer(kinds if isinstance(kinds, array) and kinds.typecode == "b" else array("b", kinds), dtype=torch.int8).to(dev, torch.long)
+    totals = [0.0] * N_STATS
     steps = 0
     stop = False
+    epoch_kl: list[tuple[float, float]] = []  # (approx KL, non-trivial approx KL) per epoch
     for _ in range(cfg.epochs):
         order, chunks = trajectory_minibatches(data.lengths, cfg.minibatch, gen)
         bounds = list(accumulate((sum(c) for c in chunks), initial=0))
         rows = order.to(dev)
         big = structure(collate_packed(samples, rows), sd, od)
-        acts, rec, width = actions[rows], recorded[:, rows], n_opts[order]
-        acc = graphs.acc if graphs else torch.zeros(len(STATS), dtype=torch.float64, device=dev)
+        acts, rec, width, knd = actions[rows], recorded[:, rows], n_opts[order], kinds[rows]
+        acc = graphs.acc if graphs else torch.zeros(N_STATS, dtype=torch.float64, device=dev)
         if mode == "eager":
             for b, lens, lo, hi in zip(split(big, bounds), chunks, bounds, bounds[1:]):
                 opt.zero_grad(set_to_none=True)
-                loss, stats = _losses(net, cfg, b, lens, int(width[lo:hi].max()), acts[lo:hi], *rec[:, lo:hi])
+                loss, stats = _losses(net, cfg, b, lens, int(width[lo:hi].max()), acts[lo:hi], *rec[:, lo:hi], kind=knd[lo:hi])
                 _step(net, opt, cfg, loss)
                 acc += stats
         else:
-            shapes, gru, ints, flts = _padded_epoch(big, bounds, chunks, acts, rec, width, graphs.choose if graphs else _need, transpose, graphs and graphs.choose_gru)
+            shapes, gru, ints, flts = _padded_epoch(
+                big, bounds, chunks, acts, rec, width, graphs.choose if graphs else _need, transpose, graphs and graphs.choose_gru,
+                kinds=knd, ent_width=bool(net.config.get("entity_attn")),
+            )
             del big
             if graphs:
                 graphs.run(net, opt, cfg, shapes, gru, ints, flts)
@@ -459,6 +500,8 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
         epoch = acc.tolist()  # read once per epoch (target_kl), not per step
         acc.zero_()
         totals = [t + x for t, x in zip(totals, epoch)]
+        nt_n, _, nt_kl = _by_kind(epoch).sum(0).tolist()
+        epoch_kl.append((epoch[STATS.index("approx_kl")] / len(chunks), nt_kl / nt_n if nt_n else float("nan")))
         if cfg.target_kl is not None and epoch[STATS.index("approx_kl")] / len(chunks) > cfg.target_kl:
             stop = True
             break
@@ -468,7 +511,26 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
             torch.cuda.empty_cache()
     out = {k: v / max(steps, 1) for k, v in zip(STATS, totals)}
     out["updates"] = steps
+    if graphs:
+        out["captures"] = graphs.captures - captures
+        out["graph_shapes"] = len(graphs.graphs)
     out["early_stop"] = stop
     out["explained_var"] = explained_var
+    out["approx_kl_first"], out["nt_approx_kl_first"] = epoch_kl[0]
+    out["approx_kl_last"], out["nt_approx_kl_last"] = epoch_kl[-1]
+    by_kind = _by_kind(totals)
+    nt_n, nt_ent, nt_kl = by_kind.sum(0).tolist()
+    nan = float("nan")
+    out["nt_frac"] = nt_n / (n * len(epoch_kl))
+    out["nt_entropy"] = nt_ent / nt_n if nt_n else nan
+    out["nt_approx_kl"] = nt_kl / nt_n if nt_n else nan
+    for name, (k_n, k_ent, k_kl) in zip(KINDS, by_kind.tolist()):
+        if k_n:
+            out.update({f"kind/{name}/share": k_n / nt_n, f"kind/{name}/entropy": k_ent / k_n, f"kind/{name}/approx_kl": k_kl / k_n})
     return out
+
+
+def _by_kind(stats: list[float]) -> torch.Tensor:
+    """The per-kind sums of a statistics vector as a (kinds, KIND_STATS) tensor."""
+    return torch.tensor(stats[len(STATS) :], dtype=torch.float64).view(len(KINDS), len(KIND_STATS))
 

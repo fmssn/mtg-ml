@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from .rollout import Result, create_pool
 from .samples import FIELDS, PackedSamples
 
-_FLOATS = (("actions", "q"), ("logps", "f"), ("advantages", "f"), ("returns", "f"))  # the typecodes ppo_update converts to
+_FLOATS = (("actions", "q"), ("logps", "f"), ("advantages", "f"), ("returns", "f"), ("kinds", "b"))  # the typecodes ppo_update converts to
 
 
 class SharedResult:
