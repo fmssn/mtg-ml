@@ -12,6 +12,7 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | 20261007-r1-gammaturn | discount per game turn (γ 0.97, λ 0.95) | 8.4M + 1M | 55.8%¹ | 65.7%¹ | 32 ± 12¹ | reject |
 | 20261007-r1-exploit-blue | exploiter, Blue only vs frozen main | 0.3M | 56.5% vs main² | | | no gap |
 | 20261007-r1-exploit-jund | exploiter, Jund only vs frozen main | 0.3M | 46.1% vs main² | | | no gap |
+| 20261006-search64-* | own-turn Gumbel AlphaZero search + distillation (PR #10, closed) | 500k + ~0.3M per attempt | 38–45% | | | **reject** |
 | 20261006-overnight-selfplay | open-ended self-play + pool | 8.4M | 64.6% | 70.9% | ~79 | parent |
 | 20261006-overnight-bot10 | + 10% games vs scripted bots | 8.4M | 65.6% | | | no effect |
 
@@ -50,6 +51,15 @@ Scripts and outputs: `~/mtg-ml-probes/probes/` on h100-private. On-policy data f
 - **Discount (item 8)**: per-decision and per-turn GAE rank "play land / cast creature" over "pass" the same way; per-turn has twice the spread. 8.3 decisions per player-turn on average (p90 17), 47% passes, 12.8% mana payments.
 - **KCS (item 12)**: mean P(activate Krark-Clan Shaman) 0.19 in own-main positions where it would kill an opposing X/1, 0.06 where it kills nothing: only 2–3× more likely when it matters, bimodal (near 0 or near 1).
 - **Lethal (item 10)**: the core linearly encodes evasive lethal (held-out AUC 0.91 at opponent life ≤ 6, against 0.83 for a random-network control) and the policy wins 95% of turns where evasive lethal is on board. Readiness features are a minor fix.
+
+## 20261006-search64 · own-turn search distillation (PR fmssn/mtg-ml#10, closed unmerged)
+
+- **Question**: can a small own-turn search (Gumbel AlphaZero, budget 64) find multi-step combos the policy never samples (Krark-Clan Shaman + Toxin Analysis sweep, sampled at p ≈ 1e-7) and teach them to the policy by distillation.
+- **Parent**: `model_v3-entity-500k-bot-s6` (entity h128, 500k games). Benchmark at the parent's end: 52% (100-game benchmark, old engine).
+- **Code**: branch `claude/jund-toxic-analysis-misplay-752403` @ 07abffd; design and measurements in `docs/search.md` on that branch. Runs on h100-private: `~/mtg-ml-search/runs/{search64-from500k, search64-vcritic}`.
+- **Attempts**: 1–4 collapsed or were dominated by a few sharp targets (KL up to 0.16). Attempt 5: margin gate 0.15, minibatch-mean distillation loss. Attempt 6: search value as the critic target too. Each ran ~300k games.
+- **Result**: the search finds the line reliably (budget 64, ~840 evaluations per search), but distillation did not teach it. The benchmark stayed at 38–45% in both attempts, 7–14 points below the parent's 52%. The probed probabilities oscillated (Cast Shaman at the seed-6 decision 0.10 → 0.32 → 0.13), the sweep activation reached only 2.6%, entropy rose from 0.33 to 0.42, and critic values drifted down. Play-time search alone: 61.3% vs 62.5% without it (n = 80).
+- **Verdict: reject.** Not merged. Known bugs if it is ever revived: determinization is lost below the root (`fork()` replays the action history and drops the hidden-card edits), the evaluation cap is not enforced, and the margin gate can compare against an unevaluated reference action. Ideas not tried: search as an auditor over many games, averaging leaves over determinizations, a combo-opportunity counter.
 
 ## 20261006-overnight · A/B, open-ended self-play vs + bot games
 
