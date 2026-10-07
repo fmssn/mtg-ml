@@ -1350,8 +1350,11 @@ class Game:
     def _declare_attackers(self):
         p = self.active
         eligible = [c for c in self.battlefield if c.controller == p and self.is_creature(c) and not c.tapped and not c.sick]
-        # Group interchangeable creatures; choose a multiset in canonical order
-        # so every legal attack declaration has exactly one decision path.
+        # Group interchangeable creatures: one option per group with creatures
+        # left, in any order. (Until 2026-10 picks were in canonical group order,
+        # so picking a later group silently dropped the earlier ones.) Chosen
+        # creatures are attacking at once, so the state shows the pending
+        # declaration; they tap when it is done.
         refs = self._referenced_oids()
         groups: list[list[Card]] = []
         index: dict[tuple, int] = {}
@@ -1362,10 +1365,9 @@ class Game:
                 groups.append([])
             groups[index[k]].append(c)
         chosen: list[Card] = []
-        gi_min = 0
         while True:
             options = [Option("Done declaring attackers", ("attack", None), None)]
-            for gi in range(gi_min, len(groups)):
+            for gi in range(len(groups)):
                 left = [c for c in groups[gi] if c not in chosen]
                 if left:
                     c = left[0]
@@ -1373,11 +1375,11 @@ class Game:
             gi = yield from self.ask(p, O.DECLARE_ATTACKER, "Declare attackers", options)
             if gi is None:
                 break
-            chosen.append(next(c for c in groups[gi] if c not in chosen))
-            gi_min = gi
+            c = next(c for c in groups[gi] if c not in chosen)
+            chosen.append(c)
+            self.attackers.append(c.oid)
         for c in chosen:
             c.tapped = True  # no vigilance in the card pool
-            self.attackers.append(c.oid)
         if chosen:
             self._log(f"p{p} attacks with {chosen}")
 

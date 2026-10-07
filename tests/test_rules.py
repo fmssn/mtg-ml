@@ -6,6 +6,7 @@ from helpers import bf, choose, find, has, labels, names, new_game, pass_priorit
 from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, expand
 from mtg_ml.engine import objects as O
 from mtg_ml.engine.game import RulesError
+from mtg_ml.engine.view import observe
 
 
 def attack(g: Game, *names: str) -> None:
@@ -62,23 +63,42 @@ def test_land_play_rules():
     assert g.decision.player == 1 and not has(g, "Play")  # not on the opponent's turn
 
 
-def test_attack_declaration_enumerates_each_subset_once():
+def test_attack_declaration_reaches_every_subset_in_any_order():
     g = scenario(p0={"battlefield": ["Eldrazi Spawn", "Eldrazi Spawn", "Gixian Infiltrator"]}, step="declare_attackers")
     assert g.decision.kind == O.DECLARE_ATTACKER
     seen = set()
+    orders = set()
 
     def walk(game, chosen):
         if game.decision.kind != O.DECLARE_ATTACKER:
             seen.add(tuple(sorted(chosen)))
+            orders.add(tuple(chosen))
             return
+        # one option per group of interchangeable creatures (plus Done)
+        assert len({o.key for o in game.legal_options()}) == len(game.legal_options())
         for i, o in enumerate(game.legal_options()):
             f = game.fork()
             f.step(i)
             walk(f, chosen + ([o.key[1]] if o.key[1] else []))
 
     walk(g, [])
-    # {0,1,2} spawns x {0,1} Gixian = 6 distinct declarations, none duplicated
+    # {0,1,2} spawns x {0,1} Gixian = 6 distinct declarations
     assert len(seen) == 6
+    # a later group first still allows the earlier ones (the old canonical order did not)
+    assert ("Gixian Infiltrator", "Eldrazi Spawn", "Eldrazi Spawn") in orders
+
+
+def test_pending_attackers_are_visible_and_tap_when_declared():
+    g = scenario(p0={"battlefield": ["Eldrazi Spawn", "Gixian Infiltrator"]}, step="declare_attackers")
+    choose(g, "Attack with Gixian Infiltrator")
+    assert g.decision.kind == O.DECLARE_ATTACKER
+    view = {p["name"]: p for p in observe(g, 0)["battlefield"]}
+    assert view["Gixian Infiltrator"]["attacking"] and not view["Gixian Infiltrator"]["tapped"]
+    assert not view["Eldrazi Spawn"]["attacking"]
+    assert has(g, "Attack with Eldrazi Spawn")  # the earlier group is still offered
+    attack(g, "Eldrazi Spawn")  # Done is the only option left, taken automatically
+    view = {p["name"]: p for p in observe(g, 0)["battlefield"]}
+    assert all(view[n]["attacking"] and view[n]["tapped"] for n in ("Gixian Infiltrator", "Eldrazi Spawn"))
 
 
 def test_summoning_sick_and_tapped_creatures_cannot_attack():
