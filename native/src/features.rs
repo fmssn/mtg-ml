@@ -62,8 +62,8 @@ fn thermo<O: FeatureOut>(o: &mut O, name: &str, n: i64, steps: &[i64]) {
 
 /// encode.py `FEATURES` / `FEATURE_VERSIONS`: feature-set versions (1: up to
 /// 2026-10-06; 2: + readiness, known positions, skip_untap, stack targets, X,
-/// option previews).
-pub const FEATURES: u8 = 2;
+/// option previews; 3: + `opp:deck:`).
+pub const FEATURES: u8 = 3;
 
 pub fn check_features(features: u8) -> Result<u8, String> {
     if (1..=FEATURES).contains(&features) {
@@ -82,6 +82,9 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
     direct!(o, "postboard:{}", if st.match_game > 1 { "True" } else { "False" });
     if let Some(deck) = st.args.deck_names[viewer as usize].as_ref().filter(|_| features >= 2) {
         direct!(o, "self:deck:{deck}");
+    }
+    if let Some(deck) = st.args.deck_names[opp as usize].as_ref().filter(|_| features >= 3) {
+        direct!(o, "opp:deck:{deck}");
     }
     thermo(o, "turn", st.turn as i64, TURN_STEPS);
     if st.active == viewer {

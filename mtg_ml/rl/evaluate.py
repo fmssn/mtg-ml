@@ -156,7 +156,7 @@ def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: in
 def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, eval_games: int, eval_bo3_matches: int, bench_games: int, bench_bo3_matches: int,
                     max_turns: int = 100, inference: str = "local", blocks: tuple = EVAL_BLOCKS, bench_greedy_games: int = 0,
                     ladder: tuple = (), ladder_games: int = 200, ladder_ratings: str = "", ladder_greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
-                    matchup: str = DEFAULT_MATCHUP, seat: int | None = None, opponent: str = "", features: dict | None = None) -> dict:
+                    matchup: str = DEFAULT_MATCHUP, seat: int | None = None, opponent: str = "", features: dict | None = None, extra_matchups: tuple = ()) -> dict:
     """The trainer's evaluation of a policy file: learner vs the opponents of
     `blocks` (the random agent, the scripted bots, the oldest pool snapshot
     `pool0`) on paired seeds (game 1 decks), best-of-three matches against
@@ -168,7 +168,8 @@ def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, e
     (`eval/opponent/<deck>`); `seat`: the learner only plays that seat
     (its deck in `matchup`). Runs on any pool (`rl.collect` calls it as
     `fn(pool, *args)`). `features`: `Job.features` overrides for pool
-    snapshots."""
+    snapshots. `extra_matchups` (a run training on a mix): the benchmark of
+    each seat of each of them too, keys `bench/<matchup>/<deck>_vs_bot*`."""
     out = {}
     opponents = {"random": RANDOM, "bot": BOT, "pool0": opponent or pool0}
     decks = [DECK_KEYS[d] for d in matchup_decks(matchup)]
@@ -188,6 +189,10 @@ def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, e
         for deck in decks:
             out[f"eval/bot_bo3/{deck}"], out[f"eval/bot_bo3/{deck}_ci"], _ = res[deck]
     out.update(benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference, bench_greedy_games, auto_mana, auto_pass, matchup, seat or 0))
+    for m in extra_matchups:
+        for s in (0, 1):
+            res = benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference, bench_greedy_games, auto_mana, auto_pass, m, s)
+            out.update({f"bench/{m}/{k.split('/', 1)[1]}": v for k, v in res.items()})
     if ladder and ladder_games:
         ratings = load_or_rate_ladder(procs, list(ladder), ladder_ratings, ladder_games, n_jobs, max_turns, inference, ladder_greedy)
         out.update(ladder_eval(procs, policy, ratings, ladder_games, n_jobs, version, max_turns, inference, ladder_greedy, auto_mana, auto_pass))
@@ -354,7 +359,7 @@ def main(argv=None) -> None:
     ap.add_argument("--bo3", action="store_true", help="best-of-three matches with sideboarding")
     ap.add_argument("--jund", action="store_true", help="learner always plays Jund (seat 0); with 'bot' this is the benchmark")
     ap.add_argument("--seat", type=int, default=None, help="learner always plays this seat (0 or 1)")
-    ap.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue or jund_madness")
+    ap.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue, jund_madness or blue_madness")
     ap.add_argument("--greedy", action="store_true", help="networks take their most likely option instead of sampling (deterministic on paired seeds)")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")

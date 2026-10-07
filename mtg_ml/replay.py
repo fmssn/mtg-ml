@@ -5,6 +5,7 @@
     python -m mtg_ml.replay record --agents model:runs/x/latest.pt,bot   # policy + value per decision
     python -m mtg_ml.replay record --matchup jund_madness --agents model:jund.pt,model:red.pt --greedy --games 20
     python -m mtg_ml.replay serve                                  # http://127.0.0.1:8765
+    python -m mtg_ml.replay serve --models runs/                   # ... and play against checkpoints (mtg_ml.live)
 
 A replay is omniscient (both hands, library sizes, every permanent's state):
 one frame per decision, holding the full state at that point, the decision
@@ -79,27 +80,46 @@ def _ref_label(g, ref) -> str | None:
     return None if c is None else c.name
 
 
-def _known_top(library, n: int = 3) -> list[str]:
-    """Names of the top cards someone knows, stopping at the first unknown one,
-    so every entry's position is exact (index 0 = top)."""
+def _known_top(library, n: int = 3, viewer: int | None = None) -> list[str]:
+    """Names of the top cards someone knows (`viewer`, if given), stopping at
+    the first unknown one, so every entry's position is exact (index 0 = top)."""
     out = []
     for c in library[:n]:
-        if not c.known_to:
+        if not c.known_to if viewer is None else viewer not in c.known_to:
             break
         out.append(c.name)
     return out
 
 
-def snapshot(g, info: dict) -> dict:
-    """Full (omniscient) game state. `info` collects static card data by name."""
+def _hand(p, info: dict, viewer: int | None) -> list[dict]:
+    """A hand as `viewer` sees it: the opponent's cards they don't know are
+    face down, with placeholder uids (real uids follow decklist order, so
+    they would give the card away) and no entry in `info`."""
+    if viewer is None or p.idx == viewer:
+        return [_card(c, info) for c in p.hand]
+    return [_card(c, info) if viewer in c.known_to else {"uid": -1 - i, "name": "", "hidden": True} for i, c in enumerate(p.hand)]
+
+
+def visible_events(lines: list[str], viewer: int) -> list[str]:
+    """Log lines `viewer` may read. The engine echoes every decision of both
+    players ("  p1 choose_card: ..."), including private ones (scry, cards
+    put back, mulligan bottoms); the opponent's echoes are dropped. Their
+    public actions have log lines of their own (casts, attacks, plays)."""
+    private = f"  p{1 - viewer} "
+    return [line for line in lines if not line.startswith(private)]
+
+
+def snapshot(g, info: dict, viewer: int | None = None) -> dict:
+    """Game state, omniscient unless `viewer` is given: then only what that
+    player may see. `info` collects static card data by name."""
     players = []
     for p in g.players:
         players.append(
             {
                 "life": p.life,
-                "hand": [_card(c, info) for c in p.hand],
+                "hand": _hand(p, info, viewer),
                 "library": len(p.library),
-                "library_top_known": _known_top(p.library),
+                "library_top_known": _known_top(p.library, viewer=viewer),
                 "graveyard": [_card(c, info) for c in p.graveyard],
                 "exile": [_card(c, info) for c in p.exile],
                 "pool": {k: v for k, v in p.pool.items() if v},
@@ -195,7 +215,9 @@ def _replay_summary(path: pathlib.Path) -> dict:
     return {**(meta if isinstance(meta, dict) else {}), "file": path.name, "mtime": path.stat().st_mtime}
 
 
-def serve(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 8765) -> None:
+def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 8765, live=None) -> http.server.ThreadingHTTPServer:
+    """The viewer and the replays in `directory`; with `live` (a
+    `live.LiveManager`) also games against models under /api/live/."""
     directory = directory.resolve()
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -207,8 +229,48 @@ def serve(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 8765) ->
             self.end_headers()
             self.wfile.write(body)
 
+        def _json(self, obj, code: int = 200) -> None:
+            self._send(json.dumps(obj, separators=(",", ":")).encode(), "application/json", code)
+
+        def _live(self, method: str, path: str, query: dict) -> None:
+            from .live import LiveError
+
+            if live is None:
+                return self._json({"error": "live play is off (start the server with --models DIR)"}, 404)
+            parts = path.strip("/").split("/")[2:]  # after api/live
+            try:
+                if method == "GET" and parts == ["options"]:
+                    return self._json(live.options())
+                if method == "GET" and len(parts) == 1:
+                    return self._json(live.view(parts[0], int(query.get("since", ["0"])[0])))
+                if method == "POST":
+                    n = int(self.headers.get("Content-Length") or 0)
+                    if n > 65536:
+                        raise LiveError("request too large")
+                    req = json.loads(self.rfile.read(n) or b"{}")
+                    if not isinstance(req, dict):
+                        raise LiveError("expected a JSON object")
+                    if parts == ["new"]:
+                        return self._json(live.new(req))
+                    if len(parts) == 2 and parts[1] == "choose":
+                        return self._json(live.choose(parts[0], req))
+            except (LiveError, ValueError) as e:  # JSON and int() errors are ValueErrors too
+                return self._json({"error": str(e)}, 400)
+            except Exception as e:  # keep the connection: the viewer shows the message
+                return self._json({"error": f"server error: {e!r}"}, 500)
+            self._json({"error": "not found"}, 404)
+
+        def do_POST(self) -> None:  # noqa: N802 (http.server API)
+            url = urllib.parse.urlparse(self.path)
+            if url.path.startswith("/api/live/"):
+                return self._live("POST", url.path, urllib.parse.parse_qs(url.query))
+            self._send(b"not found", "text/plain", 404)
+
         def do_GET(self) -> None:  # noqa: N802 (http.server API)
-            path = urllib.parse.urlparse(self.path).path
+            url = urllib.parse.urlparse(self.path)
+            path = url.path
+            if path.startswith("/api/live/"):
+                return self._live("GET", path, urllib.parse.parse_qs(url.query))
             if path in ("/", "/index.html"):
                 return self._send(VIEWER.read_bytes(), "text/html; charset=utf-8")
             if path == "/api/replays":
@@ -223,12 +285,20 @@ def serve(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 8765) ->
         def log_message(self, fmt, *args) -> None:
             pass
 
-    srv = http.server.ThreadingHTTPServer((host, port), Handler)
-    print(f"serving {directory} at http://{host}:{port}  (ctrl-c to stop)")
+    return http.server.ThreadingHTTPServer((host, port), Handler)
+
+
+def serve(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 8765, live=None) -> None:
+    srv = make_server(directory, host, port, live)
+    directory = directory.resolve()
+    print(f"serving {directory} at http://{host}:{port}{'  with live play' if live else ''}  (ctrl-c to stop)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        if live is not None:
+            live.close()  # native games must be freed on the worker thread, not this one
 
 
 def _agent_name(kind: str) -> str:
@@ -251,13 +321,15 @@ def main(argv=None) -> None:
     r.add_argument("--games", type=int, default=1)
     r.add_argument("--out", default="replays", help="output directory")
     r.add_argument("--engine", default=None, help="python or native; default: $MTG_ENGINE, else python")
-    r.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue or jund_madness")
+    r.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue, jund_madness or blue_madness")
     r.add_argument("--match-game", type=int, default=1, help="1: maindecks; 2/3: sideboarded")
     r.add_argument("--starting-player", type=int, default=None, help="0 or 1 (default: by the seed)")
     s = sub.add_parser("serve", help="serve the web viewer")
     s.add_argument("--dir", default="replays")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--models", default=None, help="directory of checkpoints to play against in the viewer (needs torch)")
+    s.add_argument("--engine", default=None, help="engine for live games: python or native; default: $MTG_ENGINE, else python")
     args = ap.parse_args(argv)
 
     if args.cmd == "record":
@@ -275,7 +347,13 @@ def main(argv=None) -> None:
             m = rep["meta"]
             print(f"{path}: {len(rep['frames'])} frames, {m['turns']} turns, winner {m['winner']} ({m['end_reason']})")
     else:
-        serve(pathlib.Path(args.dir), args.host, args.port)
+        live = None
+        if args.models:
+            from .live import LiveManager, find_models
+
+            live = LiveManager(pathlib.Path(args.models), pathlib.Path(args.dir), engine=args.engine)
+            print(f"{len(find_models(pathlib.Path(args.models)))} checkpoints in {args.models}")
+        serve(pathlib.Path(args.dir), args.host, args.port, live=live)
 
 
 if __name__ == "__main__":

@@ -326,3 +326,16 @@ def test_worker_notices_a_killed_server(tmp_path, monkeypatch, reaped):
         cl.close()
     finally:
         srv.close()
+
+
+def test_stack_takes_policies_of_another_feature_set():
+    """The feature-set version has no weights: a set-3 learner and set-1/2
+    pool snapshots share one stack (else every pool policy ran on the slow
+    per-policy path)."""
+    old, new = PolicyNet(hidden=16, trunk="entity"), PolicyNet(hidden=16, trunk="entity", features=3)
+    assert old.config != new.config and stacked.stack_config(old.config) == stacked.stack_config(new.config)
+    stack = stacked.PolicyStack(new.config, 2, "cpu")
+    stack.load(0, old)
+    stack.load(1, new)
+    with pytest.raises(ValueError):
+        stack.load(0, PolicyNet(hidden=32, trunk="entity"))
