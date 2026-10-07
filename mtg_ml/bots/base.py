@@ -134,7 +134,7 @@ class Bot:
     def _blockers_for(self, g: Game, attacker: Card) -> list[Card]:
         out = []
         for b in self.creatures(g, self.opp):
-            if b.tapped:
+            if b.tapped or g.has(attacker, "unblockable"):
                 continue
             if g.has(attacker, "flying") and not (g.has(b, "flying") or g.has(b, "reach")):
                 continue

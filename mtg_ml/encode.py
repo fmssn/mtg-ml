@@ -162,6 +162,8 @@ def _ready(p: dict, active: bool) -> bool:
 
 def _can_block(blocker: dict, attacker: dict) -> bool:
     """`Game._can_block` on observed permanents."""
+    if "unblockable" in attacker["keywords"]:
+        return False
     return "flying" not in attacker["keywords"] or "flying" in blocker["keywords"] or "reach" in blocker["keywords"]
 
 

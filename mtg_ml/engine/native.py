@@ -515,14 +515,17 @@ class NativeGame:
         return None
 
     def is_bestowed(self, c) -> bool:
-        return c.zone == "battlefield" and c.attached_to is not None
+        return c.zone == "battlefield" and c.attached_to is not None and not c.face.is_equipment
 
     # Live cards go to Rust; last-known-information snapshots (stack item and
     # trigger sources) are computed here from their stored characteristics,
     # exactly as `Game` does for its `Card.snapshot()` copies.
 
     def _auras_on(self, c) -> list[NativeCard]:
-        return [a for a in self.battlefield if a.attached_to == c.oid]
+        return [a for a in self.battlefield if a.attached_to == c.oid and not a.face.is_equipment]
+
+    def equipment_on(self, c) -> list[NativeCard]:
+        return [a for a in self.battlefield if a.attached_to == c.oid and a.face.is_equipment]
 
     def types(self, c) -> set[str]:
         if c.__class__ is NativeCard:
@@ -548,12 +551,14 @@ class NativeGame:
     def power(self, c) -> int:
         if c.__class__ is NativeCard:
             return self._g.power(c._idx)
-        return (c.face.power or 0) + c.counters + sum(t.power for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        v = (c.face.power or 0) + c.counters + sum(t.power for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        return v + sum(e.face.equipped_power for e in self.equipment_on(c))
 
     def toughness(self, c) -> int:
         if c.__class__ is NativeCard:
             return self._g.toughness(c._idx)
-        return (c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        v = (c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        return v + sum(e.face.equipped_toughness for e in self.equipment_on(c))
 
     def keywords(self, c) -> set[str]:
         if c.__class__ is NativeCard:
@@ -565,7 +570,12 @@ class NativeGame:
             k |= t.keywords
         if self._auras_on(c):
             k |= {"reach", "trample"}
+        for e in self.equipment_on(c):
+            k |= e.face.equipped_keywords
         return k
+
+    def targetable(self, c) -> bool:
+        return not self.has(c, "shroud")
 
     def has(self, c, kw: str) -> bool:
         if c.__class__ is NativeCard:

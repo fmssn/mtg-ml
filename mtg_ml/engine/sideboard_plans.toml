@@ -61,9 +61,9 @@ out = { "Highway Robbery" = 4, "Grab the Prize" = 2 }
 [[plan]]
 deck = "tron"
 opponent = "jund_wildfire"
-why = "Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; the slow card draw goes out."
-in = { "Breath Weapon" = 2, "Call Damage Control" = 2 }
-out = { "Candy Trail" = 2, "Unfathomable Truths" = 2 }
+why = "Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+in = { "Breath Weapon" = 3, "Call Damage Control" = 2, "Whispersilk Cloak" = 1 }
+out = { "Candy Trail" = 2, "Unfathomable Truths" = 2, "Bonder's Ornament" = 1, "Boulderbranch Golem" = 1 }
 
 [[plan]]
 deck = "jund_wildfire"
@@ -75,9 +75,9 @@ out = { "Makeshift Munitions" = 1, "Lembas" = 1 }
 [[plan]]
 deck = "tron"
 opponent = "mono_blue_terror"
-why = "Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent; Candy Trail and the Golem's life gain matter little against Blue."
-in = { "Breath Weapon" = 2, "Scour from Existence" = 2 }
-out = { "Candy Trail" = 2, "Boulderbranch Golem" = 2 }
+why = "Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent, Whispersilk Cloak protects a threat from Deem Inferior; the life gain (Candy Trail, the Golem, Bramble Wurm) matters little against Blue."
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2, "Whispersilk Cloak" = 1 }
+out = { "Candy Trail" = 2, "Boulderbranch Golem" = 2, "Bramble Wurm" = 1 }
 
 [[plan]]
 deck = "mono_blue_terror"
@@ -89,8 +89,8 @@ out = { "Sleep of the Dead" = 2 }
 [[plan]]
 deck = "tron"
 opponent = "red_madness"
-why = "Blue Elemental Blast counters burn and kills Guttersnipe, Breath Weapon sweeps the small creatures, Pulse of Murasa gains 6; the slowest cards go out."
-in = { "Blue Elemental Blast" = 2, "Breath Weapon" = 2, "Pulse of Murasa" = 1 }
+why = "Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+in = { "Breath Weapon" = 3, "Kaervek's Torch" = 1, "Pulse of Murasa" = 1 }
 out = { "Unfathomable Truths" = 2, "Maelstrom Colossus" = 2, "Bonder's Ornament" = 1 }
 
 [[plan]]

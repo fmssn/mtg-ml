@@ -177,9 +177,17 @@ class CardDef:
     station: int = 0  # Spacecraft: a creature with this many charge counters
     station_keywords: frozenset[str] = frozenset()  # ... and these keywords
     additional_choose_creature: bool = False  # choose a creature you control or reveal one from hand (Monstrous Emergence)
+    # Equipment (301.5): what the equipped creature gets (Whispersilk Cloak: shroud, can't be blocked).
+    equipped_keywords: frozenset[str] = frozenset()
+    equipped_power: int = 0
+    equipped_toughness: int = 0
 
     def is_type(self, t: str) -> bool:
         return t in self.types
+
+    @property
+    def is_equipment(self) -> bool:
+        return "Equipment" in self.subtypes
 
     @property
     def mana_value(self) -> int:
@@ -226,7 +234,7 @@ class Card:
     deathtouch_damage: bool = False
     counters: int = 0  # +1/+1 counters
     sick: bool = False  # not continuously controlled since start of turn
-    attached_to: int | None = None  # oid of enchanted creature (bestow)
+    attached_to: int | None = None  # oid of the enchanted (bestow) or equipped creature
     skip_untap: int = 0
     plotted_turn: int = 0  # turn this card was plotted on (exile), 0 = not plotted
     prototyped: bool = False  # cast (and on the battlefield) as its prototype

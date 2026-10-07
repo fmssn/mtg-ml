@@ -5,7 +5,7 @@ targets, scry 2, surveil, graveyard abilities. Every test runs on both engines."
 import random
 
 import pytest
-from helpers import bf, choose, find, has, labels, names, new_game, pay, resolve_stack, scenario
+from helpers import bf, choose, find, has, labels, names, new_game, pay, resolve_stack, scenario, settle
 
 from mtg_ml.agents import RandomAgent
 from mtg_ml.bots import make_bot
@@ -23,6 +23,16 @@ WASTES = lambda n: [("Urza's Mine", {})] * n  # noqa: E731
 def pay_all(g):
     """Pay with the first option (floating mana first, then sources in order)."""
     pay(g)
+
+
+def pass_until(g, done):
+    """Pass priority (taking forced decisions) until `done(g)`."""
+    for _ in range(300):
+        if done(g):
+            return
+        assert g.decision.kind == O.PRIORITY, g.decision
+        choose(g, "Pass priority")
+    raise AssertionError("never reached")
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +189,133 @@ def test_bonders_ornament_mana_and_draw():
     pay_all(g)
     resolve_stack(g)
     assert len(g.players[0].hand) == 1 and len(g.players[1].hand) == 0
+
+
+def test_giants_boulder_scries_two_on_entering():
+    g = scenario(p0={"hand": ["Giant's Boulder"], "battlefield": WASTES(1), "library": ["Bramble Wurm", "Forest", "Urza's Tower"]})
+    choose(g, "Cast Giant's Boulder")
+    resolve_stack(g)
+    resolve_stack(g)
+    assert g.decision.kind == O.ORDER and len(labels(g)) == 6
+    choose(g, "Scry: top -; bottom Forest, Bramble Wurm")
+    assert names(g.players[0].library) == ["Urza's Tower", "Forest", "Bramble Wurm"]
+
+
+def test_giants_boulder_filters_by_tapping_itself():
+    g = scenario(p0={"hand": ["Blue Elemental Blast"], "battlefield": ["Giant's Boulder", "Urza's Mine"]}, p1={"battlefield": ["Guttersnipe"]})
+    choose(g, "Cast Blue Elemental Blast (destroy)")  # {U}: the Mine's {C} through the Boulder ({1}, {T})
+    assert find(g, "Giant's Boulder").tapped and find(g, "Urza's Mine").tapped
+    resolve_stack(g)
+    assert "Guttersnipe" not in bf(g)
+    g = scenario(p0={"hand": ["Blue Elemental Blast"], "battlefield": [("Giant's Boulder", {"tapped": True}), "Urza's Mine"]}, p1={"battlefield": ["Guttersnipe"]})
+    assert not has(g, "Blue Elemental Blast")  # a tapped Boulder filters nothing
+
+
+def test_giants_boulder_destroys_target_permanent():
+    g = scenario(p0={"battlefield": ["Giant's Boulder"] + WASTES(6)}, p1={"battlefield": ["Guttersnipe", "Island"]})
+    assert not has(g, "destroy target permanent")  # {7}: six Mines are not enough
+    g = scenario(p0={"battlefield": ["Giant's Boulder"] + WASTES(7)}, p1={"battlefield": ["Guttersnipe", "Island"]})
+    choose(g, "Giant's Boulder: destroy target permanent")
+    assert g.decision.kind == O.TARGET
+    assert any("Island" in lab for lab in labels(g)) and any("Urza's Mine" in lab for lab in labels(g))  # any permanent
+    choose(g, "Target Island")
+    pay_all(g)
+    assert "Giant's Boulder" in names(g.players[0].graveyard)
+    resolve_stack(g)
+    assert "Island" not in bf(g) and "Guttersnipe" in bf(g)
+
+
+# ---------------------------------------------------------------------------
+# Equipment: Whispersilk Cloak
+# ---------------------------------------------------------------------------
+
+
+def equip(g, creature):
+    choose(g, "Whispersilk Cloak: equip")
+    if g.decision.kind == O.TARGET:
+        choose(g, f"Target {creature}")
+    pay_with_lands(g)
+    resolve_stack(g)
+
+
+def pay_with_lands(g):
+    """Pay with Urza's Mines first (keeps Eldrazi Spawn around)."""
+    while g.decision.kind == O.PAY_MANA:
+        mines = [i for i, o in enumerate(g.legal_options()) if "Urza's Mine" in o.label]
+        g.step(mines[0] if mines else 0)
+        settle(g)
+
+
+def test_whispersilk_cloak_is_cast_and_equips_at_sorcery_speed():
+    g = scenario(p0={"hand": ["Whispersilk Cloak"], "battlefield": ["Bramble Wurm"] + WASTES(5)})
+    choose(g, "Cast Whispersilk Cloak")
+    pay_all(g)
+    resolve_stack(g)
+    cloak, wurm = find(g, "Whispersilk Cloak"), find(g, "Bramble Wurm")
+    assert cloak.attached_to is None and not g.has(wurm, "shroud") and not g.is_creature(cloak)
+    equip(g, "Bramble Wurm")
+    assert cloak.attached_to == wurm.oid and not g.is_creature(cloak) and "Whispersilk Cloak" in bf(g)
+    assert g.has(wurm, "shroud") and g.has(wurm, "unblockable")
+    assert (g.power(wurm), g.toughness(wurm)) == (7, 6)  # no power or toughness from the Cloak
+    assert sum(1 for c in g.battlefield if c.tapped) == 5  # {3}, then equip {2}
+    assert not has(g, "equip")  # the only creature has shroud now: no legal target
+    # Sorcery speed: not on the opponent's turn.
+    g = scenario(p0={"battlefield": ["Whispersilk Cloak", "Bramble Wurm"] + WASTES(2)}, active=1)
+    choose(g, "Pass priority")
+    assert g.decision.player == 0 and not has(g, "equip")
+    # A creature you control is needed: theirs is not a legal target.
+    g = scenario(p0={"battlefield": ["Whispersilk Cloak"] + WASTES(2)}, p1={"battlefield": ["Guttersnipe"]})
+    assert not has(g, "equip")
+
+
+def test_whispersilk_cloak_gives_shroud():
+    def setup(equipped):
+        g = scenario(p0={"battlefield": ["Whispersilk Cloak", "Bramble Wurm"] + WASTES(2)}, p1={"hand": ["Cast Down"], "battlefield": ["Swamp", "Swamp"]})
+        if equipped:
+            equip(g, "Bramble Wurm")
+        choose(g, "Pass priority")
+        assert g.decision.player == 1
+        return g
+
+    assert has(setup(False), "Cast Cast Down")
+    assert not has(setup(True), "Cast Cast Down")  # its only creature target has shroud
+    # Its own controller cannot target it either: the Kill-Ship's "up to one" finds no other creature.
+    g = scenario(p0={"hand": ["Pinnacle Kill-Ship"], "battlefield": ["Whispersilk Cloak", "Bramble Wurm"] + TRON_LANDS + WASTES(2)})
+    equip(g, "Bramble Wurm")
+    choose(g, "Cast Pinnacle Kill-Ship")
+    pay_all(g)
+    resolve_stack(g)
+    assert "Bramble Wurm" in bf(g) and "Pinnacle Kill-Ship" in bf(g) and not g.stack
+
+
+def test_whispersilk_cloak_equipped_creature_cant_be_blocked():
+    g = scenario(p0={"battlefield": ["Whispersilk Cloak", "Bramble Wurm"] + WASTES(2)}, p1={"battlefield": ["Generous Ent"]})
+    equip(g, "Bramble Wurm")
+    pass_until(g, lambda g: g.decision.kind == O.DECLARE_ATTACKER)
+    choose(g, "Attack with Bramble Wurm")
+    if g.decision.kind == O.DECLARE_ATTACKER:
+        choose(g, "Done declaring attackers")
+    # The Ent's only blocking option was "does not block" (settled): passing reaches combat damage.
+    pass_until(g, lambda g: g.players[1].life < 20)
+    assert g.players[1].life == 13 and "Generous Ent" in bf(g)
+
+
+def test_whispersilk_cloak_moves_and_stays_when_the_creature_leaves():
+    g = scenario(p0={"hand": ["Candy Trail"], "battlefield": ["Whispersilk Cloak", "Eldrazi Spawn", "Bramble Wurm"] + WASTES(4)})
+    equip(g, "Bramble Wurm")
+    cloak, wurm, spawn = find(g, "Whispersilk Cloak"), find(g, "Bramble Wurm"), find(g, "Eldrazi Spawn")
+    # Equip again: the Wurm has shroud, so the Spawn is the only target.
+    choose(g, "Whispersilk Cloak: equip")
+    pay_with_lands(g)
+    resolve_stack(g)
+    assert cloak.attached_to == spawn.oid and not g.has(wurm, "shroud") and g.has(spawn, "unblockable")
+    # The Spawn is sacrificed for mana: the Cloak stays on the battlefield, unattached (301.5c).
+    choose(g, "Cast Candy Trail")  # the Spawn is the only mana left (settled)
+    assert "Eldrazi Spawn" not in bf(g)
+    resolve_stack(g)
+    assert find(g, "Whispersilk Cloak").attached_to is None
+    assert has(g, "Whispersilk Cloak: equip") is False  # no mana left; the Wurm is a legal target again
+    assert g.target_candidates(O.TargetSpec("creature_you_control"), 0) == [("perm", wurm.oid)]
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +587,7 @@ def test_monstrous_emergence_needs_a_creature():
 
 def test_tron_deck_is_sixty_and_fifteen():
     assert sum(TRON.values()) == 60 and sum(TRON_SIDEBOARD.values()) == 15
+    assert TRON["Giant's Boulder"] == 4 and TRON_SIDEBOARD["Whispersilk Cloak"] == 1
     assert DECKS["tron"] is TRON and SIDEBOARDS["tron"] is TRON_SIDEBOARD
     for name, n in list(TRON.items()) + list(TRON_SIDEBOARD.items()):
         assert n <= 4 or "Basic" in CARDS[name].supertypes, name
@@ -510,3 +648,24 @@ def test_tron_bot_maps_for_the_missing_piece_and_crop_rotates_into_tron():
     while g.stack or g.decision.kind != O.PRIORITY:
         g.step(bot.act(g))
     assert sorted(bf(g, 0)) == sorted(TRON_LANDS)
+
+
+def test_tron_bot_equips_the_cloak_on_its_best_attacker():
+    bot = make_bot(0, "tron")
+    g = scenario(p0={"battlefield": ["Whispersilk Cloak", ("Generous Ent", {"sick": True}), "Bramble Wurm"] + WASTES(2)}, p1={"battlefield": ["Guttersnipe"]})
+    assert g.legal_options()[bot.act(g)].label == "Whispersilk Cloak: equip"
+    g.step(bot.act(g))
+    while g.stack or g.decision.kind != O.PRIORITY:
+        g.step(bot.act(g))
+    assert find(g, "Whispersilk Cloak").attached_to == find(g, "Bramble Wurm").oid
+    assert not has(g, "equip")  # no mana left, and the Ent is not clearly better anyway
+
+
+def test_tron_bot_spends_giants_boulder_on_a_big_threat():
+    bot = make_bot(0, "tron")
+    g = scenario(p0={"battlefield": ["Giant's Boulder"] + WASTES(7)}, p1={"battlefield": ["Guttersnipe", "Cryptic Serpent"]})
+    assert g.legal_options()[bot.act(g)].label == "Giant's Boulder: destroy target permanent"
+    g.step(bot.act(g))
+    assert g.legal_options()[bot.act(g)].label.startswith("Target Cryptic Serpent")
+    g = scenario(p0={"battlefield": ["Giant's Boulder"] + WASTES(7)}, p1={"battlefield": ["Guttersnipe"]})
+    assert g.legal_options()[bot.act(g)].label == "Pass priority"  # a small creature waits for their end step

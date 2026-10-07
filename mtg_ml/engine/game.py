@@ -534,7 +534,7 @@ class Game:
         return None
 
     def is_bestowed(self, c: Card) -> bool:
-        return c.zone == "battlefield" and c.attached_to is not None
+        return c.zone == "battlefield" and c.attached_to is not None and not c.face.is_equipment
 
     @staticmethod
     def is_stationed(c: Card) -> bool:
@@ -559,16 +559,23 @@ class Game:
         return "Land" in c.face.types
 
     def _auras_on(self, c: Card) -> list[Card]:
-        return [a for a in self.battlefield if a.attached_to == c.oid]
+        """Bestowed Auras attached to `c`."""
+        return [a for a in self.battlefield if a.attached_to == c.oid and not a.face.is_equipment]
+
+    def equipment_on(self, c: Card) -> list[Card]:
+        """Equipment attached to `c` (301.5)."""
+        return [a for a in self.battlefield if a.attached_to == c.oid and a.face.is_equipment]
 
     def power(self, c: Card) -> int:
         v = (c.face.power or 0) + c.counters + sum(t.power for t in c.temp)
         v += sum(a.counters for a in self._auras_on(c))
+        v += sum(e.face.equipped_power for e in self.equipment_on(c))
         return v
 
     def toughness(self, c: Card) -> int:
         v = (c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp)
         v += sum(a.counters for a in self._auras_on(c))
+        v += sum(e.face.equipped_toughness for e in self.equipment_on(c))
         return v
 
     def keywords(self, c: Card) -> set[str]:
@@ -579,6 +586,8 @@ class Game:
             k |= t.keywords
         for a in self._auras_on(c):
             k |= {"reach", "trample"}
+        for e in self.equipment_on(c):
+            k |= e.face.equipped_keywords
         return k
 
     def has(self, c: Card, kw: str) -> bool:
@@ -924,7 +933,7 @@ class Game:
             if c.attached_to is not None:
                 host = self.perm(c.attached_to)
                 if host is None or not self.is_creature(host):
-                    c.attached_to = None  # bestow: becomes a creature again
+                    c.attached_to = None  # bestow: becomes a creature again; Equipment: unattached, stays (301.5c)
                     changed = True
         dying = []
         for c in self.battlefield:
@@ -957,11 +966,11 @@ class Game:
             return [("player", q) for q in (controller, 1 - controller) if any(c.controller == q and self.is_creature(c) for c in self.battlefield)]
         if k == "creature_of_target_player" and chosen:
             q = chosen[-1][1]
-            return [("perm", c.oid) for c in self.battlefield if self.is_creature(c) and c.controller == q]
+            return [("perm", c.oid) for c in self.battlefield if self.is_creature(c) and c.controller == q and self.targetable(c)]
         if k == "another_creature":
             # A creature not already chosen as a target of the same spell. With
             # nothing chosen yet (casting checks) it needs a second creature.
-            creatures = [("perm", c.oid) for c in self.battlefield if self.is_creature(c)]
+            creatures = [("perm", c.oid) for c in self.battlefield if self.is_creature(c) and self.targetable(c)]
             if not chosen:
                 return creatures if len(creatures) >= 2 else []
             return [r for r in creatures if r not in chosen]
@@ -969,11 +978,15 @@ class Game:
             return [("stack", it.sid) for it in self.stack if it.kind == "spell" and it.sid != exclude_sid and self._spell_matches(spec, it)]
         out = []
         for c in self.battlefield:
-            if self._perm_matches(spec, c, controller):
+            if self._perm_matches(spec, c, controller) and self.targetable(c):
                 out.append(("perm", c.oid))
         if k == "any":
             out += [("player", controller), ("player", 1 - controller)]
         return out
+
+    def targetable(self, c: Card) -> bool:
+        """Shroud (702.18): it can't be the target of spells or abilities."""
+        return not self.has(c, "shroud")
 
     def _perm_matches(self, spec: TargetSpec, c: Card, controller: int) -> bool:
         k = spec.kind
@@ -1033,7 +1046,7 @@ class Game:
         c = self.perm(ref[1])
         if c is not None and spec.kind == "creature_of_target_player" and c.controller != item.targets[i - 1][1]:
             return False
-        return c is not None and self._perm_matches(spec, c, item.controller)
+        return c is not None and self._perm_matches(spec, c, item.controller) and self.targetable(c)
 
     def target(self, item: StackItem, i: int = 0):
         """Resolved target i if still legal: a Card, StackItem or ('player', idx)."""
@@ -1919,6 +1932,8 @@ class Game:
             self._log(f"p{p} attacks with {chosen}")
 
     def _can_block(self, blocker: Card, attacker: Card) -> bool:
+        if self.has(attacker, "unblockable"):
+            return False
         if self.has(attacker, "flying") and not (self.has(blocker, "flying") or self.has(blocker, "reach")):
             return False
         return True

@@ -830,6 +830,26 @@ abilities = [
 ]
 
 [[card]]
+name = "Giant's Boulder"
+cost = "{1}"
+types = "Artifact"
+text = "When this artifact enters, scry 2. {1}, {T}: Add one mana of any color. {7}, {T}, Sacrifice this artifact: Destroy target permanent."
+abilities = [
+    { name = "add one mana of any color", cost = "{1}", tap = true, mana = ["W", "U", "B", "R", "G"] },
+    { name = "destroy target permanent", cost = "{7}", tap = true, sac_self = true, targets = ["permanent"], effect = [{ op = "destroy_target" }] },
+]
+triggers = [{ name = "scry 2", event = "etb", effect = [{ op = "scry", n = 2 }] }]
+
+[[card]]
+name = "Whispersilk Cloak"
+cost = "{3}"
+types = "Artifact"
+subtypes = "Equipment"
+text = "Equipped creature can't be blocked and has shroud. Equip {2}"
+equipped = { keywords = ["unblockable", "shroud"] }
+abilities = [{ name = "equip", cost = "{2}", sorcery_speed = true, targets = ["creature_you_control"], effect = [{ op = "attach" }] }]
+
+[[card]]
 name = "Candy Trail"
 cost = "{1}"
 types = "Artifact"

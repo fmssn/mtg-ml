@@ -251,6 +251,8 @@ pub enum Op {
     Dig { filter: SearchFilter, n: i32, what: String },
     Cascade,
     Station,
+    /// Equip: attach the source to the target creature.
+    Attach,
     ReturnRandomFromGraveyard { types: u16 },
     /// types: (type bit, type name) in spec order; any: from either graveyard.
     ReturnFromGraveyard { types: Vec<(u16, &'static str)>, n: i32, each_type: bool, any: bool },
@@ -366,6 +368,11 @@ pub struct CardDef {
     pub station: i32,
     pub station_keywords: u32,
     pub additional_choose_creature: bool,
+    /// Equipment (301.5): the subtype, and what the equipped creature gets.
+    pub is_equipment: bool,
+    pub equipped_keywords: u32,
+    pub equipped_power: i32,
+    pub equipped_toughness: i32,
 }
 
 impl CardDef {
@@ -736,6 +743,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             },
             "cascade" => Op::Cascade,
             "station" => Op::Station,
+            "attach" => Op::Attach,
             "return_random_from_graveyard" => Op::ReturnRandomFromGraveyard { types: type_bit(req_str(t, "type")?)? },
             "return_from_graveyard" => Op::ReturnFromGraveyard {
                 types: get_str_list(t, "types")?
@@ -803,10 +811,23 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
             "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward", "targets", "effect",
             "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped", "etb_x_counters", "back", "modes",
             "abilities", "triggers", "madness", "plot", "overload", "overload_effect", "additional_discard", "alternative_cost", "flashback_cost", "bargain",
-            "prototype", "prototype_face", "station", "additional_choose_creature",
+            "prototype", "prototype_face", "station", "additional_choose_creature", "equipped",
         ],
         "card",
     )?;
+    let subtypes = words(t, "subtypes")?;
+    let is_equipment = subtypes.iter().any(|s| s == "Equipment");
+    let (equipped_keywords, equipped_power, equipped_toughness) = match t.get("equipped") {
+        None => (0, 0, 0),
+        Some(Value::Table(e)) => {
+            check_keys(e, &["keywords", "power", "toughness"], "equipped")?;
+            if !is_equipment {
+                return Err("equipped needs the Equipment subtype".into());
+            }
+            (get_str_list(e, "keywords")?.iter().fold(0, |m, k| m | db.kw(k)), get_int(e, "power")?.unwrap_or(0), get_int(e, "toughness")?.unwrap_or(0))
+        }
+        Some(_) => return Err("equipped must be a table".into()),
+    };
     let cost_text = get_str(t, "cost")?;
     let colors = match get_str(t, "colors")? {
         Some(c) => c.split_whitespace().fold(0, |m, s| m | color_bit(s.as_bytes()[0])),
@@ -941,7 +962,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         bargain: get_bool(t, "bargain")?,
         cost,
         types,
-        subtypes: words(t, "subtypes")?,
+        subtypes,
         supertypes: words(t, "supertypes")?,
         colors,
         power: get_int(t, "power")?,
@@ -1000,6 +1021,10 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
             _ => 0,
         },
         additional_choose_creature: get_bool(t, "additional_choose_creature")?,
+        is_equipment,
+        equipped_keywords,
+        equipped_power,
+        equipped_toughness,
     })
 }
 
@@ -1016,7 +1041,7 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 94);
+        assert_eq!(db.cards.len(), 96);
         let gut = db.def(db.cards["Gut Shot"]);
         assert_eq!((gut.colors, gut.phyrexian_life, gut.cost.mana_value()), (color_bit(b'R'), 2, 1));
         assert!(gut.phyrexian_cost.as_ref().unwrap().is_zero());

@@ -10,6 +10,10 @@ creature), Bramble Wurm, Boulderbranch Golem (prototyped when seven mana is
 far away), Generous Ent (forestcycled when a land is needed more). Card
 draw (Unfathomable Truths, Candy Trail, Bonder's Ornament) waits for the
 opponent's end step. A summoning-sick creature stations the Kill-Ship.
+Giant's Boulder is an early scry 2 and colour fixer, later removal: {7}
+destroys their best creature (at once for a big one, else in their end
+step). Whispersilk Cloak goes on the best creature before combat (shroud,
+unblockable) and moves only to a clearly better one.
 """
 
 from __future__ import annotations
@@ -29,7 +33,9 @@ THREATS = {  # main-phase cast priority once affordable
     "Boulderbranch Golem": 24,
     "Generous Ent": 22,
 }
-CHEAP = {"Expedition Map": 9, "Barrels of Blasting Jelly": 7, "Candy Trail": 8, "Bonder's Ornament": 6, "Relic of Progenitus": 3}
+CHEAP = {"Expedition Map": 9, "Giant's Boulder": 8.5, "Barrels of Blasting Jelly": 7, "Candy Trail": 8, "Bonder's Ornament": 6, "Relic of Progenitus": 3}
+BIG_THREAT = 6.0  # creature_value worth Giant's Boulder at once
+CLOAK_MOVE = 3.0  # how much better a creature must be to move the Cloak to it
 FORESTS_IN_DECK = 2
 KILL_VALUE = 3.0  # creature_value worth a removal effect
 LOW_LIFE = 8
@@ -84,6 +90,8 @@ class TronBot(Bot):
             "Crop Rotation": 3.5 if self.tron_missing(g) else 1.0,
             "Unfathomable Truths": 4.0,
             "Barrels of Blasting Jelly": 2.5,
+            "Giant's Boulder": 3.0 if self.has_tron(g) else 2.5,
+            "Whispersilk Cloak": 2.0,
             "Candy Trail": 2.5,
             "Bonder's Ornament": 2.0,
             "Scour from Existence": 4.0,
@@ -176,6 +184,8 @@ class TronBot(Bot):
             return CHEAP[n]
         if n == "Kaervek's Torch":
             return self.torch_score(g)
+        if n == "Whispersilk Cloak":
+            return 6.0 if self.creatures(g, self.p) else 2.0
         if n == "Monstrous Emergence":
             pw = max([g.power(c) for c in self.creatures(g, self.p)] + [c.face.power or 0 for c in self.hand(g) if c.face.is_type("Creature") and c is not card], default=0)
             return 13.0 if self.kill_targets(g, pw) else NEG
@@ -240,6 +250,24 @@ class TronBot(Bot):
             return 4.0 if self.end_of_their_turn(g) else NEG
         if n == "Barrels of Blasting Jelly":
             return 9.0 if self.kill_targets(g, 5) and (spare or self.main_phase(g)) else NEG
+        if n == "Giant's Boulder":  # {7}, {T}, sacrifice: destroy target permanent
+            t = self.best_permanent_target(g)
+            if t is None:
+                return NEG
+            v = self.creature_value(g, t)
+            if v >= BIG_THREAT and (self.main_phase(g) or self.end_of_their_turn(g) or (not self.my_turn(g) and g.step_name == "declare_attackers")):
+                return 13.0
+            return 8.0 if v >= KILL_VALUE and self.end_of_their_turn(g) else NEG
+        if n == "Whispersilk Cloak":  # equip, before combat
+            if g.step_name != "main1":
+                return NEG
+            best = self.cloak_target(g)
+            worn = self.cloak_wearer(g, card)
+            if best is None or best is worn:
+                return NEG
+            if worn is not None and self.cloak_value(g, best) < self.cloak_value(g, worn) + CLOAK_MOVE:
+                return NEG
+            return 18.0
         if n == "Bramble Wurm":
             return 4.0 if spare and self.me(g).life <= 12 else NEG
         if n == "Haunted Fengraf":
@@ -259,14 +287,27 @@ class TronBot(Bot):
             return 2.0 if self.end_of_their_turn(g) and gy else NEG
         return NEG
 
+    def cloak_value(self, g: Game, c: Card) -> float:
+        """How much a creature gains from Whispersilk Cloak: its power now, more if it can attack this turn."""
+        return g.power(c) + 0.3 * self.creature_value(g, c) + (3.0 if not c.sick and not c.tapped else 0.0)
+
+    def cloak_wearer(self, g: Game, cloak: Card) -> Card | None:
+        return g.perm(cloak.attached_to) if cloak.attached_to is not None else None
+
+    def cloak_target(self, g: Game) -> Card | None:
+        mine = [c for c in self.creatures(g, self.p) if g.power(c) > 0 and not g.has(c, "shroud")]
+        return max(mine, key=lambda c: self.cloak_value(g, c), default=None)
+
     # -- combat ----------------------------------------------------------------------
 
     def alpha_strike(self, g: Game) -> bool:
         """Everything attacks when the attackers they cannot block are lethal
         (their untapped creatures block our biggest attackers)."""
-        ready = sorted((g.power(c) for c in self.creatures(g, self.p) if not c.tapped and not c.sick and g.power(c) > 0), reverse=True)
+        ready = [c for c in self.creatures(g, self.p) if not c.tapped and not c.sick and g.power(c) > 0]
+        free = sum(g.power(c) for c in ready if g.has(c, "unblockable"))
+        blockable = sorted((g.power(c) for c in ready if not g.has(c, "unblockable")), reverse=True)
         blockers = sum(1 for c in self.creatures(g, self.opp) if not c.tapped)
-        return bool(ready) and sum(ready[blockers:]) >= g.players[self.opp].life
+        return bool(ready) and free + sum(blockable[blockers:]) >= g.players[self.opp].life
 
     def score_declare_attacker(self, g: Game, d: Decision, o: Option) -> float:
         if o.value is not None and self.alpha_strike(g):
@@ -375,7 +416,9 @@ class TronBot(Bot):
         if v is None:  # "No target" (Kill-Ship's up to one)
             return 0.5
         c = self.ref_card(g, o)
-        if name in ("Pinnacle Kill-Ship", "Barrels of Blasting Jelly", "Monstrous Emergence", "Kaervek's Torch", "Scour from Existence"):
+        if name == "Whispersilk Cloak":
+            return NEG if c is None or c.controller != self.p else self.cloak_value(g, c)
+        if name in ("Pinnacle Kill-Ship", "Barrels of Blasting Jelly", "Monstrous Emergence", "Kaervek's Torch", "Scour from Existence", "Giant's Boulder"):
             if v == ("player", self.opp):
                 return 50.0 if name == "Kaervek's Torch" and self.torch_score(g) >= 40 else NEG
             if c is None or c.controller == self.p:

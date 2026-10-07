@@ -1626,6 +1626,22 @@ impl Eng {
                 let mv = self.source_card(item).face().mana_value();
                 self.cascade(ctl, mv)?;
             }
+            Op::Attach => {
+                let src = self.source_card(item);
+                let st = self.s();
+                let live = st.live(&src);
+                let tgt = st.target(item, 0);
+                if let (Some(l), Some(Tgt::Card(t))) = (live, tgt) {
+                    if st.c(l).controller == ctl {
+                        let toid = st.c(t).oid;
+                        st.cm(l).attached_to = Some(toid);
+                        if st.logging {
+                            let msg = format!("{}#{} is attached to {}#{}", st.c(l).name(), st.c(l).oid, st.c(t).name(), toid);
+                            st.log.push(msg);
+                        }
+                    }
+                }
+            }
             Op::Station => {
                 let src = self.source_card(item);
                 let st = self.s();

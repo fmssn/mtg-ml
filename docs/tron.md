@@ -10,38 +10,52 @@ Rotation, and casts seven- and eight-drops. Matchups put it in seat 1:
 
 | main | | | sideboard |
 |---|---|---|---|
-| 4 Urza's Mine | 4 Expedition Map | 4 Bramble Wurm | 2 Breath Weapon |
+| 4 Urza's Mine | 4 Expedition Map | 4 Bramble Wurm | 3 Breath Weapon |
 | 4 Urza's Power Plant | 4 Ancient Stirrings | 2 Generous Ent | 3 Relic of Progenitus |
-| 4 Urza's Tower | 3 Crop Rotation | 4 Boulderbranch Golem | 2 Call Damage Control |
-| 2 Forest | 4 Barrels of Blasting Jelly | 4 Pinnacle Kill-Ship | 2 Scour from Existence |
-| 1 Bojuka Bog | 2 Bonder's Ornament | 4 Maelstrom Colossus | 1 Kaervek's Torch |
-| 1 Conduit Pylons | 4 Candy Trail | | 1 Pulse of Murasa |
-| 1 Haunted Fengraf | 4 Unfathomable Truths | | 2 Monstrous Emergence |
-| | | | 2 Blue Elemental Blast |
+| 4 Urza's Tower | 3 Crop Rotation | 3 Boulderbranch Golem | 2 Call Damage Control |
+| 2 Forest | 4 Barrels of Blasting Jelly | 4 Pinnacle Kill-Ship | 2 Monstrous Emergence |
+| 1 Bojuka Bog | 4 Giant's Boulder | 4 Maelstrom Colossus | 2 Scour from Existence |
+| 1 Conduit Pylons | 2 Bonder's Ornament | | 1 Kaervek's Torch |
+| 1 Haunted Fengraf | 3 Candy Trail | | 1 Pulse of Murasa |
+| | 2 Unfathomable Truths | | 1 Whispersilk Cloak |
 
-**Source:** the project owner's Pauper research data for Q3 2026
-(2026-07-05 to 2026-10-02, 443 Tron lists; `q3_typical_lists.txt`,
-`deck_decisions/data.js`). Main: every card played in at least half of the
-lists, at its modal count, sums to 64. The four Giant's Boulder (played in
-51%, the least of them, and 0 copies in 49% of lists) are cut, which gives
-exactly 60. Sideboard: only 2 Breath Weapon (80%) and 3 Relic of Progenitus
-(74%) are in at least half of the sideboards; the rest is filled with the
-next most played at their modal counts: Call Damage Control (46%), Scour
-from Existence (36%), Kaervek's Torch (36%), Pulse of Murasa (27%),
-Monstrous Emergence (26%), and 2 Blue Elemental Blast (23%, standing in for
-the equally played Hydroblast: both are blue anti-red cards). Whispersilk
-Cloak (28%) is skipped: equipment is not in the engine.
+**Source:** the project owner's Pauper research dashboard
+(`pauper-research/reports/dashboard/index.html`, generated 2026-10-04),
+period 90 days (2026-07-05 to 2026-10-02 = Q3 2026), scope online + paper,
+"Builds and decisions" for Tron: the typical list of all 443 Tron lists (the
+dashboard's aggregate decklist, Frank Karsten's method: every (card, k-th
+copy) ranked by how many lists play it, the top 60 / 15). The 60 and the 15
+are taken unchanged; every card in them is implemented.
+
+**Why the archetype's typical list and not the largest build's.** The
+dashboard splits the 443 lists into builds. The largest (179 lists, 40%:
+no Nyxborn Hydra, 3+ Candy Trail, 2+ Generous Ent) plays no Giant's Boulder
+and instead 2 Breath Weapon and 2 Prophetic Prism main; the next ones (83, 40,
+37, 37, 35 lists) all play 4 Boulder. Across all lists Boulder is in 51% and
+almost always as a full playset (4 in 49%, 0 in 49%). The project owner rules
+that Giant's Boulder is important, and it is what this kind of Tron does with
+its mana: an early scry 2 and colour fixer that later destroys any permanent
+for {7}. The aggregate list keeps it, so it is the list used. The largest
+build's 60 (if wanted instead): 4 Mine, 4 Power Plant, 4 Tower, 3 Forest, 1
+Bog, 1 Pylons, 1 Fengraf, 4 Map, 4 Stirrings, 3 Crop Rotation, 2 Barrels, 2
+Bonder's Ornament, 2 Prophetic Prism, 4 Candy Trail, 1 Truths, 2 Breath
+Weapon, 4 Wurm, 3 Ent, 3 Golem, 4 Kill-Ship, 4 Colossus (Prophetic Prism is
+not implemented).
+
+The previous version of this deck (PR head 3f57415) cut the four Boulders to
+get from 64 to 60 and left Whispersilk Cloak out because the engine had no
+equipment rules; both are back, and equipment is in both engines.
 
 ## Sideboard plans (`engine/sideboard_plans.toml`)
 
 | deck vs opponent | in | out | why |
 |---|---|---|---|
-| Tron vs Jund | 2 Breath Weapon, 2 Call Damage Control | 2 Candy Trail, 2 Unfathomable Truths | Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire |
+| Tron vs Jund | 3 Breath Weapon, 2 Call Damage Control, 1 Whispersilk Cloak | 2 Candy Trail, 2 Unfathomable Truths, 1 Bonder's Ornament, 1 Boulderbranch Golem | Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; the Cloak keeps a seven-drop safe from Cast Down |
 | Jund vs Tron | 2 Duress | 1 Makeshift Munitions, 1 Lembas | Duress takes Stirrings, Map, Crop Rotation, Truths |
-| Tron vs Blue | 2 Breath Weapon, 2 Scour from Existence | 2 Candy Trail, 2 Boulderbranch Golem | instant-speed answer to Delver, Scour for Terror and Serpent |
+| Tron vs Blue | 2 Breath Weapon, 2 Scour from Existence, 1 Whispersilk Cloak | 2 Candy Trail, 2 Boulderbranch Golem, 1 Bramble Wurm | instant-speed answer to Delver, Scour for Terror and Serpent, the Cloak against Deem Inferior; life gain matters little |
 | Blue vs Tron | 2 Dispel | 2 Sleep of the Dead | Dispel counters Crop Rotation and Truths |
-| Tron vs Red | 2 Blue Elemental Blast, 2 Breath Weapon, 1 Pulse of Murasa | 2 Unfathomable Truths, 2 Maelstrom Colossus, 1 Bonder's Ornament | counter burn, sweep small creatures, gain life; the slowest cards out |
-| Red vs Tron | 2 Gorilla Shaman | 2 Voldaren Epicure | Shaman eats Maps, Barrels, Candy Trails, Ornaments |
+| Tron vs Red | 3 Breath Weapon, 1 Kaervek's Torch, 1 Pulse of Murasa | 2 Unfathomable Truths, 2 Maelstrom Colossus, 1 Bonder's Ornament | sweep the small creatures, kill one at instant speed, gain life; the slowest cards out |
+| Red vs Tron | 2 Gorilla Shaman | 2 Voldaren Epicure | Shaman eats Maps, Barrels, Boulders, Candy Trails, Ornaments |
 
 Rows for Affinity and Elves, to add to the table when those decks land (the
 loader requires both decks to exist):
@@ -77,6 +91,10 @@ out = { "Unfathomable Truths" = 2, "Candy Trail" = 2 }
 | graveyard abilities | ability `zone = "graveyard"` | Bramble Wurm: {2}{G}, exile it from your graveyard: gain 5 |
 | land sacrifice cost | `additional_sac = "land"` | Crop Rotation (a land tapped for its {G} can be the one sacrificed) |
 | choose a creature as a cost | `additional_choose_creature` | Monstrous Emergence: a creature you control or a creature card revealed from hand; its power (last known if it left) is the damage |
+| Equipment (301.5, 702.6) | `subtypes = "Equipment"`, card `equipped = { keywords, power, toughness }`, an `equip` ability (`sorcery_speed`, `targets = ["creature_you_control"]`) with op `attach` | Whispersilk Cloak. `Card.attached_to` holds the equipped creature (bestow Auras use the same field; `Game.is_bestowed` now excludes Equipment, `Game.equipment_on` lists what a creature wears). The grants are static: `keywords` / `power` / `toughness` read them while attached. Equipping again moves it; when the creature leaves or stops being a creature, the SBA that frees bestowed Auras unattaches the Equipment, which stays on the battlefield |
+| shroud | keyword `shroud` | `Game.targetable`: never a target candidate and an illegal target on resolution, for either player (so an equip ability cannot target a creature that already wears the Cloak) |
+| can't be blocked | keyword `unblockable` | `Game._can_block` (and the bots' `_blockers_for`, the `ready_evasive_power` feature in both engines) |
+| filter that taps an artifact | `{1}, {T}` mana ability on Giant's Boulder | the existing filter rules; a tapped Boulder can neither filter nor pay its {7} ability's {T} |
 
 New ops: `dig` (Ancient Stirrings), `cascade`, `station`, `surveil`,
 `damage_target_from` (`from = "x"`: Kaervek's Torch; `"chosen_power"`:
@@ -85,7 +103,9 @@ Monstrous Emergence), `return_random_from_graveyard` (Haunted Fengraf),
 parameters: `draw.each_controlling` (Bonder's Ornament), `gain_life.n_from =
 "source_power"` (Golem), search filter `colorless`, sacrifice filter
 `land`. `exile_target` (Scour from Existence) is the sideboard branch's.
-Generous Ent and its Food token come from the Elves branch.
+Generous Ent and its Food token come from the Elves branch. `attach`
+(equip) is new with Whispersilk Cloak; Giant's Boulder needs no new op
+(`scry` 2, a filter, `destroy_target` on `permanent`).
 
 ## Known simplifications
 
@@ -105,6 +125,10 @@ Generous Ent and its Food token come from the Elves branch.
   killed in response).
 - **Charge counters** are not in `observe()` or the features yet; a
   stationed Kill-Ship shows up as a creature.
+- **Which creature wears the Cloak** is not an entity feature yet: the Cloak
+  has `e:attached`, the equipped creature `e:kw:shroud` and
+  `e:kw:unblockable`, but the link between the two is not encoded (for the
+  feature set work, like bestow's `attached_to`).
 - Feature previews (`pv:mana_left_after`) count mana sources, not units, so
   they undercount assembled Tron (feature-set territory).
 
@@ -116,9 +140,16 @@ completes Tron), cheap artifacts early, then the biggest affordable threat
 while seven mana is far away). Card draw (Truths, Candy Trail, Ornament)
 waits for the opponent's end step; summoning-sick creatures station the
 Kill-Ship in main 2; Ent forestcycles while a Forest can still be found;
-the board attacks all-out when the unblockable part is lethal. Sideboard
-cards: Breath Weapon (two or more of theirs die), Scour, Blue Elemental
-Blast, Torch, Emergence, Call Damage Control, Pulse.
+the board attacks all-out when the unblockable part is lethal (creatures
+wearing the Cloak always count as unblocked). Giant's Boulder is a cheap
+artifact on turn one or two (scry 2, a colour filter); its {7} ability
+destroys their best creature at once when it is a big threat (creature
+value 6+, e.g. Cryptic Serpent, Tolarian Terror), else a smaller one in
+their end step. Whispersilk Cloak is cast once there is a creature to wear
+it, equipped in main 1 to the creature that gains most (power, and +3 if it
+can attack this turn) and moved only to one that is clearly better.
+Sideboard cards: Breath Weapon (two or more of theirs die), Scour, Torch,
+Emergence, Call Damage Control, Pulse, the Cloak.
 
 ## Bot-vs-bot (200 game-1 games per matchup, native engine, Apple M3 laptop, shared with other jobs, 2026-10-07)
 

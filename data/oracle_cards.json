@@ -1044,5 +1044,29 @@
   "toughness": null,
   "keywords": [],
   "cmc": 2.0
+ },
+ {
+  "name": "Giant's Boulder",
+  "mana_cost": "{1}",
+  "type_line": "Artifact",
+  "oracle_text": "When this artifact enters, scry 2. (Look at the top two cards of your library, then put any number of them on the bottom and the rest on top in any order.)\n{1}, {T}: Add one mana of any color.\n{7}, {T}, Sacrifice this artifact: Destroy target permanent.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Scry"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Whispersilk Cloak",
+  "mana_cost": "{3}",
+  "type_line": "Artifact \u2014 Equipment",
+  "oracle_text": "Equipped creature can't be blocked and has shroud. (It can't be the target of spells or abilities.)\nEquip {2}",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Equip"
+  ],
+  "cmc": 3.0
  }
 ]

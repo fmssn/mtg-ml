@@ -6,7 +6,7 @@ Sideboard plans (what comes in and out against each opponent) are data:
 Sources: MTGGoldfish archetype pages for Pauper "Jund Wildfire" and
 "Blue Terror", fetched 2026-10-05; Red Madness: the 60 + 15 given by the
 project owner on 2026-10-07 (a 2026 Pauper Challenge style list); Tron: the
-modal counts of 443 Q3 2026 lists (docs/tron.md).
+typical list of 443 Q3 2026 lists (docs/tron.md).
 """
 
 JUND_WILDFIRE = {
@@ -65,9 +65,9 @@ RED_MADNESS = {
     "Mountain": 18,
 }
 
-# Tron (Q3 2026, the green artifact-ramp build): every card played in at
-# least half of the lists at its modal count sums to 64; the four Giant's
-# Boulder (51%, the least played) are cut.
+# Tron (Q3 2026, the green artifact-ramp build): the typical list of all
+# 443 Tron lists from 2026-07-05 to 2026-10-02 (Pauper-Research dashboard,
+# "Builds and decisions": the aggregate decklist), unchanged (docs/tron.md).
 TRON = {
     "Urza's Mine": 4,
     "Urza's Power Plant": 4,
@@ -80,12 +80,13 @@ TRON = {
     "Ancient Stirrings": 4,
     "Crop Rotation": 3,
     "Barrels of Blasting Jelly": 4,
+    "Giant's Boulder": 4,
     "Bonder's Ornament": 2,
-    "Candy Trail": 4,
-    "Unfathomable Truths": 4,
+    "Candy Trail": 3,
+    "Unfathomable Truths": 2,
     "Bramble Wurm": 4,
     "Generous Ent": 2,
-    "Boulderbranch Golem": 4,
+    "Boulderbranch Golem": 3,
     "Pinnacle Kill-Ship": 4,
     "Maelstrom Colossus": 4,
 }
@@ -104,17 +105,16 @@ MONO_BLUE_TERROR_SIDEBOARD = {
     "Dispel": 2,
     "Steel Sabotage": 2,
 }
-# Tron: the five cards in at least half of the sideboards (2 Breath Weapon,
-# 3 Relic of Progenitus) and then the next most played (docs/tron.md).
+# Tron: the typical 15 of the same 443 lists, unchanged (docs/tron.md).
 TRON_SIDEBOARD = {
-    "Breath Weapon": 2,
+    "Breath Weapon": 3,
     "Relic of Progenitus": 3,
     "Call Damage Control": 2,
+    "Monstrous Emergence": 2,
     "Scour from Existence": 2,
     "Kaervek's Torch": 1,
     "Pulse of Murasa": 1,
-    "Monstrous Emergence": 2,
-    "Blue Elemental Blast": 2,
+    "Whispersilk Cloak": 1,
 }
 RED_MADNESS_SIDEBOARD = {
     "Gorilla Shaman": 2,

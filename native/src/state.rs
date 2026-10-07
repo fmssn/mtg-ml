@@ -751,7 +751,7 @@ impl State {
     }
 
     pub fn is_bestowed(&self, c: &Card) -> bool {
-        c.zone == Zone::Battlefield && c.attached_to.is_some()
+        c.zone == Zone::Battlefield && c.attached_to.is_some() && !c.face().is_equipment
     }
 
     /// A Spacecraft with enough charge counters is an artifact creature (702.184).
@@ -781,16 +781,30 @@ impl State {
         c.face().types & T_LAND != 0
     }
 
+    /// Bestowed Auras attached to `oid`.
     fn auras_on(&self, oid: u32) -> impl Iterator<Item = &Card> + '_ {
-        self.battlefield.iter().map(move |&a| self.c(a)).filter(move |a| a.attached_to == Some(oid))
+        self.battlefield.iter().map(move |&a| self.c(a)).filter(move |a| a.attached_to == Some(oid) && !a.face().is_equipment)
+    }
+
+    /// Equipment attached to `oid` (301.5).
+    pub fn equipment_on(&self, oid: u32) -> impl Iterator<Item = &Card> + '_ {
+        self.battlefield.iter().map(move |&a| self.c(a)).filter(move |a| a.attached_to == Some(oid) && a.face().is_equipment)
     }
 
     pub fn power(&self, c: &Card) -> i32 {
-        c.face().power.unwrap_or(0) + c.counters + c.temp.iter().map(|t| t.power).sum::<i32>() + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
+        c.face().power.unwrap_or(0)
+            + c.counters
+            + c.temp.iter().map(|t| t.power).sum::<i32>()
+            + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
+            + self.equipment_on(c.oid).map(|e| e.face().equipped_power).sum::<i32>()
     }
 
     pub fn toughness(&self, c: &Card) -> i32 {
-        c.face().toughness.unwrap_or(0) + c.counters + c.temp.iter().map(|t| t.toughness).sum::<i32>() + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
+        c.face().toughness.unwrap_or(0)
+            + c.counters
+            + c.temp.iter().map(|t| t.toughness).sum::<i32>()
+            + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
+            + self.equipment_on(c.oid).map(|e| e.face().equipped_toughness).sum::<i32>()
     }
 
     pub fn keywords(&self, c: &Card) -> u32 {
@@ -805,11 +819,27 @@ impl State {
             let d = db();
             k |= d.kw("reach") | d.kw("trample");
         }
+        for e in self.equipment_on(c.oid) {
+            k |= e.face().equipped_keywords;
+        }
         k
+    }
+
+    /// Shroud (702.18): it can't be the target of spells or abilities.
+    pub fn targetable(&self, c: &Card) -> bool {
+        !self.has_known(c, "shroud")
     }
 
     pub fn has(&self, c: &Card, kw: &str) -> bool {
         self.keywords(c) & db().kw(kw) != 0
+    }
+
+    /// `has` for a keyword that may be missing from the card pool (false then).
+    pub fn has_known(&self, c: &Card, kw: &str) -> bool {
+        match db().keyword_names.iter().position(|k| k == kw) {
+            Some(i) => self.keywords(c) & (1 << i) != 0,
+            None => false,
+        }
     }
 
     pub fn referenced_oids(&self) -> Vec<u32> {
@@ -1307,11 +1337,17 @@ impl State {
             }
             TK::CreatureOfTargetPlayer if !chosen.is_empty() => {
                 let q = ref_index(chosen[chosen.len() - 1]);
-                return self.battlefield.iter().map(|&c| self.c(c)).filter(|c| self.is_creature(c) && c.controller as u32 == q).map(|c| Ref::Perm(c.oid)).collect();
+                return self
+                    .battlefield
+                    .iter()
+                    .map(|&c| self.c(c))
+                    .filter(|c| self.is_creature(c) && c.controller as u32 == q && self.targetable(c))
+                    .map(|c| Ref::Perm(c.oid))
+                    .collect();
             }
             TK::AnotherCreature => {
                 // With nothing chosen yet (casting checks) it needs a second creature.
-                let creatures: Vec<Ref> = self.battlefield.iter().map(|&c| self.c(c)).filter(|c| self.is_creature(c)).map(|c| Ref::Perm(c.oid)).collect();
+                let creatures: Vec<Ref> = self.battlefield.iter().map(|&c| self.c(c)).filter(|c| self.is_creature(c) && self.targetable(c)).map(|c| Ref::Perm(c.oid)).collect();
                 if chosen.is_empty() {
                     return if creatures.len() >= 2 { creatures } else { vec![] };
                 }
@@ -1322,7 +1358,12 @@ impl State {
         if spec.is_spell() {
             return self.stack.iter().filter(|it| it.kind == SKind::Spell && Some(it.sid) != exclude_sid && self.spell_matches(spec, it)).map(|it| Ref::Stack(it.sid)).collect();
         }
-        let mut out: Vec<Ref> = self.battlefield.iter().filter(|&&c| self.perm_matches(spec, self.c(c), controller)).map(|&c| Ref::Perm(self.c(c).oid)).collect();
+        let mut out: Vec<Ref> = self
+            .battlefield
+            .iter()
+            .filter(|&&c| self.perm_matches(spec, self.c(c), controller) && self.targetable(self.c(c)))
+            .map(|&c| Ref::Perm(self.c(c).oid))
+            .collect();
         if spec == TK::Any {
             out.push(Ref::Player(controller));
             out.push(Ref::Player(1 - controller));
@@ -1375,7 +1416,7 @@ impl State {
             },
             Ref::Perm(oid) => match self.perm(oid) {
                 Some(c) if spec == TK::CreatureOfTargetPlayer && self.c(c).controller as u32 != ref_index(item.targets[i - 1]) => false,
-                Some(c) => self.perm_matches(spec, self.c(c), item.controller),
+                Some(c) => self.perm_matches(spec, self.c(c), item.controller) && self.targetable(self.c(c)),
                 None => false,
             },
         }
@@ -2013,6 +2054,9 @@ impl State {
     }
 
     pub fn can_block(&self, blocker: &Card, attacker: &Card) -> bool {
+        if self.has_known(attacker, "unblockable") {
+            return false;
+        }
         !(self.has(attacker, "flying") && !(self.has(blocker, "flying") || self.has(blocker, "reach")))
     }
 

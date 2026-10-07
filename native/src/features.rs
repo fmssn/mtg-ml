@@ -192,6 +192,7 @@ fn ready(c: &Card, active: bool) -> bool {
 fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
     let d = db();
     let (fly, reach) = (d.kw("flying"), d.kw("reach"));
+    let unblockable = d.keyword_names.iter().position(|k| k == "unblockable").map_or(0, |i| 1u32 << i);
     // (controller, untapped, ready-if-its-controller-is-active, ready otherwise, power, keywords)
     let creatures: Vec<(u8, bool, bool, bool, i64, u32)> = st
         .battlefield
@@ -206,7 +207,7 @@ fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
         let (mut ready_power, mut evasive) = (0i64, 0i64);
         for c in creatures.iter().filter(|c| c.0 == p && if active { c.2 } else { c.3 }) {
             ready_power += c.4;
-            let blockable = blockers.iter().any(|&b| c.5 & fly == 0 || b & (fly | reach) != 0);
+            let blockable = c.5 & unblockable == 0 && blockers.iter().any(|&b| c.5 & fly == 0 || b & (fly | reach) != 0);
             if !blockable {
                 evasive += c.4;
             }

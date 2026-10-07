@@ -332,6 +332,17 @@ def _op_station(g, item, op):
         live.charge += item.data["tapped_power"]
 
 
+def _op_attach(g, item, op):
+    """Equip (702.6): attach the source, if it is still on the battlefield
+    under the ability's controller's control, to the target creature."""
+    live = g.live(item.source)
+    t = g.target(item)
+    if live is None or t is None or live.controller != item.controller:
+        return
+    live.attached_to = t.oid
+    g._log(f"{live.name}#{live.oid} is attached to {t.name}#{t.oid}")
+
+
 def _op_return_random_from_graveyard(g, item, op):
     """Return a card of this type at random from your graveyard to your hand (Haunted Fengraf)."""
     p = item.controller
@@ -419,6 +430,7 @@ OPS = {
     "dig": _op_dig,
     "cascade": _op_cascade,
     "station": _op_station,
+    "attach": _op_attach,
     "return_random_from_graveyard": _op_return_random_from_graveyard,
     "return_from_graveyard": _op_return_from_graveyard,
     "explore_target": _op_explore_target,
@@ -716,13 +728,29 @@ def _land_sac(spec: dict | None) -> tuple[str, int] | None:
     return spec["sacrifice"], spec["n"]
 
 
+def _equipped(spec: dict) -> dict:
+    """`equipped = { keywords, power, toughness }`: what an Equipment gives the equipped creature."""
+    e = spec.get("equipped")
+    if e is None:
+        return {}
+    if set(e) - {"keywords", "power", "toughness"}:
+        raise ValueError(f"{spec['name']}: unknown equipped fields {sorted(set(e) - {'keywords', 'power', 'toughness'})}")
+    if "Equipment" not in spec.get("subtypes", "").split():
+        raise ValueError(f"{spec['name']}: equipped needs the Equipment subtype")
+    return {
+        "equipped_keywords": frozenset(e.get("keywords", ())),
+        "equipped_power": e.get("power", 0),
+        "equipped_toughness": e.get("toughness", 0),
+    }
+
+
 def card_def(spec: dict) -> CardDef:
     known = {
         "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward",
         "targets", "effect", "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped",
         "etb_x_counters", "back", "modes", "abilities", "triggers", "madness", "plot", "overload", "overload_effect",
         "additional_discard", "alternative_cost", "flashback_cost", "bargain", "prototype", "prototype_face", "station",
-        "additional_choose_creature",
+        "additional_choose_creature", "equipped",
     }  # fmt: skip
     unknown = set(spec) - known
     if unknown:
@@ -770,6 +798,7 @@ def card_def(spec: dict) -> CardDef:
         station=spec["station"]["n"] if "station" in spec else 0,
         station_keywords=frozenset(spec["station"].get("keywords", ())) if "station" in spec else frozenset(),
         additional_choose_creature=spec.get("additional_choose_creature", False),
+        **_equipped(spec),
     )
 
 
