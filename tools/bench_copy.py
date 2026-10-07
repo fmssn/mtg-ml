@@ -52,11 +52,11 @@ def main() -> None:
                 copy[n].append(timed(g.copy, reps))
                 if args.engine == "python":
                     since[n].append(len(g.actions) - g._snap.n_actions)
-        # per-decision stepping cost, random play, without and with snapshots
+        # per-decision stepping cost, random play, of a game never copied and of one copied (it snapshots every step)
         for on, out in ((False, plain), (True, snap)):
             g = new_game(sc, args.engine, log=False)
             if on:
-                g = g.copy()
+                g.copy()  # the copied game takes snapshots from now on
             rng = random.Random(seed)
             k = 0
             t = time.perf_counter()
