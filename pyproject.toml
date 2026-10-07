@@ -8,6 +8,7 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 rl = ["torch>=2.2", "numpy"]
+review = ["anthropic"]  # only for `mtg_ml.review --backend claude`
 
 [build-system]
 requires = ["setuptools>=68"]

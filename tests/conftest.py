@@ -10,15 +10,21 @@ import pytest
 
 from mtg_ml.backend import ENV_VAR, native_available
 
-ENGINE_MODULES = {"test_action_decomposition", "test_cards_blue", "test_cards_jund", "test_cards_red", "test_cards_elves", "test_rules", "test_sideboard", "test_view_env", "test_bots", "test_fuzz"}
+ENGINE_MODULES = {"test_action_decomposition", "test_audit", "test_cards_blue", "test_cards_jund", "test_cards_red", "test_rules", "test_sideboard", "test_view_env", "test_bots", "test_fuzz"}
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "python_only: test reads or mutates reference-engine internals")
 
 
+def is_engine_module(name: str) -> bool:
+    """Engine-parametrized modules: ENGINE_MODULES plus every card module
+    (`test_cards_<deck>.py`), so new decks need no edit here."""
+    return name in ENGINE_MODULES or name.startswith("test_cards_")
+
+
 def pytest_generate_tests(metafunc):
-    if metafunc.module.__name__.rsplit(".", 1)[-1] in ENGINE_MODULES:
+    if is_engine_module(metafunc.module.__name__.rsplit(".", 1)[-1]):
         metafunc.parametrize("engine", ["python", "native"], indirect=True)
 
 
