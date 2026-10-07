@@ -249,7 +249,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 ## Adding a whole deck
 
 1. Every card of the 75 through the card steps above.
-2. `mtg_ml/engine/decks.py`: the list, its sideboard and the sideboard plan against each opponent (`DECKS`, `SIDEBOARDS`, `SIDEBOARD_PLANS`).
+2. `mtg_ml/engine/decks.py`: the list and its 15-card sideboard (`DECKS`, `SIDEBOARDS`); `mtg_ml/engine/sideboard_plans.toml`: one plan row against each existing deck and one for each existing deck against it ([sideboarding.md](sideboarding.md)).
 3. Matchups are currently fixed to seat 0 = Jund Wildfire, seat 1 = Mono Blue Terror: `match.DECK_NAMES`, `bots.make_bot(seat)`, `agents.play_game`'s default decks and the RL deck conditioning (`seat:` feature) assume it. A third deck means generalizing those to (deck, seat) pairs first.
 4. A scripted bot for the deck (`mtg_ml/bots/<deck>.py`, subclass `Bot`) so there is a baseline opponent.
 5. Regenerate the golden digests on purpose (`python -m mtg_ml.trace record --games 210`), run the full test suite and a long differential fuzz (`--games 5000`).

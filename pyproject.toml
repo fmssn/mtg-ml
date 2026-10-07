@@ -17,7 +17,7 @@ build-backend = "setuptools.build_meta"
 include = ["mtg_ml*"]
 
 [tool.setuptools.package-data]
-"mtg_ml.engine" = ["cards.toml"]
+"mtg_ml.engine" = ["cards.toml", "sideboard_plans.toml"]
 
 [tool.ruff]
 line-length = 120
