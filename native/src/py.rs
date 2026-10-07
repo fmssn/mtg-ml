@@ -98,6 +98,9 @@ fn data_list(py: Python<'_>, st: &State, d: &Data) -> PyObject {
     if let Some(b) = d.discarded_land {
         v.push(("discarded_land", b.into_py(py)));
     }
+    if let Some(n) = d.storm {
+        v.push(("storm", n.into_py(py)));
+    }
     v.sort_by(|a, b| a.0.cmp(b.0));
     v.into_py(py)
 }

@@ -247,3 +247,21 @@ def test_relic_of_progenitus_both_abilities():
     resolve_stack(g)
     assert not g.players[0].graveyard and not g.players[1].graveyard
     assert "Relic of Progenitus" in names(g.players[0].exile) and len(g.players[0].hand) == 1
+
+
+def test_weather_the_storm_gains_3_per_spell_cast_this_turn():
+    g = scenario(p0={"hand": ["Weather the Storm"], "battlefield": ["Forest", "Swamp"], "life": 5}, p1={"hand": ["Lightning Bolt", "Lava Dart"], "battlefield": MOUNTAINS(2)}, active=1)
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target player 0 (opponent)")
+    pay(g)
+    pass_priority(g)  # p0 gets priority with Bolt on the stack
+    choose(g, "Cast Weather the Storm")
+    pay(g)
+    assert g.stack[-1].name == "Weather the Storm: storm"
+    resolve_stack(g)  # storm (one spell before it: +3), Weather (+3), then Bolt (-3)
+    assert g.players[0].life == 5 + 3 + 3 - 3
+    g = scenario(p0={"hand": ["Weather the Storm"], "battlefield": ["Forest", "Swamp"], "life": 5})
+    choose(g, "Cast Weather the Storm")
+    pay(g)
+    resolve_stack(g)
+    assert g.players[0].life == 8  # nothing cast before it: no copies

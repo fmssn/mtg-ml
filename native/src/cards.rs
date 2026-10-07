@@ -207,7 +207,8 @@ pub enum Op {
     TapTarget { skip_untap: i32 },
     GrantTarget { keywords: u32 },
     CreateToken { token: DefId, n: i32 },
-    GainLife { n: i32 },
+    /// per_storm: n for each spell cast before this one this turn (Weather the Storm's storm trigger).
+    GainLife { n: i32, per_storm: bool },
     LoseLife { who: Who, n: i32 },
     CounterOnSource,
     DamageTarget { n: i32, index: usize, n_landfall: Option<i32> },
@@ -533,7 +534,8 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "tap_target" => &["op", "skip_untap"],
             "grant_target" => &["op", "keywords"],
             "create_token" => &["op", "token", "n"],
-            "gain_life" | "scry" | "discard" => &["op", "n"],
+            "gain_life" => &["op", "n", "per_storm"],
+            "scry" | "discard" => &["op", "n"],
             "damage_target" => &["op", "n", "index", "n_landfall"],
             "damage_each_opponent" => &["op", "n", "if_discarded_nonland"],
             "counter_target" => &["op", "if_color"],
@@ -568,7 +570,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 let name = req_str(t, "token")?;
                 Op::CreateToken { token: *tokens.get(name).ok_or_else(|| format!("unknown token {name:?}"))?, n: get_int(t, "n")?.unwrap_or(1) }
             }
-            "gain_life" => Op::GainLife { n: n()? },
+            "gain_life" => Op::GainLife { n: n()?, per_storm: get_bool(t, "per_storm")? },
             "lose_life" => Op::LoseLife {
                 who: match req_str(t, "who")? {
                     "you" => Who::You,

@@ -213,6 +213,8 @@ pub struct Data {
     pub source_oid: Option<u32>,
     /// Grab the Prize: whether the card discarded to cast it was a land.
     pub discarded_land: Option<bool>,
+    /// Cast triggers: spells cast before this one this turn (storm).
+    pub storm: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -467,6 +469,8 @@ pub struct State {
     pub turn: i32,
     pub step_name: &'static str,
     pub lands_played: i32,
+    /// Spells cast this turn by both players: the storm count.
+    pub spells_cast_this_turn: i32,
     pub attackers: Vec<u32>,
     pub blocked: Vec<u32>,
     /// blocker oid -> attacker oid, insertion ordered (Python dict).
@@ -535,6 +539,7 @@ impl State {
             turn: 0,
             step_name: "untap",
             lands_played: 0,
+            spells_cast_this_turn: 0,
             attackers: vec![],
             blocked: vec![],
             blocks: vec![],
@@ -1105,11 +1110,13 @@ impl State {
         let it = &self.stack[self.stack_pos(sid).unwrap()];
         let card = it.card.unwrap();
         let controller = it.controller;
+        let storm = self.spells_cast_this_turn; // spells cast before this one this turn
+        self.spells_cast_this_turn += 1;
         let mut new = vec![];
         let face = self.c(card).face();
         for t in &face.triggers {
             if t.event == Event::Cast {
-                new.push(PendingTrigger { controller, source: Src::Live(card), tdef: t, data: Data { spell_sid: Some(sid), ..Default::default() } });
+                new.push(PendingTrigger { controller, source: Src::Live(card), tdef: t, data: Data { spell_sid: Some(sid), storm: Some(storm), ..Default::default() } });
             }
         }
         for &perm in &self.battlefield {
@@ -1810,6 +1817,7 @@ impl State {
 
     pub fn begin_turn(&mut self) {
         self.lands_played = 0;
+        self.spells_cast_this_turn = 0;
         for p in self.players.iter_mut() {
             p.cards_drawn_this_turn = 0;
         }

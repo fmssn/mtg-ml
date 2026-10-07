@@ -121,6 +121,7 @@ class Game:
         self.turn = 0
         self.step_name = "untap"
         self.lands_played = 0
+        self.spells_cast_this_turn = 0  # by both players: the storm count
         self.attackers: list[int] = []
         self.blocked: set[int] = set()
         self.blocks: dict[int, int] = {}  # blocker oid -> attacker oid
@@ -301,6 +302,7 @@ class Game:
 
     def _begin_turn(self) -> None:
         self.lands_played = 0
+        self.spells_cast_this_turn = 0
         for p in self.players:
             p.cards_drawn_this_turn = 0
         self._clear_combat()
@@ -823,9 +825,11 @@ class Game:
                     self.pending.append(PendingTrigger(perm.controller, perm, t))
 
     def _emit_cast(self, item: StackItem) -> None:
+        storm = self.spells_cast_this_turn  # spells cast before this one this turn
+        self.spells_cast_this_turn += 1
         for t in item.card.face.triggers:
             if t.event == "cast":
-                self.pending.append(PendingTrigger(item.controller, item.card, t, {"spell_sid": item.sid}))
+                self.pending.append(PendingTrigger(item.controller, item.card, t, {"spell_sid": item.sid, "storm": storm}))
         for perm in self.battlefield:
             if perm.controller != item.controller:
                 continue

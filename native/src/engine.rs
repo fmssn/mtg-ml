@@ -1151,7 +1151,10 @@ impl Eng {
                     self.s().create_token(ctl, *token);
                 }
             }
-            Op::GainLife { n } => self.s().players[ctl as usize].life += n,
+            Op::GainLife { n, per_storm } => {
+                let k = if *per_storm { item.data.storm.unwrap_or(0) } else { 1 };
+                self.s().players[ctl as usize].life += n * k;
+            }
             Op::LoseLife { who, n } => {
                 let st = self.s();
                 let p = match who {

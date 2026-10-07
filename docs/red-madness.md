@@ -27,7 +27,7 @@ Plans are keyed by (deck, opponent):
 | deck vs opponent | in | out | why |
 |---|---|---|---|
 | Red vs Jund | 2 Electrickery, 2 Searing Blaze, 2 Gorilla Shaman | 2 Voldaren Epicure, 2 Highway Robbery, 1 Guttersnipe, 1 Sneaky Snacker | overloaded Electrickery sweeps Spawn, Krark-Clan Shaman, Gixian Infiltrator, Refurbished Familiar; Searing Blaze kills Writhing Chrysalis; Gorilla Shaman eats Clues, Maps, Spellbombs, Wellsprings. Out: x/1s that die to Krark-Clan Shaman, the slowest draw |
-| Jund vs Red | 2 Go for the Throat, 2 Duress | 2 Cleansing Wildfire, 1 Nyxborn Hydra, 1 Eviscerator's Insight | cheap removal for Guttersnipe / Flamebreather, Duress for burn; Red Elemental Blast has no target. Lembas, Toxin Analysis (lifelink) and Makeshift Munitions stay |
+| Jund vs Red | 3 Weather the Storm | 2 Cleansing Wildfire, 1 Nyxborn Hydra | life against a burn turn: Weather the Storm gains 3 per spell cast that turn (storm, implemented as one cast trigger: the copies could only differ by being countered one by one, and Red has no counter for a green spell). Cleansing Wildfire is a slow cantrip against basic Mountains. Lembas, Toxin Analysis (lifelink) and Makeshift Munitions stay |
 | Red vs Blue | 4 Pyroblast, 2 Electrickery | 4 Highway Robbery, 2 Grab the Prize | (no Blue-vs-Red training yet) |
 | Blue vs Red | 2 Blue Elemental Blast, 2 Dispel | 2 Sleep of the Dead, 2 Deem Inferior | |
 

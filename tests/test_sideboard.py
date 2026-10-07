@@ -129,7 +129,7 @@ def test_postboard_decks_are_legal():
     assert "Duress" not in g1[0] and "Duress" in g2[0] and "Dispel" in g2[1]
     g1, g2 = match_decks(1, "jund_madness"), match_decks(2, "jund_madness")
     assert "Fiery Temper" in g1[1] and "Electrickery" not in g1[1] and "Electrickery" in g2[1]
-    assert "Go for the Throat" in g2[0] and "Red Elemental Blast" not in g2[0]
+    assert g2[0].count("Weather the Storm") == 3 and g2[0].count("Cleansing Wildfire") == 2 and "Red Elemental Blast" not in g2[0]
 
 
 def test_deck_names_only_for_non_default_decks():

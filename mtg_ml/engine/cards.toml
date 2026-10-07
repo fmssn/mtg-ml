@@ -565,6 +565,17 @@ text = "Destroy target creature that isn't an artifact creature."
 targets = ["nonartifact_creature"]
 effect = [{ op = "destroy_target" }]
 
+# Storm as a cast trigger: the copies of Weather the Storm would only differ
+# from one trigger by being counterable one by one, and it is only boarded
+# in against Red Madness, which has no counterspell for a green spell.
+[[card]]
+name = "Weather the Storm"
+cost = "{1}{G}"
+types = "Instant"
+text = "You gain 3 life. Storm."
+effect = [{ op = "gain_life", n = 3 }]
+triggers = [{ name = "storm", event = "cast", effect = [{ op = "gain_life", n = 3, per_storm = true }] }]
+
 [[card]]
 name = "Duress"
 cost = "{B}"

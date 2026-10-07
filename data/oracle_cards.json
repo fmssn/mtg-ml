@@ -664,5 +664,17 @@
   "toughness": null,
   "keywords": [],
   "cmc": 1.0
+ },
+ {
+  "name": "Weather the Storm",
+  "mana_cost": "{1}{G}",
+  "type_line": "Instant",
+  "oracle_text": "You gain 3 life.\nStorm (When you cast this spell, copy it for each spell cast before it this turn.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Storm"
+  ],
+  "cmc": 2.0
  }
 ]

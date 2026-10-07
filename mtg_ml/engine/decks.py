@@ -68,6 +68,7 @@ JUND_WILDFIRE_SIDEBOARD = {
     "Red Elemental Blast": 2,
     "Go for the Throat": 2,
     "Duress": 2,
+    "Weather the Storm": 3,
 }
 MONO_BLUE_TERROR_SIDEBOARD = {
     "Blue Elemental Blast": 2,
@@ -93,12 +94,13 @@ SIDEBOARD_PLANS = {
         "in": {"Blue Elemental Blast": 2, "Dispel": 2, "Steel Sabotage": 2},
         "out": {"Force Spike": 3, "Sleep of the Dead": 2, "Deem Inferior": 1},
     },
-    # Against Red Madness Jund wants cheap removal for Guttersnipe and
-    # Flamebreather and Duress for burn; Red Elemental Blast has no target.
-    # Lembas, Toxin Analysis (lifelink) and Munitions (pings x/1s) stay in.
+    # Against Red Madness Jund wants life: Weather the Storm gains 3 per spell
+    # cast that turn, often 6-12 against a burn turn. Out: Cleansing Wildfire
+    # (Red runs only basic Mountains, so it is a slow cantrip) and the
+    # Nyxborn Hydra. Lembas, Toxin Analysis (lifelink) and Munitions stay in.
     ("jund_wildfire", "red_madness"): {
-        "in": {"Go for the Throat": 2, "Duress": 2},
-        "out": {"Cleansing Wildfire": 2, "Nyxborn Hydra": 1, "Eviscerator's Insight": 1},
+        "in": {"Weather the Storm": 3},
+        "out": {"Cleansing Wildfire": 2, "Nyxborn Hydra": 1},
     },
     # Red against Jund: Electrickery (overloaded) sweeps Spawn, Krark-Clan
     # Shaman, Gixian Infiltrator and Refurbished Familiar; Searing Blaze kills

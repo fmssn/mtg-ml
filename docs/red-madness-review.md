@@ -21,6 +21,11 @@ point at the learning setup.
 
 Red won 16 of the 20 games, and 169 of the 200 (84% of game 1s, 86% of game 2s).
 
+The run and these games used the first Jund plan against Red (+2 Go for
+the Throat, +2 Duress). That plan was wrong: since 2026-10-07 Jund boards
++3 Weather the Storm, -2 Cleansing Wildfire, -1 Nyxborn Hydra
+(`docs/red-madness.md`), so game-2 numbers from this run do not carry over.
+
 ## 1. Engine mistakes
 
 **None found.** The checks covered:

@@ -123,7 +123,9 @@ def _op_create_token(g, item, op):
 
 
 def _op_gain_life(g, item, op):
-    g.gain_life(item.controller, op["n"])
+    """per_storm: n for each spell cast before this one this turn (a storm
+    trigger standing in for the copies: Weather the Storm)."""
+    g.gain_life(item.controller, op["n"] * (item.data["storm"] if op.get("per_storm") else 1))
 
 
 def _op_lose_life(g, item, op):
