@@ -321,7 +321,7 @@ def main(argv=None) -> None:
     r.add_argument("--games", type=int, default=1)
     r.add_argument("--out", default="replays", help="output directory")
     r.add_argument("--engine", default=None, help="python or native; default: $MTG_ENGINE, else python")
-    r.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue or jund_madness")
+    r.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue, jund_madness or blue_madness")
     r.add_argument("--match-game", type=int, default=1, help="1: maindecks; 2/3: sideboarded")
     r.add_argument("--starting-player", type=int, default=None, help="0 or 1 (default: by the seed)")
     s = sub.add_parser("serve", help="serve the web viewer")

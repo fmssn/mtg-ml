@@ -506,7 +506,7 @@ class _Server:
             return self.ids[key]
         from .features import OPTION_DIM, STATE_DIM
         from .rollout import load_net
-        from .stacked import PolicyStack
+        from .stacked import PolicyStack, stack_config
 
         path, version = key
         self.drain()  # batches on the GPU read the weights about to change
@@ -528,7 +528,7 @@ class _Server:
         if stackable and self.stack is None:
             self.stack = PolicyStack(net.config, self.cfg.policy_slots, self.device)
             self.free = list(range(self.cfg.policy_slots - 1, -1, -1))
-        if stackable and net.config == self.stack.config:
+        if stackable and stack_config(net.config) == self.stack.config:
             if not self.free:
                 self._grow()
             pid = self.free.pop()

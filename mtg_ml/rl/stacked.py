@@ -137,6 +137,16 @@ def _table_dims(config: dict) -> dict:
     return out
 
 
+# Config keys no weight depends on: policies differing only there share a stack
+# (a run on a newer feature set plays pool snapshots of an older one).
+_NO_WEIGHTS = ("features",)
+
+
+def stack_config(config: dict) -> dict:
+    """`config` without the keys no weight depends on."""
+    return {k: v for k, v in config.items() if k not in _NO_WEIGHTS}
+
+
 class PolicyStack:
     """The weights of up to `capacity` policies of one config, stacked.
     Slot k holds one policy; `load(k, net)` copies a PolicyNet in place
@@ -147,7 +157,7 @@ class PolicyStack:
             raise ValueError(f"config {config} is not stackable (trunks {STACKABLE_TRUNKS}, no entity attention)")
         from .model import PolicyNet
 
-        self.config = dict(config)
+        self.config = stack_config(config)
         self.capacity = capacity
         self.device = torch.device(device)
         with torch.device("meta"):
@@ -174,7 +184,7 @@ class PolicyStack:
         return config.get("trunk") in STACKABLE_TRUNKS and not config.get("entity_attn")
 
     def load(self, slot: int, net) -> None:
-        if net.config != self.config:
+        if stack_config(net.config) != self.config:
             raise ValueError("a stack holds policies of one config")
         sd = net.state_dict()
         with torch.no_grad():

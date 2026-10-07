@@ -385,7 +385,7 @@ def main(argv=None) -> None:
     )
     f.add_argument("--auto-mana", action="store_true", help="play with Game(auto_mana=True): colour-preserving auto payment")
     f.add_argument("--auto-pass", action="store_true", help="play with Game(auto_pass=True): collapse uneventful priority passes")
-    f.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue or jund_madness")
+    f.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue, jund_madness or blue_madness")
     r = sub.add_parser("repro", help="replay a saved divergence")
     r.add_argument("file")
     args = ap.parse_args(argv)
