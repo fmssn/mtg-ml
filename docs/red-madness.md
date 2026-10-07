@@ -7,31 +7,26 @@ Wildfire in seat 0 and Red Madness in seat 1.
 
 ## Decklist (`engine/decks.py`)
 
-| main | | sideboard | |
-|---|---|---|---|
-| 3 Guttersnipe | 4 Lava Dart | 2 Gorilla Shaman | 2 Searing Blaze |
-| 4 Kessig Flamebreather | 3 Fireblast | 2 Martyr of Ashes | 2 Electrickery |
-| 4 Voldaren Epicure | 4 Fiery Temper | 4 Pyroblast | 3 Relic of Progenitus |
-| 4 Sneaky Snacker | 4 Faithless Looting | | |
-| 4 Lightning Bolt | 4 Highway Robbery | | |
-| 18 Mountain | 4 Grab the Prize | | |
+| main | |
+|---|---|
+| 3 Guttersnipe | 4 Lava Dart |
+| 4 Kessig Flamebreather | 3 Fireblast |
+| 4 Voldaren Epicure | 4 Fiery Temper |
+| 4 Sneaky Snacker | 4 Faithless Looting |
+| 4 Lightning Bolt | 4 Highway Robbery |
+| 18 Mountain | 4 Grab the Prize |
 
 Given by the project owner on 2026-10-07. Sneaky Snacker ({U}{B}) is never
 cast here: it is discarded and returns from the graveyard on the third draw
 of a turn.
 
-## Sideboard plans (games 2 and 3)
+## Sideboard and plans (games 2 and 3)
 
-Plans are keyed by (deck, opponent):
-
-| deck vs opponent | in | out | why |
-|---|---|---|---|
-| Red vs Jund | 2 Electrickery, 2 Searing Blaze, 2 Gorilla Shaman | 2 Voldaren Epicure, 2 Highway Robbery, 1 Guttersnipe, 1 Sneaky Snacker | overloaded Electrickery sweeps Spawn, Krark-Clan Shaman, Gixian Infiltrator, Refurbished Familiar; Searing Blaze kills Writhing Chrysalis; Gorilla Shaman eats Clues, Maps, Spellbombs, Wellsprings. Out: x/1s that die to Krark-Clan Shaman, the slowest draw |
-| Jund vs Red | 3 Weather the Storm | 2 Cleansing Wildfire, 1 Nyxborn Hydra | life against a burn turn: Weather the Storm gains 3 per spell cast that turn (storm, implemented as one cast trigger: the copies could only differ by being countered one by one, and Red has no counter for a green spell). Cleansing Wildfire is a slow cantrip against basic Mountains. Lembas, Toxin Analysis (lifelink) and Makeshift Munitions stay |
-| Red vs Blue | 4 Pyroblast, 2 Electrickery | 4 Highway Robbery, 2 Grab the Prize | (no Blue-vs-Red training yet) |
-| Blue vs Red | 2 Blue Elemental Blast, 2 Dispel | 2 Sleep of the Dead, 2 Deem Inferior | |
-
-Jund vs Blue is unchanged (golden digests identical).
+Since 2026-10-07 the sideboard is the typical Q3 2026 15 (4 Pyroblast, 3 Relic
+of Progenitus, 2 Red Elemental Blast, 2 Cast into the Fire, 2 Searing Blaze, 2
+End the Festivities) and the plans live in `engine/sideboard_plans.toml`
+([sideboarding.md](sideboarding.md)). The first sideboard (Gorilla Shaman,
+Martyr of Ashes, Electrickery) stays in the card pool.
 
 ## Rules added
 

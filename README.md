@@ -2,7 +2,7 @@
 
 A rules engine and self-play environment for **Magic: The Gathering (Pauper)**, built so a reinforcement-learning agent can be trained on one fixed matchup:
 
-**Jund Wildfire** (player 0) vs. **Mono Blue Terror** (player 1). Games use the London mulligan. Matches are best of three, with a fixed sideboard plan for games 2 and 3. Every rule the 41 cards (35 maindeck, 6 sideboard) need is implemented in full.
+**Jund Wildfire** (player 0) vs. **Mono Blue Terror** (player 1). Games use the London mulligan. Matches are best of three, with real 15-card sideboards and a sideboarding decision before games 2 and 3. Every rule the cards need is implemented in full.
 
 Background research and the roadmap: [`docs/research-mtg-pauper-rl.md`](docs/research-mtg-pauper-rl.md).
 
@@ -83,18 +83,18 @@ Architecture, determinism, the differential suite and all benchmarks: [`docs/nat
 ## Mulligans, sideboards and matches
 
 - **Mulligan** (`Game(mulligans=True)`, the default): London mulligan (CR 103.5) with no free mulligan. Each decision is a `mulligan` decision ("Keep" / "Mulligan"), starting with the starting player. Once a player keeps, they put one card per mulligan on the bottom of their library: one `choose_card` decision per card, private to that player. Mulligan counts are public (`observe()["self"/"opponent"]["mulligans"]`). `RandomAgent` always keeps. The bots keep 7 with 2–5 lands (Jund) or 2–4 lands (Blue; one land is fine with two cantrips), and always keep 5.
-- **Sideboards** (`mtg_ml/engine/decks.py`): six matchup-relevant cards per deck, built from public sideboard guides rather than one specific 15-card list.
-  - Jund brings in 2 Red Elemental Blast, 2 Go for the Throat and 2 Duress, and takes out 2 Lembas, 2 Toxin Analysis, 1 Makeshift Munitions and 1 Nyxborn Hydra.
-  - Blue brings in 2 Blue Elemental Blast, 2 Dispel and 2 Steel Sabotage, and takes out 3 Force Spike, 2 Sleep of the Dead and 1 Deem Inferior.
+- **Sideboards** (`mtg_ml/engine/decks.py`): each deck's typical 15 from the Q3 2026 tournament data. What comes in and out against each opponent is a table, `mtg_ml/engine/sideboard_plans.toml` (one row per deck pair, with the reason); [docs/sideboarding.md](docs/sideboarding.md) has the format and the policy interface.
+  - Jund vs Blue brings in 3 Duress, 2 Pyroblast, 1 Faerie Macabre and 1 Terminate for 2 Lembas, 2 Cleansing Wildfire, 1 Makeshift Munitions, 1 Nyxborn Hydra and 1 Toxin Analysis.
+  - Blue vs Jund brings in 4 Annul and 2 Hydroblast for 3 Force Spike, 2 Sleep of the Dead and 1 Deem Inferior.
   - Modal spells ("choose one") are cast as separate options, for example `Cast Red Elemental Blast (counter)` with key `(..., "normal", "counter")`.
 - **Matches** (`mtg_ml/match.py`):
   - game 1 uses the maindecks and a random starting player;
-  - games 2 and 3 use the sideboarded decks, and the loser of the previous game plays first (after a draw, the previous starting player starts again);
+  - before games 2 and 3 each seat's `SideboardPolicy` picks its plan (default `PlanMatrixPolicy`: the table's row), and the loser of the previous game plays first (after a draw, the previous starting player starts again);
   - a match ends at two game wins or after three games.
   - `Game.match_game` and the `postboard:` state feature tell agents which decks are in play.
 - **Training:** `--postboard-frac` (default 0.5) sets the share of training games played with sideboarded decks. Each evaluation includes `--eval-bo3-matches` best-of-three matches against the bots. `python -m mtg_ml.rl.evaluate CKPT bot --bo3` runs that evaluation on its own.
 
-Bot vs bot, 200 matches: Jund wins 23.5% of matches. Per game, Jund wins 27.5% of game 1, 37.5% of game 2 and 32.7% of game 3, so sideboarding helps Jund as the guides suggest. Real-world data puts Jund at about 55–61% in this matchup, so the bots still underplay Jund; the card rules themselves have been audited.
+Bot vs bot, 200 matches each (2026-10-07, 8-core dev Mac, native engine): Jund wins 30.0% of game 1 and 35.5% of games 2/3 against Blue (22.5% of games 2/3 without sideboarding); Blue beats Red in 63.5% of games 2/3 (35.0% of game 1). The Q3 2026 match data puts Jund at 46% against Blue, so the bots still underplay Jund; the card rules themselves have been audited.
 
 ## Scripted bots
 

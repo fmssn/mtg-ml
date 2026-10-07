@@ -3,9 +3,18 @@
 Sideboard plans (what comes in and out against each opponent) are data:
 `sideboard_plans.toml`, loaded and validated by `sideboard.py`.
 
-Sources: MTGGoldfish archetype pages for Pauper "Jund Wildfire" and
-"Blue Terror", fetched 2026-10-05; Red Madness: the 60 + 15 given by the
-project owner on 2026-10-07 (a 2026 Pauper Challenge style list).
+Maindecks: MTGGoldfish archetype pages for Pauper "Jund Wildfire" and
+"Blue Terror", fetched 2026-10-05; Red Madness: the 60 given by the project
+owner on 2026-10-07 (a 2026 Pauper Challenge style list).
+
+Sideboards (since 2026-10-07): the typical Q3 2026 sideboards of the
+Pauper-Research project (fmssn, `reports/2026-Q3`, `prototypes/deck_decisions/
+data.js`; "Jund Midrange" there is Jund Wildfire): the modal count of every
+card played in at least about half of the archetype's lists (970 Red Madness,
+666 Mono Blue Terror, 428 Jund lists), filled to exactly 15 with the next
+most played cards. Jund: 12 cards at >= 57%, + Faerie Macabre 1 (50%),
+Terminate 1 (46%), Ancient Grudge 1 (35%). Mono Blue Terror: 13 at >= 84%,
++ Steel Sabotage 2 (50%). Red Madness: exactly 15 at >= 57%.
 """
 
 JUND_WILDFIRE = {
@@ -64,27 +73,33 @@ RED_MADNESS = {
     "Mountain": 18,
 }
 
-# Sideboards: Jund and Blue are lean and matchup-relevant only (6 cards each),
-# built from public sideboard guides for their matchup rather than a specific
-# 15-card list. Red Madness has its full 15.
+# Sideboards: exactly 15 cards each, from the Q3 2026 typical lists (see the
+# module docstring). The maindecks above are left as they were so the
+# benchmark stays comparable across PRs.
 JUND_WILDFIRE_SIDEBOARD = {
-    "Red Elemental Blast": 2,
-    "Go for the Throat": 2,
-    "Duress": 2,
     "Weather the Storm": 3,
+    "Duress": 3,
+    "Troublemaker Ouphe": 2,
+    "Breath Weapon": 2,
+    "Pyroblast": 2,
+    "Faerie Macabre": 1,
+    "Terminate": 1,
+    "Ancient Grudge": 1,
 }
 MONO_BLUE_TERROR_SIDEBOARD = {
+    "Hydroblast": 4,
+    "Annul": 4,
+    "Gut Shot": 3,
     "Blue Elemental Blast": 2,
-    "Dispel": 2,
     "Steel Sabotage": 2,
 }
 RED_MADNESS_SIDEBOARD = {
-    "Gorilla Shaman": 2,
-    "Martyr of Ashes": 2,
     "Pyroblast": 4,
-    "Searing Blaze": 2,
-    "Electrickery": 2,
     "Relic of Progenitus": 3,
+    "Red Elemental Blast": 2,
+    "Cast into the Fire": 2,
+    "Searing Blaze": 2,
+    "End the Festivities": 2,
 }
 
 DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS}
@@ -96,4 +111,4 @@ def expand(decklist: dict[str, int]) -> list[str]:
 
 
 for _d, _list in DECKS.items():
-    assert sum(_list.values()) == 60 and sum(SIDEBOARDS[_d].values()) <= 15, _d
+    assert sum(_list.values()) == 60 and sum(SIDEBOARDS[_d].values()) == 15, _d

@@ -239,12 +239,30 @@ class Bot:
         return -self.sac_cost(g, o.value)
 
     def score_exile_from_graveyard(self, g: Game, d: Decision, o: Option) -> float:
+        if o.key[0] == "exile_any_gy":
+            return self.exile_any_value(g, o)
         c = o.value
         if c.face.is_type("Land"):
             return 3.0
         if c.face.is_type("Instant") or c.face.is_type("Sorcery"):
             return 1.0
         return 2.0
+
+    def exile_any_value(self, g: Game, o: Option) -> float:
+        """Faerie Macabre: exile up to two cards from any graveyard. Stop
+        (0.5) unless the card feeds the opponent: spells (Terror, Serpent,
+        Guttersnipe-style discounts) and cards castable from the graveyard."""
+        c = o.value
+        if c is None:
+            return 0.5
+        if c.owner == self.p:
+            return NEG
+        f = c.face
+        if f.flashback is not None or f.escape is not None or any(t.event == "third_draw" for t in f.triggers):
+            return 4.0
+        if f.is_type("Instant") or f.is_type("Sorcery"):
+            return 3.0
+        return 0.2
 
     def score_choose_x(self, g: Game, d: Decision, o: Option) -> float:
         return o.value

@@ -534,7 +534,7 @@ abilities = [
 ]
 
 # ---------------------------------------------------------------------------
-# Sideboards (lean, matchup-relevant; see decks.py)
+# Sideboard cards (see decks.py; not all are in a current sideboard)
 # ---------------------------------------------------------------------------
 
 [[card]]
