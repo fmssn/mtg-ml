@@ -171,6 +171,9 @@ def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, e
     decks = [DECK_KEYS[d] for d in matchup_decks(matchup)]
     decks = decks if seat is None else [decks[seat]]
     kw = dict(auto_mana=auto_mana, auto_pass=auto_pass, seat=seat, matchup=matchup)
+    if ladder and matchup != DEFAULT_MATCHUP:
+        _warn_ladder_skipped(matchup)
+        ladder = ()  # pool0 is played instead, as without a ladder
     for name in blocks:
         if eval_games and not (name == "pool0" and ladder):
             res = head_to_head(procs, policy, opponents[name], eval_games, n_jobs, version, max_turns, inference, **kw)
@@ -186,6 +189,18 @@ def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, e
         ratings = load_or_rate_ladder(procs, list(ladder), ladder_ratings, ladder_games, n_jobs, max_turns, inference, ladder_greedy)
         out.update(ladder_eval(procs, policy, ratings, ladder_games, n_jobs, version, max_turns, inference, ladder_greedy, auto_mana, auto_pass))
     return out
+
+
+_LADDER_SKIP_WARNED: set = set()
+
+
+def _warn_ladder_skipped(matchup: str) -> None:
+    """The reference ladder's rungs and ratings are for the default matchup
+    (Jund vs Blue); on another one its Elo would be meaningless, so it is
+    skipped (said once per matchup)."""
+    if matchup not in _LADDER_SKIP_WARNED:
+        _LADDER_SKIP_WARNED.add(matchup)
+        print(f"evaluate: skipping the reference ladder on matchup {matchup!r} (its rungs are rated on {DEFAULT_MATCHUP!r})", flush=True)
 
 
 # -- reference ladder and Elo ------------------------------------------------

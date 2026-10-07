@@ -33,7 +33,7 @@ def make_agent(kind: str, seat: int, seed: int, greedy: bool = False, deck: str 
         from .bots.search import SearchBot
 
         playouts = int(kind.split(":")[1]) if ":" in kind else 8
-        return SearchBot(seat, playouts=playouts, seed=seed)
+        return SearchBot(seat, playouts=playouts, seed=seed, deck=deck)
     if kind == "random":
         return RandomAgent(seed + seat)
     raise SystemExit(f"unknown agent {kind!r} (random, bot, search[:playouts], model:<checkpoint>)")

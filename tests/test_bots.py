@@ -145,6 +145,27 @@ def test_search_bot_returns_legal_choices_and_respects_hidden_info():
         steps += 1
 
 
+def test_search_bot_uses_the_bots_of_the_decks_in_play(monkeypatch):
+    """On jund_madness the Red seat's search builds a Red base bot, and its
+    playouts run the bots of the decks in play (not Jund vs Blue)."""
+    from mtg_ml.bots import RedBot, search
+    from mtg_ml.match import game_args
+    from mtg_ml.play import make_agent
+
+    bot = make_agent("search:2", 1, seed=1, deck="red_madness")
+    assert isinstance(bot.base, RedBot) and bot.name == "search(" + RedBot(1).name + ")"
+    built = []
+    monkeypatch.setattr(search, "make_bot", lambda seat, deck=None: built.append((seat, deck)) or make_bot(seat, deck))
+    g = new_game(seed=3, **game_args(1, "jund_madness"))
+    steps = 0
+    while not built and not g.over and steps < 200:
+        d = g.decision
+        g.step(bot.act(g) if d.player == 1 else make_bot(0).act(g))
+        steps += 1
+    assert built and all(deck == g.deck_names[seat] for seat, deck in built)
+    assert (1, "red_madness") in built
+
+
 def test_search_pins_offered_cards_through_determinize():
     """Library cards a decision offers (a search) keep their real definitions
     in the re-dealt worlds; the hidden multiset is unchanged."""
