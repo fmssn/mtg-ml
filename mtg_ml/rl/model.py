@@ -610,6 +610,7 @@ class EntityEncoder(nn.Module):
 
 
 VALUE_NETS = ("shared", "separate")
+VALUE_BOUNDS = ("none", "tanh")
 
 
 class TokenEncoder(nn.Module):
@@ -735,7 +736,10 @@ class PolicyNet(nn.Module):
     embeddings, trunk and memory of width value_hidden, no shared gradients;
     Andrychowicz et al. 2020 found separate, wider value networks better).
     The recurrent state of a separate value net is appended to the policy's,
-    so `state_size` = hidden (+ value_hidden). entity_attn (trunk "entity"
+    so `state_size` = hidden (+ value_hidden). value_bound "tanh" squashes
+    the value into (-1, 1), the range of the terminal rewards (no weights:
+    any checkpoint loads either way); it is in `config` only when set, so
+    configs of unbounded nets are unchanged. entity_attn (trunk "entity"
     only): self-attention layers over each sample's entity vectors, in every
     core, before they are pooled and before options point at them (4 heads,
     feed-forward 2 * width; 0: none, and the config and weights of the model
@@ -750,17 +754,21 @@ class PolicyNet(nn.Module):
         trunk: str = "mlp",
         value_net: str = "shared",
         value_hidden: int = 0,
+        value_bound: str = "none",
         entity_attn: int = 0,
     ):
         super().__init__()
-        if memory not in MEMORY_KINDS or trunk not in TRUNKS or value_net not in VALUE_NETS:
-            raise ValueError(f"memory in {MEMORY_KINDS}, trunk in {TRUNKS}, value_net in {VALUE_NETS}")
+        if memory not in MEMORY_KINDS or trunk not in TRUNKS or value_net not in VALUE_NETS or value_bound not in VALUE_BOUNDS:
+            raise ValueError(f"memory in {MEMORY_KINDS}, trunk in {TRUNKS}, value_net in {VALUE_NETS}, value_bound in {VALUE_BOUNDS}")
         if entity_attn < 0 or (entity_attn and trunk != "entity"):
             raise ValueError(f"entity_attn ({entity_attn}) needs trunk 'entity' and must be >= 0")
         value_hidden = value_hidden or hidden
         self.config = {"hidden": hidden, "memory": memory, "state_dim": state_dim, "option_dim": option_dim, "trunk": trunk, "value_net": value_net, "value_hidden": value_hidden}
+        if value_bound != "none":
+            self.config["value_bound"] = value_bound
         if entity_attn:  # only then: checkpoints without attention stay readable by code that predates it
             self.config["entity_attn"] = entity_attn
+        self.value_bound = value_bound
         self.hidden = hidden
         self.memory = memory
         self.value_net = value_net
@@ -801,6 +809,8 @@ class PolicyNet(nn.Module):
                 hn = torch.cat([hn, hvn], dim=-1)
         else:
             values = self.value_head(c).squeeze(-1)
+        if self.value_bound == "tanh":
+            values = torch.tanh(values)
         a = self.option_mlp(self._options(b))
         cr = c.index_select(0, b.o_row)
         scores = self.scorer(torch.cat([cr, a, cr * a], dim=-1)).squeeze(-1)
