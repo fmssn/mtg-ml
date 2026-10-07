@@ -28,6 +28,43 @@ fn s(x: &'static str) -> KI {
     KI::S(x)
 }
 
+/// game.py `_filtered`: a filter pays a coloured symbol; its own (generic) cost is added instead.
+fn filtered(rem: &Remaining, color: u8, generic: i32) -> Remaining {
+    let mut r = rem.clone();
+    let pos = r.colored.iter().position(|(k, _)| *k == color).expect("filtered colour");
+    r.colored[pos].1 -= 1;
+    if r.colored[pos].1 == 0 {
+        r.colored.remove(pos);
+    }
+    r.generic += generic;
+    r
+}
+
+/// `pool2 = dict(pool); pool2[color] = pool2.get(color, 0) + n`
+fn pool_with(pool: &[(u8, i32)], color: u8, n: i32) -> Vec<(u8, i32)> {
+    let mut v = pool.to_vec();
+    match v.iter_mut().find(|(k, _)| *k == color) {
+        Some(e) => e.1 += n,
+        None => v.push((color, n)),
+    }
+    v
+}
+
+/// Lower-case card type name (the key of a return_from_graveyard choice).
+fn type_lower(name: &'static str) -> &'static str {
+    match name {
+        "Artifact" => "artifact",
+        "Battle" => "battle",
+        "Creature" => "creature",
+        "Enchantment" => "enchantment",
+        "Instant" => "instant",
+        "Kindred" => "kindred",
+        "Land" => "land",
+        "Planeswalker" => "planeswalker",
+        _ => "sorcery",
+    }
+}
+
 impl Eng {
     #[inline(always)]
     pub fn s(&mut self) -> &mut State {
@@ -461,8 +498,8 @@ impl Eng {
             let sources: Vec<CIdx> = st.mana_sources(p, exclude).into_iter().map(|(c, _)| c).collect();
             for card in st.dedupe_by_equiv(sources) {
                 let c = st.c(card);
-                let ab = c.face().abilities.iter().find(|a| a.mana.is_some()).unwrap();
-                let extra = st.mana_units(ab) - 1; // floats in the pool (Priest of Titania)
+                let ab = &c.face().abilities[st.mana_ability(card)];
+                let n = st.mana_amount(card, ab);
                 for &color in ab.mana.as_ref().unwrap() {
                     if !rem.useful(color) {
                         continue;
@@ -472,17 +509,30 @@ impl Eng {
                     let gone: Vec<u32> = if ab.sac_self { vec![c.oid] } else { vec![] };
                     let mut excl = exclude.to_vec();
                     excl.push(c.oid);
-                    let pool2 = if extra != 0 {
-                        let mut pl = st.players[p as usize].clone();
-                        pl.pool_add(color, extra);
-                        Some(pl.pool)
-                    } else {
-                        None
-                    };
-                    if st.cost_feasible(p, &r2, sac_filter, &excl, pool2.as_deref(), &gone) {
+                    // The extra units float.
+                    let pool2 = if n > 1 { pool_with(&st.players[p as usize].pool, color, n - 1) } else { vec![] };
+                    let pool_arg = if n > 1 { Some(&pool2[..]) } else { None };
+                    if st.cost_feasible(p, &r2, sac_filter, &excl, pool_arg, &gone) {
                         let verb = if ab.sac_self { "Sacrifice" } else { "Tap" };
                         let cs = color_str(color);
                         options.push(opt(format!("{verb} {}#{} for {cs}", c.name(), c.oid), vec![s("pay"), s("source"), s(c.name()), s(cs)], Val::Source(card, color)));
+                    }
+                }
+            }
+            let filters: Vec<CIdx> = st.mana_filters(p, exclude).into_iter().map(|(c, _)| c).collect();
+            for card in st.dedupe_by_equiv(filters) {
+                let c = st.c(card);
+                let ab = c.face().abilities.iter().find(|a| a.is_filter()).unwrap();
+                for &color in ab.mana.as_ref().unwrap() {
+                    if rem.colored_get(color) <= 0 {
+                        continue;
+                    }
+                    let r2 = filtered(&rem, color, ab.cost.generic);
+                    let mut excl = exclude.to_vec();
+                    excl.push(c.oid);
+                    if st.cost_feasible(p, &r2, sac_filter, &excl, None, &[]) {
+                        let cs = color_str(color);
+                        options.push(opt(format!("Activate {}#{} for {cs}", c.name(), c.oid), vec![s("pay"), s("filter"), s(c.name()), s(cs)], Val::Filter(card, color)));
                     }
                 }
             }
@@ -510,15 +560,28 @@ impl Eng {
                 }
                 Val::Source(card, color) => {
                     let st = self.s();
-                    let ai = st.c(card).face().abilities.iter().position(|a| a.mana.is_some()).unwrap();
-                    let extra = st.mana_units(&st.c(card).face().abilities[ai]) - 1;
+                    let ai = st.mana_ability(card);
+                    let n = st.mana_amount(card, &st.c(card).face().abilities[ai]);
                     st.activate_mana_ability(card, ai);
                     if !rem.apply(color) {
                         return rules("mana unit could not be applied");
                     }
-                    if extra > 0 {
-                        st.players[p as usize].pool_add(color, extra);
+                    if n > 1 {
+                        st.players[p as usize].pool_add(color, n - 1);
                     }
+                }
+                Val::Filter(card, color) => {
+                    let st = self.s();
+                    let ab = st.c(card).face().abilities.iter().find(|a| a.is_filter()).unwrap();
+                    let (tap, once, generic) = (ab.tap, ab.once_per_turn, ab.cost.generic);
+                    if tap {
+                        st.cm(card).tapped = true;
+                    }
+                    if once {
+                        st.cm(card).mana_used_turn = st.turn;
+                    }
+                    st.push_log_lazy(|s| format!("p{p} activates {}#{} for {}", s.c(card).name(), s.c(card).oid, color_str(color)));
+                    rem = filtered(&rem, color, generic);
                 }
                 _ => unreachable!(),
             }
@@ -598,6 +661,12 @@ impl Eng {
         if mode == Method::Omen {
             st.cm(card).transformed = true; // on the stack it is the omen face (Roost Seek)
         }
+        let name = if mode == Method::Prototype {
+            st.cm(card).prototyped = true;
+            st.c(card).name().to_string()
+        } else {
+            name
+        };
         let sid = st.c(card).oid;
         st.stack.push(StackItem {
             sid,
@@ -662,6 +731,20 @@ impl Eng {
         }
         if d.additional_power {
             self.choose_power(p, sid, card)?;
+        }
+        if d.additional_choose_creature {
+            let options = self.s().creature_choices(p, card);
+            let chosen = match self.ask(p, Kind::ChooseCard, || format!("{cname}: choose a creature you control or reveal a creature card"), options)? {
+                Val::Card(c) => c,
+                _ => unreachable!(),
+            };
+            let st = self.s();
+            if st.c(chosen).zone == Zone::Hand {
+                st.cm(chosen).known_to = BOTH;
+            }
+            let snap = st.c(chosen).clone();
+            let pos = st.stack_pos(sid).unwrap();
+            st.stack[pos].data.chosen = Some(Box::new(snap));
         }
         if let Some((flt, n)) = self.s().mode_sac(card, mode) {
             for _ in 0..n {
@@ -906,6 +989,26 @@ impl Eng {
         if ab.return_forest {
             self.choose_return_land(p, &name)?;
         }
+        if ab.tap_other {
+            let st = self.s();
+            let cands = st.dedupe_by_equiv(st.tap_other_candidates(p, card));
+            let options = cands
+                .iter()
+                .map(|&c| {
+                    let cd = st.c(c);
+                    opt(format!("Tap {}#{}", cd.name(), cd.oid), vec![s("tap_cost"), s(cd.name())], Val::Card(c))
+                })
+                .collect();
+            let t = match self.ask(p, Kind::ChooseCard, || format!("Tap another untapped creature you control for {name}"), options)? {
+                Val::Card(c) => c,
+                _ => unreachable!(),
+            };
+            let st = self.s();
+            st.cm(t).tapped = true;
+            let pw = st.power(st.c(t));
+            let pos = st.stack_pos(sid).unwrap();
+            st.stack[pos].data.tapped_power = Some(pw);
+        }
         if ab.x_reveal {
             let st = self.s();
             let xv = st.stack[st.stack_pos(sid).unwrap()].x;
@@ -921,7 +1024,7 @@ impl Eng {
         if ab.sac_self && st.c(card).zone == Zone::Battlefield {
             st.sacrifice(card);
         }
-        if ab.exile_self && st.c(card).zone == Zone::Battlefield {
+        if ab.exile_self && matches!(st.c(card).zone, Zone::Battlefield | Zone::Graveyard) {
             st.mv(card, Zone::Exile);
         }
         st.emit_targeted(sid);
@@ -1020,6 +1123,9 @@ impl Eng {
             None
         };
         let new = st.move_card(card, Zone::Battlefield, Some(item.controller), Pos::Top, None, false).unwrap();
+        if item.method == Method::Prototype {
+            st.cm(new).prototyped = true;
+        }
         if st.c(card).face().etb_x_counters {
             st.cm(new).counters = item.x;
         }
@@ -1070,20 +1176,19 @@ impl Eng {
         Ok(found)
     }
 
-    fn scry(&mut self, p: u8, n: i32) -> R<()> {
+    fn scry(&mut self, p: u8, n: usize) -> R<()> {
         let st = self.s();
-        let top: Vec<CIdx> = st.players[p as usize].library.iter().take(n.max(1) as usize).copied().collect();
-        if top.is_empty() {
-            return Ok(());
-        }
+        let top: Vec<CIdx> = st.players[p as usize].library.iter().take(n).copied().collect();
         for &c in &top {
             st.cm(c).known_to |= pbit(p);
         }
         if top.len() > 1 {
-            return self.scry_n(p, top);
+            return self.scry_many(p, top);
+        }
+        if top.is_empty() {
+            return Ok(());
         }
         let c = top[0];
-        st.cm(c).known_to |= pbit(p);
         let n = st.c(c).name();
         let options = vec![
             opt(format!("Keep {n} on top"), vec![s("scry"), s("top")], Val::Top),
@@ -1098,39 +1203,140 @@ impl Eng {
         Ok(())
     }
 
-    /// `Game._scry_n`: one ORDER decision over (top in order, bottom in order).
-    fn scry_n(&mut self, p: u8, top: Vec<CIdx>) -> R<()> {
+    /// game.py `_scry_many`: scry N > 1 as one ORDER decision.
+    fn scry_many(&mut self, p: u8, top: Vec<CIdx>) -> R<()> {
         let st = self.s();
+        let n = top.len();
         let mut options = vec![];
         let mut seen: Vec<(Vec<&'static str>, Vec<&'static str>)> = vec![];
-        for perm in permutations(&top) {
-            for k in 0..=perm.len() {
-                let tops: Vec<&'static str> = perm[..k].iter().map(|&c| st.c(c).name()).collect();
-                let bottoms: Vec<&'static str> = perm[k..].iter().map(|&c| st.c(c).name()).collect();
-                let key = (tops, bottoms);
-                if seen.contains(&key) {
-                    continue;
+        for mask in 0u32..(1 << n) {
+            let ups: Vec<CIdx> = top.iter().enumerate().filter(|(i, _)| mask >> i & 1 == 0).map(|(_, &c)| c).collect();
+            let downs: Vec<CIdx> = top.iter().enumerate().filter(|(i, _)| mask >> i & 1 == 1).map(|(_, &c)| c).collect();
+            for pu in permutations(&ups) {
+                for pd in permutations(&downs) {
+                    let tn: Vec<&'static str> = pu.iter().map(|&c| st.c(c).name()).collect();
+                    let bn: Vec<&'static str> = pd.iter().map(|&c| st.c(c).name()).collect();
+                    let k = (tn.clone(), bn.clone());
+                    if seen.contains(&k) {
+                        continue;
+                    }
+                    seen.push(k);
+                    let ts = if tn.is_empty() { "-".to_string() } else { tn.join(", ") };
+                    let bs = if bn.is_empty() { "-".to_string() } else { bn.join(", ") };
+                    let mut key = vec![s("scry"), s("top")];
+                    key.extend(tn.iter().map(|x| s(x)));
+                    key.push(s("bottom"));
+                    key.extend(bn.iter().map(|x| s(x)));
+                    options.push(opt(format!("Scry: top {ts}; bottom {bs}"), key, Val::Scry(pu.clone(), pd)));
                 }
-                let t = if key.0.is_empty() { "-".to_string() } else { key.0.join(", ") };
-                let b = if key.1.is_empty() { "-".to_string() } else { key.1.join(", ") };
-                let label = format!("Top: {t}; bottom: {b}");
-                let mut k_tuple = vec![s("scry"), s("top")];
-                k_tuple.extend(key.0.iter().map(|x| KI::S(x)));
-                k_tuple.push(s("bottom"));
-                k_tuple.extend(key.1.iter().map(|x| KI::S(x)));
-                seen.push(key);
-                options.push(opt(label, k_tuple, Val::ScryN(perm.clone(), k)));
             }
         }
-        let names: Vec<&'static str> = top.iter().map(|&c| st.c(c).name()).collect();
-        let prompt = format!("Scry {}: {}", top.len(), names.join(", "));
-        if let Val::ScryN(order, k) = self.ask(p, Kind::Order, || prompt, options)? {
+        if let Val::Scry(pu, pd) = self.ask(p, Kind::Order, || format!("Scry {n}: top (first = top card) and bottom (last = bottom card)"), options)? {
             let lib = &mut self.s().players[p as usize].library;
-            lib.drain(..order.len());
-            for (i, &c) in order[..k].iter().enumerate() {
+            lib.drain(..n);
+            for (i, c) in pu.into_iter().enumerate() {
                 lib.insert(i, c);
             }
-            lib.extend_from_slice(&order[k..]);
+            lib.extend(pd);
+        }
+        Ok(())
+    }
+
+    /// game.py `surveil`: surveil 1.
+    fn surveil(&mut self, p: u8) -> R<()> {
+        let st = self.s();
+        let c = match st.players[p as usize].library.first() {
+            Some(&c) => c,
+            None => return Ok(()),
+        };
+        st.cm(c).known_to |= pbit(p);
+        let n = st.c(c).name();
+        let options = vec![
+            opt(format!("Keep {n} on top"), vec![s("surveil"), s("top")], Val::Top),
+            opt(format!("Put {n} into your graveyard"), vec![s("surveil"), s("graveyard")], Val::Bottom),
+        ];
+        if let Val::Bottom = self.ask(p, Kind::ChooseMode, || format!("Surveil 1: {n}"), options)? {
+            self.s().mv(c, Zone::Graveyard);
+        }
+        Ok(())
+    }
+
+    /// game.py `dig` (op look_top): look at the top n, maybe take a matching card, the rest to the bottom.
+    fn look_top(&mut self, p: u8, n: i32, filter: &SearchFilter, what: &str, name: &str) -> R<()> {
+        let st = self.s();
+        let top: Vec<CIdx> = st.players[p as usize].library.iter().take(n as usize).copied().collect();
+        for &c in &top {
+            st.cm(c).known_to |= pbit(p);
+        }
+        let mut options = vec![opt("Take nothing".into(), vec![s("dig"), KI::N], Val::None)];
+        for c in st.dedupe_by_name(top.iter().copied().filter(|&c| search_matches(filter, st.c(c)))) {
+            let nm = st.c(c).name();
+            options.push(opt(format!("Take {nm}"), vec![s("dig"), s(nm)], Val::Card(c)));
+        }
+        let found = match self.ask(p, Kind::ChooseCard, || format!("{name}: reveal {what} and put it into your hand"), options)? {
+            Val::Card(c) => Some(c),
+            _ => None,
+        };
+        let st = self.s();
+        if let Some(c) = found {
+            st.move_card(c, Zone::Hand, None, Pos::Top, Some(BOTH), false);
+        }
+        for c in top {
+            if Some(c) != found {
+                st.move_card(c, Zone::Library, None, Pos::Bottom, Some(pbit(p)), false);
+            }
+        }
+        Ok(())
+    }
+
+    /// game.py `cascade` (702.85).
+    fn cascade(&mut self, p: u8, mv: i32) -> R<()> {
+        let mut exiled: Vec<CIdx> = vec![];
+        let mut hit: Option<CIdx> = None;
+        loop {
+            let st = self.s();
+            let top = match st.players[p as usize].library.first() {
+                Some(&c) => c,
+                None => break,
+            };
+            let c = st.mv(top, Zone::Exile).unwrap();
+            exiled.push(c);
+            if !st.is_land(st.c(c)) && st.c(c).face().mana_value() < mv {
+                hit = Some(c);
+                break;
+            }
+        }
+        self.log(|st| {
+            let names = exiled.iter().map(|&c| py_repr_str(st.c(c).name())).collect::<Vec<_>>().join(", ");
+            format!("p{p} cascades into {}, exiling [{names}]", hit.map_or("nothing", |h| st.c(h).name()))
+        });
+        let mut cast: Option<Option<u8>> = None;
+        if let Some(h) = hit {
+            let st = self.s();
+            let n = st.c(h).name();
+            let mut options = vec![opt(format!("Don't cast {n}"), vec![s("cascade"), s("no")], Val::None)];
+            let face = st.c(h).face();
+            if !face.modes.is_empty() {
+                for (i, sm) in face.modes.iter().enumerate() {
+                    if st.can_cast(p, h, Method::Cascade, Some(i as u8)) {
+                        options.push(opt(format!("Cast {n} ({})", sm.name), vec![s("cascade"), s("cast"), s(sm.name.as_str())], Val::Cast(h, Method::Cascade, Some(i as u8))));
+                    }
+                }
+            } else if st.can_cast(p, h, Method::Cascade, None) {
+                options.push(opt(format!("Cast {n}"), vec![s("cascade"), s("cast")], Val::Cast(h, Method::Cascade, None)));
+            }
+            if let Val::Cast(_, _, ch) = self.ask(p, Kind::YesNo, || format!("Cascade: cast {n} without paying its mana cost?"), options)? {
+                cast = Some(ch);
+            }
+        }
+        let st = self.s();
+        let mut rest: Vec<CIdx> = exiled.into_iter().filter(|&c| !(cast.is_some() && Some(c) == hit)).collect();
+        st.rng.shuffle(&mut rest);
+        for c in rest {
+            st.move_card(c, Zone::Library, None, Pos::Bottom, None, false);
+        }
+        if let Some(ch) = cast {
+            self.cast(p, hit.unwrap(), Method::Cascade, ch)?;
         }
         Ok(())
     }
@@ -1397,9 +1603,19 @@ impl Eng {
     fn run_op(&mut self, op: &'static Op, item: &StackItem) -> R<()> {
         let ctl = item.controller;
         match op {
-            Op::Draw { n, n_cast_from_graveyard } => {
+            Op::Draw { n, n_cast_from_graveyard, each_controlling } => {
                 let n = if item.cast_from == Zone::Graveyard { n_cast_from_graveyard.unwrap_or(*n) } else { *n };
-                self.s().draw(ctl as usize, n, true);
+                let st = self.s();
+                match each_controlling {
+                    None => st.draw(ctl as usize, n, true),
+                    Some(name) => {
+                        for q in [ctl, 1 - ctl] {
+                            if st.battlefield.iter().any(|&c| st.c(c).controller == q && st.c(c).name() == name.as_str()) {
+                                st.draw(q as usize, n, true);
+                            }
+                        }
+                    }
+                }
             }
             Op::Mill { target_player, n } => {
                 if !target_player {
@@ -1473,10 +1689,18 @@ impl Eng {
                     st.attach(eq, Some(host));
                 }
             }
-            Op::GainLife { n, per_storm, sacrificed_mv } => {
+            Op::GainLife { n, per_storm, sacrificed_mv, source_power } => {
                 if *sacrificed_mv {
                     let v = item.data.sacrificed_mv.unwrap_or(0);
                     self.s().players[ctl as usize].life += v;
+                } else if *source_power {
+                    let src = self.source_card(item);
+                    let st = self.s();
+                    let pw = match st.live(&src) {
+                        Some(ci) => st.power(st.c(ci)),
+                        None => st.power(&src),
+                    };
+                    st.players[ctl as usize].life += pw;
                 } else {
                     let k = if *per_storm { item.data.storm.unwrap_or(0) } else { 1 };
                     self.s().players[ctl as usize].life += n * k;
@@ -1506,6 +1730,23 @@ impl Eng {
                 let st = self.s();
                 if let Some(live) = st.live(&src) {
                     st.cm(live).counters += 1;
+                }
+            }
+            Op::DamageTargetFrom { index, chosen_power } => {
+                let i = *index;
+                if i < item.targets.len() && self.s().target_legal(item, i) {
+                    let src = self.source_card(item);
+                    let st = self.s();
+                    let amount = if *chosen_power {
+                        let ch = item.data.chosen.as_ref().expect("chosen creature");
+                        match st.live(ch) {
+                            Some(ci) => st.power(st.c(ci)),
+                            None => st.power(ch),
+                        }
+                    } else {
+                        item.x
+                    };
+                    st.deal_damage(&src, item.targets[i], amount);
                 }
             }
             Op::DamageTarget { n, index, n_landfall, n_metalcraft } => {
@@ -1626,7 +1867,62 @@ impl Eng {
                     self.run_effect(Some(then), item)?;
                 }
             }
-            Op::Scry { n } => self.scry(ctl, *n)?,
+            Op::Scry { n } => self.scry(ctl, *n as usize)?,
+            Op::Surveil => self.surveil(ctl)?,
+            Op::LookTop { filter, n, what } => {
+                let name = item.name.clone();
+                self.look_top(ctl, *n, filter, what, &name)?;
+            }
+            Op::Cascade => {
+                let mv = self.source_card(item).face().mana_value();
+                self.cascade(ctl, mv)?;
+            }
+            Op::Station => {
+                let src = self.source_card(item);
+                let st = self.s();
+                if let Some(l) = st.live(&src) {
+                    st.cm(l).charge += item.data.tapped_power.expect("station cost paid");
+                }
+            }
+            Op::ReturnRandomFromGraveyard { types } => {
+                let st = self.s();
+                let cands: Vec<CIdx> = st.players[ctl as usize].graveyard.iter().copied().filter(|&c| st.c(c).face().types & types != 0).collect();
+                if !cands.is_empty() {
+                    let c = cands[st.rng.randbelow(cands.len() as u32) as usize];
+                    st.push_log_lazy(|s| format!("p{ctl} returns {} at random", s.c(c).name()));
+                    st.mv(c, Zone::Hand);
+                }
+            }
+            Op::ReturnCardsFromGraveyards { types, n, each_type, any } => {
+                let owners: Vec<u8> = if *any { vec![ctl, 1 - ctl] } else { vec![ctl] };
+                let mut used: Vec<u16> = vec![];
+                for _ in 0..*n {
+                    let st = self.s();
+                    let mut options = vec![opt("Return nothing more".into(), vec![s("return_gy"), KI::N], Val::None)];
+                    for &q in &owners {
+                        let (rel, whose) = if q == ctl { ("self", "your") } else { ("opponent", "the opponent's") };
+                        for &(tb, tname) in types {
+                            if *each_type && used.contains(&tb) {
+                                continue;
+                            }
+                            let gy = st.players[q as usize].graveyard.iter().copied().filter(|&c| st.c(c).face().types & tb != 0);
+                            for c in st.dedupe_by_name(gy) {
+                                let nm = st.c(c).name();
+                                let tl = type_lower(tname);
+                                options.push(opt(format!("Return {nm} ({tl}) from {whose} graveyard"), vec![s("return_gy"), s(rel), s(tl), s(nm)], Val::Typed(tname, c)));
+                            }
+                        }
+                    }
+                    let iname = item.name.clone();
+                    match self.ask(ctl, Kind::ChooseCard, || format!("{iname}: return a card from a graveyard to its owner's hand"), options)? {
+                        Val::Typed(tname, c) => {
+                            used.push(crate::cards::type_bit(tname).unwrap());
+                            self.s().mv(c, Zone::Hand);
+                        }
+                        _ => break,
+                    }
+                }
+            }
             Op::DamageChosenPower => {
                 if !item.targets.is_empty() && self.s().target_legal(item, 0) {
                     let src = self.source_card(item);
@@ -1997,7 +2293,7 @@ impl Eng {
                 if let Some(Tgt::Card(t)) = self.s().target(item, 0) {
                     let controller = self.s().c(t).controller;
                     self.s().destroy(t);
-                    let basic = SearchFilter { supertype: Some("Basic".into()), types: T_LAND, subtypes_any: vec![] };
+                    let basic = SearchFilter { supertype: Some("Basic".into()), types: T_LAND, subtypes_any: vec![], colorless: false };
                     self.search_library(controller, &basic, true, "a basic land card", true, false)?;
                 }
             }
@@ -2089,6 +2385,9 @@ pub fn search_matches(f: &SearchFilter, c: &Card) -> bool {
         return false;
     }
     if !f.subtypes_any.is_empty() && !f.subtypes_any.iter().any(|s| face.has_subtype(s)) {
+        return false;
+    }
+    if f.colorless && face.colors != 0 {
         return false;
     }
     true

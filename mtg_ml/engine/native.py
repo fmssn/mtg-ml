@@ -25,7 +25,7 @@ import random
 import mtg_ml_native as _n
 
 from .cards import CARDS, FACES, SPEC_PATH, TOKENS, count_of
-from .game import RulesError
+from .game import Game, RulesError
 from .mana import ManaCost
 from .objects import FREE, TempEffect
 
@@ -70,6 +70,7 @@ class NativeCard(_n.CardView):
 _SNAP_FIELDS = (
     "uid", "oid", "name", "_defn_name", "owner", "controller", "zone", "is_token", "transformed", "tapped", "damage",
     "deathtouch_damage", "counters", "sick", "attached_to", "skip_untap", "_temp", "_known", "animated", "_granted",
+    "prototyped", "charge", "mana_used_turn",
 )  # fmt: skip
 
 
@@ -168,7 +169,7 @@ class NativeStackItem:
         self.targets = [tuple(t) for t in targets]
         self.card = None if card is None else g._card(card)
         self.source = None if src is None else NativeSnapshot(src)
-        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed") else v) for k, v in data}
+        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed", "chosen") else v) for k, v in data}
 
     def __repr__(self) -> str:
         return f"[{self.name} ({self.kind}) #{self.sid}]"
@@ -245,7 +246,7 @@ class NativePendingTrigger:
         self.controller, src, name, data = info
         self.source = NativeSnapshot(src)
         self.tdef = _TriggerName(name)
-        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed") else v) for k, v in data}
+        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed", "chosen") else v) for k, v in data}
 
 
 class _TriggerName:
@@ -583,12 +584,14 @@ class NativeGame:
             t.add("Creature")
         if self.is_bestowed(c):
             t.discard("Creature")
+        if Game.is_stationed(c):
+            t.add("Creature")
         return t
 
     def is_creature(self, c) -> bool:
         if c.__class__ is NativeCard:
             return self._g.is_creature(c._idx)
-        return ("Creature" in c.face.types or c.animated is not None) and not self.is_bestowed(c)
+        return (("Creature" in c.face.types or c.animated is not None) and not self.is_bestowed(c)) or Game.is_stationed(c)
 
     def is_artifact(self, c) -> bool:
         return "Artifact" in c.face.types
@@ -610,11 +613,19 @@ class NativeGame:
         if c.__class__ is NativeCard:
             return set(self._g.keywords(c._idx))
         k = set(c.face.keywords) | c.granted
+        if Game.is_stationed(c):
+            k |= c.face.station_keywords
         for t in c.temp:
             k |= t.keywords
         if any(a.face.bestow is not None for a in self._auras_on(c)):
             k |= {"reach", "trample"}
+        for a in self._auras_on(c):
+            if a.face.bestow is None:
+                k |= a.face.equipped_keywords
         return k
+
+    def targetable(self, c) -> bool:
+        return not self.has(c, "shroud")
 
     def has(self, c, kw: str) -> bool:
         if c.__class__ is NativeCard:
@@ -631,6 +642,9 @@ class NativeGame:
             if c.oid not in exclude:
                 out.append((c, c.face.abilities[ai]))
         return out
+
+    mana_ability = staticmethod(Game.mana_ability)
+    mana_amount = Game.mana_amount
 
     def sac_candidates(self, p: int, flt: str, exclude=frozenset()) -> list[NativeCard]:
         return [c for c in (self._card(i) for i in self._g.sac_candidates(p, flt)) if c.oid not in exclude]
@@ -654,12 +668,14 @@ class NativeGame:
             "bargain": d.cost if d.bargain else None,
             "omen": card.defn.back.cost if card.defn.omen else None,
             "evidence": d.cost if d.collect_evidence else None,
+            "prototype": card.defn.prototype,
+            "cascade": FREE,
         }
         return modes.get(mode)
 
     def mana_units(self, ab) -> int:
         """Game.mana_units: one, or one per Elf (Priest of Titania)."""
-        return count_of(self, ab.mana_amount) if ab.mana_amount else 1
+        return count_of(self, ab.mana_amount) if isinstance(ab.mana_amount, str) else 1
 
     def _cost_reduction(self, p: int, card) -> int:
         return self._g.cost_reduction(p, self._idx(card))

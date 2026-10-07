@@ -4,13 +4,15 @@
 //! the method names are kept so the two files can be read side by side.
 
 use crate::cards::{color_bit, db, AbilityDef, CardDef, CastFilter, CostRed, DefId, Event, Op, SacFilter, TriggerDef, T_ARTIFACT, T_CREATURE, T_ENCHANTMENT, T_INSTANT, T_LAND, T_SORCERY, TK};
-use crate::mana::{bit, can_pay, ManaCost, Remaining};
+use crate::mana::{bit, can_pay, can_pay_wild, ManaCost, Remaining};
 use crate::rng::PyRandom;
 use std::rc::Rc;
 
 pub type CIdx = u32;
 
 pub const MAX_HAND: usize = 7;
+/// auto_mana: a mana filter is the payment of last resort (game.py FILTER_HURT).
+pub const FILTER_HURT: i32 = 1 << 20;
 
 pub const STEPS: [&str; 12] = [
     "untap",
@@ -102,6 +104,12 @@ pub struct Card {
     pub once_used_turn: i32,
     /// Hexproof until its controller's next turn (Throne of the Dead Three).
     pub hexproof: bool,
+    /// Cast (and on the battlefield) as its prototype.
+    pub prototyped: bool,
+    /// Charge counters (station).
+    pub charge: i32,
+    /// Turn a once-per-turn mana ability was last activated.
+    pub mana_used_turn: i32,
     pub temp: Vec<TempEffect>,
     /// Bit p set: player p knows this card.
     pub known_to: u8,
@@ -118,6 +126,11 @@ impl Card {
         if self.transformed {
             if let Some(b) = d.back {
                 return db().def(b);
+            }
+        }
+        if self.prototyped {
+            if let Some(f) = d.prototype_face {
+                return db().def(f);
             }
         }
         d
@@ -140,6 +153,9 @@ impl Card {
         self.plotted_turn = 0;
         self.once_used_turn = 0;
         self.hexproof = false;
+        self.prototyped = false;
+        self.charge = 0;
+        self.mana_used_turn = 0;
         self.temp.clear();
         self.animated = None;
         self.granted = 0;
@@ -206,10 +222,12 @@ pub enum Method {
     Omen,
     /// Collect evidence as an additional cost (Extract a Confession; normal cost plus collect evidence).
     Evidence,
+    Prototype,
+    Cascade,
 }
 
 /// Cast modes from the hand, in the order they are offered (game.HAND_MODES).
-pub const HAND_MODES: [Method; 8] = [Method::Normal, Method::Bestow, Method::Overload, Method::Alternative, Method::Phyrexian, Method::Bargain, Method::Omen, Method::Evidence];
+pub const HAND_MODES: [Method; 9] = [Method::Normal, Method::Bestow, Method::Overload, Method::Alternative, Method::Phyrexian, Method::Bargain, Method::Omen, Method::Evidence, Method::Prototype];
 
 impl Method {
     pub fn name(self) -> &'static str {
@@ -226,6 +244,8 @@ impl Method {
             Method::Bargain => "bargain",
             Method::Omen => "omen",
             Method::Evidence => "evidence",
+            Method::Prototype => "prototype",
+            Method::Cascade => "cascade",
         }
     }
 }
@@ -250,6 +270,10 @@ pub struct Data {
     /// Monstrous Emergence: the creature chosen as the cost and its power then.
     pub chosen_oid: Option<u32>,
     pub power: Option<i32>,
+    /// Monstrous Emergence: the creature chosen or revealed as it was cast.
+    pub chosen: Option<Box<Card>>,
+    /// Station: the power of the creature tapped to pay the cost.
+    pub tapped_power: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -416,8 +440,12 @@ pub enum Val {
     Bottom,
     /// A name chosen from a fixed list (a card type, a dungeon room).
     Name(&'static str),
-    /// Scry N: the cards in order, the first `usize` stay on top.
-    ScryN(Vec<CIdx>, usize),
+    /// A mana filter: (permanent, colour).
+    Filter(CIdx, u8),
+    /// Scry N > 1: (top cards, first = top; bottom cards, last = bottom).
+    Scry(Vec<CIdx>, Vec<CIdx>),
+    /// A card chosen for one of a spell's card types (return_from_graveyard).
+    Typed(&'static str, CIdx),
 }
 
 #[derive(Clone, Debug)]
@@ -490,6 +518,8 @@ pub enum EquivKey {
         granted: u32,
         once_used: bool,
         hexproof: bool,
+        charge: i32,
+        used_this_turn: bool,
     },
 }
 
@@ -730,6 +760,9 @@ impl State {
             plotted_turn: 0,
             once_used_turn: 0,
             hexproof: false,
+            prototyped: false,
+            charge: 0,
+            mana_used_turn: 0,
             temp: vec![],
             known_to,
             animated: None,
@@ -826,6 +859,12 @@ impl State {
         }
     }
 
+    /// A Spacecraft with enough charge counters is an artifact creature (702.184).
+    pub fn is_stationed(c: &Card) -> bool {
+        let f = c.face();
+        f.station > 0 && c.charge >= f.station
+    }
+
     pub fn types(&self, c: &Card) -> u16 {
         let mut t = c.face().types;
         if c.animated.is_some() {
@@ -834,11 +873,14 @@ impl State {
         if self.is_bestowed(c) {
             t &= !T_CREATURE;
         }
+        if Self::is_stationed(c) {
+            t |= T_CREATURE;
+        }
         t
     }
 
     pub fn is_creature(&self, c: &Card) -> bool {
-        (c.face().types & T_CREATURE != 0 || c.animated.is_some()) && !self.is_bestowed(c)
+        ((c.face().types & T_CREATURE != 0 || c.animated.is_some()) && !self.is_bestowed(c)) || Self::is_stationed(c)
     }
     pub fn is_artifact(&self, c: &Card) -> bool {
         c.face().types & T_ARTIFACT != 0
@@ -847,6 +889,7 @@ impl State {
         c.face().types & T_LAND != 0
     }
 
+    /// Bestowed Auras and Equipment attached to `oid`.
     fn auras_on(&self, oid: u32) -> impl Iterator<Item = &Card> + '_ {
         self.battlefield.iter().map(move |&a| self.c(a)).filter(move |a| a.attached_to == Some(oid))
     }
@@ -867,6 +910,9 @@ impl State {
 
     pub fn keywords(&self, c: &Card) -> u32 {
         let mut k = c.face().keywords | c.granted;
+        if Self::is_stationed(c) {
+            k |= c.face().station_keywords;
+        }
         for t in &c.temp {
             k |= t.keywords;
         }
@@ -877,11 +923,27 @@ impl State {
         if c.hexproof {
             k |= db().kw("hexproof");
         }
+        for a in self.auras_on(c.oid).filter(|a| a.face().bestow.is_none()) {
+            k |= a.face().equipped_keywords;
+        }
         k
+    }
+
+    /// Shroud (702.18): it can't be the target of spells or abilities.
+    pub fn targetable(&self, c: &Card) -> bool {
+        !self.has_known(c, "shroud")
     }
 
     pub fn has(&self, c: &Card, kw: &str) -> bool {
         self.keywords(c) & db().kw(kw) != 0
+    }
+
+    /// `has` for a keyword that may be missing from the card pool (false then).
+    pub fn has_known(&self, c: &Card, kw: &str) -> bool {
+        match db().keyword_names.iter().position(|k| k == kw) {
+            Some(i) => self.keywords(c) & (1 << i) != 0,
+            None => false,
+        }
     }
 
     pub fn referenced_oids(&self) -> Vec<u32> {
@@ -928,6 +990,8 @@ impl State {
             granted: c.granted,
             once_used: c.once_used_turn == self.turn,
             hexproof: c.hexproof,
+            charge: c.charge,
+            used_this_turn: c.mana_used_turn == self.turn,
         }
     }
 
@@ -1216,6 +1280,9 @@ impl State {
             hexproof: false,
             animated: None,
             granted: 0,
+            prototyped: false,
+            charge: 0,
+            mana_used_turn: 0,
             temp: vec![],
             known_to: BOTH,
         }
@@ -1446,11 +1513,17 @@ impl State {
             }
             TK::CreatureOfTargetPlayer if !chosen.is_empty() => {
                 let q = ref_index(chosen[chosen.len() - 1]);
-                return self.battlefield.iter().map(|&c| self.c(c)).filter(|c| self.is_creature(c) && c.controller as u32 == q).map(|c| Ref::Perm(c.oid)).collect();
+                return self
+                    .battlefield
+                    .iter()
+                    .map(|&c| self.c(c))
+                    .filter(|c| self.is_creature(c) && c.controller as u32 == q && self.targetable(c))
+                    .map(|c| Ref::Perm(c.oid))
+                    .collect();
             }
             TK::AnotherCreature => {
                 // With nothing chosen yet (casting checks) it needs a second creature.
-                let creatures: Vec<Ref> = self.battlefield.iter().map(|&c| self.c(c)).filter(|c| self.is_creature(c)).map(|c| Ref::Perm(c.oid)).collect();
+                let creatures: Vec<Ref> = self.battlefield.iter().map(|&c| self.c(c)).filter(|c| self.is_creature(c) && self.targetable(c)).map(|c| Ref::Perm(c.oid)).collect();
                 if chosen.is_empty() {
                     return if creatures.len() >= 2 { creatures } else { vec![] };
                 }
@@ -1461,7 +1534,12 @@ impl State {
         if spec.is_spell() {
             return self.stack.iter().filter(|it| it.kind == SKind::Spell && Some(it.sid) != exclude_sid && self.spell_matches(spec, it)).map(|it| Ref::Stack(it.sid)).collect();
         }
-        let mut out: Vec<Ref> = self.battlefield.iter().filter(|&&c| self.perm_matches(spec, self.c(c), controller)).map(|&c| Ref::Perm(self.c(c).oid)).collect();
+        let mut out: Vec<Ref> = self
+            .battlefield
+            .iter()
+            .filter(|&&c| self.perm_matches(spec, self.c(c), controller) && self.targetable(self.c(c)))
+            .map(|&c| Ref::Perm(self.c(c).oid))
+            .collect();
         if spec == TK::Any {
             out.push(Ref::Player(controller));
             out.push(Ref::Player(1 - controller));
@@ -1519,7 +1597,7 @@ impl State {
             },
             Ref::Perm(oid) => match self.perm(oid) {
                 Some(c) if spec == TK::CreatureOfTargetPlayer && self.c(c).controller as u32 != ref_index(item.targets[i - 1]) => false,
-                Some(c) => self.perm_matches(spec, self.c(c), item.controller),
+                Some(c) => self.perm_matches(spec, self.c(c), item.controller) && self.targetable(self.c(c)),
                 None => false,
             },
         }
@@ -1567,7 +1645,7 @@ impl State {
                 continue;
             }
             for (i, ab) in c.face().abilities.iter().enumerate() {
-                if ab.mana.is_none() {
+                if ab.mana.is_none() || ab.is_filter() {
                     continue;
                 }
                 if ab.tap && (c.tapped || (self.is_creature(c) && c.sick)) {
@@ -1580,13 +1658,78 @@ impl State {
         out
     }
 
-    /// `Game.mana_units`: mana one activation makes.
-    pub fn mana_units(&self, ab: &AbilityDef) -> i32 {
+    /// `Game.mana_ability`: index of a permanent's plain mana ability (not a filter).
+    pub fn mana_ability(&self, ci: CIdx) -> usize {
+        self.c(ci).face().abilities.iter().position(|a| a.mana.is_some() && !a.is_filter()).unwrap()
+    }
+
+    /// `Game.mana_amount`: units one activation makes.
+    pub fn mana_amount(&self, ci: CIdx, ab: &AbilityDef) -> i32 {
         if ab.mana_elves {
-            self.count_elves()
+            return self.count_elves(); // one per Elf (Priest of Titania)
+        }
+        let (n, subtypes) = match &ab.mana_amount {
+            None => return 1,
+            Some(m) => m,
+        };
+        let ctl = self.c(ci).controller;
+        let all = subtypes.iter().all(|s| self.battlefield.iter().any(|&o| self.c(o).controller == ctl && self.c(o).face().has_subtype(s)));
+        if all {
+            *n
         } else {
             1
         }
+    }
+
+    /// `Game.mana_filters`: usable filters, (card, ability index), at most one per permanent.
+    pub fn mana_filters(&self, p: u8, exclude: &[u32]) -> Vec<(CIdx, usize)> {
+        let mut out = vec![];
+        for &ci in &self.battlefield {
+            let c = self.c(ci);
+            if c.controller != p || exclude.contains(&c.oid) {
+                continue;
+            }
+            for (i, ab) in c.face().abilities.iter().enumerate() {
+                if !ab.is_filter() {
+                    continue;
+                }
+                if ab.tap && (c.tapped || (self.is_creature(c) && c.sick)) {
+                    continue;
+                }
+                if ab.once_per_turn && c.mana_used_turn == self.turn {
+                    continue;
+                }
+                out.push((ci, i));
+                break;
+            }
+        }
+        out
+    }
+
+    /// `Game._can_pay_filtered`. `unit_of`: (oid, first unit index, units) of
+    /// plain sources that a tapping filter would use up.
+    fn can_pay_filtered(&self, rem: &Remaining, units: &[u8], filters: &[(CIdx, usize)], unit_of: &[(u32, usize, usize)]) -> bool {
+        if filters.is_empty() || !rem.colored.iter().any(|&(c, n)| c != b'C' && n > 0) {
+            return can_pay(rem, units);
+        }
+        let find = |oid: u32| unit_of.iter().find(|e| e.0 == oid);
+        let free = filters.iter().filter(|(c, _)| find(self.c(*c).oid).is_none()).count() as i32;
+        let costly: Vec<&(u32, usize, usize)> = filters.iter().filter_map(|(c, _)| find(self.c(*c).oid)).collect();
+        for mask in 0u32..(1 << costly.len()) {
+            let mut drop = vec![false; units.len()];
+            for (i, e) in costly.iter().enumerate() {
+                if mask >> i & 1 == 1 {
+                    for j in e.1..e.1 + e.2 {
+                        drop[j] = true;
+                    }
+                }
+            }
+            let us: Vec<u8> = units.iter().enumerate().filter(|(j, _)| !drop[*j]).map(|(_, u)| *u).collect();
+            if can_pay_wild(rem, &us, free + mask.count_ones() as i32) {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn sac_candidates(&self, p: u8, flt: SacFilter, exclude: &[u32]) -> Vec<CIdx> {
@@ -1603,6 +1746,7 @@ impl State {
                     SacFilter::ArtifactOrCreature => self.is_artifact(c) || self.is_creature(c),
                     SacFilter::Mountain => self.is_land(c) && c.face().has_subtype("Mountain"),
                     SacFilter::ArtifactEnchantmentOrToken => c.is_token || self.types(c) & (T_ARTIFACT | T_ENCHANTMENT) != 0,
+                    SacFilter::Land => self.is_land(c),
                 }
             })
             .collect()
@@ -1621,24 +1765,29 @@ impl State {
             }
         }
         let mut selfsac: Vec<CIdx> = vec![];
+        let mut unit_of: Vec<(u32, usize, usize)> = vec![];
         for (ci, ai) in &sources {
             let ab = &self.c(*ci).face().abilities[*ai];
             if ab.sac_self {
                 selfsac.push(*ci);
             } else {
+                let n = self.mana_amount(*ci, ab) as usize;
+                unit_of.push((self.c(*ci).oid, base.len(), n));
                 let u = ab.mana.as_ref().unwrap().iter().fold(0, |m, c| m | bit(*c));
-                for _ in 0..self.mana_units(ab) {
+                for _ in 0..n {
                     base.push(u);
                 }
             }
         }
+        let filters = self.mana_filters(p, &excl);
+        unit_of.retain(|e| filters.iter().any(|&(c, a)| self.c(c).oid == e.0 && self.c(c).face().abilities[a].tap));
         match sac_filter {
             None => {
                 for &ci in &selfsac {
-                    let ab = self.c(ci).face().abilities.iter().find(|a| a.mana.is_some()).unwrap();
+                    let ab = &self.c(ci).face().abilities[self.mana_ability(ci)];
                     base.push(ab.mana.as_ref().unwrap().iter().fold(0, |m, c| m | bit(*c)));
                 }
-                can_pay(rem, &base)
+                self.can_pay_filtered(rem, &base, &filters, &unit_of)
             }
             Some(flt) => {
                 let cands: Vec<u32> = self.sac_candidates(p, flt, gone).iter().map(|&c| self.c(c).oid).collect();
@@ -1661,7 +1810,7 @@ impl State {
                             let mut units = base.clone();
                             units.extend(chosen.iter().map(|(_, u)| *u));
                             units.extend(std::iter::repeat(bit(b'C')).take(k));
-                            if can_pay(rem, &units) {
+                            if self.can_pay_filtered(rem, &units, &filters, &unit_of) {
                                 return true;
                             }
                         }
@@ -1713,6 +1862,9 @@ impl State {
                 }
             }
             Method::Evidence => (d.collect_evidence != 0).then_some(&d.cost),
+            // The prototype face itself has no prototype cost.
+            Method::Prototype => self.c(ci).defn().prototype.as_ref(),
+            Method::Cascade => Some(&db().free),
         }
     }
 
@@ -1772,7 +1924,7 @@ impl State {
         if matches!(mode, Method::Flashback | Method::Escape) && c.zone != Zone::Graveyard {
             return false;
         }
-        if matches!(mode, Method::Madness | Method::Plot) && c.zone != Zone::Exile {
+        if matches!(mode, Method::Madness | Method::Plot | Method::Cascade) && c.zone != Zone::Exile {
             return false;
         }
         if mode == Method::Plot && !(0 < c.plotted_turn && c.plotted_turn < self.turn) {
@@ -1782,8 +1934,8 @@ impl State {
             return false;
         }
         let spell = if mode == Method::Omen { db().def(d.back.unwrap()) } else { d };
-        // Madness casts on resolution of its trigger, whatever the card type (702.35).
-        if mode != Method::Madness && !spell.is_type(T_INSTANT) && spell.keywords & db().kw("flash") == 0 && !self.sorcery_timing(p) {
+        // Madness and cascade cast while a trigger resolves, whatever the card type (702.35, 702.85).
+        if !matches!(mode, Method::Madness | Method::Cascade) && !spell.is_type(T_INSTANT) && spell.keywords & db().kw("flash") == 0 && !self.sorcery_timing(p) {
             return false;
         }
         for spec in self.mode_targets(ci, mode, choice) {
@@ -1809,6 +1961,9 @@ impl State {
         if d.additional_power && self.power_sources(p, ci).is_empty() {
             return false;
         }
+        if d.additional_choose_creature && self.creature_choices(p, ci).is_empty() {
+            return false;
+        }
         if let Some((flt, n)) = self.mode_sac(ci, mode) {
             if (self.sac_candidates(p, flt, &[]).len() as i32) < n {
                 return false;
@@ -1829,11 +1984,34 @@ impl State {
         self.battlefield.iter().copied().filter(|&c| self.c(c).controller == p && self.is_land(self.c(c)) && self.c(c).face().has_subtype("Forest")).collect()
     }
 
+    /// `Game._creature_choices`: Monstrous Emergence's additional cost.
+    pub fn creature_choices(&self, p: u8, spell: CIdx) -> Vec<Opt> {
+        let mut opts: Vec<Opt> = self
+            .dedupe_by_equiv(self.battlefield.iter().copied().filter(|&c| self.c(c).controller == p && self.is_creature(self.c(c))))
+            .into_iter()
+            .map(|c| {
+                let card = self.c(c);
+                Opt { label: format!("Choose {}#{}", card.name(), card.oid), key: vec![KI::S("choose_creature"), KI::S("battlefield"), KI::S(card.name())], value: Val::Card(c) }
+            })
+            .collect();
+        let hand = self.players[p as usize].hand.iter().copied().filter(|&c| c != spell && self.c(c).face().is_type(T_CREATURE));
+        for c in self.dedupe_by_name(hand) {
+            let n = self.c(c).name();
+            opts.push(Opt { label: format!("Reveal {n}"), key: vec![KI::S("choose_creature"), KI::S("hand"), KI::S(n)], value: Val::Card(c) });
+        }
+        opts
+    }
+
+    /// `Game._tap_other_candidates`: station's cost.
+    pub fn tap_other_candidates(&self, p: u8, ci: CIdx) -> Vec<CIdx> {
+        self.battlefield.iter().copied().filter(|&c| c != ci && self.c(c).controller == p && self.is_creature(self.c(c)) && !self.c(c).tapped).collect()
+    }
+
     pub fn can_activate(&self, p: u8, ci: CIdx, ai: usize) -> bool {
         let c = self.c(ci);
         let ab = &c.face().abilities[ai];
-        if ab.zone_hand {
-            if c.zone != Zone::Hand {
+        if ab.zone_hand || ab.zone_graveyard {
+            if c.zone != (if ab.zone_hand { Zone::Hand } else { Zone::Graveyard }) {
                 return false;
             }
         } else if c.zone != Zone::Battlefield || c.controller != p {
@@ -1855,6 +2033,9 @@ impl State {
             return false;
         }
         if ab.return_forest && self.return_land_candidates(p).is_empty() {
+            return false;
+        }
+        if ab.tap_other && self.tap_other_candidates(p, ci).is_empty() {
             return false;
         }
         let exclude: Vec<u32> = if ab.tap { vec![c.oid] } else { vec![] };
@@ -1945,10 +2126,18 @@ impl State {
             let (card, color) = match o.value {
                 Val::Pool(_) => return Some(i),
                 Val::Source(card, color) => (card, color),
+                Val::Filter(..) => {
+                    // A mana filter is the payment of last resort.
+                    let key = (FILTER_HURT, 0, 0, 0);
+                    if best.as_ref().map_or(true, |(_, k)| key < *k) {
+                        best = Some((i, key));
+                    }
+                    continue;
+                }
                 _ => unreachable!("pay_mana option"),
             };
             let face = self.c(card).face();
-            let ai = face.abilities.iter().position(|a| a.mana.is_some()).unwrap();
+            let ai = self.mana_ability(card);
             let ab = &face.abilities[ai];
             if ab.sac_self {
                 return None;
@@ -1956,7 +2145,7 @@ impl State {
             let nd = need.get_or_insert_with(|| self.colour_needs(p));
             let mana = ab.mana.as_ref().unwrap();
             let hurt: i32 = mana.iter().map(|&c| nd[c as usize]).sum();
-            let other_tap = face.abilities.iter().enumerate().any(|(j, a)| j != ai && !a.zone_hand && a.tap);
+            let other_tap = face.abilities.iter().enumerate().any(|(j, a)| j != ai && a.on_battlefield() && a.tap);
             let key = (hurt, other_tap as i32, mana.len(), if rem.colored_get(color) > 0 { 0 } else { 1 });
             if best.as_ref().map_or(true, |(_, k)| key < *k) {
                 best = Some((i, key));
@@ -2036,10 +2225,22 @@ impl State {
                 }
             }
         }
+        for card in self.dedupe_by_name(pl.graveyard.iter().copied()) {
+            let face = self.c(card).face();
+            for (i, ab) in face.abilities.iter().enumerate() {
+                if ab.zone_graveyard && self.can_activate(p, card, i) {
+                    opts.push(Opt {
+                        label: format!("{}: {}", face.name, ab.name),
+                        key: vec![KI::S("activate"), KI::S(face.name.as_str()), KI::S(ab.name.as_str())],
+                        value: Val::Activate(card, i as u8),
+                    });
+                }
+            }
+        }
         for card in self.dedupe_by_equiv(self.battlefield.iter().copied().filter(|&c| self.c(c).controller == p)) {
             let face = self.c(card).face();
             for (i, ab) in face.abilities.iter().enumerate() {
-                if ab.zone_hand {
+                if !ab.on_battlefield() {
                     continue;
                 }
                 if ab.mana.is_some() {
@@ -2081,6 +2282,9 @@ impl State {
     }
 
     pub fn can_block(&self, blocker: &Card, attacker: &Card) -> bool {
+        if self.has_known(attacker, "unblockable") {
+            return false;
+        }
         !(self.has(attacker, "flying") && !(self.has(blocker, "flying") || self.has(blocker, "reach")))
     }
 

@@ -188,6 +188,11 @@ All fields are optional unless marked. Unknown fields are an error in both engin
 | `madness`, `plot` | madness cost (a discarded card goes to exile, and a trigger lets its owner cast it for this cost at any speed); plot cost (a sorcery-speed special action exiles it; cast free as a sorcery on a later turn, option "Cast X (plotted)") |
 | `overload` + `overload_effect` | cast mode "overload": this cost, no targets, `overload_effect` instead of `effect` |
 | `alternative_cost`, `flashback_cost` | `{ sacrifice = "mountain", n = N }`: sacrifice lands instead of paying mana (cast mode "alternative" from hand; flashback with only `flashback_cost` is free apart from the sacrifice). `alternative_cost = { reveal_hand = true }`: reveal your hand instead of paying, offered only with no other land card in hand; the hand becomes known to both players (Land Grant) |
+| `alternative_cost`, `flashback_cost` | `{ sacrifice = "mountain", n = N }`: sacrifice lands instead of paying mana (cast mode "alternative" from hand; flashback with only `flashback_cost` is free apart from the sacrifice) |
+| `prototype` + `prototype_face` | cast mode "prototype" for this cost; the permanent (and spell) uses the named `[[face]]` (Boulderbranch Golem) |
+| `station` | `{ n = 7, keywords = ["flying"] }`: a Spacecraft, a creature with these keywords at `n` charge counters (an ability with `tap_other = "creature"` and op `station` adds them) |
+| `additional_choose_creature` | `true`: choose a creature you control or reveal a creature card from hand as the spell is cast (op `damage_target_from` with `from = "chosen_power"`) |
+| `equipped` | `{ keywords, power, toughness }`, only with `subtypes = "Equipment"`: what the equipped creature gets (Whispersilk Cloak: `keywords = ["unblockable", "shroud"]`). Equip is an ordinary ability: `{ name = "equip", cost = "{2}", sorcery_speed = true, targets = ["creature_you_control"], effect = [{ op = "attach" }] }`. The Equipment stays on the battlefield when the creature leaves and becomes unattached (an SBA, 301.5c) |
 | `bargain` | `true`: cast mode "bargain", sacrificing an artifact, enchantment or token as an additional cost; an `etb` trigger with `condition = { bargained = true }` only triggers then (Troublemaker Ouphe) |
 | `enters_tapped`, `etb_x_counters`, `back` | `back` names a `[[face]]` (transform) |
 | `enters_tapped_unless_forests` | `N`: enters tapped unless its controller controls N other Forests (Gingerbread Cabin) |
@@ -198,10 +203,14 @@ All fields are optional unless marked. Unknown fields are an error in both engin
 | `triggers` | `[{ name (required), event, effect, condition, targets, up_to }]`; `targets` are chosen as the trigger goes on the stack, and a trigger without legal targets is removed (603.3d), events: `etb`, `leaves_battlefield`, `to_graveyard_from_battlefield`, `cast`, `you_sacrifice_another`, `your_upkeep`, `you_cast` (another spell its controller casts, from the battlefield), `third_draw` (its owner draws their third card in a turn, from the graveyard); condition: `{ sacrificed_subtype = "Eldrazi" }`, `{ spell = "noncreature" \| "instant_or_sorcery" }` (for `you_cast`), `{ equipped = true, spell = ... }` (for `you_cast`, only while this Equipment is attached: a trigger it grants the equipped creature; keys in alphabetical order, as the Rust TOML table iterates them), `{ bargained = true }`, `{ entered_untapped = true }`, `{ cast_mode = "evidence" }` (for `etb`); event `room`: a `[[dungeon]]` room (below) |
 | `[[dungeon]]` | top-level: `name`, `rooms = [{ name, next, targets, effect }]`, first room on top; rooms are the dungeon's triggers. Only the Undercity exists (initiative: `take_initiative`, the upkeep venture, combat damage to the holder takes it) |
 | `equipped_power`, `equipped_toughness` | Equipment: what the creature it is attached to gets (Black Mage's Rod: `equipped_power = 1`). Equip is an ordinary ability (`cost`, `sorcery_speed = true`, `targets = ["creature_you_control"]`, op `attach_source_to_target`); an attached permanent without `bestow` is Equipment |
+| `equipped_power`, `equipped_toughness` | Equipment: what the creature it is attached to gets (Black Mage's Rod: `equipped_power = 1`); `equipped_keywords` the keywords it gets (Whispersilk Cloak: `["unblockable", "shroud"]`). Equip is an ordinary ability (`cost`, `sorcery_speed = true`, `targets = ["creature_you_control"]`, op `attach_source_to_target`); an attached permanent without `bestow` is Equipment |
+| `abilities` | `[{ name (required), cost, tap, sac_self, sac_other, discard_self, discard_other, exile_self, x_target_mv, x_reveal, zone = "battlefield" \| "hand", sorcery_speed, mana = ["B", "R"], targets, effect }]`; `mana` makes it a mana ability; `discard_other` / `exile_self`: discard a card / exile this permanent as a cost; `x_target_mv = 2`: the cost has {X}{X}, X = the (single) target's mana value, only affordable targets are offered (Gorilla Shaman); `x_reveal = "red"`: choose X, then reveal X red cards from hand as a cost (Martyr of Ashes); `zone = "graveyard"`: activated from its owner's graveyard (with `exile_self`: Bramble Wurm); `mana_amount = { n, if_control = [subtypes] }`: a mana ability making `n` units while its controller controls each subtype (Urza's lands; extra units float); a mana ability with a `cost` (exactly `{1}`) is a **filter**, offered only while paying ("Activate X for U"), `once_per_turn` limits it (Barrels of Blasting Jelly); `tap_other = "creature"`: tap another untapped creature you control as a cost (station) |
+| `triggers` | `[{ name (required), event, effect, condition, targets }]`; `targets` are chosen as the trigger goes on the stack, and a trigger without legal targets is removed (603.3d), events: `etb`, `to_graveyard_from_battlefield`, `cast`, `you_sacrifice_another`, `your_upkeep`, `you_cast` (another spell its controller casts, from the battlefield), `third_draw` (its owner draws their third card in a turn, from the graveyard); condition: `{ sacrificed_subtype = "Eldrazi" }`, `{ spell = "noncreature" \| "instant_or_sorcery" }` (for `you_cast`), `{ equipped = true, spell = ... }` (for `you_cast`, only while this Equipment is attached: a trigger it grants the equipped creature; keys in alphabetical order, as the Rust TOML table iterates them), `{ bargained = true }` (for `etb`) |
 
 Target kinds: `creature`, `nonlegendary_creature`, `nonartifact_creature`, `creature_you_control`, `creature_you_dont_control`, `land`, `nonland_permanent`, `permanent`, `artifact`, `noncreature_artifact`, `blue_permanent`, `red_permanent`, `spell`, `blue_spell`, `red_spell`, `instant_spell`, `artifact_spell`, `player`, `opponent`, `player_with_creature`, `creature_of_target_player` (a creature controlled by the player chosen as the previous target: Searing Blaze), `another_creature` (a creature not already chosen as a target of the same spell: Cast into the Fire), `artifact_or_enchantment_spell`, `artifact_or_enchantment_you_dont_control`, `artifact_or_enchantment`, `any`.
+Target kinds: `creature`, `nonlegendary_creature`, `nonartifact_creature`, `creature_you_control`, `creature_you_dont_control`, `land`, `nonland_permanent`, `permanent`, `artifact`, `noncreature_artifact`, `blue_permanent`, `red_permanent`, `spell`, `blue_spell`, `red_spell`, `instant_spell`, `sorcery_spell`, `artifact_spell`, `player`, `opponent`, `player_with_creature`, `creature_of_target_player` (a creature controlled by the player chosen as the previous target: Searing Blaze), `another_creature` (a creature not already chosen as a target of the same spell: Cast into the Fire), `artifact_or_enchantment_spell`, `artifact_or_enchantment_you_dont_control`, `any`. A permanent with `shroud` is never a legal target (`Game.targetable`: candidates and the resolution re-check).
 
-Sacrifice filters (`additional_sac`, `sac_other`, land-sacrifice costs): `artifact`, `artifact_or_creature`, `mountain`, `artifact_enchantment_or_token` (bargain).
+Sacrifice filters (`additional_sac`, `sac_other`, land-sacrifice costs): `artifact`, `artifact_or_creature`, `mountain`, `artifact_enchantment_or_token` (bargain), `land` (Crop Rotation).
 
 Where the vocabulary lives, for when it needs to grow:
 
@@ -210,7 +219,7 @@ Where the vocabulary lives, for when it needs to grow:
 | target kinds | `Game.target_candidates` / `_perm_matches` / `_spell_matches` | `TK` + `TK_NAMES` (cards.rs), `perm_matches` / `spell_matches` (state.rs) |
 | trigger events | the `_emit_*` methods of `Game` | `Event` (cards.rs), `emit_*` (state.rs) |
 | cost reductions, conditions | `COST_REDUCTIONS`, `_condition` (cards.py) | `CostRed`, `sacrificed_subtype` (cards.rs), `cost_reduction` / `emit_sacrifice` (state.rs) |
-| keywords with rules meaning | `Game.has(...)` call sites | `ENGINE_KEYWORDS` (cards.rs) and the same call sites |
+| keywords with rules meaning | `Game.has(...)` call sites (`shroud`: `targetable`; `unblockable`: `_can_block`) | `ENGINE_KEYWORDS` (cards.rs) or `has_known` (a keyword only some card defines: `shroud`, `unblockable`) and the same call sites |
 
 ## Reference: ops
 
@@ -218,7 +227,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 
 | op | parameters | effect |
 |---|---|---|
-| `draw` | `n`, `n_cast_from_graveyard` | the controller draws `n` (or `n_cast_from_graveyard` when the spell was cast from a graveyard) |
+| `draw` | `n`, `n_cast_from_graveyard`, `each_controlling` | the controller draws `n` (or `n_cast_from_graveyard` when the spell was cast from a graveyard); `each_controlling`: instead each player who controls a permanent with that name (Bonder's Ornament) |
 | `mill` | `who` = `you` \| `target_player`, `n` | mill `n` |
 | `counter_target` | `if_color` | counter the targeted spell (only if it has colour `if_color`, e.g. `"U"`) |
 | `counter_target_unless_paid` | `cost` | its controller may pay `cost`; otherwise counter it (Force Spike) |
@@ -228,7 +237,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 | `grant_target` | `keywords` | it gains the keywords until end of turn |
 | `create_token` | `token`, `n`, `attach_source` | the controller creates `n` tokens (a `[[token]]` name); `attach_source`: then attach the source Equipment to the token (job select) |
 | `attach_source_to_target` | | attach the source Equipment to the targeted creature (equip); nothing happens if the Equipment is itself a creature (CR 301.5c) |
-| `gain_life` | `n` | the controller gains `n` life |
+| `gain_life` | `n`, `per_storm`, `n_from = "source_power"` | the controller gains `n` life (or life equal to the source's power: Boulderbranch Golem) |
 | `lose_life` | `who` = `you` \| `opponent` \| `target_player` \| `target_controller`, `n` | that player loses `n` life |
 | `counter_on_source` | | a +1/+1 counter on the source, if it is still on the battlefield |
 | `damage_target` | `n`, `index`, `n_landfall` | the source (the spell itself, or the ability's source) deals `n` damage to target `index` (default 0; creature or player); `n_landfall` instead if a land entered under the controller's control this turn |
@@ -241,7 +250,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 | `exile_all_graveyards` | | exile both graveyards |
 | `exile_target` | | exile the targeted permanent |
 | `exile_from_graveyards` | `n` | the controller exiles up to `n` cards from any graveyards, chosen one at a time on resolution (Faerie Macabre; the engine has no graveyard targets) |
-| `search_library` | `supertype`, `type`, `subtypes_any`, `dest` = `battlefield` \| `hand`, `tapped`, `reveal`, `what` | search for a matching card (finding nothing is allowed), put it there, shuffle |
+| `search_library` | `supertype`, `type`, `subtypes_any`, `colorless`, `dest` = `battlefield` \| `hand`, `tapped`, `reveal`, `what` | search for a matching card (finding nothing is allowed), put it there, shuffle |
 | `optional_payment` | `cost`, `prompt`, `then` | the controller may pay; if paid, run the `then` ops |
 | `scry` | `n` | scry n: for n = 1 a top / bottom choice, for n > 1 one ORDER decision over (top in order, bottom in order) |
 | `untap_target` | | untap the targeted permanent |
@@ -253,6 +262,14 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 | `damage_chosen_power` | | the source deals damage equal to the power chosen as the `additional_power` cost to target 0 |
 | `take_initiative` | | the controller takes the initiative and ventures into Undercity |
 | `reveal_to_battlefield` | `n`, `type`, `counters`, `hexproof` | reveal the top `n`, put a `type` card from among them onto the battlefield with `counters` +1/+1 counters (hexproof until your next turn), shuffle (Throne of the Dead Three) |
+| `scry` | `n` | scry 1 (top or bottom), or scry N > 1 as one ORDER decision over every top/bottom split in every order |
+| `surveil` | `n` (only 1) | surveil 1 |
+| `dig` | `n`, `type`, `colorless`, `what` | look at the top `n`, may put a matching card into your hand (revealed), the rest on the bottom (Ancient Stirrings) |
+| `cascade` | | on a `cast` trigger: cascade below the spell's mana value (Maelstrom Colossus) |
+| `station` | | charge counters on the source equal to the power of the creature tapped for `tap_other` |
+| `damage_target_from` | `from` = `x` \| `chosen_power`, `index` | damage equal to X, or to the power of the creature chosen as the spell was cast |
+| `return_random_from_graveyard` | `type` | a card of that type at random from your graveyard to your hand (Haunted Fengraf) |
+| `return_cards_from_graveyards` | `types`, `n`, `each_type`, `whose` = `you` \| `any` | up to `n` cards of those types to their owners' hands, chosen on resolution (`each_type`: one per type: Call Damage Control) |
 | `explore_target` | | the targeted creature explores |
 | `shuffle_into_library` | | dies trigger: shuffle this card from the graveyard into its owner's library |
 | `custom` | `fn` | `delver_reveal`, `brainstorm`, `ponder`, `deem_inferior`, `opponent_discards_else_draw`, `wildfire`, `duress`, `highway_robbery`, `relic_exile_one` |

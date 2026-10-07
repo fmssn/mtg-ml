@@ -179,7 +179,7 @@ class TrainConfig:
     pfsp_ema: float = 0.05  # per-game step of the running win rate vs each pool opponent (starts at 0.5)
     init: str = ""  # a new run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, with --value-bound, --entity-attn and --features on top (new attention layers start as the identity)
     exploit: str = ""  # exploiter mode: every training game is the learner on --exploit-deck vs this frozen policy file
-    exploit_deck: str = "jund"  # the learner's deck: "jund", "blue", "red", "affinity" or "elves", one of --matchup's (evaluate.DECK_KEYS)
+    exploit_deck: str = "jund"  # the learner's deck: "jund", "blue", "red", "affinity", "elves" or "tron", one of --matchup's (evaluate.DECK_KEYS)
     eval_every: int = 10  # evaluate every this many iterations (0 = only by eval_every_games)
     eval_every_games: int = 0  # also evaluate whenever the training games cross a multiple of this (e.g. 250000)
     eval_process: int = 1  # 1: evaluate in a process of its own, never waiting for it; 0: on the training pool, blocking

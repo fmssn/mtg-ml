@@ -284,7 +284,7 @@ def test_lost_well_scry_two():
     choose(g, "Venture into Lost Well")
     resolve_stack(g)
     assert g.decision.kind == O.ORDER and len(labels(g)) == 6
-    choose(g, "Top: Llanowar Elves; bottom: Forest")
+    choose(g, "Scry: top Llanowar Elves; bottom Forest")
     lib = names(g.players[0].library)
     assert lib[0] == "Llanowar Elves" and lib[-1] == "Forest"
 
