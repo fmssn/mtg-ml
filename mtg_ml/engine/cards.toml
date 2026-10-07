@@ -688,6 +688,28 @@ effect = [{ op = "counters_on_target", n = 1, keywords = ["lifelink"] }]
 
 # ---------------------------------------------------------------------------
 # Sideboard cards (see decks.py; not all are in a current sideboard)
+# Elves
+# ---------------------------------------------------------------------------
+
+# Also played by Tron.
+[[card]]
+name = "Generous Ent"
+cost = "{5}{G}"
+types = "Creature"
+subtypes = "Treefolk"
+text = "Reach. When this creature enters, create a Food token. Forestcycling {1}."
+power = 5
+toughness = 7
+keywords = ["reach"]
+triggers = [{ name = "create a Food token", event = "etb", effect = [{ op = "create_token", token = "Food", n = 1 }] }]
+abilities = [
+    { name = "forestcycling {1}", cost = "{1}", zone = "hand", discard_self = true, effect = [
+        { op = "search_library", subtypes_any = ["Forest"], dest = "hand", reveal = true, what = "a Forest card" },
+    ] },
+]
+
+# ---------------------------------------------------------------------------
+# Sideboards (lean, matchup-relevant; see decks.py)
 # ---------------------------------------------------------------------------
 
 [[card]]
@@ -929,3 +951,10 @@ types = "Artifact"
 subtypes = "Blood"
 text = "{1}, {T}, Discard a card, Sacrifice this token: Draw a card."
 abilities = [{ name = "draw a card", cost = "{1}", tap = true, discard_other = true, sac_self = true, effect = [{ op = "draw", n = 1 }] }]
+
+[[token]]
+name = "Food"
+types = "Artifact"
+subtypes = "Food"
+text = "{2}, {T}, Sacrifice this token: You gain 3 life."
+abilities = [{ name = "gain 3 life", cost = "{2}", tap = true, sac_self = true, effect = [{ op = "gain_life", n = 3 }] }]
