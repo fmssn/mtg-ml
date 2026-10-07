@@ -27,9 +27,10 @@ SEARCHED = {"priority", "target", "declare_attacker", "declare_blocker", "sacrif
 
 
 class SearchBot:
-    def __init__(self, seat: int, playouts: int = 8, max_options: int = 4, seed: int = 0, max_decisions: int = 4000):
+    def __init__(self, seat: int, playouts: int = 8, max_options: int = 4, seed: int = 0, max_decisions: int = 4000, deck: str | None = None):
+        """`deck`: the deck in `seat` (default: the seat's usual one), for the base bot."""
         self.p = seat
-        self.base: Bot = make_bot(seat)
+        self.base: Bot = make_bot(seat, deck)
         self.playouts = playouts
         self.max_options = max_options
         self.rng = random.Random(seed)
@@ -60,7 +61,7 @@ class SearchBot:
             _pin(h, self.p, pins)
         h.rng = random.Random(seed ^ 0x5EED)  # future shuffles must not mirror the real game's
         h.step(option)
-        bots = (make_bot(0), make_bot(1))
+        bots = (make_bot(0, h.deck_names[0]), make_bot(1, h.deck_names[1]))  # the decks in play, not the default matchup
         n = 0
         while not h.over and n < self.max_decisions:
             h.step(bots[h.decision.player].act(h))

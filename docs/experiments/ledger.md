@@ -12,6 +12,7 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
+| 20261007-red-madness-1m | new deck: Red Madness learner vs frozen r1-control Jund, warm-started from it | 1M | (vs Jund bot) 89.9% | 92.6% | | new-deck baseline⁴ |
 | 20261007-r3-attn | R3 + 1 entity self-attention layer (identity init) | 9.4M + 1M | running | | | |
 | 20261007-r3-postboard | R3 + 20% sideboarded games (vs 50%) | 9.4M + 1M | **74.9%** | 74.9% | **154 ± 13** | inconclusive (+) |
 | 20261007-r3-botjund | R3 + 25% games learner Jund vs blue bot | 9.4M + 1M | 74.2% | 75.0% | 143 ± 13 | reject |
@@ -29,7 +30,28 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | 20261006-overnight-selfplay | open-ended self-play + pool | 8.4M | 64.6% | 70.9% | 103 ± 13 | parent |
 | 20261006-overnight-bot10 | + 10% games vs scripted bots | 8.4M | 65.6% | | 75 ± 12 | no effect |
 
-Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections.
+Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows.
+
+---
+
+## 20261007-red-madness-1m · a third deck against a frozen Jund
+
+- **Question**: can a new deck (Red Madness, `docs/red-madness.md`) be learned in 1M games against a fixed opponent, and what do its greedy games show about the engine and the training setup.
+- **Parent / opponent**: `20261007-r1-control` policy (Jund + Blue network, never trained against Red); the learner starts from its weights, the opponent stays frozen. (`r1-lranneal`, the stronger Jund, was not yet adopted when this launched.)
+- **Code**: `claude/mono-red-burn-pauper-627e45` @ 09020f2 (PR fmssn/mtg-ml#23) with this branch's original flags `--matchup jund_madness --learner-seat 1 --opponent J --init-from J`, which the merge renamed to `--matchup jund_madness --exploit J --exploit-deck red`. Native engine.
+- **Flags**: `--self-play-frac 0 --bot-frac 0 --engine native --device cuda --inference server --server-device cuda:1 --workers 22 --games-per-iter 2048 --total-games 1000000 --eval-every-games 100000 --bench-games 1000 --bench-greedy-games 1000 --eval-games 200`, defaults otherwise (postboard 0.5, shaping 0.2 annealed over 100 iterations). 489 iterations, 1.4 s each, ~15 minutes on cores 32-63 and two H100s.
+
+| games | win vs frozen Jund (training, sampled, g1+g2) | vs frozen Jund (eval, g1) | vs Jund bot sampled / greedy |
+|---|---|---|---|
+| 0 | 0.8% | | |
+| 0.1M | 64.6% | 68.5% | 75.7% / 82.6% |
+| 0.5M | 77.2% | 83.5% | 84.7% / 89.8% |
+| 1.0M | 78.7% | 88.5% | 89.9% / 92.6% |
+
+- **Controls**: the frozen Jund scores only 41% (greedy, 1,000 games) against the scripted Red bot, and the Jund bot 21% against it, so the opponent is weak in this matchup; the learner (88.5% vs the same Jund) is well beyond the scripted bot (59%).
+- **Review** (20 greedy games + statistics over 200 more): no engine mistakes found. Most of the win rate is the frozen Jund not knowing Red's threats; Red's own leaks are madness discards without {R} open (a third of Fiery Temper discards are lost), plot never used (0 / 366), greedy 1-land keeps, burn almost never aimed at creatures, sideboard cards near-unused. Details: `docs/red-madness-review.md`.
+- **Verdict**: baseline for the new deck; the setup (one frozen opponent that never saw Red) inflates the number. Next: train both sides (self-play over the jund_madness matchup), see the review.
+- **Archive**: `20261007-red-madness-1m` (evals.txt has the numbers above).
 
 ---
 

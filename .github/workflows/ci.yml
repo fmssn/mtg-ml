@@ -53,3 +53,4 @@ jobs:
         working-directory: native
       - run: python -m pytest -q -m "not slow and not gpu"   # torch tests skip here; the python job covers them
       - run: python -m mtg_ml.difftest fuzz --games 300 --jobs 4
+      - run: python -m mtg_ml.difftest fuzz --games 300 --jobs 4 --matchup jund_madness

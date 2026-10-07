@@ -27,7 +27,7 @@ import mtg_ml_native as _n
 from .cards import CARDS, FACES, SPEC_PATH, TOKENS
 from .game import RulesError
 from .mana import ManaCost
-from .objects import TempEffect
+from .objects import FREE, TempEffect
 
 with open(SPEC_PATH, encoding="utf-8") as _f:
     _n.load_cards(_f.read())
@@ -124,6 +124,7 @@ class NativePlayer:
     exile = property(lambda self: self._zone(4))
     pool = property(lambda self: dict(self._info[5]))
     drew_from_empty = property(lambda self: self._info[6])
+    landfall_turn = property(lambda self: self._info[8])
 
     @property
     def life(self) -> int:
@@ -282,6 +283,7 @@ class NativeGame:
         match_game: int = 1,
         auto_mana: bool = False,
         auto_pass: bool = False,
+        deck_names: tuple[str | None, str | None] | None = None,
     ):
         self._args = dict(
             decks=decks,
@@ -296,7 +298,10 @@ class NativeGame:
             match_game=match_game,
             auto_mana=auto_mana,
             auto_pass=auto_pass,
+            deck_names=deck_names,
         )
+        # Names of decks that are not the default for their seat (Game.deck_names).
+        self.deck_names = tuple(deck_names) if deck_names else (None, None)
         self.cards_db = CARDS
         self.match_game = match_game
         self.auto_single = auto_single
@@ -317,6 +322,7 @@ class NativeGame:
             match_game,
             auto_mana,
             auto_pass,
+            self.deck_names,
         )
         self._cache: dict = {}
         self._cache_version = -1
@@ -575,13 +581,23 @@ class NativeGame:
     def sac_candidates(self, p: int, flt: str, exclude=frozenset()) -> list[NativeCard]:
         return [c for c in (self._card(i) for i in self._g.sac_candidates(p, flt)) if c.oid not in exclude]
 
-    def target_candidates(self, spec, controller: int, exclude_sid=None) -> list[tuple]:
+    def target_candidates(self, spec, controller: int, exclude_sid=None, chosen=None) -> list[tuple]:
         assert exclude_sid is None, "exclude_sid is engine-internal"
-        return [tuple(r) for r in self._g.target_candidates(spec.kind, controller)]
+        return [tuple(r) for r in self._g.target_candidates(spec.kind, controller, [tuple(r) for r in chosen or ()])]
 
     def _mode_cost(self, card, mode: str) -> ManaCost | None:
         d = card.face
-        return {"normal": d.cost, "bestow": d.bestow, "flashback": d.flashback, "escape": d.escape}.get(mode)
+        modes = {
+            "normal": d.cost,
+            "bestow": d.bestow,
+            "flashback": d.flashback,
+            "escape": d.escape,
+            "madness": d.madness,
+            "overload": d.overload,
+            "plot": FREE if d.plot is not None else None,
+            "alternative": FREE if d.alternative_sac is not None else None,
+        }
+        return modes.get(mode)
 
     def _cost_reduction(self, p: int, card) -> int:
         return self._g.cost_reduction(p, self._idx(card))

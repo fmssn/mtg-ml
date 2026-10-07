@@ -3,6 +3,7 @@
     python -m mtg_ml.replay record --agents bot,bot --seed 3       # -> replays/bot-bot-s3.json
     python -m mtg_ml.replay record --agents bot,bot --games 20     # seeds 0..19
     python -m mtg_ml.replay record --agents model:runs/x/latest.pt,bot   # policy + value per decision
+    python -m mtg_ml.replay record --matchup jund_madness --agents model:jund.pt,model:red.pt --greedy --games 20
     python -m mtg_ml.replay serve                                  # http://127.0.0.1:8765
 
 A replay is omniscient (both hands, library sizes, every permanent's state):
@@ -22,12 +23,12 @@ import urllib.parse
 
 from .agents import take
 from .backend import engine_name, game_class
-from .engine import JUND_WILDFIRE, MONO_BLUE_TERROR, expand
+from .match import DEFAULT_MATCHUP, game_args, matchup_decks
 
 FORMAT = 1
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VIEWER = ROOT / "viz" / "viewer.html"
-DECK_NAMES = ("Jund Wildfire", "Mono Blue Terror")
+DECK_TITLES = {"jund_wildfire": "Jund Wildfire", "mono_blue_terror": "Mono Blue Terror", "red_madness": "Red Madness"}
 
 
 def _card_info(face, token: bool) -> dict:
@@ -133,10 +134,13 @@ def snapshot(g, info: dict) -> dict:
     }
 
 
-def record(agents, seed: int = 0, decks=None, engine: str | None = None, names=("?", "?"), **game_kw) -> dict:
-    """Play one game with `agents` and return the replay dict."""
-    decks = decks or (expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR))
-    g = game_class(engine)(decks, seed=seed, log=True, **game_kw)
+def record(agents, seed: int = 0, decks=None, engine: str | None = None, names=("?", "?"), matchup: str = DEFAULT_MATCHUP, match_game: int = 1, **game_kw) -> dict:
+    """Play one game with `agents` and return the replay dict. The decks are
+    game `match_game` of `matchup` unless `decks` are given."""
+    args = game_args(match_game, matchup)
+    if decks is not None:
+        args["decks"] = decks
+    g = game_class(engine)(**args, seed=seed, log=True, **game_kw)
     info: dict = {}
     frames = []
     seen = 0
@@ -163,7 +167,8 @@ def record(agents, seed: int = 0, decks=None, engine: str | None = None, names=(
             "seed": seed,
             "engine": engine_name(engine),
             "agents": list(names),
-            "decks": list(DECK_NAMES),
+            "decks": [DECK_TITLES[d] for d in matchup_decks(matchup)],
+            "match_game": match_game,
             "starting_player": g.starting_player,
             "winner": g.winner,
             "end_reason": g.end_reason,
@@ -246,6 +251,9 @@ def main(argv=None) -> None:
     r.add_argument("--games", type=int, default=1)
     r.add_argument("--out", default="replays", help="output directory")
     r.add_argument("--engine", default=None, help="python or native; default: $MTG_ENGINE, else python")
+    r.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue or jund_madness")
+    r.add_argument("--match-game", type=int, default=1, help="1: maindecks; 2/3: sideboarded")
+    r.add_argument("--starting-player", type=int, default=None, help="0 or 1 (default: by the seed)")
     s = sub.add_parser("serve", help="serve the web viewer")
     s.add_argument("--dir", default="replays")
     s.add_argument("--host", default="127.0.0.1")
@@ -257,10 +265,12 @@ def main(argv=None) -> None:
         out = pathlib.Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
         for seed in range(args.seed, args.seed + args.games):
-            agents = [make_agent(k, i, seed, greedy=args.greedy) for i, k in enumerate(kinds)]
+            decks = matchup_decks(args.matchup)
+            agents = [make_agent(k, i, seed, greedy=args.greedy, deck=decks[i]) for i, k in enumerate(kinds)]
             names = [_agent_name(k) for k in kinds]
-            rep = record(agents, seed=seed, engine=args.engine, names=names)
-            path = out / f"{'-'.join(n.replace(':', '_') for n in names)}-s{seed}.json"
+            rep = record(agents, seed=seed, engine=args.engine, names=names, matchup=args.matchup, match_game=args.match_game, starting_player=args.starting_player)
+            tag = "" if args.matchup == DEFAULT_MATCHUP else f"{args.matchup}-g{args.match_game}-"
+            path = out / f"{tag}{'-'.join(n.replace(':', '_') for n in names)}-s{seed}.json"
             path.write_text(json.dumps(rep, separators=(",", ":")))
             m = rep["meta"]
             print(f"{path}: {len(rep['frames'])} frames, {m['turns']} turns, winner {m['winner']} ({m['end_reason']})")

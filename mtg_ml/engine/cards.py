@@ -1,5 +1,5 @@
-"""Card definitions for the supported pool: Jund Wildfire and Mono Blue Terror
-(Pauper), plus the tokens they create.
+"""Card definitions for the supported pool: Jund Wildfire, Mono Blue Terror
+and Red Madness (Pauper), plus the tokens they create.
 
 The pool itself is data: `cards.toml` (shared with the Rust port). This
 module turns each entry into a `CardDef` and each effect, a list of ops,
@@ -19,6 +19,8 @@ from .mana import ManaCost
 from .objects import (
     CHOOSE_CARD,
     CHOOSE_MODE,
+    EXILE_FROM_GY,
+    FREE,
     ORDER,
     YES_NO,
     AbilityDef,
@@ -66,9 +68,14 @@ def _op_mill(g, item, op):
         g.mill(t[1], op["n"])
 
 
+def _color_ok(op, card) -> bool:
+    """`if_color`: the effect only does something to an object of that color (Pyroblast)."""
+    return "if_color" not in op or op["if_color"] in card.face.colors
+
+
 def _op_counter_target(g, item, op):
     t = g.target(item)
-    if t is not None:
+    if t is not None and _color_ok(op, t.card):
         g.counter(t)
 
 
@@ -84,8 +91,11 @@ def _op_counter_target_unless_paid(g, item, op):
 
 def _op_destroy_target(g, item, op):
     t = g.target(item)
-    if t is not None:
-        g.destroy(t)
+    if t is None or not _color_ok(op, t):
+        return
+    if op.get("mv_is_x") and t.face.mana_value != item.x:
+        return
+    g.destroy(t)
 
 
 def _op_bounce_target(g, item, op):
@@ -113,7 +123,9 @@ def _op_create_token(g, item, op):
 
 
 def _op_gain_life(g, item, op):
-    g.gain_life(item.controller, op["n"])
+    """per_storm: n for each spell cast before this one this turn (a storm
+    trigger standing in for the copies: Weather the Storm)."""
+    g.gain_life(item.controller, op["n"] * (item.data["storm"] if op.get("per_storm") else 1))
 
 
 def _op_lose_life(g, item, op):
@@ -137,16 +149,61 @@ def _op_counter_on_source(g, item, op):
         live.counters += 1
 
 
+def _source(item):
+    """The object dealing an effect's damage: the spell itself, or the
+    (last known information of the) source of an ability or trigger."""
+    return item.source if item.source is not None else item.card
+
+
+def _landfall(g, item) -> bool:
+    return g.players[item.controller].landfall_turn == g.turn
+
+
 def _op_damage_target(g, item, op):
-    if g.target_legal(item, 0):
-        g.deal_damage(item.source, item.targets[0], op["n"])
+    """index: which target (default 0). n_landfall: the amount instead of n
+    if a land entered under the controller's control this turn."""
+    i = op.get("index", 0)
+    if i < len(item.targets) and g.target_legal(item, i):
+        n = op["n_landfall"] if "n_landfall" in op and _landfall(g, item) else op["n"]
+        g.deal_damage(_source(item), item.targets[i], n)
+
+
+def _op_damage_each_opponent(g, item, op):
+    """if_discarded_nonland: only if the card discarded to cast it was not a land (Grab the Prize)."""
+    if op.get("if_discarded_nonland") and item.data.get("discarded_land", True):
+        return
+    g.deal_damage(_source(item), ("player", 1 - item.controller), op["n"])
 
 
 def _op_damage_each_creature(g, item, op):
+    """n, or x = true for X; without: a keyword that protects; whose = opponent: only theirs."""
     without = op.get("without")
+    n = item.x if op.get("x") else op["n"]
     for c in list(g.battlefield):
-        if g.is_creature(c) and not (without and g.has(c, without)):
-            g.deal_damage(item.source, ("perm", c.oid), op["n"])
+        if not g.is_creature(c) or (without and g.has(c, without)):
+            continue
+        if op.get("whose") == "opponent" and c.controller == item.controller:
+            continue
+        g.deal_damage(_source(item), ("perm", c.oid), n)
+
+
+def _op_discard(g, item, op):
+    for _ in range(op["n"]):
+        if (yield from g.choose_discard(item.controller, item.name)) is None:
+            return
+
+
+def _op_return_to_battlefield(g, item, op):
+    """Graveyard trigger: the card returns, if it is still that object in the graveyard."""
+    c = item.data["card"]
+    if c.zone == "graveyard" and c.oid == item.data["oid"]:
+        g.put_onto_battlefield(c, c.owner, tapped=op.get("tapped", False))
+
+
+def _op_exile_all_graveyards(g, item, op):
+    for q in (0, 1):
+        for c in list(g.players[q].graveyard):
+            g._move(c, "exile")
 
 
 def _op_exile_graveyard(g, item, op):
@@ -223,8 +280,12 @@ OPS = {
     "lose_life": _op_lose_life,
     "counter_on_source": _op_counter_on_source,
     "damage_target": _op_damage_target,
+    "damage_each_opponent": _op_damage_each_opponent,
     "damage_each_creature": _op_damage_each_creature,
+    "discard": _op_discard,
+    "return_to_battlefield": _op_return_to_battlefield,
     "exile_graveyard": _op_exile_graveyard,
+    "exile_all_graveyards": _op_exile_all_graveyards,
     "search_library": _op_search_library,
     "optional_payment": _op_optional_payment,
     "scry": _op_scry,
@@ -354,6 +415,33 @@ def _duress(g, item):
     g.discard(c)
 
 
+def _highway_robbery(g, item):
+    """You may discard a card or sacrifice a land. If you do, draw two cards."""
+    p = item.controller
+    options = [Option("Neither: draw nothing", ("robbery", "none"), None)]
+    options += [Option(f"Discard {c.name}", ("robbery", "discard", c.name), ("discard", c)) for c in g._dedupe_by_name(g.players[p].hand)]
+    lands = g._dedupe_by_equiv(c for c in g.battlefield if c.controller == p and g.is_land(c))
+    options += [Option(f"Sacrifice {c.name}#{c.oid}", ("robbery", "sacrifice", c.name), ("sacrifice", c)) for c in lands]
+    choice = yield from g.ask(p, CHOOSE_CARD, "Highway Robbery: discard a card or sacrifice a land to draw two?", options)
+    if choice is None:
+        return
+    if choice[0] == "discard":
+        g.discard(choice[1])
+    else:
+        g.sacrifice(choice[1])
+    g.draw(p, 2)
+
+
+def _relic_exile_one(g, item):
+    """Target player exiles a card of their choice from their graveyard."""
+    t = g.target(item)
+    if t is None or not g.players[t[1]].graveyard:
+        return
+    options = [Option(f"Exile {c.name}", ("exile_gy", c.name), c) for c in g._dedupe_by_name(g.players[t[1]].graveyard)]
+    c = yield from g.ask(t[1], EXILE_FROM_GY, f"{item.name}: exile a card from your graveyard", options)
+    g._move(c, "exile")
+
+
 CUSTOM = {
     "delver_reveal": _delver_reveal,
     "brainstorm": _brainstorm,
@@ -362,6 +450,8 @@ CUSTOM = {
     "opponent_discards_else_draw": _opponent_discards_else_draw,
     "wildfire": _wildfire,
     "duress": _duress,
+    "highway_robbery": _highway_robbery,
+    "relic_exile_one": _relic_exile_one,
 }
 
 # ---------------------------------------------------------------------------
@@ -384,12 +474,21 @@ COST_REDUCTIONS = {
 }
 
 
+CAST_FILTERS = {
+    "noncreature": lambda card: "Creature" not in card.face.types,
+    "instant_or_sorcery": is_instant_or_sorcery,
+}
+
+
 def _condition(spec: dict | None):
     if spec is None:
         return None
     if set(spec) == {"sacrificed_subtype"}:
         sub = spec["sacrificed_subtype"]
         return lambda g, src, lki: sub in lki.face.subtypes
+    if set(spec) == {"spell"}:  # you_cast: the kind of spell cast
+        flt = CAST_FILTERS[spec["spell"]]
+        return lambda g, src, card: flt(card)
     raise ValueError(f"unsupported trigger condition {spec!r}")
 
 
@@ -421,6 +520,10 @@ def _ability(a: dict) -> AbilityDef:
         sac_self=a.get("sac_self", False),
         sac_other=a.get("sac_other"),
         discard_self=a.get("discard_self", False),
+        discard_other=a.get("discard_other", False),
+        exile_self=a.get("exile_self", False),
+        x_target_mv=a.get("x_target_mv", 0),
+        x_reveal=a.get("x_reveal"),
         zone=a.get("zone", "battlefield"),
         sorcery_speed=a.get("sorcery_speed", False),
         mana=tuple(a["mana"]) if "mana" in a else None,
@@ -441,11 +544,21 @@ def colors_of(spec: dict) -> frozenset[str]:
     return frozenset(c for c in "WUBRG" if "{%s}" % c in cost)
 
 
+def _land_sac(spec: dict | None) -> tuple[str, int] | None:
+    """{ sacrifice = "mountain", n = 2 }: a cost of sacrificing lands instead of mana."""
+    if spec is None:
+        return None
+    if set(spec) != {"sacrifice", "n"} or spec["sacrifice"] != "mountain":
+        raise ValueError(f"unsupported land sacrifice cost {spec!r}")
+    return spec["sacrifice"], spec["n"]
+
+
 def card_def(spec: dict) -> CardDef:
     known = {
         "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward",
         "targets", "effect", "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped",
-        "etb_x_counters", "back", "modes", "abilities", "triggers",
+        "etb_x_counters", "back", "modes", "abilities", "triggers", "madness", "plot", "overload", "overload_effect",
+        "additional_discard", "alternative_cost", "flashback_cost",
     }  # fmt: skip
     unknown = set(spec) - known
     if unknown:
@@ -467,10 +580,17 @@ def card_def(spec: dict) -> CardDef:
         effect=make_effect(spec.get("effect")),
         additional_sac=spec.get("additional_sac"),
         cost_reduction=COST_REDUCTIONS[cr] if cr else None,
-        flashback=M(spec["flashback"]) if "flashback" in spec else None,
+        flashback=M(spec["flashback"]) if "flashback" in spec else FREE if "flashback_cost" in spec else None,
         escape=M(spec["escape"]) if "escape" in spec else None,
         escape_exile=spec.get("escape_exile", 0),
         bestow=M(spec["bestow"]) if "bestow" in spec else None,
+        madness=M(spec["madness"]) if "madness" in spec else None,
+        plot=M(spec["plot"]) if "plot" in spec else None,
+        overload=M(spec["overload"]) if "overload" in spec else None,
+        overload_effect=make_effect(spec.get("overload_effect")),
+        additional_discard=spec.get("additional_discard", False),
+        alternative_sac=_land_sac(spec.get("alternative_cost")),
+        flashback_sac=_land_sac(spec.get("flashback_cost")),
         abilities=tuple(_ability(a) for a in spec.get("abilities", ())),
         triggers=tuple(_trigger(t) for t in spec.get("triggers", ())),
         enters_tapped=spec.get("enters_tapped", False),

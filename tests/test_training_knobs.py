@@ -19,7 +19,8 @@ from mtg_ml.rl import stacked  # noqa: E402
 from mtg_ml.rl.features import featurize_flat  # noqa: E402
 from mtg_ml.rl.model import PolicyNet  # noqa: E402
 from mtg_ml.rl.ppo import PPOConfig, _graphs_for, _StepGraphs, get_lr, load_optimizer_state, make_optimizer, ppo_update, set_lr  # noqa: E402
-from mtg_ml.rl.rollout import BOT, LEARNER, GameSpec, Job, Result, Trajectory, _batch, _decks, _finish, run_job  # noqa: E402
+from mtg_ml.match import match_decks  # noqa: E402
+from mtg_ml.rl.rollout import BOT, LEARNER, GameSpec, Job, Result, Trajectory, _batch, _finish, run_job  # noqa: E402
 from mtg_ml.rl.train import Trainer  # noqa: E402
 
 # -- GAE: value clamp and per-turn discounting ---------------------------------
@@ -136,7 +137,7 @@ def test_tanh_value_bound():
     with torch.no_grad():
         for n in (net, bounded):
             n.value_head[-1].bias.fill_(3.0)
-    g = game_class("python")(_decks(1), seed=1)
+    g = game_class("python")(match_decks(1), seed=1)
     p = g.decision.player
     st, ol, of = featurize_flat(g, p)
     x = (array("i", st), array("i", ol), array("i", of), array("i"))

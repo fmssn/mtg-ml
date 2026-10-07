@@ -7,12 +7,15 @@
     python -m mtg_ml.rl.evaluate runs/a/latest.pt bot --jund  # the benchmark: learner Jund vs the blue bot
     python -m mtg_ml.rl.evaluate runs/a/latest.pt bot --jund --greedy   # ... with argmax play
     python -m mtg_ml.rl.evaluate ladder a.pt b.pt c.pt --games 200 --out ladder.json   # rate a reference ladder
+    python -m mtg_ml.rl.evaluate runs/red/latest.pt runs/jund.pt --matchup jund_madness --seat 1   # Red Madness learner vs a Jund checkpoint
 
 Every seed is played twice with the seats swapped, so both sides see the
 same shuffles from both decks. With --jund the learner always plays Jund
 Wildfire (seat 0) and every seed is played once per starting player instead;
 against `bot` that is the project benchmark (learner Jund vs the Mono Blue
-Terror / Delver bot), see `benchmark`. Scores count a draw as half a win; the
+Terror / Delver bot), see `benchmark`. `--seat` keeps the learner in any one
+seat the same way and `--matchup` picks the decks (`match.MATCHUPS`). Scores
+are keyed by the learner's deck (jund, blue, red) and count a draw as half a win; the
 interval is Wilson 95%. With --bo3 each seed is a best-of-three match
 (`mtg_ml.match` rules: sideboarded games 2/3, loser starts the next game).
 `evaluate_policy` is the trainer's periodic evaluation, run in a process of
@@ -42,12 +45,13 @@ import math
 import os
 
 from ..backend import ENV_VAR, engine_name
-from ..match import MatchResult, game_seed
+from ..match import DEFAULT_MATCHUP, MatchResult, game_seed, matchup_decks
 from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, create_pool, play
 
 EVAL_SEED = 10_000_000
 ELO = 400 / math.log(10)  # Elo points per natural-log unit of odds
 EVAL_BLOCKS = ("random", "bot", "pool0")
+DECK_KEYS = {"jund_wildfire": "jund", "mono_blue_terror": "blue", "red_madness": "red"}  # metric names
 
 
 def wilson(wins: float, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -60,43 +64,54 @@ def wilson(wins: float, n: int, z: float = 1.96) -> tuple[float, float]:
     return (c - h, c + h)
 
 
-def paired_specs(opponent: str, games: int, seed: int = EVAL_SEED, jund_only: bool = False) -> list[GameSpec]:
+def _seats(seat: int, opponent: str) -> tuple[str, str]:
+    return (LEARNER, opponent) if seat == 0 else (opponent, LEARNER)
+
+
+def paired_specs(opponent: str, games: int, seed: int = EVAL_SEED, jund_only: bool = False, seat: int | None = None, matchup: str = DEFAULT_MATCHUP) -> list[GameSpec]:
+    """Each seed once per seat; with `seat` (`jund_only`: seat 0) the
+    learner keeps that seat and each seed is played once per starting player."""
+    seat = 0 if jund_only else seat
     specs = []
     for s in range(games // 2):
-        if jund_only:  # learner keeps seat 0 (Jund); the pair swaps who starts
-            specs.append(GameSpec(seed=seed + s, seats=(LEARNER, opponent), starting_player=0))
-            specs.append(GameSpec(seed=seed + s, seats=(LEARNER, opponent), starting_player=1))
+        if seat is not None:
+            specs.append(GameSpec(seed=seed + s, seats=_seats(seat, opponent), starting_player=0, matchup=matchup))
+            specs.append(GameSpec(seed=seed + s, seats=_seats(seat, opponent), starting_player=1, matchup=matchup))
             continue
-        specs.append(GameSpec(seed=seed + s, seats=(LEARNER, opponent)))
-        specs.append(GameSpec(seed=seed + s, seats=(opponent, LEARNER)))
+        specs.append(GameSpec(seed=seed + s, seats=(LEARNER, opponent), matchup=matchup))
+        specs.append(GameSpec(seed=seed + s, seats=(opponent, LEARNER), matchup=matchup))
     return specs
 
 
-def score(games: list) -> dict:
-    """Learner score per deck and overall from `Result.games` rows."""
+def score(games: list, matchup: str = DEFAULT_MATCHUP) -> dict:
+    """Learner score per deck (the learner's: jund, blue, red) and overall from `Result.games` rows."""
     out = {}
-    rows = {"jund": [], "blue": []}
+    keys = [DECK_KEYS[d] for d in matchup_decks(matchup)]
+    rows = {keys[0]: [], keys[1]: []}
     for g in games:
         seat = 0 if g[0][0] == LEARNER else 1
-        rows["jund" if seat == 0 else "blue"].append(1.0 if g[1] == seat else 0.5 if g[1] is None else 0.0)
-    rows["all"] = rows["jund"] + rows["blue"]
+        rows[keys[seat]].append(1.0 if g[1] == seat else 0.5 if g[1] is None else 0.0)
+    rows["all"] = rows[keys[0]] + rows[keys[1]]
     for k, xs in rows.items():
         lo, hi = wilson(sum(xs), len(xs))
         out[k] = (sum(xs) / max(len(xs), 1), (round(lo, 3), round(hi, 3)), len(xs))
     return out
 
 
-def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
-    specs = paired_specs(opponent, games, jund_only=jund_only)
-    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass), n_jobs).games)
+def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
+                 seat: int | None = None, matchup: str = DEFAULT_MATCHUP) -> dict:  # fmt: skip
+    specs = paired_specs(opponent, games, jund_only=jund_only, seat=seat, matchup=matchup)
+    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass), n_jobs).games, matchup)
 
 
-def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
-    """Best-of-three matches on paired seeds (`jund_only`: one match per seed,
-    learner on Jund). Each round plays the next game of every unfinished match
-    as one batch. Returns match scores like `score`."""
-    if jund_only:
-        live = [(EVAL_SEED + s, (LEARNER, opponent), MatchResult()) for s in range(matches)]
+def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
+                     seat: int | None = None, matchup: str = DEFAULT_MATCHUP) -> dict:  # fmt: skip
+    """Best-of-three matches on paired seeds (`seat`, `jund_only`: seat 0: one
+    match per seed, the learner in that seat). Each round plays the next game
+    of every unfinished match as one batch. Returns match scores like `score`."""
+    seat = 0 if jund_only else seat
+    if seat is not None:
+        live = [(EVAL_SEED + s, _seats(seat, opponent), MatchResult()) for s in range(matches)]
     else:
         live = [(EVAL_SEED + s, seats, MatchResult()) for s in range(matches // 2) for seats in ((LEARNER, opponent), (opponent, LEARNER))]
     while True:
@@ -104,60 +119,88 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
         for seed, seats, res in live:
             if not res.over:
                 n, start = res.next_game(seed)
-                todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n))
+                todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n, matchup=matchup))
         if not todo:
             break
         job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass)
         for seats, winner, reason, _, _, seed in play(procs, [sp for _, sp in todo.values()], job, n_jobs).games:
             res, spec = todo[(seed, seats)]
             res.games.append((spec.starting_player, winner, reason))
-    return score([(seats, res.winner) for _, seats, res in live])
+    return score([(seats, res.winner) for _, seats, res in live], matchup)
 
 
-def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy_games: int = 0, auto_mana: bool = False, auto_pass: bool = False) -> dict:
+def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy_games: int = 0, auto_mana: bool = False, auto_pass: bool = False,
+              matchup: str = DEFAULT_MATCHUP, seat: int = 0) -> dict:  # fmt: skip
     """The fixed benchmark: the learner plays Jund Wildfire against the scripted
-    Mono Blue Terror (Delver) bot. Game-1 decks on paired seeds (each seed once
-    per starting player), sampled (`games`) and greedy (`greedy_games`,
-    keys `bench/jund_vs_bot_greedy*`), plus best-of-three matches. Same seeds
+    Mono Blue Terror (Delver) bot; in general the deck in `seat` of
+    `matchup` against the other deck's bot (keys `bench/<deck>_vs_bot*`).
+    Game-1 decks on paired seeds (each seed once per starting player),
+    sampled (`games`) and greedy (`greedy_games`, keys
+    `bench/<deck>_vs_bot_greedy*`), plus best-of-three matches. Same seeds
     every call."""
     out = {}
+    deck = DECK_KEYS[matchup_decks(matchup)[seat]]
+    kw = dict(seat=seat, matchup=matchup, auto_mana=auto_mana, auto_pass=auto_pass)
     for n_games, sfx, greedy in ((games, "", False), (greedy_games, "_greedy", True)):
         if n_games:
-            s, ci, n = head_to_head(procs, learner_path, BOT, n_games, n_jobs, version, max_turns, inference, jund_only=True, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass)["jund"]
-            out.update({f"bench/jund_vs_bot{sfx}": s, f"bench/jund_vs_bot{sfx}_ci": ci, f"bench/jund_vs_bot{sfx}_n": n})
+            s, ci, n = head_to_head(procs, learner_path, BOT, n_games, n_jobs, version, max_turns, inference, greedy=greedy, **kw)[deck]
+            out.update({f"bench/{deck}_vs_bot{sfx}": s, f"bench/{deck}_vs_bot{sfx}_ci": ci, f"bench/{deck}_vs_bot{sfx}_n": n})
     if bo3_matches:
-        s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, jund_only=True, auto_mana=auto_mana, auto_pass=auto_pass)["jund"]
-        out.update({"bench/jund_vs_bot_bo3": s, "bench/jund_vs_bot_bo3_ci": ci, "bench/jund_vs_bot_bo3_n": n})
+        s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, **kw)[deck]
+        out.update({f"bench/{deck}_vs_bot_bo3": s, f"bench/{deck}_vs_bot_bo3_ci": ci, f"bench/{deck}_vs_bot_bo3_n": n})
     return out
 
 
 def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, eval_games: int, eval_bo3_matches: int, bench_games: int, bench_bo3_matches: int,
                     max_turns: int = 100, inference: str = "local", blocks: tuple = EVAL_BLOCKS, bench_greedy_games: int = 0,
-                    ladder: tuple = (), ladder_games: int = 200, ladder_ratings: str = "", ladder_greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
+                    ladder: tuple = (), ladder_games: int = 200, ladder_ratings: str = "", ladder_greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
+                    matchup: str = DEFAULT_MATCHUP, seat: int | None = None, opponent: str = "") -> dict:
     """The trainer's evaluation of a policy file: learner vs the opponents of
     `blocks` (the random agent, the scripted bots, the oldest pool snapshot
     `pool0`) on paired seeds (game 1 decks), best-of-three matches against
     the bots, the benchmark (sampled and greedy) and, with `ladder`
     (checkpoint paths) in place of `pool0`, the reference ladder
     (`ladder_eval`; rung ratings from `load_or_rate_ladder`). Keys
-    `eval/<opponent>/<deck>` (+ `_ci`), `bench/*` and `ladder/*`. Runs on
-    any pool (`rl.collect` calls it as `fn(pool, *args)`)."""
+    `eval/<opponent>/<deck>` (+ `_ci`), `bench/*` and `ladder/*`. With a
+    fixed training `opponent` checkpoint, the pool0 block plays it instead
+    (`eval/opponent/<deck>`); `seat`: the learner only plays that seat
+    (its deck in `matchup`). Runs on any pool (`rl.collect` calls it as
+    `fn(pool, *args)`)."""
     out = {}
-    opponents = {"random": RANDOM, "bot": BOT, "pool0": pool0}
+    opponents = {"random": RANDOM, "bot": BOT, "pool0": opponent or pool0}
+    decks = [DECK_KEYS[d] for d in matchup_decks(matchup)]
+    decks = decks if seat is None else [decks[seat]]
+    kw = dict(auto_mana=auto_mana, auto_pass=auto_pass, seat=seat, matchup=matchup)
+    if ladder and matchup != DEFAULT_MATCHUP:
+        _warn_ladder_skipped(matchup)
+        ladder = ()  # pool0 is played instead, as without a ladder
     for name in blocks:
         if eval_games and not (name == "pool0" and ladder):
-            res = head_to_head(procs, policy, opponents[name], eval_games, n_jobs, version, max_turns, inference, auto_mana=auto_mana, auto_pass=auto_pass)
-            for deck in ("jund", "blue"):
-                out[f"eval/{name}/{deck}"], out[f"eval/{name}/{deck}_ci"], _ = res[deck]
+            res = head_to_head(procs, policy, opponents[name], eval_games, n_jobs, version, max_turns, inference, **kw)
+            label = "opponent" if name == "pool0" and opponent else name
+            for deck in decks:
+                out[f"eval/{label}/{deck}"], out[f"eval/{label}/{deck}_ci"], _ = res[deck]
     if eval_bo3_matches:
-        res = head_to_head_bo3(procs, policy, BOT, eval_bo3_matches, n_jobs, version, max_turns, inference, auto_mana=auto_mana, auto_pass=auto_pass)
-        for deck in ("jund", "blue"):
+        res = head_to_head_bo3(procs, policy, BOT, eval_bo3_matches, n_jobs, version, max_turns, inference, **kw)
+        for deck in decks:
             out[f"eval/bot_bo3/{deck}"], out[f"eval/bot_bo3/{deck}_ci"], _ = res[deck]
-    out.update(benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference, bench_greedy_games, auto_mana, auto_pass))
+    out.update(benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference, bench_greedy_games, auto_mana, auto_pass, matchup, seat or 0))
     if ladder and ladder_games:
         ratings = load_or_rate_ladder(procs, list(ladder), ladder_ratings, ladder_games, n_jobs, max_turns, inference, ladder_greedy)
         out.update(ladder_eval(procs, policy, ratings, ladder_games, n_jobs, version, max_turns, inference, ladder_greedy, auto_mana, auto_pass))
     return out
+
+
+_LADDER_SKIP_WARNED: set = set()
+
+
+def _warn_ladder_skipped(matchup: str) -> None:
+    """The reference ladder's rungs and ratings are for the default matchup
+    (Jund vs Blue); on another one its Elo would be meaningless, so it is
+    skipped (said once per matchup)."""
+    if matchup not in _LADDER_SKIP_WARNED:
+        _LADDER_SKIP_WARNED.add(matchup)
+        print(f"evaluate: skipping the reference ladder on matchup {matchup!r} (its rungs are rated on {DEFAULT_MATCHUP!r})", flush=True)
 
 
 # -- reference ladder and Elo ------------------------------------------------
@@ -303,6 +346,8 @@ def main(argv=None) -> None:
     ap.add_argument("--games", type=int, default=400, help="games (or matches with --bo3)")
     ap.add_argument("--bo3", action="store_true", help="best-of-three matches with sideboarding")
     ap.add_argument("--jund", action="store_true", help="learner always plays Jund (seat 0); with 'bot' this is the benchmark")
+    ap.add_argument("--seat", type=int, default=None, help="learner always plays this seat (0 or 1)")
+    ap.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue or jund_madness")
     ap.add_argument("--greedy", action="store_true", help="networks take their most likely option instead of sampling (deterministic on paired seeds)")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")
@@ -313,7 +358,7 @@ def main(argv=None) -> None:
         os.environ[ENV_VAR] = engine_name(args.engine)
     with create_pool(args.workers) as procs:
         fn = head_to_head_bo3 if args.bo3 else head_to_head
-        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund, greedy=args.greedy, auto_mana=args.auto_mana, auto_pass=args.auto_pass)
+        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund, greedy=args.greedy, auto_mana=args.auto_mana, auto_pass=args.auto_pass, seat=args.seat, matchup=args.matchup)
     for k, (s, ci, n) in res.items():
         print(f"{k:5s} {s:.3f}  95% CI {ci}  ({n} games)")
 

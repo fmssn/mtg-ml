@@ -480,5 +480,201 @@
   "toughness": null,
   "keywords": [],
   "cmc": 1.0
+ },
+ {
+  "name": "Guttersnipe",
+  "mana_cost": "{2}{R}",
+  "type_line": "Creature \u2014 Goblin Shaman",
+  "oracle_text": "Whenever you cast an instant or sorcery spell, this creature deals 2 damage to each opponent.",
+  "power": "2",
+  "toughness": "2",
+  "keywords": [],
+  "cmc": 3.0
+ },
+ {
+  "name": "Kessig Flamebreather",
+  "mana_cost": "{1}{R}",
+  "type_line": "Creature \u2014 Human Shaman",
+  "oracle_text": "Whenever you cast a noncreature spell, this creature deals 1 damage to each opponent.",
+  "power": "1",
+  "toughness": "3",
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Voldaren Epicure",
+  "mana_cost": "{R}",
+  "type_line": "Creature \u2014 Vampire",
+  "oracle_text": "When this creature enters, it deals 1 damage to each opponent. Create a Blood token. (It's an artifact with \"{1}, {T}, Discard a card, Sacrifice this token: Draw a card.\")",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Sneaky Snacker",
+  "mana_cost": "{U}{B}",
+  "type_line": "Creature \u2014 Faerie Rogue",
+  "oracle_text": "Flying\nWhen you draw your third card in a turn, return this card from your graveyard to the battlefield tapped.",
+  "power": "2",
+  "toughness": "1",
+  "keywords": [
+   "Flying"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Lightning Bolt",
+  "mana_cost": "{R}",
+  "type_line": "Instant",
+  "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Lava Dart",
+  "mana_cost": "{R}",
+  "type_line": "Instant",
+  "oracle_text": "Lava Dart deals 1 damage to any target.\nFlashback\u2014Sacrifice a Mountain. (You may cast this card from your graveyard for its flashback cost. Then exile it.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flashback"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Fireblast",
+  "mana_cost": "{4}{R}{R}",
+  "type_line": "Instant",
+  "oracle_text": "You may sacrifice two Mountains rather than pay this spell's mana cost.\nFireblast deals 4 damage to any target.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 6.0
+ },
+ {
+  "name": "Fiery Temper",
+  "mana_cost": "{1}{R}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Fiery Temper deals 3 damage to any target.\nMadness {R} (If you discard this card, discard it into exile. When you do, cast it for its madness cost or put it into your graveyard.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Madness"
+  ],
+  "cmc": 3.0
+ },
+ {
+  "name": "Faithless Looting",
+  "mana_cost": "{R}",
+  "type_line": "Sorcery",
+  "oracle_text": "Draw two cards, then discard two cards.\nFlashback {2}{R} (You may cast this card from your graveyard for its flashback cost. Then exile it.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flashback"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Highway Robbery",
+  "mana_cost": "{1}{R}",
+  "type_line": "Sorcery",
+  "oracle_text": "You may discard a card or sacrifice a land. If you do, draw two cards.\nPlot {1}{R} (You may pay {1}{R} and exile this card from your hand. Cast it as a sorcery on a later turn without paying its mana cost. Plot only as a sorcery.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Plot"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Grab the Prize",
+  "mana_cost": "{1}{R}",
+  "type_line": "Sorcery",
+  "oracle_text": "As an additional cost to cast this spell, discard a card.\nDraw two cards. If the discarded card wasn't a land card, Grab the Prize deals 2 damage to each opponent.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Gorilla Shaman",
+  "mana_cost": "{R}",
+  "type_line": "Creature \u2014 Ape Shaman",
+  "oracle_text": "{X}{X}{1}: Destroy target noncreature artifact with mana value X.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Martyr of Ashes",
+  "mana_cost": "{R}",
+  "type_line": "Creature \u2014 Human Shaman",
+  "oracle_text": "{2}, Reveal X red cards from your hand, Sacrifice this creature: This creature deals X damage to each creature without flying.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Pyroblast",
+  "mana_cost": "{R}",
+  "type_line": "Instant",
+  "oracle_text": "Choose one \u2014\n\u2022 Counter target spell if it's blue.\n\u2022 Destroy target permanent if it's blue.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Searing Blaze",
+  "mana_cost": "{R}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Searing Blaze deals 1 damage to target player or planeswalker and 1 damage to target creature that player or that planeswalker's controller controls.\nLandfall \u2014 If you had a land enter the battlefield under your control this turn, Searing Blaze deals 3 damage to that player or planeswalker and 3 damage to that creature instead.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Landfall"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Electrickery",
+  "mana_cost": "{R}",
+  "type_line": "Instant",
+  "oracle_text": "Electrickery deals 1 damage to target creature you don't control.\nOverload {1}{R} (You may cast this spell for its overload cost. If you do, change \"target\" in its text to \"each.\")",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Overload"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Relic of Progenitus",
+  "mana_cost": "{1}",
+  "type_line": "Artifact",
+  "oracle_text": "{T}: Target player exiles a card from their graveyard.\n{1}, Exile this artifact: Exile all graveyards. Draw a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Weather the Storm",
+  "mana_cost": "{1}{G}",
+  "type_line": "Instant",
+  "oracle_text": "You gain 3 life.\nStorm (When you cast this spell, copy it for each spell cast before it this turn.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Storm"
+  ],
+  "cmc": 2.0
  }
 ]

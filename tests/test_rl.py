@@ -133,7 +133,7 @@ class _InProcess:
 def test_benchmark_keeps_learner_on_jund(learner_ckpt):
     from mtg_ml.rl.evaluate import benchmark, paired_specs
 
-    specs = paired_specs(BOT, 4, jund_only=True)
+    specs = paired_specs(BOT, 4, seat=0)
     assert all(sp.seats == (LEARNER, BOT) for sp in specs) and [sp.starting_player for sp in specs] == [0, 1, 0, 1]
     _, path = learner_ckpt
     res = benchmark(_InProcess(), path, games=4, bo3_matches=2, n_jobs=2, version=1, max_turns=8)
