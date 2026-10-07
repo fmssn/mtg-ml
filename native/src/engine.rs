@@ -65,11 +65,17 @@ impl Eng {
     // Turn structure
     // ------------------------------------------------------------------
 
-    pub fn main(&mut self, start_step: &str) -> R<()> {
-        if self.s().mulligan_phase {
+    /// `resume`: `Game::copy` finishing a turn from a step-start snapshot.
+    pub fn main(&mut self, start_step: &str, resume: Option<(&'static str, bool)>) -> R<()> {
+        let mut first = true;
+        if let Some((step, skip_draw)) = resume {
+            self.run_turn(step, skip_draw)?;
+            let st = self.s();
+            st.active = 1 - st.active;
+            first = false;
+        } else if self.s().mulligan_phase {
             self.mulligans()?;
         }
-        let mut first = true;
         loop {
             let st = self.s();
             st.turn += 1;
@@ -136,6 +142,9 @@ impl Eng {
         for &name in &STEPS[from..] {
             if (name == "declare_blockers" || name == "combat_damage") && self.s().attackers.is_empty() {
                 continue;
+            }
+            if self.s().snapshots {
+                self.s().take_snapshot(name, skip_draw);
             }
             self.s().step_name = name;
             self.log(|_| format!("-- {name}"));

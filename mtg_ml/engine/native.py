@@ -284,6 +284,7 @@ class NativeGame:
         auto_mana: bool = False,
         auto_pass: bool = False,
         deck_names: tuple[str | None, str | None] | None = None,
+        _snapshots: bool = False,
     ):
         self._args = dict(
             decks=decks,
@@ -329,6 +330,8 @@ class NativeGame:
         self._proxies: dict[int, NativeCard] = {}
         if setup is not None:
             setup(self)
+        if _snapshots:
+            self._g.enable_snapshots()
         try:
             self._g.start()
         except _n.NativeRulesError as e:
@@ -390,8 +393,34 @@ class NativeGame:
         except _n.NativeRulesError as e:
             raise RulesError(str(e)) from None
 
-    def fork(self) -> "NativeGame":
-        g = NativeGame(**self._args)
+    def fork(self, replay: bool = False) -> "NativeGame":
+        """Exact copy (`copy()`); `replay=True` rebuilds it from the
+        constructor arguments and the action history (Game.fork)."""
+        if replay:
+            return self._replay()
+        return self.copy()
+
+    def copy(self) -> "NativeGame":
+        """Game.copy: a step-start snapshot restore plus the actions since;
+        the first copy replays the whole history and turns snapshots on."""
+        try:
+            inner = self._g.copy()
+        except _n.NativeRulesError as e:
+            raise RulesError(str(e)) from None
+        if inner is None:
+            g = self._replay(snapshots=True)
+            self._g.adopt_snapshot(g._g)
+            return g
+        g = object.__new__(NativeGame)
+        g.__dict__.update(self.__dict__)
+        g._g = inner
+        g._cache = {}
+        g._cache_version = -1
+        g._proxies = {}
+        return g
+
+    def _replay(self, snapshots: bool = False) -> "NativeGame":
+        g = NativeGame(**self._args, _snapshots=snapshots)
         try:
             g._g.replay(self._g.actions)
         except _n.NativeRulesError as e:

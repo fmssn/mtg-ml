@@ -120,9 +120,13 @@ impl PyGame {
     fn st(&self) -> &State {
         self.g.state()
     }
+    /// Every edit outside `step()` goes through here: it also drops the
+    /// copy snapshot, which no longer leads to the edited state.
     fn mutate(&mut self) -> &mut State {
         self.version += 1;
-        self.g.state_mut()
+        let st = self.g.state_mut();
+        st.state_edited();
+        st
     }
     fn card(&self, c: CIdx) -> PyResult<&Card> {
         self.st().cards.get(c as usize).ok_or_else(|| PyIndexError::new_err("bad card index"))
@@ -209,6 +213,33 @@ impl PyGame {
             self.g.step(a).map_err(Self::step_err)?;
         }
         Ok(())
+    }
+
+    /// `Game.copy` from the latest step-start snapshot; None when there is
+    /// none (the caller replays instead, see `NativeGame.copy`).
+    fn copy(&self) -> PyResult<Option<PyGame>> {
+        Ok(self.g.copy().map_err(Self::step_err)?.map(|g| PyGame { g, version: 0 }))
+    }
+
+    /// Take snapshots at every step start from now on (`Game._snapshots`).
+    fn enable_snapshots(&mut self) {
+        self.g.state_mut().snapshots = true;
+    }
+
+    /// Use `other`'s latest snapshot: it replayed this game's actions and is
+    /// in the same state. Ignored when this game was edited outside `step()`.
+    fn adopt_snapshot(&mut self, other: PyRef<'_, PyGame>) {
+        let snap = other.st().snap.clone();
+        let st = self.g.state_mut();
+        if !st.edited {
+            st.snapshots = true;
+            st.snap = snap;
+        }
+    }
+
+    #[getter]
+    fn has_snapshot(&self) -> bool {
+        self.st().snap.is_some()
     }
 
     // -- scalar state --------------------------------------------------------

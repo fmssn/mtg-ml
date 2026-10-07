@@ -24,6 +24,9 @@ class ManaCost:
     colored: tuple[tuple[str, int], ...] = ()
     x: int = 0  # number of {X} symbols
 
+    def __deepcopy__(self, memo) -> "ManaCost":  # immutable: Game.copy shares it
+        return self
+
     @staticmethod
     def parse(text: str | None) -> "ManaCost":
         if not text:
