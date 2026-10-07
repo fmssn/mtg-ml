@@ -13,6 +13,10 @@ on:
   push:
     # claude/lucid-euler-0tjz9h is the default branch until it is renamed to main
     branches: [main, claude/lucid-euler-0tjz9h]
+  schedule:
+    # GitHub runs no pull_request workflows while a PR conflicts with its base, so a
+    # push to a conflicting PR goes unnoticed. Sweep for those every 30 minutes.
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       pr:
@@ -27,7 +31,7 @@ permissions:
 
 jobs:
   plan:
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -130,7 +134,7 @@ jobs:
     concurrency:
       group: autopilot-pr-${{ needs.plan.outputs.pr }}
     permissions:
-      actions: read   # failed CI logs
+      actions: write   # failed CI logs; re-dispatch on retry
     env:
       PR: ${{ needs.plan.outputs.pr }}
       MODE: ${{ needs.plan.outputs.mode }}
@@ -201,6 +205,12 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: python "$AP/finish.py" fix "$PR" "$HEAD_REF" "$ROUND"
+      - name: "Fix: retry on the new head"
+        if: steps.fix.outputs.outcome == 'retry'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run pr-autopilot.yml -f pr="$PR" -f reason="$MODE"
 
       - name: "Escalate: prepare"
         id: esc
@@ -229,10 +239,11 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: python "$AP/finish.py" escalate "$PR" "$HEAD_REF" "$ROUND"
 
-  # Something landed on the default branch: bring every ready PR up to date so the
-  # required checks run against the new base. Conflicts go to the autopilot.
+  # Something landed on the default branch (or the half-hourly sweep): bring every
+  # ready PR up to date so the required checks run against the new base. Conflicts
+  # go to the autopilot.
   update-branches:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       actions: write   # gh workflow run
@@ -248,10 +259,11 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           DISPATCH_TOKEN: ${{ github.token }}
         run: |
-          prs=$(gh pr list --state open --base "${GITHUB_REF_NAME}" --json number,isDraft,author,headRepositoryOwner,labels --jq '
+          base=$(gh api "repos/$GH_REPO" --jq .default_branch)
+          prs=$(gh pr list --state open --base "$base" --json number,isDraft,author,headRepositoryOwner,labels --jq '
             .[] | select(.isDraft | not)
                 | select(.author.login == $ENV.OWNER and .headRepositoryOwner.login == $ENV.OWNER)
-                | select([.labels[].name] | index("needs-human") | not)
+                | select([.labels[].name] | (index("needs-human") or index("needs-opus")) | not)
                 | .number')
           for pr in $prs; do
             # Pushed as the App, so CI runs on the updated branch.
