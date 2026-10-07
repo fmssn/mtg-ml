@@ -315,9 +315,10 @@ label.tg{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-
       <button class="btn" id="bNextT" title="Next turn (Shift+→)">turn ⇥</button>
       <button class="btn" id="bEnd" title="End (End)">⏭</button>
       <div id="timeline" title="Click to jump. Keys: ←/→ step, Shift+←/→ turn, Space play, L side panel"></div>
-      <select id="speed" class="btn" title="Playback speed"><option value="0.5">0.5 step/s</option><option value="1">1 step/s</option><option value="2" selected>2 steps/s</option><option value="4">4 steps/s</option><option value="8">8 steps/s</option></select>
+      <select id="speed" class="btn" title="Playback speed"><option value="0.25">0.25 step/s</option><option value="0.5">0.5 step/s</option><option value="1">1 step/s</option><option value="2" selected>2 steps/s</option><option value="4">4 steps/s</option><option value="8">8 steps/s</option></select>
       <label class="tg" title="Skip passes and mana payments with nothing happening"><input type="checkbox" id="keyOnly" checked> key moments</label>
       <label class="tg"><input type="checkbox" id="showHands" checked> hands</label>
+      <label class="tg" id="liveConfirmL" style="display:none" title="Live games: stop at each of the model's moves; Space or → shows the next one"><input type="checkbox" id="liveConfirm" checked> confirm model moves</label>
       <span class="info" id="pos"></span>
     </div>
   </div>
@@ -338,7 +339,8 @@ let keyFrames = [], turnStarts = [];
 let LIVE = null;
 const pending = d => d && d.chosen == null;  // the player's decision, not yet made
 const modelMove = d => LIVE && d && d.player !== LIVE.seat;  // live: only the chosen option is known
-const pref = {keyOnly: true, showHands: true, speed: 2, panel: true};
+const stepping = () => LIVE && pref.liveConfirm && !playing && idx < R.frames.length - 1;  // Space confirms the next model move
+const pref = {keyOnly: true, showHands: true, speed: 2, panel: true, liveConfirm: true};
 
 // ---------------------------------------------------------------- Scryfall images
 const IMG_KEY = 'mtgml-scryfall-v1';
@@ -572,7 +574,12 @@ function renderCenter(s) {
 function liveNote() {
   if (!LIVE || idx >= R.frames.length - 1) return '';
   const end = R.frames[R.frames.length - 1].decision;
-  return `<div class="dp" style="margin-bottom:8px">${playing ? "the model's moves are playing back" : 'you are looking at the past'} · <a href="#" id="bLiveNow">${pending(end) ? 'skip to your move' : 'skip to the end'}</a></div>`;
+  const skip = `<a href="#" id="bLiveNow">${pending(end) ? 'skip to your move' : 'skip to the end'}</a>`;
+  if (stepping()) {
+    const left = (pref.keyOnly ? keyFrames : R.frames.map((_, i) => i)).filter(k => k > idx).length;
+    return `<div class="dp" style="margin-bottom:8px;color:var(--text)"><kbd>Space</kbd> / <kbd>→</kbd> next model move (${left} to go) · ${skip}</div>`;
+  }
+  return `<div class="dp" style="margin-bottom:8px">${playing ? "the model's moves are playing back" : 'you are looking at the past'} · ${skip}</div>`;
 }
 function renderDecision(f) {
   const d = f.decision, el = $('#decision');
@@ -856,7 +863,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') $('#modal').classList.remove('on');
   else if (e.key === 'ArrowRight') { e.shiftKey ? turnJump(1) : step(1); e.preventDefault(); }
   else if (e.key === 'ArrowLeft') { e.shiftKey ? turnJump(-1) : step(-1); e.preventDefault(); }
-  else if (e.key === ' ') { setPlaying(!playing); e.preventDefault(); }
+  else if (e.key === ' ') { stepping() ? step(1) : setPlaying(!playing); e.preventDefault(); }
   else if (e.key === 'l' || e.key === 'L') setPanel(!pref.panel);
   else if (e.key === 'Home') seek(0);
   else if (e.key === 'End') seek(R.frames.length - 1);
@@ -864,7 +871,8 @@ document.addEventListener('keydown', e => {
 function savePref() { try { localStorage.setItem('mtgml-viewer-pref', JSON.stringify(pref)); } catch (e) {} }
 try { Object.assign(pref, JSON.parse(localStorage.getItem('mtgml-viewer-pref') || '{}')); } catch (e) {}
 $('#app').classList.toggle('nopanel', !pref.panel); $('#bPanel').textContent = pref.panel ? 'Hide panel' : 'Show panel';
-$('#keyOnly').checked = pref.keyOnly; $('#showHands').checked = pref.showHands; $('#speed').value = String(pref.speed);
+$('#keyOnly').checked = pref.keyOnly; $('#showHands').checked = pref.showHands; $('#liveConfirm').checked = pref.liveConfirm;
+$('#liveConfirm').onchange = e => { pref.liveConfirm = e.target.checked; savePref(); if (pref.liveConfirm) setPlaying(false); render(); }; $('#speed').value = String(pref.speed);
 
 // ---------------------------------------------------------------- loading
 // Every replay is checked and normalised before use: numbers become numbers,
@@ -960,6 +968,7 @@ function load(rep, name, frame = 0) {
   R = rep; file = name; shown = null;
   $('#drop').classList.remove('on');
   placeMats(LIVE ? LIVE.seat : 0);
+  $('#liveConfirmL').style.display = LIVE ? '' : 'none';
   const m = R.meta;
   if (LIVE) $('#meta').innerHTML = `<span class="live-badge">LIVE</span><span class="p0c">${esc(m.decks[0])}</span> (${esc(m.agents[0])}) vs <span class="p1c">${esc(m.decks[1])}</span> (${esc(m.agents[1])}) · ${esc(m.engine)} · turn ${m.turns}${LIVE.over ? ` · winner: ${m.winner == null ? 'draw' : `<span class="${PCLS[m.winner]}">${esc(m.decks[m.winner])}</span>`} (${esc(m.end_reason)})` : ''}`;
   else $('#meta').innerHTML = `<span class="p0c">${esc(m.decks[0])}</span> (${esc(m.agents[0])}) vs <span class="p1c">${esc(m.decks[1])}</span> (${esc(m.agents[1])}) · seed ${m.seed} · ${esc(m.engine)} · ${R.frames.length} frames · ${m.turns} turns · winner: ${m.winner == null ? 'draw' : `<span class="${PCLS[m.winner]}">${esc(m.decks[m.winner])}</span>`} (${esc(m.end_reason)})`;
@@ -1003,6 +1012,7 @@ async function api(path, body) {
 // Server answers carry the frames from live.since on; earlier ones are kept.
 function applyLive(view, resume = false) {
   const L = view.live;
+  loadGen++;  // a replay still loading must not replace the game
   if (!LIVE || LIVE.id !== L.id) LIVE = {id: L.id, raw: []};
   Object.assign(LIVE, {seat: L.seat, over: L.over, replay: L.replay, busy: false, error: null});
   // Play the model's moves back from the first frame the player hasn't seen.
@@ -1011,7 +1021,7 @@ function applyLive(view, resume = false) {
   const last = LIVE.raw.length - 1;
   load({format: view.format, meta: view.meta, cards: view.cards, frames: LIVE.raw}, 'live', first);
   const start = resume ? last : pref.keyOnly ? keyFrames.find(k => k >= first) ?? last : first;
-  if (start < last) { seek(start); setPlaying(true); render(); } else seek(last);
+  if (start < last) { seek(start); if (!pref.liveConfirm) { setPlaying(true); render(); } } else seek(last);
   if (L.over) refreshList();
 }
 async function choose(i) {
