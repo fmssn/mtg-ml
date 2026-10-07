@@ -215,7 +215,11 @@ impl Eng {
             self.sba_and_triggers()?;
             let options = self.s().priority_options(p);
             let step = self.s().step_name;
-            let act = self.ask(p, Kind::Priority, || format!("Priority ({step})"), options)?;
+            let act = if self.s().auto_pass && self.s().uneventful_priority(p, &options) {
+                Val::Pass
+            } else {
+                self.ask(p, Kind::Priority, || format!("Priority ({step})"), options)?
+            };
             if let Val::Pass = act {
                 passes += 1;
                 if passes >= 2 {
@@ -416,7 +420,18 @@ impl Eng {
                 }
             }
             let rem_s = rem.to_string();
-            match self.ask(p, Kind::PayMana, || format!("Pay {rem_s} for {what}"), options)? {
+            let auto = if st.auto_mana { st.auto_pay_index(p, &rem, &options) } else { None };
+            let choice = match auto {
+                Some(i) => {
+                    if st.logging {
+                        let m = format!("  p{p} pay_mana: {} (auto)", options[i].label);
+                        st.log.push(m);
+                    }
+                    options.into_iter().nth(i).unwrap().value
+                }
+                None => self.ask(p, Kind::PayMana, || format!("Pay {rem_s} for {what}"), options)?,
+            };
+            match choice {
                 Val::Pool(c) => {
                     self.s().players[p as usize].pool_spend(c);
                     rem.apply(c);
@@ -780,12 +795,13 @@ impl Eng {
                 }
             }
         }
+        // Any group with creatures left, in any order; chosen creatures attack
+        // at once (the state shows the pending declaration) and tap when done.
         let mut chosen: Vec<CIdx> = vec![];
-        let mut gi_min = 0;
         loop {
             let st = self.s();
             let mut options = vec![opt("Done declaring attackers".into(), vec![s("attack"), KI::N], Val::None)];
-            for gi in gi_min..groups.len() {
+            for gi in 0..groups.len() {
                 if let Some(&c) = groups[gi].iter().find(|c| !chosen.contains(c)) {
                     let card = st.c(c);
                     options.push(opt(format!("Attack with {}#{}", card.name(), card.oid), vec![s("attack"), s(card.name())], Val::Group(gi)));
@@ -795,7 +811,9 @@ impl Eng {
                 Val::Group(gi) => {
                     let c = *groups[gi].iter().find(|c| !chosen.contains(c)).unwrap();
                     chosen.push(c);
-                    gi_min = gi;
+                    let st = self.s();
+                    let oid = st.c(c).oid;
+                    st.attackers.push(oid);
                 }
                 _ => break,
             }
@@ -803,8 +821,6 @@ impl Eng {
         let st = self.s();
         for &c in &chosen {
             st.cm(c).tapped = true;
-            let oid = st.c(c).oid;
-            st.attackers.push(oid);
         }
         if !chosen.is_empty() {
             st.push_log_lazy(|s| format!("p{p} attacks with [{}]", chosen.iter().map(|&c| s.c(c).repr()).collect::<Vec<_>>().join(", ")));

@@ -86,12 +86,12 @@ def score(games: list) -> dict:
     return out
 
 
-def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False) -> dict:
+def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
     specs = paired_specs(opponent, games, jund_only=jund_only)
-    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy), n_jobs).games)
+    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass), n_jobs).games)
 
 
-def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False) -> dict:
+def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
     """Best-of-three matches on paired seeds (`jund_only`: one match per seed,
     learner on Jund). Each round plays the next game of every unfinished match
     as one batch. Returns match scores like `score`."""
@@ -107,14 +107,14 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
                 todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n))
         if not todo:
             break
-        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy)
+        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass)
         for seats, winner, reason, _, _, seed in play(procs, [sp for _, sp in todo.values()], job, n_jobs).games:
             res, spec = todo[(seed, seats)]
             res.games.append((spec.starting_player, winner, reason))
     return score([(seats, res.winner) for _, seats, res in live])
 
 
-def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy_games: int = 0) -> dict:
+def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy_games: int = 0, auto_mana: bool = False, auto_pass: bool = False) -> dict:
     """The fixed benchmark: the learner plays Jund Wildfire against the scripted
     Mono Blue Terror (Delver) bot. Game-1 decks on paired seeds (each seed once
     per starting player), sampled (`games`) and greedy (`greedy_games`,
@@ -123,17 +123,17 @@ def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: in
     out = {}
     for n_games, sfx, greedy in ((games, "", False), (greedy_games, "_greedy", True)):
         if n_games:
-            s, ci, n = head_to_head(procs, learner_path, BOT, n_games, n_jobs, version, max_turns, inference, jund_only=True, greedy=greedy)["jund"]
+            s, ci, n = head_to_head(procs, learner_path, BOT, n_games, n_jobs, version, max_turns, inference, jund_only=True, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass)["jund"]
             out.update({f"bench/jund_vs_bot{sfx}": s, f"bench/jund_vs_bot{sfx}_ci": ci, f"bench/jund_vs_bot{sfx}_n": n})
     if bo3_matches:
-        s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, jund_only=True)["jund"]
+        s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, jund_only=True, auto_mana=auto_mana, auto_pass=auto_pass)["jund"]
         out.update({"bench/jund_vs_bot_bo3": s, "bench/jund_vs_bot_bo3_ci": ci, "bench/jund_vs_bot_bo3_n": n})
     return out
 
 
 def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, eval_games: int, eval_bo3_matches: int, bench_games: int, bench_bo3_matches: int,
                     max_turns: int = 100, inference: str = "local", blocks: tuple = EVAL_BLOCKS, bench_greedy_games: int = 0,
-                    ladder: tuple = (), ladder_games: int = 200, ladder_ratings: str = "", ladder_greedy: bool = False) -> dict:
+                    ladder: tuple = (), ladder_games: int = 200, ladder_ratings: str = "", ladder_greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
     """The trainer's evaluation of a policy file: learner vs the opponents of
     `blocks` (the random agent, the scripted bots, the oldest pool snapshot
     `pool0`) on paired seeds (game 1 decks), best-of-three matches against
@@ -146,17 +146,17 @@ def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, e
     opponents = {"random": RANDOM, "bot": BOT, "pool0": pool0}
     for name in blocks:
         if eval_games and not (name == "pool0" and ladder):
-            res = head_to_head(procs, policy, opponents[name], eval_games, n_jobs, version, max_turns, inference)
+            res = head_to_head(procs, policy, opponents[name], eval_games, n_jobs, version, max_turns, inference, auto_mana=auto_mana, auto_pass=auto_pass)
             for deck in ("jund", "blue"):
                 out[f"eval/{name}/{deck}"], out[f"eval/{name}/{deck}_ci"], _ = res[deck]
     if eval_bo3_matches:
-        res = head_to_head_bo3(procs, policy, BOT, eval_bo3_matches, n_jobs, version, max_turns, inference)
+        res = head_to_head_bo3(procs, policy, BOT, eval_bo3_matches, n_jobs, version, max_turns, inference, auto_mana=auto_mana, auto_pass=auto_pass)
         for deck in ("jund", "blue"):
             out[f"eval/bot_bo3/{deck}"], out[f"eval/bot_bo3/{deck}_ci"], _ = res[deck]
-    out.update(benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference, bench_greedy_games))
+    out.update(benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference, bench_greedy_games, auto_mana, auto_pass))
     if ladder and ladder_games:
         ratings = load_or_rate_ladder(procs, list(ladder), ladder_ratings, ladder_games, n_jobs, max_turns, inference, ladder_greedy)
-        out.update(ladder_eval(procs, policy, ratings, ladder_games, n_jobs, version, max_turns, inference, ladder_greedy))
+        out.update(ladder_eval(procs, policy, ratings, ladder_games, n_jobs, version, max_turns, inference, ladder_greedy, auto_mana, auto_pass))
     return out
 
 
@@ -251,7 +251,7 @@ def load_or_rate_ladder(procs, paths: list[str], path: str, games: int, n_jobs: 
     return out["ratings"]
 
 
-def ladder_eval(procs, policy: str, ratings: dict, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy: bool = False) -> dict:
+def ladder_eval(procs, policy: str, ratings: dict, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
     """The learner against every rung of the ladder ({path: Elo}) on paired
     seeds (`games` each, both seats): keys `ladder/<rung>` (score) with
     `_ci`, and the learner's fitted Elo on the ladder's scale `ladder/elo`
@@ -259,7 +259,7 @@ def ladder_eval(procs, policy: str, ratings: dict, games: int, n_jobs: int, vers
     out, results = {}, []
     paths = list(ratings)
     for name, p in zip(rung_names(paths), paths):
-        s, ci, n = head_to_head(procs, policy, p, games, n_jobs, version, max_turns, inference, greedy=greedy)["all"]
+        s, ci, n = head_to_head(procs, policy, p, games, n_jobs, version, max_turns, inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass)["all"]
         out[f"ladder/{name}"], out[f"ladder/{name}_ci"] = s, ci
         results.append((ratings[p], s, n))
     elo, se = fit_elo(results)
@@ -306,12 +306,14 @@ def main(argv=None) -> None:
     ap.add_argument("--greedy", action="store_true", help="networks take their most likely option instead of sampling (deterministic on paired seeds)")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")
+    ap.add_argument("--auto-mana", action="store_true", help="games with Game(auto_mana=True), for policies trained with it")
+    ap.add_argument("--auto-pass", action="store_true", help="games with Game(auto_pass=True), for policies trained with it")
     args = ap.parse_args(argv)
     if args.engine:
         os.environ[ENV_VAR] = engine_name(args.engine)
     with create_pool(args.workers) as procs:
         fn = head_to_head_bo3 if args.bo3 else head_to_head
-        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund, greedy=args.greedy)
+        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund, greedy=args.greedy, auto_mana=args.auto_mana, auto_pass=args.auto_pass)
     for k, (s, ci, n) in res.items():
         print(f"{k:5s} {s:.3f}  95% CI {ci}  ({n} games)")
 

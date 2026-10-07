@@ -110,6 +110,19 @@ TRAIN_SEED_BASE = 1 << 40  # training game seeds start here: disjoint from the f
 KEEP_POLICIES = 3  # the newest, the one a lagged rollout may still be loading, one spare (plus those pinned by evaluations)
 
 
+REQUEST_INTS_PER_GAME = 1 << 15  # worst seen in the overnight run: ~17k int32 words per decision (state, events since the last one, options)
+
+
+def request_ints_for(games_per_iter: int, workers: int, groups: int = Job.groups) -> int:
+    """Request slot size for the inference server: one decision per live game of
+    a worker's request group, at REQUEST_INTS_PER_GAME each, rounded up to a
+    power of two and at least 1 << 18. With 13 workers and 2048 games per
+    iteration a request carries ~79 decisions; 1 << 18 overflowed at 1.3M."""
+    games = -(-games_per_iter // max(workers, 1))
+    per_request = -(-games // max(groups, 1))
+    return max(1 << 18, 1 << (per_request * REQUEST_INTS_PER_GAME - 1).bit_length())
+
+
 @dataclass
 class TrainConfig:
     run: str = "runs/ppo"
@@ -149,12 +162,16 @@ class TrainConfig:
     ladder_ratings: str = ""  # JSON with the rungs' Elo (`evaluate ladder`); "" = <run>/ladder.json, rated by the first evaluation if missing
     ladder_greedy: int = 0  # 1: ladder games (and the rating round robin) with greedy play
     max_turns: int = 100
+    auto_mana: int = 0  # 1: pay non-strategic mana costs automatically (colour-preserving payer; docs/action-decomposition.md)
+    auto_pass: int = 0  # 1: auto-pass priority when the only other options are side-effect-free sacrifice-for-mana abilities
     seed: int = 0
     device: str = "cpu"
     engine: str = "python"  # rules engine for rollouts: python (reference) or native (Rust, mtg_ml_native)
     inference: str = "local"  # policy inference: local (CPU torch in each worker) or server (one GPU process, rl/inference.py)
     server_device: str = ""  # device of the inference server ("" = --device, or cuda when --device is cpu and a GPU exists)
     server_max_rows: int = 16384  # largest batch the server builds from queued requests
+    server_request_ints: int = 0  # int32 words per worker request slot (0 = auto: `request_ints_for`, from the games each request carries)
+    server_policy_slots: int = 32  # policies the server's stack holds before it grows (pool snapshots + learner versions; each ~68 MB for h128 entity)
     trainer_cpus: str = ""  # CPUs of the trainer process, e.g. "32" or "32-35" ("": see the CPU layout)
     worker_cpus: str = ""  # CPUs of the rollout workers, one worker per CPU round robin
     eval_cpus: str = ""  # CPUs of the evaluation workers
@@ -261,7 +278,7 @@ class Trainer:
             from .inference import ServerConfig, default_device
 
             dev = c.server_device or (c.device if c.device != "cpu" else default_device())
-            server_cfg = ServerConfig(device=dev, max_rows=c.server_max_rows, cpus=lay.server or None)
+            server_cfg = ServerConfig(device=dev, max_rows=c.server_max_rows, request_ints=c.server_request_ints or request_ints_for(c.games_per_iter, c.workers), policy_slots=c.server_policy_slots, cpus=lay.server or None)
         if c.collector == "process":  # merging as jobs end, off the trainer's NUMA node if it can
             return PoolProcess(c.workers, c.inference, server_cfg, lay.workers or None, lay.collector or None)
         if c.collector != "thread":
@@ -354,7 +371,7 @@ class Trainer:
         drawn here, in the main thread (`self.rng`)."""
         c, rng = self.cfg, self.rng.getstate()
         shaping = c.shaping * max(0.0, 1 - it / max(c.shaping_anneal_iters, 1))
-        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference)
+        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference, auto_mana=bool(c.auto_mana), auto_pass=bool(c.auto_pass))
         specs = self._train_specs(it)
         return _Rollout(self.collector.call(play, specs, job, c.workers), shaping, it - self.iteration, rng)
 
@@ -379,7 +396,7 @@ class Trainer:
     def _eval_args(self, e: _Eval, n_jobs: int, inference: str) -> tuple:
         c = self.cfg
         return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference,
-                self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy))
+                self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass))
 
     def _request_eval(self) -> dict:
         """Evaluate the newest policy file. Inline (`--eval-process 0`): on the

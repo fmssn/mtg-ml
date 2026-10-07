@@ -19,6 +19,13 @@ def test_lockstep(sc):
     assert d is None, str(d)
 
 
+@pytest.mark.parametrize("sc", scenarios(14, start=20_000, auto_mana=True, auto_pass=True), ids=lambda sc: f"seed{sc.seed}-{'-'.join(sc.agents)}-g{sc.match_game}")
+def test_lockstep_action_decomposition(sc):
+    # Game(auto_mana=True, auto_pass=True): the auto payer and the collapsed passes match too
+    d = run_lockstep(sc, fork_every=41)
+    assert d is None, str(d)
+
+
 def test_lockstep_without_auto_single():
     # every forced choice becomes a decision: exercises option lists of length 1
     for seed in range(4):

@@ -140,6 +140,14 @@ def test_benchmark_keeps_learner_on_jund(learner_ckpt):
     assert res["bench/jund_vs_bot_n"] == 4 and res["bench/jund_vs_bot_bo3_n"] == 2
 
 
+def test_benchmark_with_action_decomposition(learner_ckpt):
+    from mtg_ml.rl.evaluate import benchmark
+
+    _, path = learner_ckpt
+    res = benchmark(_InProcess(), path, games=4, bo3_matches=0, n_jobs=2, version=1, max_turns=8, auto_mana=True, auto_pass=True)
+    assert res["bench/jund_vs_bot_n"] == 4
+
+
 def test_bo3_eval_plays_two_or_three_games_per_match(learner_ckpt):
     from mtg_ml.rl.evaluate import head_to_head_bo3
 

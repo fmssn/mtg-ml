@@ -557,6 +557,7 @@ class _Server:
         self.stack = new
         for lane in self.lanes:
             lane.graphs.clear()  # they point at the old tensors
+            lane.pool = None  # and a fresh pool for the new captures: capturing into the dropped graphs' pool fails the allocator's use_count assert
 
     # -- batches ---------------------------------------------------------
 

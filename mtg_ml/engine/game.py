@@ -74,6 +74,8 @@ class Game:
         start_step: str = "untap",
         mulligans: bool = True,
         match_game: int = 1,
+        auto_mana: bool = False,
+        auto_pass: bool = False,
     ):
         from .cards import CARDS  # local import: cards module imports engine helpers
 
@@ -88,11 +90,20 @@ class Game:
             start_step=start_step,
             mulligans=mulligans,
             match_game=match_game,
+            auto_mana=auto_mana,
+            auto_pass=auto_pass,
         )
         self.match_game = match_game  # 1 = preboard, 2/3 = after sideboarding
         self.cards_db = CARDS
         self.rng = random.Random(seed)
         self.auto_single = auto_single
+        # Action decomposition (both opt-in, see docs/action-decomposition.md):
+        # auto_mana pays mana with a colour-preserving payer unless a source
+        # that sacrifices itself is on offer; auto_pass passes priority when
+        # the only other options are sacrifice-for-mana abilities whose mana
+        # and side effects cannot matter.
+        self.auto_mana = auto_mana
+        self.auto_pass = auto_pass
         self.max_turns = max_turns
         self.logging = log
         self.log: list[str] = []
@@ -366,7 +377,10 @@ class Game:
         while True:
             yield from self._sba_and_triggers()
             options = self._priority_options(p)
-            act = yield from self.ask(p, O.PRIORITY, f"Priority ({self.step_name})", options)
+            if self.auto_pass and self._uneventful_priority(p, options):
+                act = options[0].value  # pass
+            else:
+                act = yield from self.ask(p, O.PRIORITY, f"Priority ({self.step_name})", options)
             if act[0] == "pass":
                 passes += 1
                 if passes >= 2:
@@ -389,6 +403,29 @@ class Game:
                 continue
             if not changed:
                 return
+
+    def _uneventful_priority(self, p: int, options: list[Option]) -> bool:
+        """auto_pass: is passing as good as every other option?
+
+        True only when the stack is empty and every non-pass option is a
+        sacrifice-for-mana ability (an Eldrazi Spawn) whose sacrifice has no
+        side effect: the source has no triggers, is not in combat, and `p`
+        controls nothing that triggers on sacrifices. Anything castable with
+        that mana is already offered (feasibility counts every source), and
+        the pool empties at the end of the step, so floating it is useless."""
+        if self.stack or len(options) < 2:
+            return False
+        for c in self.battlefield:
+            if c.controller == p and any(t.event == "you_sacrifice_another" for t in c.face.triggers):
+                return False
+        combat = set(self.attackers) | set(self.blocks) | set(self.blocks.values())
+        for o in options[1:]:
+            if o.value[0] != "mana":
+                return False
+            card = o.value[1]
+            if card.face.triggers or card.oid in combat:
+                return False
+        return True
 
     def sorcery_timing(self, p: int) -> bool:
         return p == self.active and self.step_name in ("main1", "main2") and not self.stack
@@ -1031,7 +1068,13 @@ class Game:
                         options.append(
                             Option(f"{verb} {card.name}#{card.oid} for {color}", ("pay", "source", card.name, color), ("source", card, color))
                         )
-            choice = yield from self.ask(p, O.PAY_MANA, f"Pay {rem} for {what}", options)
+            auto = self._auto_pay_index(p, rem, options) if self.auto_mana else None
+            if auto is not None:
+                if self.logging:
+                    self._log(f"  p{p} {O.PAY_MANA}: {options[auto].label} (auto)")
+                choice = options[auto].value
+            else:
+                choice = yield from self.ask(p, O.PAY_MANA, f"Pay {rem} for {what}", options)
             if choice[0] == "pool":
                 pl.pool[choice[1]] -= 1
                 if pl.pool[choice[1]] == 0:
@@ -1043,6 +1086,47 @@ class Game:
                 self._activate_mana_ability(card, ab)
                 if not rem.apply(color):
                     raise RulesError("mana unit could not be applied")
+
+    def _colour_needs(self, p: int) -> dict[str, int]:
+        """Coloured pips the non-land cards in `p`'s hand ask for; instants
+        count double (they are cast from whatever is left untapped)."""
+        need: dict[str, int] = {}
+        for c in self.players[p].hand:
+            if c.face.is_type("Land"):
+                continue
+            w = 2 if c.face.is_type("Instant") else 1
+            for col, n in c.face.cost.colored:
+                need[col] = need.get(col, 0) + w * n
+        return need
+
+    def _auto_pay_index(self, p: int, rem: RemainingCost, options: list[Option]) -> int | None:
+        """auto_mana: the pay_mana option a colour-preserving payer takes, or
+        None when the choice is left to the player.
+
+        Floating mana goes first (the pool empties anyway). If any option
+        sacrifices its source (an Eldrazi Spawn), the payment is strategic and
+        the player decides. Otherwise tap the source that hurts least: lowest
+        sum of hand colour needs over the colours it produces, then sources
+        without another {T} ability (Twisted Landscape keeps its search), then
+        fewer colours, then a colour that pays a coloured pip, then option order.
+        Every offered option keeps the payment completable, so greedy is safe."""
+        need = None
+        best, best_key = None, None
+        for i, o in enumerate(options):
+            if o.value[0] == "pool":
+                return i
+            card, color = o.value[1], o.value[2]
+            ab = next(a for a in card.face.abilities if a.mana is not None)
+            if ab.sac_self:
+                return None
+            if need is None:
+                need = self._colour_needs(p)
+            hurt = sum(need.get(col, 0) for col in ab.mana)
+            other_tap = any(a is not ab and a.zone == "battlefield" and a.tap for a in card.face.abilities)
+            key = (hurt, int(other_tap), len(ab.mana), 0 if rem.colored.get(color, 0) > 0 else 1)
+            if best_key is None or key < best_key:
+                best, best_key = i, key
+        return best
 
     def can_afford(self, p: int, cost: ManaCost) -> bool:
         return self._cost_feasible(p, RemainingCost.of(cost))
@@ -1350,8 +1434,11 @@ class Game:
     def _declare_attackers(self):
         p = self.active
         eligible = [c for c in self.battlefield if c.controller == p and self.is_creature(c) and not c.tapped and not c.sick]
-        # Group interchangeable creatures; choose a multiset in canonical order
-        # so every legal attack declaration has exactly one decision path.
+        # Group interchangeable creatures: one option per group with creatures
+        # left, in any order. (Until 2026-10 picks were in canonical group order,
+        # so picking a later group silently dropped the earlier ones.) Chosen
+        # creatures are attacking at once, so the state shows the pending
+        # declaration; they tap when it is done.
         refs = self._referenced_oids()
         groups: list[list[Card]] = []
         index: dict[tuple, int] = {}
@@ -1362,10 +1449,9 @@ class Game:
                 groups.append([])
             groups[index[k]].append(c)
         chosen: list[Card] = []
-        gi_min = 0
         while True:
             options = [Option("Done declaring attackers", ("attack", None), None)]
-            for gi in range(gi_min, len(groups)):
+            for gi in range(len(groups)):
                 left = [c for c in groups[gi] if c not in chosen]
                 if left:
                     c = left[0]
@@ -1373,11 +1459,11 @@ class Game:
             gi = yield from self.ask(p, O.DECLARE_ATTACKER, "Declare attackers", options)
             if gi is None:
                 break
-            chosen.append(next(c for c in groups[gi] if c not in chosen))
-            gi_min = gi
+            c = next(c for c in groups[gi] if c not in chosen)
+            chosen.append(c)
+            self.attackers.append(c.oid)
         for c in chosen:
             c.tapped = True  # no vigilance in the card pool
-            self.attackers.append(c.oid)
         if chosen:
             self._log(f"p{p} attacks with {chosen}")
 
