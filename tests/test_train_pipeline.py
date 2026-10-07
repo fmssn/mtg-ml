@@ -395,3 +395,15 @@ def test_new_deck_against_a_fixed_opponent_from_its_weights(tmp_path):
     assert rows[1]["bench/red_vs_bot_n"] == 4
     with pytest.raises(ValueError):
         Trainer(_cfg(tmp_path / "bad", "--exploit", jund, "--exploit-deck", "red"))  # no red deck in jund_blue
+
+
+def test_restore_torch_rng_accepts_states_moved_by_map_location():
+    from mtg_ml.rl.train import restore_torch_rng
+
+    state = torch.get_rng_state()
+    a = torch.rand(3)
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    # what torch.load(latest.pt, map_location=cfg.device) hands back: the ByteTensor on the training device
+    restore_torch_rng({"torch_rng": state.to(dev), "cuda_rng": [s.to(dev) for s in torch.cuda.get_rng_state_all()] if torch.cuda.is_available() else None})
+    assert torch.equal(torch.rand(3), a)
+    restore_torch_rng({})  # older checkpoints: nothing to restore
