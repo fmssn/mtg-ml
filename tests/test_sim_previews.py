@@ -278,6 +278,17 @@ def test_own_creature_spell_resolves_if_unanswered():
     assert not any("creatures_gained" in t for t in _sim(g, "Pass priority"))
 
 
+def test_attacker_passing_into_lethal_damage_wins_if_unanswered():
+    g = scenario(p0={"battlefield": ["Gixian Infiltrator"]}, p1={"life": 2}, step="declare_attackers")
+    choose(g, "Attack with Gixian Infiltrator")
+    if g.decision.kind == O.DECLARE_ATTACKER:
+        choose(g, "Done declaring attackers")
+    _pass_until(g, "declare_blockers", 0)
+    assert _sim(g, "Pass priority")[:2] == ["pv:sim:stop:opponent_decision", "pv:sim:next:opponent:priority"]
+    simp = _simp(g, "Pass priority")
+    assert simp[:2] == ["pv:sim:stop:game_over", "pv:sim:won"] and "pv:sim:opponent:life->=2" in simp
+
+
 def test_simp_repeats_sim_when_no_opponent_priority_comes_up():
     """Paying mana stops at the decider's next decision: passing never comes
     up, so `pv:simp:` is `pv:sim:` under the other prefix."""

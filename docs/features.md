@@ -18,7 +18,7 @@ feature set is versioned and travels with the model:
 | 3 | + `opp:deck:{deck}` (the opponent not on its seat's usual deck), so one network can play every matchup of a `--matchup` mix; on jund_blue identical to set 2, so `--init <set-2 checkpoint> --features 3` changes nothing there |
 | 4 | + the rules-level gaps found by the r4-control game review ([below](#feature-set-4)): combat relations (who blocks whom, blocked / unblocked attackers, block previews), incoming combat damage, `choose_x` previews and an X option -> spell pointer, mana colours (sources, hand needs, colour previews on land plays, basic searches and mana payment). Only adds strings: every set-3 string is still there. New rows start untrained, so a set-3 checkpoint needs a fine-tune with `--features 4` |
 | 5 | + cards described by what they do ([below](#card-shapes-and-hand-entities-set-5)): shape tokens from the card spec on permanents and stack items, the ops a stack item will resolve, the decider's own hand cards as entities, and cast / play-land / plot options pointing at them. Step 4 of the representation plan (PR #32, `docs/representation-plan.md`) |
-| 6 | + simulated option previews ([below](#simulated-option-previews-set-6)): every option of every decision is applied to a copy of the game, advanced while that needs no hidden information and no choice of the opponent, and the observable change is featurized (`pv:sim:*`: life, creatures and permanents lost / gained, zones, mana and colours left, lethal flags, why it stopped). Step 3 of the representation plan. Option tokens only, so the model is unchanged |
+| 6 | + simulated option previews ([below](#simulated-option-previews-set-6)): every option of every decision is applied to a copy of the game, advanced while that needs no hidden information and no choice of the opponent, and the observable change is featurized (`pv:sim:*`: life, creatures and permanents lost / gained, zones, mana and colours left, lethal flags, why it stopped), and the same assuming the opponent passes (`pv:simp:*`). Step 3 of the representation plan. Option tokens only, so the model is unchanged |
 
 - `PolicyNet(features=...)` stores it in `config["features"]`, only when it
   is not 1, so a config without the key (every checkpoint before this) is
@@ -340,21 +340,47 @@ are asked, because whether it has a choice can depend on its hand. Priority
 always stops a simulation, the decider's or the opponent's, and the engine
 stops there before it lists the options: the opponent's would read its
 hidden hand (an opponent holding Counterspell and one holding a land look
-the same), and the decider's are not needed. So a spell the decider casts
-does not resolve in its own previews (the opponent gets priority first), but
+the same), and the decider's are not needed. So in `pv:sim:` a spell the
+decider casts does not resolve (the opponent gets priority first), but
 passing as the second player shows the top of the stack resolving: letting
 the opponent's Lightning Bolt resolve shows the creature dying, or the life
 loss.
 
 Combat choices stop at the next priority too (after the last block the
-attacker gets priority), so damage is not simulated: set 4's block previews
-(`pv:attacker_dies`, `pv:blocker_dies`, `pv:unblocked_damage_left`) keep
-covering it, and `pv:sim:` adds the lethal flags of the declared blocks.
+attacker gets priority), so `pv:sim:` does not reach damage: set 4's block
+previews (`pv:attacker_dies`, `pv:blocker_dies`, `pv:unblocked_damage_left`)
+keep covering it, and `pv:sim:` adds the lethal flags of the declared blocks.
+
+### If the opponent passes (`pv:simp:`)
+
+`pv:sim:` is the "they may respond" view. Every option also gets the same
+token families under `pv:simp:` from a second simulation that assumes the
+opponent passes (`Game.sim_assume_pass`): at the opponent's priority the
+engine takes its pass, which is always legal, without listing its options,
+so nothing about its hand is read and nothing else it could do is
+considered. Everything else is the same: the simulation stops at the
+decider's next decision (its own priority included), at any opponent
+decision that is not forced, at hidden information, the end of the game or
+the step cap. So the decider's own Lightning Bolt shows the creature dying,
+its Counterspell shows both spells leaving the stack, a creature spell shows
+the creature entering, and the attacker passing in the declare-blockers
+step sees combat damage dealt (and the game won) when nothing else needs
+choosing; the decider's next priority stops it.
+
+The second simulation runs only where it can differ: when the first stopped
+at the opponent's priority (25% of options in random play). Otherwise passing
+never came up, the second simulation would be the same, and the first one's
+tokens are repeated under `pv:simp:` rather than a single "same" token: each
+prefix then always means the same thing (`pv:simp:self:creatures_lost` is
+always "the decider loses a creature if the opponent does nothing"), so the
+network need not combine the two families, and the repeat costs only the
+token hashing. `pv:sim:skipped` comes with `pv:simp:skipped`.
 
 ### Tokens (the delta)
 
 Computed from two summaries of what the decider can observe (`_sim_summary`):
-before the option, and at the stop. `{side}` is `self` or `opponent`.
+before the option, and at the stop. `{side}` is `self` or `opponent`. Every
+token below exists under `pv:simp:` as well.
 
 | token | meaning |
 |---|---|
@@ -388,11 +414,19 @@ a library touch, and never lists the opponent's options. Checked by
   library, the same cards split and ordered differently, and in half of the
   cases the decider's library order) are played with the same choices while
   the decider's observation stays the same; at every decider decision every
-  option's previews must be equal. Without `Game.sim_viewer` it fails on
-  every matchup (an opponent's single-option priority was auto-passed, so a
-  spell resolved or not depending on its hand).
+  option's previews, `pv:sim:` and `pv:simp:`, must be equal (and some
+  `pv:simp:` must differ from `pv:sim:`, so the second simulation is
+  exercised). Without `Game.sim_viewer` it fails on every matchup (an
+  opponent's single-option priority was auto-passed, so a spell resolved or
+  not depending on its hand).
 - `test_an_opponent_without_a_response_is_not_revealed` (Counterspell vs a
-  land in the opponent's hand), `test_a_draw_stops_the_simulation`.
+  land in the opponent's hand: equal `pv:sim:` and `pv:simp:`, the Bolt
+  resolving in both `pv:simp:`), `test_a_draw_stops_the_simulation`.
+- `pv:simp:`: `test_own_bolt_on_a_creature_kills_it_if_unanswered`,
+  `test_own_counterspell_counters_the_spell_if_unanswered`,
+  `test_own_creature_spell_resolves_if_unanswered`,
+  `test_attacker_passing_into_lethal_damage_wins_if_unanswered`,
+  `test_simp_repeats_sim_when_no_opponent_priority_comes_up`.
 
 ### Parity and cost
 
@@ -400,22 +434,25 @@ Both engines produce the same strings:
 `tests/test_difftest.py::test_entity_and_preview_strings_identical` compares
 `option_preview` and `option_previews` for sets 3-6 over all matchups and
 checks that every stop reason except `game_over` (scenario test) and the
-common deltas occur; `make difftest` compares `featurize()` in set 6.
+common deltas occur, for `pv:simp:` too; `make difftest` compares
+`featurize()` in set 6.
 Copies drop cheaply in Rust: a suspended copy is resumed with an abort index
 that makes `ask` return `Stop::Abort` up to `main`, instead of unwinding the
 coroutine (`Game::release_co`, ~4× cheaper).
 
 `python tools/bench_sim.py --engine native --games 30` (random play, all
-matchups, 4048 decisions, 2.8 options per decision; Apple M3 laptop, shared
-with other agents, load ~8): `featurize_flat` per decision
+matchups, 4048 decisions, 2.8 options per decision, the second simulation
+on 25-26% of options; Apple M3 laptop, shared with other agents, load ~7):
+`featurize_flat` per decision
 
-| | set 5 | set 6 | added |
-|---|---:|---:|---:|
-| Rust, mean | 14.6 µs | 32.4 µs | +17.8 µs (2.2×) |
-| Rust, median | 14.3 µs | 27.5 µs | +12.9 µs (1.9×) |
-| Python, mean (6 games) | 186 µs | 981 µs | +795 µs (5.3×) |
+| | set 5 | set 6 | added | of it `pv:simp:` |
+|---|---:|---:|---:|---:|
+| Rust, mean | 15.2 µs | 38.5 µs | +23.3 µs (2.5×) | ~5.5 µs |
+| Rust, median | 14.9 µs | 32.4 µs | +17.5 µs (2.2×) | |
+| Python, mean (6 games) | 223 µs | 1480 µs | +1257 µs (6.6×) | |
 
-About 6 µs per option in Rust, two thirds of it the copy (state clone,
+(`pv:simp:` share: the same benchmark before it, at load ~8, gave Rust
+14.6 -> 32.4 µs mean.) About 6 µs per simulation in Rust, two thirds of it the copy (state clone,
 coroutine restart and replay of the ~1.7 actions since the step began, which
 lists their options again) and its drop. A game featurized in set 6 takes a
 snapshot at every step start (`Game.copy`), included in the engine step
