@@ -603,6 +603,117 @@ modes = [
 ]
 
 # ---------------------------------------------------------------------------
+# Shared sideboard hate (Q3 2026 typical sideboards, see decks.py)
+# ---------------------------------------------------------------------------
+
+[[card]]
+name = "Hydroblast"
+cost = "{U}"
+types = "Instant"
+text = "Choose one - Counter target spell if it's red; or destroy target permanent if it's red."
+modes = [
+    { name = "counter", targets = ["spell"], effect = [{ op = "counter_target", if_color = "R" }] },
+    { name = "destroy", targets = ["permanent"], effect = [{ op = "destroy_target", if_color = "R" }] },
+]
+
+[[card]]
+name = "Annul"
+cost = "{U}"
+types = "Instant"
+text = "Counter target artifact or enchantment spell."
+targets = ["artifact_or_enchantment_spell"]
+effect = [{ op = "counter_target" }]
+
+# {R/P}: cast normally for {R}, or in cast mode "phyrexian" for 2 life.
+[[card]]
+name = "Gut Shot"
+cost = "{R/P}"
+types = "Instant"
+text = "({R/P} can be paid with either {R} or 2 life.) Gut Shot deals 1 damage to any target."
+targets = ["any"]
+effect = [{ op = "damage_target", n = 1 }]
+
+# Bargain is the cast mode "bargain" (sacrifice an artifact, enchantment or
+# token as an additional cost); the ETB trigger only exists if it was used.
+[[card]]
+name = "Troublemaker Ouphe"
+cost = "{1}{G}"
+types = "Creature"
+subtypes = "Ouphe"
+text = "Bargain. When this creature enters, if it was bargained, exile target artifact or enchantment an opponent controls."
+power = 2
+toughness = 2
+bargain = true
+triggers = [{ name = "exile artifact or enchantment", event = "etb", condition = { bargained = true }, targets = ["artifact_or_enchantment_you_dont_control"], effect = [{ op = "exile_target" }] }]
+
+# The pool has no Dragons, so "each non-Dragon creature" is each creature.
+[[card]]
+name = "Breath Weapon"
+cost = "{2}{R}"
+types = "Instant"
+text = "Breath Weapon deals 2 damage to each non-Dragon creature."
+effect = [{ op = "damage_each_creature", n = 2 }]
+
+# The engine has no graveyard targets: the (up to two) cards are chosen as
+# the ability resolves.
+[[card]]
+name = "Faerie Macabre"
+cost = "{1}{B}{B}"
+types = "Creature"
+subtypes = "Faerie Rogue"
+text = "Flying. Discard this card: Exile up to two target cards from graveyards."
+power = 2
+toughness = 2
+keywords = ["flying"]
+abilities = [{ name = "exile up to two cards from graveyards", zone = "hand", discard_self = true, effect = [{ op = "exile_from_graveyards", n = 2 }] }]
+
+[[card]]
+name = "Terminate"
+cost = "{B}{R}"
+types = "Instant"
+text = "Destroy target creature. It can't be regenerated."
+targets = ["creature"]
+effect = [{ op = "destroy_target" }]
+
+# "Up to two target creatures" as two modes: one creature, or two different ones.
+[[card]]
+name = "Cast into the Fire"
+cost = "{1}{R}"
+types = "Instant"
+text = "Choose one - 1 damage to each of up to two target creatures; or exile target artifact."
+modes = [
+    { name = "one creature", targets = ["creature"], effect = [{ op = "damage_target", n = 1 }] },
+    { name = "two creatures", targets = ["creature", "another_creature"], effect = [{ op = "damage_target", n = 1 }, { op = "damage_target", index = 1, n = 1 }] },
+    { name = "exile", targets = ["artifact"], effect = [{ op = "exile_target" }] },
+]
+
+[[card]]
+name = "End the Festivities"
+cost = "{R}"
+types = "Sorcery"
+text = "End the Festivities deals 1 damage to each opponent and each creature and planeswalker they control."
+effect = [{ op = "damage_each_opponent", n = 1 }, { op = "damage_each_creature", n = 1, whose = "opponent" }]
+
+# The damage goes first: it needs the artifact's controller, and nothing can
+# happen between the two.
+[[card]]
+name = "Smash to Smithereens"
+cost = "{1}{R}"
+types = "Instant"
+text = "Destroy target artifact. Smash to Smithereens deals 3 damage to that artifact's controller."
+targets = ["artifact"]
+effect = [{ op = "damage_target_controller", n = 3 }, { op = "destroy_target" }]
+
+[[card]]
+name = "Ancient Grudge"
+cost = "{1}{R}"
+types = "Instant"
+text = "Destroy target artifact. Flashback {G}."
+targets = ["artifact"]
+effect = [{ op = "destroy_target" }]
+flashback = "{G}"
+
+# ---------------------------------------------------------------------------
 # Back faces (not cards on their own)
 # ---------------------------------------------------------------------------
 

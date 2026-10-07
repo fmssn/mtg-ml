@@ -348,7 +348,7 @@ impl Eng {
                     controller: t.controller,
                     name,
                     effect: Some(&t.tdef.effect),
-                    target_specs: vec![],
+                    target_specs: t.tdef.targets.clone(),
                     targets: vec![],
                     card: None,
                     source: Some(t.source),
@@ -357,6 +357,18 @@ impl Eng {
                     x: 0,
                     data: t.data,
                 });
+                if !t.tdef.targets.is_empty() {
+                    // 603.3d: a triggered ability without legal targets is removed from the stack.
+                    let st = self.s();
+                    if t.tdef.targets.iter().any(|&spec| st.target_candidates(spec, p, Some(sid), &[]).is_empty()) {
+                        let pos = st.stack_pos(sid).unwrap();
+                        let item = st.stack.remove(pos);
+                        st.push_log_lazy(|_| format!("{}: no legal targets", item.name));
+                        continue;
+                    }
+                    self.choose_targets(p, sid, None)?;
+                    self.s().emit_targeted(sid);
+                }
             }
         }
         Ok(())
@@ -577,10 +589,11 @@ impl Eng {
         let base = st.mode_cost(card, mode).unwrap().clone();
         let reduction = st.cost_reduction(p, card);
         let cname = st.c(card).name();
+        let add_sac = st.mode_additional_sac(card, mode);
         if base.x != 0 {
             let mut options = vec![];
             let mut x = 0;
-            while st.cost_feasible(p, &Remaining::of(&base.with_x(x).reduced(reduction)), d.additional_sac, &[], None, &[]) {
+            while st.cost_feasible(p, &Remaining::of(&base.with_x(x).reduced(reduction)), add_sac, &[], None, &[]) {
                 options.push(opt(format!("X={x}"), vec![s("x"), KI::I(x as i64)], Val::Int(x)));
                 x += 1;
             }
@@ -596,8 +609,14 @@ impl Eng {
         let st = self.s();
         let xv = st.stack[st.stack_pos(sid).unwrap()].x;
         let cost = base.with_x(xv).reduced(reduction);
-        self.pay_mana(p, Remaining::of(&cost), d.additional_sac, &[], cname)?;
-        if let Some(flt) = d.additional_sac {
+        self.pay_mana(p, Remaining::of(&cost), add_sac, &[], cname)?;
+        if mode == Method::Phyrexian {
+            let st = self.s();
+            st.players[p as usize].life -= d.phyrexian_life;
+            let life = d.phyrexian_life;
+            st.push_log_lazy(|_| format!("p{p} pays {life} life for {cname}"));
+        }
+        if let Some(flt) = add_sac {
             self.choose_sacrifice(p, flt, cname)?;
         }
         if d.additional_discard {
@@ -820,7 +839,7 @@ impl Eng {
             let hoid = st.c(h).oid;
             st.cm(new).attached_to = Some(hoid);
         }
-        st.emit_etb(new);
+        st.emit_etb(new, Some(item.method));
     }
 
     pub fn counter(&mut self, sid: u32) {
@@ -1232,6 +1251,14 @@ impl Eng {
                     st.deal_damage(&src, item.targets[i], amount);
                 }
             }
+            Op::DamageTargetController { n } => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    let src = self.source_card(item);
+                    let st = self.s();
+                    let r = Ref::Player(st.c(c).controller);
+                    st.deal_damage(&src, r, *n);
+                }
+            }
             Op::DamageEachOpponent { n, if_discarded_nonland } => {
                 if *if_discarded_nonland && item.data.discarded_land.unwrap_or(true) {
                     return Ok(());
@@ -1279,6 +1306,35 @@ impl Eng {
                 }
             }
             Op::Madness => self.madness(item)?,
+            Op::ExileTarget => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    self.s().mv(c, Zone::Exile);
+                }
+            }
+            Op::ExileFromGraveyards { n } => {
+                let n = *n;
+                for i in 0..n {
+                    let st = self.s();
+                    let mut options = vec![opt("Exile nothing more".to_string(), vec![s("exile_any_gy"), KI::N], Val::None)];
+                    for q in [ctl, 1 - ctl] {
+                        let rel = if q == ctl { "self" } else { "opponent" };
+                        for c in st.dedupe_by_name(st.players[q as usize].graveyard.iter().copied()) {
+                            let nm = st.c(c).name();
+                            options.push(opt(format!("Exile {nm} ({rel} graveyard)"), vec![s("exile_any_gy"), s(rel), s(nm)], Val::Card(c)));
+                        }
+                    }
+                    if options.len() == 1 {
+                        break;
+                    }
+                    let name = item.name.clone();
+                    match self.ask(ctl, Kind::ExileFromGy, || format!("{name}: exile a card from a graveyard ({}/{n})", i + 1), options)? {
+                        Val::Card(c) => {
+                            self.s().mv(c, Zone::Exile);
+                        }
+                        _ => break,
+                    }
+                }
+            }
             Op::ExileGraveyard => {
                 if let Some(Tgt::Player(p)) = self.s().target(item, 0) {
                     let st = self.s();

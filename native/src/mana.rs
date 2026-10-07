@@ -16,6 +16,12 @@ pub fn bit(c: u8) -> u8 {
     }
 }
 
+/// `{R/P}`: a phyrexian symbol of a colour.
+fn is_phyrexian(sym: &str) -> bool {
+    let b = sym.as_bytes();
+    b.len() == 3 && &sym[1..] == "/P" && MANA_TYPES[..5].contains(&b[0])
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ManaCost {
     pub generic: i32,
@@ -45,7 +51,8 @@ impl ManaCost {
                 generic += sym.parse::<i32>().unwrap();
             } else if sym == "X" {
                 x += 1;
-            } else if sym.len() == 1 && MANA_TYPES.contains(&sym.as_bytes()[0]) {
+            } else if (sym.len() == 1 && MANA_TYPES.contains(&sym.as_bytes()[0])) || is_phyrexian(sym) {
+                // Phyrexian mana counts as its colour here; paying 2 life is the cast mode "phyrexian".
                 let c = sym.as_bytes()[0];
                 match colored.iter_mut().find(|(k, _)| *k == c) {
                     Some(e) => e.1 += 1,
@@ -58,6 +65,38 @@ impl ManaCost {
         }
         colored.sort();
         Ok(ManaCost { generic, colored, x })
+    }
+
+    /// The phyrexian symbols of a cost text ({R/P} -> {R}), as a cost.
+    pub fn phyrexian(text: Option<&str>) -> ManaCost {
+        let mut colored: Vec<(u8, i32)> = vec![];
+        let mut rest = text.unwrap_or("");
+        while let Some(start) = rest.find('{') {
+            let Some(len) = rest[start..].find('}') else { break };
+            let sym = &rest[start + 1..start + len];
+            if is_phyrexian(sym) {
+                let c = sym.as_bytes()[0];
+                match colored.iter_mut().find(|(k, _)| *k == c) {
+                    Some(e) => e.1 += 1,
+                    None => colored.push((c, 1)),
+                }
+            }
+            rest = &rest[start + len + 1..];
+        }
+        colored.sort();
+        ManaCost { generic: 0, colored, x: 0 }
+    }
+
+    /// This cost without `other`'s coloured symbols.
+    pub fn minus_colored(&self, other: &ManaCost) -> ManaCost {
+        let mut colored = self.colored.clone();
+        for (k, n) in &other.colored {
+            if let Some(e) = colored.iter_mut().find(|(c, _)| c == k) {
+                e.1 -= n;
+            }
+        }
+        colored.retain(|(_, n)| *n > 0);
+        ManaCost { generic: self.generic, colored, x: self.x }
     }
 
     pub fn mana_value(&self) -> i32 {
