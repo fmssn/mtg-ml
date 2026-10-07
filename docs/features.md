@@ -137,6 +137,10 @@ without code. Not covered yet: hand cards are still not entities, so cast
 options point at nothing; `destroy_target` and other removal get no lethality
 preview.
 
+To check whether a feature set lets the policy tell apart options that lead
+to different games, run the indistinguishability audit ([audit.md](audit.md),
+`python -m mtg_ml.audit --features N`).
+
 ## Feature set 4
 
 Rules-level gaps from the review of 50 r4-control games (PR #31's game
