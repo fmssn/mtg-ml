@@ -431,6 +431,20 @@ def test_feature_set_4_is_unchanged():
         assert features_digest(m, n, s, 4) == want[f"{m}:{n}:{s}:4"], (m, n, s)
 
 
+def test_feature_set_5_is_unchanged():
+    """Set 5 is byte for byte what it was before set 6 was added: digests
+    recorded with that code (`tests/data/features_v5_digests.json`) on the
+    same games as the set-4 digests."""
+    import json
+    import os
+
+    with open(os.path.join(os.path.dirname(__file__), "data", "features_v5_digests.json")) as f:
+        want = json.load(f)
+    assert len(want) == len(V3_DIGEST_GAMES)
+    for m, n, s in V3_DIGEST_GAMES:
+        assert features_digest(m, n, s, 5) == want[f"{m}:{n}:{s}:5"], (m, n, s)
+
+
 def _pointers(g, label: str, features: int) -> list[int]:
     """Entity indices the option with this label points at."""
     from mtg_ml.rl.features import OPTION_DIM, featurize
