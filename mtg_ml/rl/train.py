@@ -30,6 +30,18 @@ Each iteration:
      `--ladder-ratings`, else `<run>/ladder.json`, rated once by the first
      evaluation if missing); logged as `eval/*`, `bench/*` and `ladder/*`.
 
+A new deck against a fixed opponent (`--matchup`, `--learner-seat`,
+`--opponent`, `--init-from`): e.g. Red Madness (seat 1 of `jund_madness`)
+against a frozen Jund checkpoint, warm-started from that checkpoint's
+weights (the network's rules knowledge carries over; the `self:deck:`
+feature tells it which deck it holds). The learner then only plays its
+seat, every non-bot game is against `--opponent`, no pool snapshots are
+taken, and the evaluation scores the learner's deck (`eval/opponent/<deck>`
+in place of pool0, `bench/<deck>_vs_bot*`):
+
+    python -m mtg_ml.rl.train --run runs/red --matchup jund_madness --learner-seat 1 \
+        --opponent jund.pt --init-from jund.pt --self-play-frac 0
+
 Processes (`rl/collect.py`). The trainer's main thread only updates and
 publishes. The rollout workers belong to a collector process, which
 streams the games (`rollout.play`), merges the results and hands the merged
@@ -100,6 +112,7 @@ from dataclasses import asdict, dataclass, field, fields
 import torch
 
 from ..backend import ENV_VAR, engine_name
+from ..match import matchup_decks
 from .collect import PoolProcess, PoolThread, cpu_layout, release
 from .evaluate import EVAL_BLOCKS, evaluate_policy
 from .model import PolicyNet
@@ -162,6 +175,10 @@ class TrainConfig:
     ladder_ratings: str = ""  # JSON with the rungs' Elo (`evaluate ladder`); "" = <run>/ladder.json, rated by the first evaluation if missing
     ladder_greedy: int = 0  # 1: ladder games (and the rating round robin) with greedy play
     max_turns: int = 100
+    matchup: str = "jund_blue"  # match.MATCHUPS: the deck in each seat
+    learner_seat: int = -1  # -1: the learner plays both seats; 0 / 1: only that seat (its deck)
+    opponent: str = ""  # a frozen checkpoint every non-bot game is played against (instead of the pool)
+    init_from: str = ""  # start a new run from these weights (its network config wins over --hidden etc.)
     auto_mana: int = 0  # 1: pay non-strategic mana costs automatically (colour-preserving payer; docs/action-decomposition.md)
     auto_pass: int = 0  # 1: auto-pass priority when the only other options are side-effect-free sacrifice-for-mana abilities
     seed: int = 0
@@ -228,9 +245,19 @@ class Trainer:
                 raise FileNotFoundError(f"ladder file {path} does not exist")
         self.ladder_ratings = cfg.ladder_ratings or os.path.join(cfg.run, "ladder.json")
         self.evaluating = bool(cfg.eval_every or cfg.eval_every_games)
+        if cfg.learner_seat not in (-1, 0, 1):
+            raise ValueError("--learner-seat must be -1, 0 or 1")
+        if cfg.learner_seat >= 0 and cfg.self_play_frac > 0:
+            raise ValueError("--learner-seat: the learner only plays one seat, so --self-play-frac must be 0")
+        matchup_decks(cfg.matchup)  # validates the name
         torch.manual_seed(cfg.seed)
         self.rng = random.Random(cfg.seed)
-        self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden).to(cfg.device)
+        init = torch.load(cfg.init_from, map_location="cpu", weights_only=False) if cfg.init_from and not os.path.exists(self.latest) else None
+        net_cfg = init["config"] if init else dict(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden)
+        self.net = PolicyNet(**net_cfg).to(cfg.device)
+        if init:
+            self.net.load_state_dict(init["model"])
+            print(f"initialized from {cfg.init_from}: {net_cfg}", flush=True)
         self.opt = make_optimizer(self.net.parameters(), cfg.ppo.lr, cfg.device)
         self.iteration = 0
         self.games_total = 0
@@ -256,7 +283,7 @@ class Trainer:
         self.pool: list[str] = sorted(os.path.join(pool_dir, f) for f in os.listdir(pool_dir) if f.startswith("iter_") and f.endswith(".pt"))
         weights = self._weights()
         self._publish(weights)
-        if not self.pool:
+        if not self.pool:  # also with --opponent: the initial snapshot is the evaluation's pool0
             self._snapshot(weights)
             self._checkpoint(weights, self.rng.getstate())
         self.layout = cpu_layout(cfg.workers, cfg.device, cfg.inference == "server", bool(self.evaluating and cfg.eval_process),
@@ -382,13 +409,17 @@ class Trainer:
             r = self.rng.random()
             if r < c.self_play_frac:
                 seats = (LEARNER, LEARNER)
-            elif r < c.self_play_frac + c.bot_frac:
-                seats = (LEARNER, BOT) if self.rng.random() < 0.5 else (BOT, LEARNER)
             else:
-                opp = self.pool[-1] if self.rng.random() < c.pool_recent_frac else self.rng.choice(self.pool)
-                seats = (LEARNER, opp) if self.rng.random() < 0.5 else (opp, LEARNER)
+                if r < c.self_play_frac + c.bot_frac:
+                    opp = BOT
+                elif c.opponent:
+                    opp = c.opponent
+                else:
+                    opp = self.pool[-1] if self.rng.random() < c.pool_recent_frac else self.rng.choice(self.pool)
+                seat = c.learner_seat if c.learner_seat >= 0 else (0 if self.rng.random() < 0.5 else 1)
+                seats = (LEARNER, opp) if seat == 0 else (opp, LEARNER)
             game_no = 2 if self.rng.random() < c.postboard_frac else 1
-            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no))
+            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no, matchup=c.matchup))
         return specs
 
     # -- evaluation ----------------------------------------------------------
@@ -396,7 +427,8 @@ class Trainer:
     def _eval_args(self, e: _Eval, n_jobs: int, inference: str) -> tuple:
         c = self.cfg
         return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference,
-                self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass))
+                self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass),
+                c.matchup, None if c.learner_seat < 0 else c.learner_seat, c.opponent)
 
     def _request_eval(self) -> dict:
         """Evaluate the newest policy file. Inline (`--eval-process 0`): on the
@@ -475,7 +507,7 @@ class Trainer:
                 self.games_total += len(data.games)
                 weights = self._weights()
                 self._publish(weights)
-                if self.iteration % c.snapshot_every == 0:
+                if self.iteration % c.snapshot_every == 0 and not c.opponent:
                     self._snapshot(weights)
                 if c.checkpoint_every and self.iteration % c.checkpoint_every == 0:
                     self._checkpoint(weights, nxt.rng if nxt else self.rng.getstate())
