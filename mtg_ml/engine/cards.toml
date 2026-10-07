@@ -634,6 +634,24 @@ triggers = [
 ]
 abilities = [{ name = "draw two cards", cost = "{3}{U}", sac_self = true, effect = [{ op = "draw", n = 2 }] }]
 
+# Equipment. Job select: the ETB trigger makes a 1/1 Hero and attaches the
+# Rod to it. The equipped creature's granted trigger is the Rod's own
+# you_cast trigger with condition equipped (same controller, same timing;
+# the Rod is the damage source, which nothing in the pool can tell apart).
+# The Wizard type it grants is not tracked (nothing in the pool reads it).
+[[card]]
+name = "Black Mage's Rod"
+cost = "{1}{B}"
+types = "Artifact"
+subtypes = "Equipment"
+text = "Job select (When this Equipment enters, create a 1/1 colorless Hero creature token, then attach this to it.) Equipped creature gets +1/+0, has \"Whenever you cast a noncreature spell, this creature deals 1 damage to each opponent,\" and is a Wizard in addition to its other types. Equip {3}"
+equipped_power = 1
+abilities = [{ name = "equip", cost = "{3}", sorcery_speed = true, targets = ["creature_you_control"], effect = [{ op = "attach_source_to_target" }] }]
+triggers = [
+    { name = "job select", event = "etb", effect = [{ op = "create_token", token = "Hero", attach_source = true }] },
+    { name = "1 damage to each opponent", event = "you_cast", condition = { equipped = true, spell = "noncreature" }, effect = [{ op = "damage_each_opponent", n = 1 }] },
+]
+
 # The Homunculus subtype is not tracked (nothing in the pool reads it).
 [[card]]
 name = "Kenku Artificer"
@@ -896,6 +914,14 @@ types = "Artifact"
 subtypes = "Map"
 text = "{1}, {T}, Sacrifice: target creature you control explores. Sorcery speed."
 abilities = [{ name = "explore", cost = "{1}", tap = true, sac_self = true, sorcery_speed = true, targets = ["creature_you_control"], effect = [{ op = "explore_target" }] }]
+
+[[token]]
+name = "Hero"
+types = "Creature"
+subtypes = "Hero"
+text = ""
+power = 1
+toughness = 1
 
 [[token]]
 name = "Blood"

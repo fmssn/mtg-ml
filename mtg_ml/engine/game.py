@@ -736,7 +736,18 @@ class Game:
         return None
 
     def is_bestowed(self, c: Card) -> bool:
-        return c.zone == "battlefield" and c.attached_to is not None
+        """An Aura cast with bestow, attached (not a creature then). Other
+        attached permanents are Equipment."""
+        return c.zone == "battlefield" and c.attached_to is not None and c.face.bestow is not None
+
+    def attach(self, eq: Card | None, host: Card | None) -> None:
+        """Attach Equipment `eq` to creature `host` (equip, job select). Nothing
+        happens if either is gone, the host is not a creature, or the
+        Equipment is itself a creature (CR 301.5c)."""
+        if eq is None or host is None or self.perm(host.oid) is None or not self.is_creature(host) or self.is_creature(eq):
+            return
+        eq.attached_to = host.oid
+        self._log(f"{eq.name}#{eq.oid} attached to {host.name}#{host.oid}")
 
     def types(self, c: Card) -> set[str]:
         t = set(c.face.types)
@@ -761,13 +772,13 @@ class Game:
     def power(self, c: Card) -> int:
         base = c.animated[0] if c.animated is not None else c.face.power or 0
         v = base + c.counters + sum(t.power for t in c.temp)
-        v += sum(a.counters for a in self._auras_on(c))
+        v += sum(a.counters if a.face.bestow is not None else a.face.equipped_power for a in self._auras_on(c))
         return v
 
     def toughness(self, c: Card) -> int:
         base = c.animated[1] if c.animated is not None else c.face.toughness or 0
         v = base + c.counters + sum(t.toughness for t in c.temp)
-        v += sum(a.counters for a in self._auras_on(c))
+        v += sum(a.counters if a.face.bestow is not None else a.face.equipped_toughness for a in self._auras_on(c))
         return v
 
     def keywords(self, c: Card) -> set[str]:
@@ -775,7 +786,8 @@ class Game:
         for t in c.temp:
             k |= t.keywords
         for a in self._auras_on(c):
-            k |= {"reach", "trample"}
+            if a.face.bestow is not None:  # Nyxborn Hydra
+                k |= {"reach", "trample"}
         return k
 
     def has(self, c: Card, kw: str) -> bool:
@@ -1123,8 +1135,8 @@ class Game:
         for c in self.battlefield:
             if c.attached_to is not None:
                 host = self.perm(c.attached_to)
-                if host is None or not self.is_creature(host):
-                    c.attached_to = None  # bestow: becomes a creature again
+                if host is None or not self.is_creature(host) or self.is_creature(c):
+                    c.attached_to = None  # bestow: becomes a creature again; Equipment stays, unattached (CR 301.5c)
                     changed = True
         dying = []
         for c in self.battlefield:

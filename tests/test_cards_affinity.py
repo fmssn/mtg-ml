@@ -324,6 +324,84 @@ def test_lifelink_counter_gains_life_on_damage():
     assert g.players[1].life == 15 and g.players[0].life == 25
 
 
+# -- Black Mage's Rod (Equipment) -----------------------------------------------
+
+
+def _rod_on_hero(extra_hand=(), extra_bf=(), p1=None):
+    g = scenario(p0={"hand": ["Black Mage's Rod", *extra_hand], "battlefield": ["Swamp"] * 2 + list(extra_bf)}, p1=p1 or {})
+    choose(g, "Cast Black Mage's Rod")
+    pay(g)
+    resolve_stack(g)  # the Rod, then its job select trigger
+    return g
+
+
+def test_black_mages_rod_job_select_makes_an_equipped_hero():
+    g = _rod_on_hero()
+    hero, rod = find(g, "Hero"), find(g, "Black Mage's Rod")
+    assert hero.is_token and rod.attached_to == hero.oid
+    assert (g.power(hero), g.toughness(hero)) == (2, 1)  # 1/1 Hero, +1/+0
+    assert g.is_artifact(rod) and not g.is_creature(rod) and g.is_creature(hero)
+    assert g.players[1].life == 20  # casting the Rod itself does not trigger it
+
+
+def test_black_mages_rod_equipped_creature_pings_on_noncreature_spells():
+    g = _rod_on_hero(extra_hand=["Ichor Wellspring", "Gixian Infiltrator"], extra_bf=["Swamp"] * 4)
+    choose(g, "Cast Ichor Wellspring")
+    pay(g)
+    assert [it.name for it in g.stack][-1].startswith("Black Mage's Rod")  # the trigger, above the spell
+    resolve_stack(g)
+    assert g.players[1].life == 19
+    choose(g, "Cast Gixian Infiltrator")  # a creature spell: no trigger
+    pay(g)
+    resolve_stack(g)
+    assert g.players[1].life == 19
+
+
+def test_black_mages_rod_stays_when_the_hero_dies_and_can_be_equipped_again():
+    g = _rod_on_hero(extra_hand=["Ichor Wellspring"], extra_bf=["Krark-Clan Shaman"] + ["Swamp"] * 5, p1={"hand": ["Lightning Bolt"], "battlefield": ["Mountain"]})
+    pass_priority(g)
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target Hero")
+    resolve_stack(g)
+    rod = find(g, "Black Mage's Rod")
+    assert "Hero" not in bf(g) and "Black Mage's Rod" in bf(g) and rod.attached_to is None
+    choose(g, "Cast Ichor Wellspring")  # unattached: nothing triggers
+    pay(g)
+    resolve_stack(g)
+    assert g.players[1].life == 20
+    equip = [lab for lab in labels(g) if lab.startswith("Black Mage's Rod")]
+    assert equip == ["Black Mage's Rod: equip"]
+    choose(g, "Black Mage's Rod: equip")  # the only target and payment are taken by settle()
+    pay(g)
+    resolve_stack(g)
+    shaman = find(g, "Krark-Clan Shaman")
+    assert find(g, "Black Mage's Rod").attached_to == shaman.oid and g.power(shaman) == 2  # 1/1, +1/+0
+
+
+def test_black_mages_rod_equip_is_sorcery_speed():
+    g = _rod_on_hero(extra_bf=["Swamp"] * 3, p1={"hand": ["Lightning Bolt"], "battlefield": ["Mountain"]})
+    assert any(lab.startswith("Black Mage's Rod: equip") for lab in labels(g))
+    pass_priority(g)
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target player 0")
+    assert not any(lab.startswith("Black Mage's Rod") for lab in labels(g))  # p0 responds: not at instant speed
+
+
+def test_kenku_animated_rod_falls_off_and_stops_triggering():
+    g = _rod_on_hero(extra_hand=["Kenku Artificer", "Ichor Wellspring"], extra_bf=["Island"] * 3 + ["Swamp"] * 2)
+    choose(g, "Cast Kenku Artificer")
+    pay(g)
+    resolve_stack(g)
+    choose(g, next(lab for lab in labels(g) if lab.startswith("Target Black Mage's Rod")))
+    resolve_stack(g)
+    rod, hero = find(g, "Black Mage's Rod"), find(g, "Hero")
+    assert g.is_creature(rod) and rod.attached_to is None and g.power(hero) == 1  # an Equipment that is a creature cannot equip (CR 301.5c)
+    choose(g, "Cast Ichor Wellspring")
+    pay(g)
+    resolve_stack(g)
+    assert g.players[1].life == 20
+
+
 # -- the deck ----------------------------------------------------------------------
 
 

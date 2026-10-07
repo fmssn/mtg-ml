@@ -929,6 +929,19 @@
   "cmc": 1.0
  },
  {
+  "name": "Black Mage's Rod",
+  "mana_cost": "{1}{B}",
+  "type_line": "Artifact \u2014 Equipment",
+  "oracle_text": "Job select (When this Equipment enters, create a 1/1 colorless Hero creature token, then attach this to it.)\nEquipped creature gets +1/+0, has \"Whenever you cast a noncreature spell, this creature deals 1 damage to each opponent,\" and is a Wizard in addition to its other types.\nEquip {3}",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Job select",
+   "Equip"
+  ],
+  "cmc": 2.0
+ },
+ {
   "name": "Kenku Artificer",
   "mana_cost": "{2}{U}",
   "type_line": "Creature \u2014 Bird Artificer",

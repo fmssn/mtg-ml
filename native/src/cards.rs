@@ -221,7 +221,10 @@ pub enum Op {
     BounceTarget,
     TapTarget { skip_untap: i32 },
     GrantTarget { keywords: u32 },
-    CreateToken { token: DefId, n: i32 },
+    /// attach_source: then attach the source Equipment to the token (job select).
+    CreateToken { token: DefId, n: i32, attach_source: bool },
+    /// Equip: attach the source Equipment to the target creature.
+    AttachSourceToTarget,
     /// per_storm: n for each spell cast before this one this turn (Weather the Storm's storm trigger);
     /// sacrificed_mv: instead of n, the mana value of the permanent sacrificed to cast it.
     GainLife { n: i32, per_storm: bool, sacrificed_mv: bool },
@@ -274,6 +277,7 @@ impl Op {
             Op::TapTarget { .. } => "tap_target",
             Op::GrantTarget { .. } => "grant_target",
             Op::CreateToken { .. } => "create_token",
+            Op::AttachSourceToTarget => "attach_source_to_target",
             Op::GainLife { .. } => "gain_life",
             Op::LoseLife { .. } => "lose_life",
             Op::CounterOnSource => "counter_on_source",
@@ -333,6 +337,9 @@ pub struct TriggerDef {
     pub cast_filter: Option<CastFilter>,
     /// etb condition `{ bargained = true }`.
     pub bargained: bool,
+    /// you_cast condition `{ spell = ..., equipped = true }`: only while this
+    /// Equipment is attached (a trigger it grants the equipped creature).
+    pub equipped: bool,
     /// Chosen as the trigger is put on the stack.
     pub targets: Vec<TK>,
     /// "Up to one target": the targets may be left empty.
@@ -381,6 +388,9 @@ pub struct CardDef {
     pub bargain: bool,
     /// Cast mode "evidence": exile cards with this total mana value from the graveyard.
     pub collect_evidence: i32,
+    /// Equipment: what the equipped creature gets (Black Mage's Rod: +1/+0).
+    pub equipped_power: i32,
+    pub equipped_toughness: i32,
     pub abilities: Vec<AbilityDef>,
     pub triggers: Vec<TriggerDef>,
     pub enters_tapped: bool,
@@ -492,8 +502,8 @@ impl CardDb {
             cards: HashMap::new(),
             tokens: HashMap::new(),
             keyword_names: kws,
-            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![], up_to: false },
-            madness: TriggerDef { name: "madness".into(), event: Event::Discarded, effect: vec![Op::Madness], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![], up_to: false },
+            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None, cast_filter: None, bargained: false, equipped: false, targets: vec![], up_to: false },
+            madness: TriggerDef { name: "madness".into(), event: Event::Discarded, effect: vec![Op::Madness], sacrificed_subtype: None, cast_filter: None, bargained: false, equipped: false, targets: vec![], up_to: false },
             free: ManaCost::default(),
             spec_text: text.to_string(),
         };
@@ -596,7 +606,7 @@ fn check_keys(t: &Table, allowed: &[&str], what: &str) -> Result<(), String> {
 pub const SHAPE_CARD_FIELDS: &[&str] = &[
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow", "plot",
     "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect", "modes",
-    "overload_effect", "abilities", "triggers", "bargain", "collect_evidence",
+    "overload_effect", "abilities", "triggers", "bargain", "collect_evidence", "equipped_power", "equipped_toughness",
 ];
 pub const NON_SHAPE_CARD_FIELDS: &[&str] = &["name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"];
 pub const SHAPE_ABILITY_FIELDS: &[&str] =
@@ -650,7 +660,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "counter_target_unless_paid" => &["op", "cost"],
             "tap_target" => &["op", "skip_untap"],
             "grant_target" => &["op", "keywords"],
-            "create_token" => &["op", "token", "n"],
+            "create_token" => &["op", "token", "n", "attach_source"],
             "gain_life" => &["op", "n", "per_storm", "sacrificed_mv"],
             "counters_on_target" => &["op", "n", "keywords"],
             "animate_target" => &["op", "power", "toughness", "keywords"],
@@ -689,8 +699,13 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "grant_target" => Op::GrantTarget { keywords: get_str_list(t, "keywords")?.iter().fold(0, |m, k| m | db.kw(k)) },
             "create_token" => {
                 let name = req_str(t, "token")?;
-                Op::CreateToken { token: *tokens.get(name).ok_or_else(|| format!("unknown token {name:?}"))?, n: get_int(t, "n")?.unwrap_or(1) }
+                Op::CreateToken {
+                    token: *tokens.get(name).ok_or_else(|| format!("unknown token {name:?}"))?,
+                    n: get_int(t, "n")?.unwrap_or(1),
+                    attach_source: get_bool(t, "attach_source")?,
+                }
             }
+            "attach_source_to_target" => Op::AttachSourceToTarget,
             "gain_life" => {
                 let sacrificed_mv = get_bool(t, "sacrificed_mv")?;
                 Op::GainLife { n: if sacrificed_mv { get_int(t, "n")?.unwrap_or(0) } else { n()? }, per_storm: get_bool(t, "per_storm")?, sacrificed_mv }
@@ -873,17 +888,22 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         for tr in v.as_array().ok_or("triggers must be a list")? {
             let tr = tr.as_table().ok_or("triggers must be tables")?;
             check_fields(tr, SHAPE_TRIGGER_FIELDS, NON_SHAPE_TRIGGER_FIELDS, "trigger")?;
-            let (mut sacrificed_subtype, mut cast_filter, mut bargained) = (None, None, false);
+            let (mut sacrificed_subtype, mut cast_filter, mut bargained, mut equipped) = (None, None, false, false);
+            let spell_filter = |c: &Table| -> Result<CastFilter, String> {
+                Ok(match req_str(c, "spell")? {
+                    "noncreature" => CastFilter::Noncreature,
+                    "instant_or_sorcery" => CastFilter::InstantOrSorcery,
+                    f => return Err(format!("unknown spell condition {f:?}")),
+                })
+            };
             match tr.get("condition") {
                 None => {}
                 Some(Value::Table(c)) if c.len() == 1 && c.get("bargained") == Some(&Value::Boolean(true)) => bargained = true,
                 Some(Value::Table(c)) if c.len() == 1 && c.contains_key("sacrificed_subtype") => sacrificed_subtype = Some(req_str(c, "sacrificed_subtype")?.to_string()),
-                Some(Value::Table(c)) if c.len() == 1 && c.contains_key("spell") => {
-                    cast_filter = Some(match req_str(c, "spell")? {
-                        "noncreature" => CastFilter::Noncreature,
-                        "instant_or_sorcery" => CastFilter::InstantOrSorcery,
-                        f => return Err(format!("unknown spell condition {f:?}")),
-                    })
+                Some(Value::Table(c)) if c.len() == 1 && c.contains_key("spell") => cast_filter = Some(spell_filter(c)?),
+                Some(Value::Table(c)) if c.len() == 2 && c.contains_key("spell") && c.get("equipped") == Some(&Value::Boolean(true)) => {
+                    cast_filter = Some(spell_filter(c)?);
+                    equipped = true;
                 }
                 Some(c) => return Err(format!("unsupported trigger condition {c}")),
             }
@@ -904,6 +924,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
                 sacrificed_subtype,
                 cast_filter,
                 bargained,
+                equipped,
                 targets: targets(tr)?,
                 up_to: get_bool(tr, "up_to")?,
             });
@@ -965,6 +986,8 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         alternative_sac: land_sac(t, "alternative_cost")?,
         flashback_sac: land_sac(t, "flashback_cost")?,
         collect_evidence: get_int(t, "collect_evidence")?.unwrap_or(0),
+        equipped_power: get_int(t, "equipped_power")?.unwrap_or(0),
+        equipped_toughness: get_int(t, "equipped_toughness")?.unwrap_or(0),
         abilities,
         triggers,
         enters_tapped: get_bool(t, "enters_tapped")?,
@@ -993,7 +1016,7 @@ fn tables(v: Option<&Value>) -> Vec<&Table> {
 /// cards.py `SHAPE_N_STEPS`.
 const SHAPE_N_STEPS: [i64; 4] = [1, 2, 3, 4];
 /// cards.py `SHAPE_OP_FLAGS`.
-const SHAPE_OP_FLAGS: [&str; 3] = ["n_metalcraft", "sacrificed_mv", "greatest_power_if_evidence"];
+const SHAPE_OP_FLAGS: [&str; 4] = ["n_metalcraft", "sacrificed_mv", "greatest_power_if_evidence", "attach_source"];
 
 /// cards.py `_op_tokens`: `{prefix}{op}` per op in order, its amount `n` as
 /// a thermometer, the same under `e:op:`, an `optional_payment`'s ops after it.
@@ -1054,6 +1077,9 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
     }
     if truthy(t, "collect_evidence") {
         v.push("e:cost:collect_evidence".into());
+    }
+    if truthy(t, "equipped_power") || truthy(t, "equipped_toughness") {
+        v.push("e:equipment_bonus".into());
     }
     for k in SHAPE_COST_KEYS {
         if t.contains_key(k) {

@@ -66,9 +66,9 @@ out = { "Highway Robbery" = 4, "Grab the Prize" = 2, "Voldaren Epicure" = 2 }
 [[plan]]
 deck = "grixis_affinity"
 opponent = "jund_wildfire"
-why = "Hydroblast for Krark-Clan Shaman and Wildfire, the edict for Chrysalis and Familiar, a fourth Shaman; the slow Kenkus and Cam go out."
+why = "Hydroblast for Krark-Clan Shaman and Wildfire, the edict for Chrysalis and Familiar, a fourth Shaman; Black Mage's Rod (its Hero dies to every Shaman activation) and Cam go out."
 in = { "Hydroblast" = 2, "Extract a Confession" = 2, "Krark-Clan Shaman" = 1 }
-out = { "Kenku Artificer" = 2, "Sewer-veillance Cam" = 1, "Makeshift Munitions" = 1, "Toxin Analysis" = 1 }
+out = { "Black Mage's Rod" = 2, "Sewer-veillance Cam" = 1, "Makeshift Munitions" = 1, "Toxin Analysis" = 1 }
 
 [[plan]]
 deck = "jund_wildfire"
@@ -80,9 +80,9 @@ out = { "Lembas" = 2, "Gixian Infiltrator" = 2, "Eviscerator's Insight" = 2, "Ny
 [[plan]]
 deck = "grixis_affinity"
 opponent = "mono_blue_terror"
-why = "Pyroblast and Red Elemental Blast fight Counterspell and kill Tolarian Terror; Toxin Analysis, Kenku and Munitions go out."
-in = { "Pyroblast" = 4, "Red Elemental Blast" = 1 }
-out = { "Toxin Analysis" = 2, "Kenku Artificer" = 2, "Makeshift Munitions" = 1 }
+why = "Pyroblast fights Counterspell and kills Tolarian Terror; Toxin Analysis, Munitions and Cam go out."
+in = { "Pyroblast" = 4 }
+out = { "Toxin Analysis" = 2, "Makeshift Munitions" = 1, "Sewer-veillance Cam" = 1 }
 
 [[plan]]
 deck = "mono_blue_terror"
@@ -94,9 +94,9 @@ out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Plunder the Trollshaws" = 1
 [[plan]]
 deck = "grixis_affinity"
 opponent = "red_madness"
-why = "Hydroblast and Blue Elemental Blast answer burn and the red creatures, Unexpected Fangs gains life, a fourth Shaman sweeps the x/1s; Kenku, the Spellbombs (Red barely uses its graveyard) and Cam go out."
-in = { "Hydroblast" = 4, "Blue Elemental Blast" = 2, "Unexpected Fangs" = 1, "Krark-Clan Shaman" = 1 }
-out = { "Kenku Artificer" = 2, "Nihil Spellbomb" = 3, "Sewer-veillance Cam" = 1, "Makeshift Munitions" = 1, "Blood Fountain" = 1 }
+why = "Hydroblast and Blue Elemental Blast answer burn and the red creatures, a fourth Shaman sweeps the x/1s; Black Mage's Rod (a 2/1 Hero dies to every burn spell), the Spellbombs (Red barely uses its graveyard) and Cam go out."
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 1, "Krark-Clan Shaman" = 1 }
+out = { "Black Mage's Rod" = 2, "Nihil Spellbomb" = 3, "Sewer-veillance Cam" = 1 }
 
 [[plan]]
 deck = "red_madness"
@@ -119,14 +119,14 @@ out = { "Highway Robbery" = 2, "Grab the Prize" = 2, "Sneaky Snacker" = 2 }
 # deck = "elves"
 # opponent = "grixis_affinity"
 # why = "Deglamer kills an artifact creature or a Bridge, Spinewoods Paladin gains life against Galvanic Blast; the slow Sagu Wildlings and Lead the Stampede go out."
-# in = { "Deglamer" = 2, "Spinewoods Paladin" = 3 }
+# in = { "Deglamer" = 1, "Spinewoods Paladin" = 4 }
 # out = { "Sagu Wildling" = 2, "Lead the Stampede" = 3 }
 #
 # [[plan]]
 # deck = "grixis_affinity"
 # opponent = "tron"
-# why = "A race: the edict answers a lone Golem or Colossus, Fangs pushes damage; Krark-Clan Shaman cannot touch Tron's big creatures."
-# in = { "Extract a Confession" = 2, "Unexpected Fangs" = 1 }
+# why = "A race: the edict answers a lone Golem or Colossus, Envelop counters a sorcery-speed answer; Krark-Clan Shaman cannot touch Tron's big creatures."
+# in = { "Extract a Confession" = 2, "Envelop" = 1 }
 # out = { "Krark-Clan Shaman" = 3 }
 #
 # [[plan]]

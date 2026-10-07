@@ -169,6 +169,9 @@ class CardDef(_Immutable):
     phyrexian_life: int = 0
     bargain: bool = False  # cast mode "bargain": also sacrifice an artifact, enchantment or token
     collect_evidence: int = 0  # cast mode "evidence": exile cards with total mana value >= N from your graveyard
+    # Equipment: what the equipped creature gets (Black Mage's Rod: +1/+0).
+    equipped_power: int = 0
+    equipped_toughness: int = 0
     # permanents
     abilities: tuple[AbilityDef, ...] = ()
     triggers: tuple[TriggerDef, ...] = ()
