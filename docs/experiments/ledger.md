@@ -4,8 +4,9 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 
 ## Open (handoff 2026-10-07)
 
-- `r3-attn` was still training on h100-private (`~/mtg-ml-next2/runs/r3-attn`, cores 48-63, GPUs 5+4, ~20 s per iteration, ends at 1M games). When it ends: `archive_run.sh 20261007-r3-attn ...`, `final_evals.sh` with `H2H="20261007-r3-attn 20261007-r3-control"`, `ladder_final.py 20261007-r3-attn` (from `~/mtg-ml-next2`), then fill its row.
-- Suggested round 4: parent `20261007-r3-postboard`; settle postboard with a 5,000-game head to head; start ladder L2 (rungs: L1 + `r1-lranneal` + `r3-control`); one larger change (entity attention if it holds, a bigger model from scratch with the anneal and auto mana, or a new search design).
+- Rounds 4 and 5 stopped 2026-10-07 17:25 UTC on request (Mix complete, the others early); all archived. The numbers below are the last in-training evaluations (1,000 games, ladder L1 200/rung); the standard 2,000-game final evals and head to heads were not run yet: `final_evals.sh` with `H2H="20261007-r4-mix 20261007-r4-control"`, `ladder_final.py`, from `~/mtg-ml-r4`.
+- Next: a mix weighted toward the main matchup (`--matchup jund_blue:2,jund_madness,blue_madness`) from `r4-control`; the width question is open (h256 needs > 6M games to say anything).
+- Still open: settle postboard with a 5,000-game head to head; ladder L2 (rungs: L1 + `r1-lranneal` + `r3-control`).
 - Scripts: `tools/experiments/`.
 
 ## Summary
@@ -13,7 +14,12 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
 | 20261007-red-madness-1m | new deck: Red Madness learner vs frozen r1-control Jund, warm-started from it | 1M | (vs Jund bot) 89.9% | 92.6% | | new-deck baseline⁴ |
-| 20261007-r3-attn | R3 + 1 entity self-attention layer (identity init) | 9.4M + 1M | running | | | |
+| 20261007-r5-mix-h256 | fresh h256 entity net on the three-deck mix, lr 1.5e-4 → 1.5e-5 | 2.6M (stopped) | 46.3%⁵ | 60.4%⁵ | -32 ± 13⁵ | inconclusive: level with h128 at equal games, slightly behind |
+| 20261007-r5-mix-h256-lr3e-4 | the same at the h128 lr (3e-4 → 3e-5) | 2.6M | 38.1% at 2.5M | | -69 at 2.5M | abort: steps too large |
+| 20261007-r5-mix-h128 | fresh h128 entity net on the three-deck mix (width control) | 5.8M (stopped) | 56.4%⁵ | 65.5%⁵ | 40 ± 12⁵ | control (49.5% / -14 at 2.5M) |
+| 20261007-r4-mix | r3-postboard + Red Madness: one network on jund_blue, jund_madness, blue_madness (feature set 3) | 10.4M + 10M | 73.4%⁵ | 71.7%⁵ | 155 ± 13⁵ | works, costs the main matchup ~5 pts vs control |
+| 20261007-r4-control | r3-postboard, jund_blue only, same schedule and feature set 3 | 10.4M + 7.2M (stopped) | **78.2%**⁵ | 77.6%⁵ | **163 ± 13**⁵ (173 at 17.0M) | **best parent** |
+| 20261007-r3-attn | R3 + 1 entity self-attention layer (identity init) | 9.4M + 1M | 73.3% | 75.0% | 152 ± 13 | reject (no gain, ~10× slower) |
 | 20261007-r3-postboard | R3 + 20% sideboarded games (vs 50%) | 9.4M + 1M | **74.9%** | 74.9% | **154 ± 13** | inconclusive (+) |
 | 20261007-r3-botjund | R3 + 25% games learner Jund vs blue bot | 9.4M + 1M | 74.2% | 75.0% | 143 ± 13 | reject |
 | 20261007-r3-control | lr-anneal final + 1M games at lr 3e-5, new features on | 9.4M + 1M | 73.0% | 74.7% | 146 ± 13 | control, **best parent** |
@@ -30,9 +36,40 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | 20261006-overnight-selfplay | open-ended self-play + pool | 8.4M | 64.6% | 70.9% | 103 ± 13 | parent |
 | 20261006-overnight-bot10 | + 10% games vs scripted bots | 8.4M | 65.6% | | 75 ± 12 | no effect |
 
-Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows.
+Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows. ⁵ last in-training evaluation (1,000 games); the 2,000-game final evals were not run (runs stopped 2026-10-07).
 
 ---
+
+## 20261007-r5 · width test on the three-deck mix
+
+- **Question**: r4-mix lost ~5 points on Jund vs Blue against its control. Is that model size? Same mix from scratch at h128 and h256; if h256 is clearly better on Jund vs Blue (and on the new pairings), scale width before adding decks.
+- **Parent**: none (fresh). A trained h128 cannot be widened, so both arms start from zero.
+- **Code**: PR fmssn/mtg-ml#28 (matchup mix, feature set 3, stack fix), box copy `~/mtg-ml-r4`.
+- **Flags** (both arms): `--hidden {128|256} --trunk entity --value-net shared --engine native --device cuda --inference server --server-device cuda:1 --workers 20 --games-per-iter 2048 --total-games 10000000 --seed 5 --features 3 --postboard-frac 0.2 --matchup jund_blue,jund_madness,blue_madness --ppo-lr 3e-4 --ppo-lr-final 3e-5 --lr-anneal-games 10000000 --eval-every-games 500000 --bench-games 1000 --bench-greedy-games 1000 --ladder <L1>`; cores 0-63 shared with r4 (speeds not comparable to other rounds).
+- **First h256 attempt (aborted)**: at the h128 learning rate h256 fell behind and stalled from 1.5M games (Jund vs Blue bot 38.1% vs h128's 49.5% at 2.5M, Elo -69 vs -14, 3-13 points behind on every new pairing). Its updates were ~70% larger (approx KL 0.026 vs 0.015, clip fraction 0.15 vs 0.11). Archived as `20261007-r5-mix-h256-lr3e-4`; restarted at half the lr (`--ppo-lr 1.5e-4 --ppo-lr-final 1.5e-5`). Lesson: scale the lr down with width.
+- **Result** (stopped early, last in-training evaluations, 1,000 games): at equal games h256 is level with h128 or slightly behind (2.5M: Jund vs Blue bot 46.3% vs 49.5%, Elo -32 vs -14; new pairings 1-4 points behind). h128 kept climbing to 56.4% / Elo 40 at 5.5M (Jund vs Red bot 59.5%, Red vs Jund bot 93.1%, Blue vs Red bot 70.8%, Red vs Blue bot 85.4%).
+- **Verdict**: inconclusive. Width did not pay off in the first 2.5M games; wider nets often pull ahead later, so the question needs h256 past ~6M games (or a fixed-compute comparison).
+
+## 20261007-r4 · one network for three decks
+
+- **Question**: can one network learn Jund, Blue and Red (all three pairings) without losing Jund-vs-Blue strength, and how strong is its Red.
+- **Parent**: `20261007-r3-postboard` latest (10.4M games) and its pool, resumed. Entity attention dropped (r3-attn: no gain).
+- **Code**: PR fmssn/mtg-ml#28 (`claude/multi-matchup` @ main 1cf8fff + matchup mix, `blue_madness`, feature set 3 `opp:deck:`), box copy `~/mtg-ml-r4`.
+- **Flags** (both arms): `--hidden 128 --trunk entity --value-net shared --engine native --device cuda --inference server --server-device cuda:1 --workers 26 --games-per-iter 2048 --total-games 20400000 --checkpoint-every 25 --snapshot-every 122 --seed 4 --server-policy-slots 256 --features 3 --postboard-frac 0.2 --ppo-lr 1e-4 --ppo-lr-final 3e-5 --lr-anneal-games 8000000 --eval-every-games 500000 --bench-games 1000 --bench-greedy-games 1000 --ladder <L1>`; mix adds `--matchup jund_blue,jund_madness,blue_madness`.
+- **Result** (last in-training evaluations, 1,000 games):
+
+| | Jund vs Blue bot | greedy | L1 Elo | Jund vs Red bot | Red vs Jund bot | Blue vs Red bot | Red vs Blue bot |
+|---|---|---|---|---|---|---|---|
+| mix at 10.5M | 73.8% | 74.0% | 135 | 41.4% | 33.9% | 62.0% | 34.8% |
+| mix at 11.0M (low) | 66.1% | 70.2% | 92 | 50.3% | 78.0% | 66.5% | 69.6% |
+| mix at 20.0M | 73.4% | 71.7% | 155 | 64.6% | 92.7% | 79.0% | 87.1% |
+| control at 17.5M | 78.2% | 77.6% | 163 (173 at 17.0M) | | | | |
+
+- **Findings**
+  - *Red is learned fast*: 34% → 93% vs the Jund bot within 10M games (the scripted Jund bot is weak against aggro, so Elo is the better yardstick for Red).
+  - *The mix costs the main matchup*: Jund vs Blue fell 7.7 points in the first 500k games (the new `opp:deck:` input starts untrained, so Jund's lessons against Red bled into its play against Blue), then recovered to the parent's level (73.4%, Elo 155) but stays ~5 points and ~10-20 Elo behind the control. At equal Jund-vs-Blue practice the mix is still behind, so it is interference, not only fewer games. Value loss 0.028 vs 0.020.
+  - *Control improves further*: continuing at lr 1e-4 → 3e-5 with feature set 3 gave the best Jund-vs-Blue numbers yet (78.2%, Elo 163-173).
+- **Verdict**: the mix works and is the basis for multi-deck play; the control is the new best parent for Jund vs Blue. Next: weight the mix toward the main matchup and settle the width question (r5).
 
 ## 20261007-red-madness-1m · a third deck against a frozen Jund
 
@@ -67,12 +104,13 @@ Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoi
 | control | 73.0% (71.0–74.9) | 74.7% (72.7–76.6) | 146 ± 13 | vs parent lranneal: 51.7% (49.6–53.9) |
 | postboard 0.2 | 74.9% (72.9–76.7) | 74.9% (73.0–76.8) | 154 ± 13 | vs control: 52.0% (49.8–54.2) |
 | botjund | 74.2% (72.2–76.0) | 75.0% (73.0–76.8) | 143 ± 13 | vs control: 50.0% (47.9–52.2) |
-| attn | running | | 171 ± 13 at +0.25M | |
+| attn | 73.3% (71.3–75.1) | 75.0% (73.0–76.8) | 152 ± 13 (171 at +0.25M) | vs control: 49.2% (47.1–51.4) |
 
 **Findings**
 - *Continued low lr*: small further gains over the parent (sampled +0.9, greedy +1.6, head to head 51.7%, just inside noise). The run is close to its plateau at this lr.
 - *Postboard 0.2*: best on every number (+1.9 sampled, Elo +9, head to head 52.0%) but each within noise. Inconclusive, leaning positive; cheap to keep. Decide with a longer run or 5,000-game head to head.
 - *Bot games as Jund*: no gain over the control on anything. Reject (with round 2: same result twice).
+- *Entity attention (1 layer)*: level with the control (head to head 49.2%, Elo 152 vs 146, benchmark within 0.3 points); the early 171 Elo did not hold. At ~20 s per iteration (no stacked server path) vs ~1.5 s, reject for now.
 
 ## 20261007-r2 · four fine-tunes from the overnight checkpoint, new code
 
