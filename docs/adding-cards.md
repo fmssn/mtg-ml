@@ -182,13 +182,19 @@ All fields are optional unless marked. Unknown fields are an error in both engin
 | `targets`, `effect` | an instant / sorcery's targets (target kinds below) and its ops |
 | `modes` | modal spells: `[{ name, targets, effect }]`, each cast as its own option |
 | `additional_sac` | `"artifact"` or `"artifact_or_creature"`: sacrifice as an additional cost |
+| `additional_discard` | `true`: discard a card as an additional cost (the spell remembers whether it was a land) |
 | `cost_reduction` | `instants_and_sorceries_in_graveyard`, `artifacts_you_control`, `cards_drawn_this_turn` |
 | `flashback`, `escape` + `escape_exile`, `bestow` | alternative costs |
+| `madness`, `plot` | madness cost (a discarded card goes to exile, and a trigger lets its owner cast it for this cost at any speed); plot cost (a sorcery-speed special action exiles it; cast free as a sorcery on a later turn, option "Cast X (plotted)") |
+| `overload` + `overload_effect` | cast mode "overload": this cost, no targets, `overload_effect` instead of `effect` |
+| `alternative_cost`, `flashback_cost` | `{ sacrifice = "mountain", n = N }`: sacrifice lands instead of paying mana (cast mode "alternative" from hand; flashback with only `flashback_cost` is free apart from the sacrifice) |
 | `enters_tapped`, `etb_x_counters`, `back` | `back` names a `[[face]]` (transform) |
-| `abilities` | `[{ name (required), cost, tap, sac_self, sac_other, discard_self, zone = "battlefield" \| "hand", sorcery_speed, mana = ["B", "R"], targets, effect }]`; `mana` makes it a mana ability |
-| `triggers` | `[{ name (required), event, effect, condition }]`, events: `etb`, `to_graveyard_from_battlefield`, `cast`, `you_sacrifice_another`, `your_upkeep`; condition: `{ sacrificed_subtype = "Eldrazi" }` |
+| `abilities` | `[{ name (required), cost, tap, sac_self, sac_other, discard_self, discard_other, exile_self, x_target_mv, x_reveal, zone = "battlefield" \| "hand", sorcery_speed, mana = ["B", "R"], targets, effect }]`; `mana` makes it a mana ability; `discard_other` / `exile_self`: discard a card / exile this permanent as a cost; `x_target_mv = 2`: the cost has {X}{X}, X = the (single) target's mana value, only affordable targets are offered (Gorilla Shaman); `x_reveal = "red"`: choose X, then reveal X red cards from hand as a cost (Martyr of Ashes) |
+| `triggers` | `[{ name (required), event, effect, condition }]`, events: `etb`, `to_graveyard_from_battlefield`, `cast`, `you_sacrifice_another`, `your_upkeep`, `you_cast` (another spell its controller casts, from the battlefield), `third_draw` (its owner draws their third card in a turn, from the graveyard); condition: `{ sacrificed_subtype = "Eldrazi" }`, `{ spell = "noncreature" \| "instant_or_sorcery" }` (for `you_cast`) |
 
-Target kinds: `creature`, `nonlegendary_creature`, `nonartifact_creature`, `creature_you_control`, `land`, `nonland_permanent`, `artifact`, `blue_permanent`, `red_permanent`, `spell`, `blue_spell`, `red_spell`, `instant_spell`, `artifact_spell`, `player`, `opponent`, `any`.
+Target kinds: `creature`, `nonlegendary_creature`, `nonartifact_creature`, `creature_you_control`, `creature_you_dont_control`, `land`, `nonland_permanent`, `permanent`, `artifact`, `noncreature_artifact`, `blue_permanent`, `red_permanent`, `spell`, `blue_spell`, `red_spell`, `instant_spell`, `artifact_spell`, `player`, `opponent`, `player_with_creature`, `creature_of_target_player` (a creature controlled by the player chosen as the previous target: Searing Blaze), `any`.
+
+Sacrifice filters (`additional_sac`, `sac_other`, land-sacrifice costs): `artifact`, `artifact_or_creature`, `mountain`.
 
 Where the vocabulary lives, for when it needs to grow:
 
@@ -207,9 +213,9 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 |---|---|---|
 | `draw` | `n`, `n_cast_from_graveyard` | the controller draws `n` (or `n_cast_from_graveyard` when the spell was cast from a graveyard) |
 | `mill` | `who` = `you` \| `target_player`, `n` | mill `n` |
-| `counter_target` | | counter the targeted spell |
+| `counter_target` | `if_color` | counter the targeted spell (only if it has colour `if_color`, e.g. `"U"`) |
 | `counter_target_unless_paid` | `cost` | its controller may pay `cost`; otherwise counter it (Force Spike) |
-| `destroy_target` | | destroy the targeted permanent (indestructible survives) |
+| `destroy_target` | `if_color`, `mv_is_x` | destroy the targeted permanent (indestructible survives; only if it has colour `if_color` / its mana value equals X) |
 | `bounce_target` | | return the targeted permanent to its owner's hand |
 | `tap_target` | `skip_untap` | tap it; it skips that many of its controller's untap steps |
 | `grant_target` | `keywords` | it gains the keywords until end of turn |
@@ -217,15 +223,19 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 | `gain_life` | `n` | the controller gains `n` life |
 | `lose_life` | `who` = `you` \| `opponent` \| `target_player` \| `target_controller`, `n` | that player loses `n` life |
 | `counter_on_source` | | a +1/+1 counter on the source, if it is still on the battlefield |
-| `damage_target` | `n` | the source deals `n` damage to the target (creature or player) |
-| `damage_each_creature` | `n`, `without` | the source deals `n` damage to each creature (without the keyword) |
+| `damage_target` | `n`, `index`, `n_landfall` | the source (the spell itself, or the ability's source) deals `n` damage to target `index` (default 0; creature or player); `n_landfall` instead if a land entered under the controller's control this turn |
+| `damage_each_opponent` | `n`, `if_discarded_nonland` | the source deals `n` damage to each opponent (only if the card discarded as the additional cost was not a land) |
+| `damage_each_creature` | `n` or `x = true`, `without`, `whose = "opponent"` | the source deals `n` (or X) damage to each creature (without the keyword; only the opponent's) |
+| `discard` | `n` | the controller discards `n` cards of their choice |
+| `return_to_battlefield` | `tapped` | graveyard trigger: this card returns to the battlefield, if it is still that object in the graveyard |
 | `exile_graveyard` | | exile the target player's graveyard |
+| `exile_all_graveyards` | | exile both graveyards |
 | `search_library` | `supertype`, `type`, `subtypes_any`, `dest` = `battlefield` \| `hand`, `tapped`, `reveal`, `what` | search for a matching card (finding nothing is allowed), put it there, shuffle |
 | `optional_payment` | `cost`, `prompt`, `then` | the controller may pay; if paid, run the `then` ops |
 | `scry` | `n` (only 1) | scry 1 |
 | `explore_target` | | the targeted creature explores |
 | `shuffle_into_library` | | dies trigger: shuffle this card from the graveyard into its owner's library |
-| `custom` | `fn` | `delver_reveal`, `brainstorm`, `ponder`, `deem_inferior`, `opponent_discards_else_draw`, `wildfire`, `duress` |
+| `custom` | `fn` | `delver_reveal`, `brainstorm`, `ponder`, `deem_inferior`, `opponent_discards_else_draw`, `wildfire`, `duress`, `highway_robbery`, `relic_exile_one` |
 
 ## Writing an op so both engines agree
 

@@ -3,7 +3,7 @@
 //! Mirrors the non-generator methods of mtg_ml/engine/game.py one to one;
 //! the method names are kept so the two files can be read side by side.
 
-use crate::cards::{db, CardDef, CostRed, DefId, Event, Op, SacFilter, TriggerDef, T_ARTIFACT, T_CREATURE, T_INSTANT, T_LAND, T_SORCERY, TK};
+use crate::cards::{color_bit, db, CardDef, CastFilter, CostRed, DefId, Event, Op, SacFilter, TriggerDef, T_ARTIFACT, T_CREATURE, T_INSTANT, T_LAND, T_SORCERY, TK};
 use crate::mana::{bit, can_pay, ManaCost, Remaining};
 use crate::rng::PyRandom;
 
@@ -92,6 +92,8 @@ pub struct Card {
     pub sick: bool,
     pub attached_to: Option<u32>,
     pub skip_untap: i32,
+    /// Turn this card was plotted on (in exile), 0 = not plotted.
+    pub plotted_turn: i32,
     pub temp: Vec<TempEffect>,
     /// Bit p set: player p knows this card.
     pub known_to: u8,
@@ -122,10 +124,19 @@ impl Card {
         self.sick = false;
         self.attached_to = None;
         self.skip_untap = 0;
+        self.plotted_turn = 0;
         self.temp.clear();
     }
     pub fn repr(&self) -> String {
         format!("{}#{}", self.name(), self.oid)
+    }
+    /// view.py `_exiled`: an exiled card's name, plotted cards marked.
+    pub fn exiled_name(&self) -> std::borrow::Cow<'static, str> {
+        if self.plotted_turn != 0 {
+            std::borrow::Cow::Owned(format!("{} (plotted)", self.name()))
+        } else {
+            std::borrow::Cow::Borrowed(self.name())
+        }
     }
 }
 
@@ -168,6 +179,10 @@ pub enum Method {
     Bestow,
     Flashback,
     Escape,
+    Madness,
+    Plot,
+    Overload,
+    Alternative,
 }
 
 impl Method {
@@ -177,6 +192,10 @@ impl Method {
             Method::Bestow => "bestow",
             Method::Flashback => "flashback",
             Method::Escape => "escape",
+            Method::Madness => "madness",
+            Method::Plot => "plot",
+            Method::Overload => "overload",
+            Method::Alternative => "alternative",
         }
     }
 }
@@ -192,6 +211,8 @@ pub struct Data {
     pub sid: Option<u32>,
     pub amount: Option<i32>,
     pub source_oid: Option<u32>,
+    /// Grab the Prize: whether the card discarded to cast it was a land.
+    pub discarded_land: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -231,6 +252,8 @@ pub struct Player {
     pub pool: Vec<(u8, i32)>,
     pub drew_from_empty: bool,
     pub cards_drawn_this_turn: i32,
+    /// Last turn a land entered the battlefield under this player's control.
+    pub landfall_turn: i32,
 }
 
 impl Player {
@@ -338,7 +361,10 @@ pub enum Val {
     Land(CIdx),
     Cast(CIdx, Method, Option<u8>),
     Activate(CIdx, u8),
+    Plot(CIdx),
     Mana(CIdx, u8),
+    /// Highway Robbery: (sacrifice a land rather than discard, the card).
+    Robbery(bool, CIdx),
     Card(CIdx),
     Ref(Ref),
     Pool(u8),
@@ -416,6 +442,8 @@ pub struct Args {
     pub match_game: i32,
     pub auto_mana: bool,
     pub auto_pass: bool,
+    /// `Game.deck_names`: a seat's deck name when it is not the seat's usual deck.
+    pub deck_names: [Option<String>; 2],
 }
 
 pub struct State {
@@ -588,6 +616,7 @@ impl State {
             sick: false,
             attached_to: None,
             skip_untap: 0,
+            plotted_turn: 0,
             temp: vec![],
             known_to,
         });
@@ -833,7 +862,11 @@ impl State {
                 c.known_to = BOTH;
                 c.sick = true;
                 c.tapped = tapped || c.face().enters_tapped;
+                let ctl = c.controller as usize;
                 self.battlefield.push(ci);
+                if self.is_land(self.c(ci)) {
+                    self.players[ctl].landfall_turn = self.turn;
+                }
                 if self.logging {
                     let c = self.c(ci);
                     let m = format!("enters: {}#{} (p{})", c.name(), c.oid, c.controller);
@@ -907,6 +940,9 @@ impl State {
             self.mv(card, Zone::Hand);
             if count {
                 self.players[p].cards_drawn_this_turn += 1;
+                if self.players[p].cards_drawn_this_turn == 3 {
+                    self.emit_third_draw(p as u8);
+                }
             }
         }
     }
@@ -934,6 +970,13 @@ impl State {
             let c = self.c(ci);
             let m = format!("p{} discards {}", c.owner, c.name());
             self.log.push(m);
+        }
+        if self.c(ci).face().madness.is_some() {
+            // Madness (702.35): discarded into exile; a trigger lets the owner cast it.
+            let new = self.mv(ci, Zone::Exile).expect("a token is never in a hand");
+            let (owner, oid) = (self.c(new).owner, self.c(new).oid);
+            self.pending.push(PendingTrigger { controller: owner, source: Src::Live(new), tdef: &db().madness, data: Data { card: Some(new), oid: Some(oid), ..Default::default() } });
+            return;
         }
         self.mv(ci, Zone::Graveyard);
     }
@@ -1063,9 +1106,39 @@ impl State {
         let card = it.card.unwrap();
         let controller = it.controller;
         let mut new = vec![];
-        for t in &self.c(card).face().triggers {
+        let face = self.c(card).face();
+        for t in &face.triggers {
             if t.event == Event::Cast {
                 new.push(PendingTrigger { controller, source: Src::Live(card), tdef: t, data: Data { spell_sid: Some(sid), ..Default::default() } });
+            }
+        }
+        for &perm in &self.battlefield {
+            let pc = self.c(perm);
+            if pc.controller != controller {
+                continue;
+            }
+            for t in &pc.face().triggers {
+                let ok = match t.cast_filter {
+                    None => true,
+                    Some(CastFilter::Noncreature) => !face.is_type(T_CREATURE),
+                    Some(CastFilter::InstantOrSorcery) => is_instant_or_sorcery(face),
+                };
+                if t.event == Event::YouCast && ok {
+                    new.push(PendingTrigger { controller: pc.controller, source: Src::Live(perm), tdef: t, data: Data { spell_sid: Some(sid), ..Default::default() } });
+                }
+            }
+        }
+        self.pending.extend(new);
+    }
+
+    pub fn emit_third_draw(&mut self, p: u8) {
+        let mut new = vec![];
+        for &c in &self.players[p as usize].graveyard {
+            let card = self.c(c);
+            for t in &card.face().triggers {
+                if t.event == Event::ThirdDraw {
+                    new.push(PendingTrigger { controller: p, source: Src::Live(c), tdef: t, data: Data { card: Some(c), oid: Some(card.oid), ..Default::default() } });
+                }
             }
         }
         self.pending.extend(new);
@@ -1140,10 +1213,23 @@ impl State {
     // Targets
     // ------------------------------------------------------------------
 
-    pub fn target_candidates(&self, spec: TK, controller: u8, exclude_sid: Option<u32>) -> Vec<Ref> {
+    /// `chosen`: the targets already chosen for the same spell or ability
+    /// (for a spec that depends on them, creature_of_target_player).
+    pub fn target_candidates(&self, spec: TK, controller: u8, exclude_sid: Option<u32>, chosen: &[Ref]) -> Vec<Ref> {
         match spec {
             TK::Player => return vec![Ref::Player(controller), Ref::Player(1 - controller)],
             TK::Opponent => return vec![Ref::Player(1 - controller)],
+            TK::PlayerWithCreature => {
+                return [controller, 1 - controller]
+                    .into_iter()
+                    .filter(|&q| self.battlefield.iter().any(|&c| self.c(c).controller == q && self.is_creature(self.c(c))))
+                    .map(Ref::Player)
+                    .collect()
+            }
+            TK::CreatureOfTargetPlayer if !chosen.is_empty() => {
+                let q = ref_index(chosen[chosen.len() - 1]);
+                return self.battlefield.iter().map(|&c| self.c(c)).filter(|c| self.is_creature(c) && c.controller as u32 == q).map(|c| Ref::Perm(c.oid)).collect();
+            }
             _ => {}
         }
         if spec.is_spell() {
@@ -1159,7 +1245,10 @@ impl State {
 
     pub fn perm_matches(&self, spec: TK, c: &Card, controller: u8) -> bool {
         match spec {
-            TK::Creature | TK::Any => self.is_creature(c),
+            TK::Creature | TK::Any | TK::CreatureOfTargetPlayer => self.is_creature(c),
+            TK::CreatureYouDontControl => self.is_creature(c) && c.controller != controller,
+            TK::Permanent => true,
+            TK::NoncreatureArtifact => self.is_artifact(c) && !self.is_creature(c),
             TK::NonlegendaryCreature => self.is_creature(c) && !c.face().has_supertype("Legendary"),
             TK::CreatureYouControl => self.is_creature(c) && c.controller == controller,
             TK::Land => self.is_land(c),
@@ -1187,7 +1276,7 @@ impl State {
     pub fn target_legal(&self, item: &StackItem, i: usize) -> bool {
         let spec = item.target_specs[i];
         match item.targets[i] {
-            Ref::Player(p) => matches!(spec, TK::Player | TK::Any) || (spec == TK::Opponent && p != item.controller),
+            Ref::Player(p) => matches!(spec, TK::Player | TK::Any | TK::PlayerWithCreature) || (spec == TK::Opponent && p != item.controller),
             Ref::Stack(sid) => match self.stack_pos(sid) {
                 Some(pos) => {
                     let it = &self.stack[pos];
@@ -1196,6 +1285,7 @@ impl State {
                 None => false,
             },
             Ref::Perm(oid) => match self.perm(oid) {
+                Some(c) if spec == TK::CreatureOfTargetPlayer && self.c(c).controller as u32 != ref_index(item.targets[i - 1]) => false,
                 Some(c) => self.perm_matches(spec, self.c(c), item.controller),
                 None => false,
             },
@@ -1269,6 +1359,7 @@ impl State {
                 match flt {
                     SacFilter::Artifact => self.is_artifact(c),
                     SacFilter::ArtifactOrCreature => self.is_artifact(c) || self.is_creature(c),
+                    SacFilter::Mountain => self.is_land(c) && c.face().has_subtype("Mountain"),
                 }
             })
             .collect()
@@ -1356,12 +1447,29 @@ impl State {
             Method::Bestow => d.bestow.as_ref(),
             Method::Flashback => d.flashback.as_ref(),
             Method::Escape => d.escape.as_ref(),
+            Method::Madness => d.madness.as_ref(),
+            Method::Overload => d.overload.as_ref(),
+            Method::Plot => d.plot.as_ref().map(|_| &db().free),
+            Method::Alternative => d.alternative_sac.map(|_| &db().free),
+        }
+    }
+
+    /// `Game._mode_sac`: lands sacrificed instead of (part of) the cost.
+    pub fn mode_sac(&self, ci: CIdx, mode: Method) -> Option<(SacFilter, i32)> {
+        let d = self.c(ci).face();
+        match mode {
+            Method::Alternative => d.alternative_sac,
+            Method::Flashback => d.flashback_sac,
+            _ => None,
         }
     }
 
     pub fn mode_targets(&self, ci: CIdx, mode: Method, choice: Option<u8>) -> Vec<TK> {
         if mode == Method::Bestow {
             return vec![TK::Creature];
+        }
+        if mode == Method::Overload {
+            return vec![];
         }
         let d = self.c(ci).face();
         match choice {
@@ -1388,25 +1496,40 @@ impl State {
             Some(b) => b,
             None => return false,
         };
-        if matches!(mode, Method::Normal | Method::Bestow) && c.zone != Zone::Hand {
+        if matches!(mode, Method::Normal | Method::Bestow | Method::Overload | Method::Alternative) && c.zone != Zone::Hand {
             return false;
         }
         if matches!(mode, Method::Flashback | Method::Escape) && c.zone != Zone::Graveyard {
             return false;
         }
+        if matches!(mode, Method::Madness | Method::Plot) && c.zone != Zone::Exile {
+            return false;
+        }
+        if mode == Method::Plot && !(0 < c.plotted_turn && c.plotted_turn < self.turn) {
+            return false;
+        }
         if d.is_type(T_LAND) {
             return false;
         }
-        if !d.is_type(T_INSTANT) && !self.sorcery_timing(p) {
+        // Madness casts on resolution of its trigger, whatever the card type (702.35).
+        if mode != Method::Madness && !d.is_type(T_INSTANT) && !self.sorcery_timing(p) {
             return false;
         }
         for spec in self.mode_targets(ci, mode, choice) {
-            if self.target_candidates(spec, p, None).is_empty() {
+            if self.target_candidates(spec, p, None, &[]).is_empty() {
                 return false;
             }
         }
         if mode == Method::Escape && (self.players[p as usize].graveyard.len() as i32) - 1 < d.escape_exile {
             return false;
+        }
+        if d.additional_discard && (self.players[p as usize].hand.len() as i32 - (c.zone == Zone::Hand) as i32) < 1 {
+            return false;
+        }
+        if let Some((flt, n)) = self.mode_sac(ci, mode) {
+            if (self.sac_candidates(p, flt, &[]).len() as i32) < n {
+                return false;
+            }
         }
         let cost = base.with_x(0).reduced(self.cost_reduction(p, ci));
         self.cost_feasible(p, &Remaining::of(&cost), d.additional_sac, &[], None, &[])
@@ -1431,13 +1554,42 @@ impl State {
         if ab.mana.is_some() {
             return true;
         }
+        if ab.discard_other && self.players[p as usize].hand.is_empty() {
+            return false;
+        }
+        let exclude: Vec<u32> = if ab.tap { vec![c.oid] } else { vec![] };
+        if ab.x_target_mv != 0 {
+            return self.target_candidates(ab.targets[0], p, None, &[]).into_iter().any(|r| self.x_target_affordable(p, ci, ai, r));
+        }
         for spec in &ab.targets {
-            if self.target_candidates(*spec, p, None).is_empty() {
+            if self.target_candidates(*spec, p, None, &[]).is_empty() {
                 return false;
             }
         }
-        let exclude: Vec<u32> = if ab.tap { vec![c.oid] } else { vec![] };
         self.cost_feasible(p, &Remaining::of(&ab.cost), ab.sac_other, &exclude, None, &[])
+    }
+
+    /// `Game._x_target_cost`: cost of an ability whose X is the target's mana value.
+    pub fn x_target_cost(&self, ci: CIdx, ai: usize, r: Ref) -> ManaCost {
+        let ab = &self.c(ci).face().abilities[ai];
+        let mv = match r {
+            Ref::Perm(oid) => self.c(self.perm(oid).expect("x target on the battlefield")).face().mana_value(),
+            _ => panic!("x target must be a permanent"),
+        };
+        let mut cost = ab.cost.clone();
+        cost.generic += ab.x_target_mv * mv;
+        cost
+    }
+
+    pub fn x_target_affordable(&self, p: u8, ci: CIdx, ai: usize, r: Ref) -> bool {
+        let c = self.c(ci);
+        let ab = &c.face().abilities[ai];
+        let exclude: Vec<u32> = if ab.tap { vec![c.oid] } else { vec![] };
+        self.cost_feasible(p, &Remaining::of(&self.x_target_cost(ci, ai, r)), ab.sac_other, &exclude, None, &[])
+    }
+
+    pub fn red_cards_in_hand(&self, p: u8) -> Vec<CIdx> {
+        self.players[p as usize].hand.iter().copied().filter(|&c| self.c(c).face().colors & color_bit(b'R') != 0).collect()
     }
 
     // ------------------------------------------------------------------
@@ -1539,7 +1691,7 @@ impl State {
             if !face.modes.is_empty() {
                 continue;
             }
-            for mode in [Method::Normal, Method::Bestow] {
+            for mode in [Method::Normal, Method::Bestow, Method::Overload, Method::Alternative] {
                 if self.can_cast(p, card, mode, None) {
                     let label = if mode == Method::Normal { format!("Cast {n}") } else { format!("Cast {n} ({})", mode.name()) };
                     opts.push(Opt { label, key: vec![KI::S("cast"), KI::S(n), KI::S("hand"), KI::S(mode.name())], value: Val::Cast(card, mode, None) });
@@ -1555,6 +1707,20 @@ impl State {
                         key: vec![KI::S("cast"), KI::S(n), KI::S("graveyard"), KI::S(mode.name())],
                         value: Val::Cast(card, mode, None),
                     });
+                }
+            }
+        }
+        for card in self.dedupe_by_name(pl.exile.iter().copied().filter(|&c| self.c(c).plotted_turn != 0)) {
+            if self.can_cast(p, card, Method::Plot, None) {
+                let n = self.c(card).name();
+                opts.push(Opt { label: format!("Cast {n} (plotted)"), key: vec![KI::S("cast"), KI::S(n), KI::S("exile"), KI::S("plot")], value: Val::Cast(card, Method::Plot, None) });
+            }
+        }
+        if sorcery_ok {
+            for card in self.dedupe_by_name(pl.hand.iter().copied().filter(|&c| self.c(c).face().plot.is_some())) {
+                if self.can_afford(p, self.c(card).face().plot.as_ref().unwrap()) {
+                    let n = self.c(card).name();
+                    opts.push(Opt { label: format!("Plot {n}"), key: vec![KI::S("plot"), KI::S(n)], value: Val::Plot(card) });
                 }
             }
         }
@@ -1687,6 +1853,14 @@ pub fn compositions(total: i32, parts: usize) -> Vec<Vec<i32>> {
         }
     }
     out
+}
+
+/// The player index or object id of a target reference (Python `ref[1]`).
+pub fn ref_index(r: Ref) -> u32 {
+    match r {
+        Ref::Player(p) => p as u32,
+        Ref::Perm(o) | Ref::Stack(o) => o,
+    }
 }
 
 pub fn is_instant_or_sorcery(d: &CardDef) -> bool {
