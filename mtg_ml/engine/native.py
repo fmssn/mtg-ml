@@ -596,6 +596,8 @@ class NativeGame:
             "overload": d.overload,
             "plot": FREE if d.plot is not None else None,
             "alternative": FREE if d.alternative_sac is not None else None,
+            "phyrexian": d.phyrexian_cost,
+            "bargain": d.cost if d.bargain else None,
         }
         return modes.get(mode)
 

@@ -11,6 +11,180 @@ from mtg_ml.encode import state_features
 from mtg_ml.match import MATCHUPS, MatchResult, deck_names, game_args, match_decks, next_starting_player, parse_matchups, play_match
 
 ISLANDS = lambda n: ["Island"] * n  # noqa: E731
+MOUNTAINS = lambda n: ["Mountain"] * n  # noqa: E731
+
+
+# ---------------------------------------------------------------------------
+# Shared sideboard hate (Q3 2026 sideboards)
+# ---------------------------------------------------------------------------
+
+
+def test_hydroblast_counters_and_destroys_only_red():
+    g = scenario(p0={"hand": ["Lightning Bolt"], "battlefield": MOUNTAINS(1)}, p1={"hand": ["Hydroblast"], "battlefield": ISLANDS(1) + ["Delver of Secrets"]})
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target player 1")
+    pass_priority(g)
+    choose(g, "Cast Hydroblast (counter)")
+    resolve_stack(g)
+    assert g.players[1].life == 20 and "Lightning Bolt" in names(g.players[0].graveyard)
+    g = scenario(p0={"battlefield": ["Krark-Clan Shaman", "Refurbished Familiar"]}, p1={"hand": ["Hydroblast"], "battlefield": ISLANDS(1)}, active=1)
+    choose(g, "Cast Hydroblast (destroy)")
+    assert any("Refurbished Familiar" in x for x in labels(g))  # any permanent can be targeted
+    choose(g, "Target Refurbished Familiar")
+    resolve_stack(g)
+    assert "Refurbished Familiar" in bf(g)  # not red: nothing happens
+    g = scenario(p0={"battlefield": ["Krark-Clan Shaman"]}, p1={"hand": ["Hydroblast"], "battlefield": ISLANDS(1)}, active=1)
+    choose(g, "Cast Hydroblast (destroy)")
+    choose(g, "Target Krark-Clan Shaman")
+    resolve_stack(g)
+    assert "Krark-Clan Shaman" not in bf(g)
+
+
+def test_annul_counters_artifact_and_enchantment_spells_only():
+    g = scenario(p0={"hand": ["Ichor Wellspring", "Cast Down"], "battlefield": ["Swamp"] * 4}, p1={"hand": ["Annul"], "battlefield": ISLANDS(1) + ["Delver of Secrets"]})
+    choose(g, "Cast Ichor Wellspring")
+    pay(g)
+    pass_priority(g)
+    choose(g, "Cast Annul")
+    resolve_stack(g)
+    assert "Ichor Wellspring" in names(g.players[0].graveyard) and "Ichor Wellspring" not in bf(g)
+    g = scenario(p0={"hand": ["Nyxborn Hydra"], "battlefield": ["Forest"] * 2}, p1={"hand": ["Annul"], "battlefield": ISLANDS(1)})
+    choose(g, "Cast Nyxborn Hydra")
+    choose(g, "X=1")
+    pay(g)
+    pass_priority(g)
+    choose(g, "Cast Annul")  # an enchantment creature spell
+    resolve_stack(g)
+    assert "Nyxborn Hydra" in names(g.players[0].graveyard)
+    g = scenario(p0={"hand": ["Cast Down"], "battlefield": ["Swamp"] * 2}, p1={"hand": ["Annul"], "battlefield": ISLANDS(1) + ["Delver of Secrets"]})
+    choose(g, "Cast Cast Down")
+    pay(g)
+    pass_priority(g)
+    assert not has(g, "Cast Annul")
+
+
+def test_gut_shot_for_red_mana_or_two_life():
+    g = scenario(p0={"battlefield": ["Delver of Secrets"]}, p1={"hand": ["Gut Shot"], "battlefield": ISLANDS(2)}, active=1)
+    assert has(g, "Cast Gut Shot (phyrexian)") and not any(x == "Cast Gut Shot" for x in labels(g))  # no red mana
+    choose(g, "Cast Gut Shot (phyrexian)")
+    choose(g, "Target Delver of Secrets")
+    assert g.players[1].life == 18 and all(not c.tapped for c in g.battlefield if c.controller == 1)
+    resolve_stack(g)
+    assert "Delver of Secrets" not in bf(g)
+    g = scenario(p0={"hand": ["Gut Shot"], "battlefield": MOUNTAINS(1)}, p1={"battlefield": ["Delver of Secrets"]})
+    assert has(g, "Cast Gut Shot (phyrexian)")
+    choose(g, "Cast Gut Shot")
+    choose(g, "Target player 1")
+    resolve_stack(g)
+    assert g.players[0].life == 20 and g.players[1].life == 19
+    g = scenario(p0={"hand": ["Gut Shot"], "life": 1}, p1={})
+    assert not has(g, "Cast Gut Shot")  # cannot pay 2 life with 1
+
+
+def test_troublemaker_ouphe_bargained_exiles_an_artifact():
+    opp = {"battlefield": ["Ichor Wellspring", "Island"]}
+    g = scenario(p0={"hand": ["Troublemaker Ouphe"], "battlefield": ["Forest", "Forest", "Clue"]}, p1=opp)
+    assert has(g, "Cast Troublemaker Ouphe (bargain)")
+    choose(g, "Cast Troublemaker Ouphe (bargain)")
+    pay(g)  # the Clue is the only thing to sacrifice
+    assert "Clue" not in bf(g)
+    resolve_stack(g)  # Ouphe resolves; its trigger targets the only opposing artifact
+    resolve_stack(g)
+    assert "Ichor Wellspring" not in bf(g) and "Ichor Wellspring" in names(g.players[1].exile)
+    assert "Troublemaker Ouphe" in bf(g)
+    g = scenario(p0={"hand": ["Troublemaker Ouphe"], "battlefield": ["Forest", "Forest", "Clue"]}, p1=opp)
+    choose(g, "Cast Troublemaker Ouphe")  # not bargained: no trigger
+    pay(g)
+    resolve_stack(g)
+    assert "Ichor Wellspring" in bf(g) and "Clue" in bf(g) and not g.stack
+    g = scenario(p0={"hand": ["Troublemaker Ouphe"], "battlefield": ["Forest", "Forest", "Clue"]}, p1={"battlefield": ["Island"]})
+    choose(g, "Cast Troublemaker Ouphe (bargain)")
+    pay(g)
+    resolve_stack(g)
+    assert not g.stack and "Troublemaker Ouphe" in bf(g)  # no target: the trigger is removed
+    g = scenario(p0={"hand": ["Troublemaker Ouphe"], "battlefield": ["Forest", "Forest"]}, p1=opp)
+    assert has(g, "Cast Troublemaker Ouphe") and not has(g, "(bargain)")  # nothing to sacrifice
+
+
+def test_breath_weapon_hits_every_creature():
+    g = scenario(p0={"hand": ["Breath Weapon"], "battlefield": MOUNTAINS(3) + ["Krark-Clan Shaman", "Writhing Chrysalis"]}, p1={"battlefield": ["Delver of Secrets", "Tolarian Terror"]})
+    choose(g, "Cast Breath Weapon")
+    pay(g)
+    resolve_stack(g)
+    assert bf(g, 0) == MOUNTAINS(3) + ["Writhing Chrysalis"] and bf(g, 1) == ["Tolarian Terror"]
+
+
+def test_faerie_macabre_exiles_up_to_two_cards_from_graveyards():
+    g = scenario(p0={"hand": ["Faerie Macabre"]}, p1={"graveyard": ["Brainstorm", "Ponder", "Counterspell"]}, active=1)
+    pass_priority(g)
+    choose(g, "Faerie Macabre: exile up to two cards from graveyards")
+    assert "Faerie Macabre" in names(g.players[0].graveyard)
+    resolve_stack(g)
+    assert sorted(labels(g)) == ["Exile Brainstorm (opponent graveyard)", "Exile Counterspell (opponent graveyard)", "Exile Faerie Macabre (self graveyard)", "Exile Ponder (opponent graveyard)", "Exile nothing more"]
+    choose(g, "Exile Brainstorm")
+    choose(g, "Exile Ponder")
+    assert names(g.players[1].graveyard) == ["Counterspell"] and sorted(names(g.players[1].exile)) == ["Brainstorm", "Ponder"]
+    g = scenario(p0={"hand": ["Faerie Macabre"]}, p1={"graveyard": ["Brainstorm"]}, active=1)
+    pass_priority(g)
+    choose(g, "Faerie Macabre: exile")
+    resolve_stack(g)
+    choose(g, "Exile nothing more")
+    assert names(g.players[1].graveyard) == ["Brainstorm"]
+
+
+def test_terminate_destroys_any_creature():
+    g = scenario(p0={"hand": ["Terminate"], "battlefield": ["Swamp", "Mountain"]}, p1={"battlefield": ["Cryptic Serpent"]})
+    choose(g, "Cast Terminate")
+    pay(g)
+    resolve_stack(g)
+    assert "Cryptic Serpent" not in bf(g)
+
+
+def test_cast_into_the_fire_modes():
+    g = scenario(p0={"hand": ["Cast into the Fire"], "battlefield": MOUNTAINS(2)}, p1={"battlefield": ["Delver of Secrets"]})
+    assert has(g, "(one creature)") and not has(g, "(two creatures)") and not has(g, "(exile)")
+    g = scenario(p0={"hand": ["Cast into the Fire"], "battlefield": MOUNTAINS(2) + ["Clue"]}, p1={"battlefield": ["Delver of Secrets", "Delver of Secrets"]})
+    choose(g, "Cast Cast into the Fire (two creatures)")
+    first = labels(g)
+    choose(g, first[0])
+    assert len(labels(g)) == 1 or labels(g) != first  # the first target is not offered again
+    if g.decision.kind == O.TARGET:
+        g.step(0)
+    pay(g)
+    resolve_stack(g)
+    assert bf(g, 1) == []
+    g = scenario(p0={"hand": ["Cast into the Fire"], "battlefield": MOUNTAINS(2)}, p1={"battlefield": ["Ichor Wellspring", "Delver of Secrets"]})
+    choose(g, "Cast Cast into the Fire (exile)")
+    pay(g)
+    resolve_stack(g)
+    assert "Ichor Wellspring" in names(g.players[1].exile) and not g.stack  # exiled: no dies trigger
+
+
+def test_end_the_festivities_hits_the_opponent_and_their_creatures():
+    g = scenario(p0={"hand": ["End the Festivities"], "battlefield": MOUNTAINS(1) + ["Krark-Clan Shaman"]}, p1={"battlefield": ["Delver of Secrets", "Cryptic Serpent"]})
+    choose(g, "Cast End the Festivities")
+    resolve_stack(g)
+    assert g.players[1].life == 19 and g.players[0].life == 20
+    assert bf(g, 0) == MOUNTAINS(1) + ["Krark-Clan Shaman"] and bf(g, 1) == ["Cryptic Serpent"]
+
+
+def test_smash_to_smithereens_and_ancient_grudge():
+    g = scenario(p0={"hand": ["Smash to Smithereens"], "battlefield": MOUNTAINS(2)}, p1={"battlefield": ["Refurbished Familiar"]})
+    choose(g, "Cast Smash to Smithereens")
+    pay(g)
+    resolve_stack(g)
+    assert "Refurbished Familiar" not in bf(g) and g.players[1].life == 17 and g.players[0].life == 20
+    g = scenario(p0={"hand": ["Ancient Grudge"], "battlefield": MOUNTAINS(2) + ["Forest"]}, p1={"battlefield": ["Ichor Wellspring", "Lembas"]})
+    choose(g, "Cast Ancient Grudge")
+    choose(g, "Target Lembas")
+    choose(g, "Tap Mountain")
+    pay(g)
+    resolve_stack(g)
+    assert "Lembas" not in bf(g)
+    choose(g, "Cast Ancient Grudge (flashback)")
+    pay(g)
+    resolve_stack(g)
+    assert "Ichor Wellspring" not in bf(g) and "Ancient Grudge" in names(g.players[0].exile)
 
 
 def test_red_elemental_blast_modes_and_targets():
