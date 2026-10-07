@@ -48,9 +48,10 @@ def review_file(path: pathlib.Path, backend: str, model: str | None = None, effo
     rep = json.loads(path.read_text())
     system = system_prompt()
     if backend == "file":
-        reply = path.with_name(path.stem + ".reply.txt")
+        # --model names whose reply it is: <game>.reply-<model>.txt
+        reply = path.with_name(path.stem + (f".reply-{model}.txt" if model else ".reply.txt"))
         result = parse_findings(reply.read_text())
-        result.update(backend="file", model=None, usage={})
+        result.update(backend="file", model=model, usage={})
     else:
         chunks = turn_chunks(rep, MAX_CHARS[backend])
         if backend == "prompt":
