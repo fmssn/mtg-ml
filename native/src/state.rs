@@ -6,6 +6,7 @@
 use crate::cards::{color_bit, db, CardDef, CastFilter, CostRed, DefId, Event, Op, SacFilter, TriggerDef, T_ARTIFACT, T_CREATURE, T_INSTANT, T_LAND, T_SORCERY, TK};
 use crate::mana::{bit, can_pay, ManaCost, Remaining};
 use crate::rng::PyRandom;
+use std::rc::Rc;
 
 pub type CIdx = u32;
 
@@ -448,8 +449,26 @@ pub struct Args {
     pub deck_names: [Option<String>; 2],
 }
 
+/// The data state at the start of a step, from which `Game::copy` restarts
+/// the engine (Python `_Snapshot`).
+pub struct Snap {
+    pub state: State,
+    pub step: &'static str,
+    pub skip_draw: bool,
+    pub n_actions: usize,
+}
+
+/// Cloning a `State` copies the whole game (cards, zones, stack, RNG); only
+/// the constructor arguments and the latest snapshot are shared (immutable).
+#[derive(Clone)]
 pub struct State {
-    pub args: Args,
+    pub args: Rc<Args>,
+    /// `Game._snapshots`: take a snapshot at the start of every step.
+    pub snapshots: bool,
+    /// `Game._snap`: the latest one (None: no snapshot, or it is stale).
+    pub snap: Option<Rc<Snap>>,
+    /// `Game._edited`: the state was edited outside `step()` since `snap`.
+    pub edited: bool,
     pub match_game: i32,
     pub rng: PyRandom,
     pub auto_single: bool,
@@ -556,7 +575,10 @@ impl State {
             skip_first_draw: false,
             mulligan_phase: false,
             mulligans_taken: [0, 0],
-            args: args.clone(),
+            snapshots: false,
+            snap: None,
+            edited: false,
+            args: Rc::new(args.clone()),
         };
         for p in 0..2u8 {
             for name in &args.decks[p as usize] {
@@ -1830,6 +1852,22 @@ impl State {
             let m = format!("=== Turn {}: player {} ===", self.turn, self.active);
             self.log.push(m);
         }
+    }
+
+    /// `Game._take_snapshot`.
+    pub fn take_snapshot(&mut self, step: &'static str, skip_draw: bool) {
+        let old = self.snap.take(); // keep snapshots from chaining
+        let mut state = self.clone();
+        state.decision = None;
+        self.snap = Some(Rc::new(Snap { state, step, skip_draw, n_actions: self.actions.len() }));
+        self.edited = false;
+        drop(old);
+    }
+
+    /// `Game._state_edited`.
+    pub fn state_edited(&mut self) {
+        self.snap = None;
+        self.edited = true;
     }
 }
 

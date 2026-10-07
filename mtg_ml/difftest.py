@@ -269,9 +269,21 @@ def run_lockstep(sc: Scenario, script: list[int] | None = None, full_every: int 
 def _check_fork(py, nat, seed: int) -> str | None:
     from .engine.view import determinize
 
-    d = first_diff(snapshot(py.fork()), snapshot(nat.fork()))
+    a, b = py.fork(), nat.fork()  # copy(): a snapshot restore once each game has been copied
+    d = first_diff(snapshot(a), snapshot(b))
     if d:
         return "fork" + d
+    if not a.over:  # the copies keep playing identically
+        a.step(0)
+        b.step(0)
+        d = first_diff(snapshot(a), snapshot(b))
+        if d:
+            return "fork+step" + d
+    for name, g in (("python", py), ("native", nat)):  # copy() == replay, within each engine
+        c, r = g.copy(), g.fork(replay=True)
+        d = first_diff(snapshot(c), snapshot(r)) or first_diff(outcome(c), outcome(r))
+        if d:
+            return f"copy vs replay ({name}; 'python' = copy)" + d
     for viewer in (0, 1):
         a = determinize(py, viewer, random.Random(seed + viewer))
         b = determinize(nat, viewer, random.Random(seed + viewer))

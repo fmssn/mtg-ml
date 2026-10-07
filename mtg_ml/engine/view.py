@@ -138,4 +138,5 @@ def determinize(g: Game, viewer: int, rng: random.Random) -> Game:
         for c, d in zip(hidden, defs):
             c.defn = d
             c.transformed = False
+    f._state_edited()  # its copy snapshot predates the re-deal
     return f

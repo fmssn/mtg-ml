@@ -18,12 +18,20 @@ removing any strategically distinct choice:
     Spawn) are offered at priority.
 
 Replay determinism: all randomness comes from `self.rng`, iteration is over
-lists/dicts only, and `fork()` rebuilds a game from its constructor arguments
-and action history.
+lists/dicts only, and `fork(replay=True)` rebuilds a game from its constructor
+arguments and action history.
+
+Copies: a suspended generator cannot be copied, so `copy()` restarts the
+engine from a snapshot of the data state taken at the start of the current
+step (where the generator holds nothing the data does not already carry
+except which step it is and whether the draw is skipped) and replays only the
+actions taken since. Snapshots are taken once a game has been copied; before
+that, `copy()` replays the whole history once.
 """
 
 from __future__ import annotations
 
+import copy as _copy
 import inspect
 import random
 from typing import Callable, Iterable
@@ -61,6 +69,105 @@ class RulesError(Exception):
     """Engine invariant violated (a bug, never a legal game situation)."""
 
 
+class _Snapshot:
+    """Data state of a game at the start of a step (see `Game.copy`)."""
+
+    __slots__ = ("state", "step", "skip_draw", "n_actions")
+
+    def __init__(self, state: dict, step: str, skip_draw: bool, n_actions: int):
+        self.state = state
+        self.step = step
+        self.skip_draw = skip_draw
+        self.n_actions = n_actions
+
+
+# Attributes a copy shares (immutable, or rebuilt by `Game.copy`) or skips.
+_SHARED = frozenset({"_args", "cards_db", "deck_names"})
+_SKIPPED = frozenset({"_gen", "_snap", "decision"})
+_SCALARS = (int, str, bool, float, type(None))
+
+
+def _copy_state(state: dict) -> dict:
+    """Copy of a game's data attributes sharing no mutable object with it.
+
+    Hand-written (copy.deepcopy is ~20x slower): every Card is copied once
+    and references to it (zones, stack, triggers, last-known information)
+    are remapped, so aliasing is preserved. Card definitions and TempEffects
+    are never mutated and are shared. Attributes this function does not know
+    fall back to copy.deepcopy, so a new one cannot end up shared."""
+    cards: dict[int, Card] = {}
+
+    def new(x):  # shallow copy of a plain dataclass instance (copy.copy is slower)
+        n = object.__new__(x.__class__)
+        n.__dict__ = x.__dict__.copy()
+        return n
+
+    def card(c: Card) -> Card:
+        n = cards.get(id(c))
+        if n is None:
+            n = cards[id(c)] = new(c)
+            n.temp = list(c.temp)
+            n.known_to = set(c.known_to)
+        return n
+
+    def data(d: dict) -> dict:
+        return {k: card(v) if type(v) is Card else v if isinstance(v, _SCALARS) else _copy.deepcopy(v) for k, v in d.items()}
+
+    def player(p: Player) -> Player:
+        n = new(p)
+        n.library = [card(c) for c in p.library]
+        n.hand = [card(c) for c in p.hand]
+        n.graveyard = [card(c) for c in p.graveyard]
+        n.exile = [card(c) for c in p.exile]
+        n.pool = dict(p.pool)
+        return n
+
+    def stack_item(it: StackItem) -> StackItem:
+        n = new(it)
+        n.targets = list(it.targets)
+        n.card = None if it.card is None else card(it.card)
+        n.source = None if it.source is None else card(it.source)
+        n.data = data(it.data)
+        return n
+
+    def pending(t: PendingTrigger) -> PendingTrigger:
+        n = new(t)
+        n.source = card(t.source)
+        n.data = data(t.data)
+        return n
+
+    def rng(r: random.Random) -> random.Random:
+        n = random.Random()
+        n.setstate(r.getstate())
+        return n
+
+    special = {
+        "players": lambda ps: [player(p) for p in ps],
+        "battlefield": lambda cs: [card(c) for c in cs],
+        "stack": lambda xs: [stack_item(it) for it in xs],
+        "pending": lambda xs: [pending(t) for t in xs],
+        "rng": rng,
+        "log": list,
+        "actions": list,
+        "attackers": list,
+        "blocked": set,
+        "blocks": dict,
+        "mulligans_taken": list,
+    }
+    out: dict = {"decision": None}
+    for k, v in state.items():
+        if k in _SKIPPED:
+            continue
+        f = special.get(k)
+        if f is not None:
+            out[k] = f(v)
+        elif k in _SHARED or isinstance(v, _SCALARS):
+            out[k] = v
+        else:
+            out[k] = _copy.deepcopy(v)
+    return out
+
+
 class Game:
     def __init__(
         self,
@@ -77,6 +184,7 @@ class Game:
         auto_mana: bool = False,
         auto_pass: bool = False,
         deck_names: tuple[str | None, str | None] | None = None,
+        _snapshots: bool = False,
     ):
         from .cards import CARDS  # local import: cards module imports engine helpers
 
@@ -150,7 +258,13 @@ class Game:
         self._skip_first_draw = setup is None
         self._mulligan_phase = setup is None and mulligans
         self.mulligans_taken = [0, 0]
+        # copy() support (module docstring): the latest step-start snapshot,
+        # and whether the state was edited outside step() since it was taken.
+        self._snapshots = _snapshots
+        self._snap: _Snapshot | None = None
+        self._edited = False
         self._gen = self._main(start_step)
+        self._primed = False
         self._advance(None)
 
     # ------------------------------------------------------------------
@@ -171,12 +285,70 @@ class Game:
             self._log(f"  p{self.decision.player} {self.decision.kind}: {opts[index].label}")
         self._advance(opts[index].value)
 
-    def fork(self) -> "Game":
-        """Exact copy by deterministic replay of the action history."""
-        g = Game(**self._args)
+    def fork(self, replay: bool = False) -> "Game":
+        """Exact copy (`copy()`). `replay=True` rebuilds it from the
+        constructor arguments and the action history instead."""
+        if replay:
+            return self._replay()
+        return self.copy()
+
+    def copy(self) -> "Game":
+        """Independent exact copy: same state, RNG state and object ids; it
+        continues identically under the same actions.
+
+        Costs a snapshot restore plus a replay of the actions taken since the
+        current step began. The first copy of a game replays the full history
+        instead and turns snapshots on for the game, so later copies are
+        cheap. A copy shares the snapshot until its next step begins but
+        takes no snapshots of its own until it is copied itself: a preview or
+        playout that is never copied pays nothing for them.
+
+        State edits made outside `step()` (determinization, `add_card` after
+        the start) drop the snapshot: until the next step begins, a copy
+        replays the actions and so, like `fork(replay=True)`, does not carry
+        those edits."""
+        snap = self._snap
+        self._snapshots = True
+        if snap is None:
+            g = self._replay(snapshots=True)
+            g._snapshots = False
+            if not self._edited:  # the replay reached this exact state
+                self._snap = g._snap
+            return g
+        g = Game.__new__(Game)
+        g.__dict__.update(_copy_state(snap.state))
+        g._args = self._args
+        g.cards_db = self.cards_db
+        g._snap = snap
+        g._snapshots = False
+        g._edited = False
+        g._gen = g._main(g._args["start_step"], resume=(snap.step, snap.skip_draw))
+        g._primed = False
+        g._advance(None)
+        for a in self.actions[snap.n_actions :]:
+            g.step(a)
+        return g
+
+    def _replay(self, snapshots: bool = False) -> "Game":
+        g = Game(**self._args, _snapshots=snapshots)
         for a in self.actions:
             g.step(a)
         return g
+
+    def _state_edited(self) -> None:
+        """The state was changed outside `step()`: the current snapshot no
+        longer leads to it."""
+        self._snap = None
+        self._edited = True
+
+    def _take_snapshot(self, step: str, skip_draw: bool) -> None:
+        self._snap = _Snapshot(_copy_state(self.__dict__), step, skip_draw, len(self.actions))
+        self._edited = False
+
+    def _at_snapshot(self, step: str) -> bool:
+        """At the start of the snapshot's own step (a copy resuming from it)."""
+        s = self._snap
+        return s.step == step and s.n_actions == len(self.actions) and s.state["turn"] == self.turn
 
     def add_card(
         self,
@@ -193,6 +365,8 @@ class Game:
 
         defn = CARDS.get(name) or TOKENS[name]
         c = self._new_card(defn, player, zone, token=name in TOKENS)
+        if "_gen" in self.__dict__:  # after the start: the snapshot is stale
+            self._state_edited()
         if zone == "battlefield":
             c.tapped = tapped
             c.sick = sick
@@ -210,7 +384,8 @@ class Game:
 
     def _advance(self, value) -> None:
         try:
-            if self.decision is None and not self.actions:
+            if not self._primed:
+                self._primed = True
                 d = next(self._gen)
             else:
                 d = self._gen.send(value)
@@ -287,10 +462,15 @@ class Game:
                 c = yield from self.ask(p, O.CHOOSE_CARD, f"Mulligan: put a card on the bottom of your library ({i + 1}/{n})", self._hand_card_options(p, "bottom"))
                 self._move(c, "library", position="bottom", known_to={p})
 
-    def _main(self, start_step: str):
-        if self._mulligan_phase:
-            yield from self._mulligans()
-        first = True
+    def _main(self, start_step: str, resume: tuple[str, bool] | None = None):
+        if resume is not None:  # copy(): finish the turn from a step-start snapshot
+            yield from self._run_turn(*resume)
+            self.active = 1 - self.active
+            first = False
+        else:
+            if self._mulligan_phase:
+                yield from self._mulligans()
+            first = True
         while True:
             self.turn += 1
             if self.turn > self.max_turns:
@@ -315,6 +495,10 @@ class Game:
         for name in STEPS[STEPS.index(start):]:
             if name in ("declare_blockers", "combat_damage") and not self.attackers:
                 continue
+            if self._snapshots:
+                self._take_snapshot(name, skip_draw)
+            elif self._snap is not None and not self._at_snapshot(name):
+                self._snap = None  # a copy's inherited snapshot is stale now
             self.step_name = name
             self._log(f"-- {name}")
             if name == "untap":
