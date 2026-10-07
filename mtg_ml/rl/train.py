@@ -278,10 +278,7 @@ class Trainer:
             self.iteration = self.checkpointed = ck["iteration"]
             self.games_total = ck.get("games_total", self.iteration * cfg.games_per_iter)
             self.rng.setstate(ck["rng"])
-            if "torch_rng" in ck:  # older checkpoints lack it: the update's minibatch shuffles then restart from cfg.seed
-                torch.set_rng_state(ck["torch_rng"])
-                if ck.get("cuda_rng") is not None and torch.cuda.is_available():
-                    torch.cuda.set_rng_state_all(ck["cuda_rng"])
+            restore_torch_rng(ck)
             self.lr_origin = ck.get("lr_anneal_origin")
             self.pfsp = dict(ck.get("pfsp") or {})
             self._drop_lost_iterations()
@@ -639,6 +636,19 @@ class Trainer:
                 os.sched_setaffinity(0, affinity)
             self._join_checkpoint()
             self.saver.shutdown()
+
+
+def restore_torch_rng(ck: dict) -> None:
+    """Restore the torch (and CUDA) generator states saved in a checkpoint.
+    `torch.load(map_location=cuda)` moves the saved ByteTensors to the GPU,
+    which set_rng_state rejects, so they go back to the CPU first. Older
+    checkpoints lack them: the update's minibatch shuffles then restart from
+    cfg.seed."""
+    if "torch_rng" not in ck:
+        return
+    torch.set_rng_state(ck["torch_rng"].cpu())
+    if ck.get("cuda_rng") is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all([s.cpu() for s in ck["cuda_rng"]])
 
 
 def _save(obj: dict, path: str) -> str:
