@@ -1001,7 +1001,7 @@ impl Eng {
                 if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
                     let card = self.s().cm(c);
                     card.tapped = true;
-                    card.skip_untap += skip_untap;
+                    card.skip_untap = card.skip_untap.max(*skip_untap);
                 }
             }
             Op::GrantTarget { keywords } => {

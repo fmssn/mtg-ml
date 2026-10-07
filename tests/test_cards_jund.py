@@ -194,6 +194,22 @@ def test_toxin_analysis_deathtouch_lifelink_and_clue():
     assert g.players[0].life == life + 3
 
 
+def test_damage_ability_uses_sources_current_keywords():
+    """Toxin Analysis cast on Krark-Clan Shaman in response to its own ability:
+    the source is still on the battlefield, so the ability's damage has the
+    deathtouch and lifelink it has now, not the activation-time snapshot's."""
+    g = scenario(p0={"hand": ["Toxin Analysis"], "battlefield": ["Krark-Clan Shaman", "Swamp", "Ichor Wellspring"]}, p1={"battlefield": ["Tolarian Terror"]}, auto_single=False)
+    choose(g, "Krark-Clan Shaman: 1 damage")  # sacrificing the Wellspring is forced
+    choose(g, "Cast Toxin Analysis")
+    choose(g, "Target Krark-Clan Shaman")
+    pay(g)
+    life = g.players[0].life
+    resolve_stack(g)
+    resolve_stack(g)
+    assert "Tolarian Terror" not in bf(g)
+    assert g.players[0].life == life + 2  # Shaman and Terror were each dealt 1
+
+
 def test_makeshift_munitions_can_sacrifice_its_own_target():
     g = scenario(p0={"battlefield": ["Makeshift Munitions", "Gixian Infiltrator", "Swamp"]})
     choose(g, "Makeshift Munitions: 1 damage")

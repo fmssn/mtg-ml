@@ -6,6 +6,7 @@ record exactly what the network computes when PPO replays the trajectories
 The evaluator must give what the old per-row evaluator gave."""
 
 import collections
+import gc
 import multiprocessing as mp
 import os
 from array import array
@@ -213,3 +214,39 @@ def test_claims_stick_to_one_opponent(tmp_path, monkeypatch):
     assert got[1] == [("b",)] * 2 + [()] * 2  # then learner-only games
     assert got[2] == [()] * 2 + [("a",)] * 2  # then switches to the next opponent
     assert got[3] == [("a",)] and take(1) == []
+
+
+def test_failed_job_collects_requests_in_flight(monkeypatch):
+    """A job that raises with several groups' requests in flight collects
+    them all before the error leaves it (the next job reuses their areas)."""
+    submitted, collected = [], []
+
+    class FakeEvaluator:
+        def __init__(self, job, slots):
+            pass
+
+        def submit(self, group, items):
+            submitted.append((group, len(submitted)))
+            return (submitted[-1], len(items))
+
+        def collect(self, handle):
+            collected.append(handle[0])
+            return [0] * handle[1], [0.0] * handle[1], [0.0] * handle[1]
+
+    real_step, calls = rollout._step, [0]
+
+    def failing_step(g, seats, a):
+        calls[0] += 1
+        if calls[0] > 5 and len(submitted) >= 2:
+            raise RuntimeError("boom")
+        real_step(g, seats, a)
+
+    monkeypatch.setattr(rollout, "_ServerEvaluator", FakeEvaluator)
+    monkeypatch.setattr(rollout, "_step", failing_step)
+    specs = [GameSpec(seed=s, seats=(LEARNER, LEARNER)) for s in range(8)]
+    with pytest.raises(RuntimeError, match="boom"):
+        run_job(Job(specs, "unused.pt", 1, max_turns=20, engine=ENGINE, inference="server", groups=4))
+    assert len(submitted) >= 2 and set(collected) == set(submitted)  # every request collected (some twice: harmless)
+    # The traceback keeps the job's native games alive in a reference cycle;
+    # free them here, not in a later test's training thread (they are unsendable).
+    gc.collect()

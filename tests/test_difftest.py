@@ -74,3 +74,62 @@ def test_search_bot_identical_on_both_engines():
             g.step(a)
         picks[engine] = out
     assert picks["python"] == picks["native"]
+
+
+def test_divergence_json_keeps_fork_every():
+    d = Divergence(Scenario(seed=5, agents=("bot", "bot")), 3, ".x", [1, 0, 2], fork_every=41)
+    assert Divergence.from_json(d.to_json()) == d
+
+
+def _flaky_bot(monkeypatch):
+    """Seat 0's bot picks differently on the native engine from step 4 on."""
+    import mtg_ml.difftest as dt
+
+    real = dt.make_agents
+
+    class Flaky:
+        def __init__(self, bot):
+            self.bot, self.calls = bot, 0
+
+        def act(self, g):
+            a = self.bot.act(g)
+            if getattr(g, "NATIVE", False) and len(g.actions) >= 4 and len(g.legal_options()) > 1:
+                return (a + 1) % len(g.legal_options())
+            return a
+
+    monkeypatch.setattr(dt, "make_agents", lambda sc: [Flaky(a) if k == "bot" else a for a, k in zip(real(sc), sc.agents)])
+
+
+def test_bot_choice_divergence_reproduces_from_its_script(monkeypatch):
+    from mtg_ml.difftest import minimize
+
+    _flaky_bot(monkeypatch)
+    sc = Scenario(seed=3, agents=("bot", "random"))
+    d = run_lockstep(sc)
+    assert d is not None and d.diff.startswith("bot choice")
+    again = run_lockstep(sc, script=d.actions)  # the script ends where the mismatch is: still found
+    assert again is not None and again.diff.startswith("bot choice")
+    assert minimize(d).diff.startswith("bot choice")
+
+
+def test_identical_errors_in_both_engines_are_reported(monkeypatch):
+    import mtg_ml.difftest as dt
+
+    real = dt._new_pair
+
+    def pair(sc):
+        games = real(sc)
+        for g in games:
+            step = g.step
+
+            def boom(a, g=g, step=step):
+                if len(g.actions) >= 5:
+                    raise ValueError("reference bug")
+                return step(a)
+
+            g.step = boom
+        return games
+
+    monkeypatch.setattr(dt, "_new_pair", pair)
+    d = run_lockstep(Scenario(seed=1, agents=("random", "random")))
+    assert d is not None and d.diff.startswith("both raised") and "ValueError: reference bug" in d.diff

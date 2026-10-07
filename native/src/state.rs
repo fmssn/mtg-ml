@@ -395,7 +395,7 @@ pub fn rules<T>(msg: impl Into<String>) -> R<T> {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EquivKey {
     Unique(u32),
-    State { face: DefId, controller: u8, is_token: bool, tapped: bool, damage: i32, deathtouch_damage: bool, counters: i32, sick: bool, skip_untap: i32, transformed: bool, temp: Vec<TempEffect>, attacking: bool },
+    State { face: DefId, controller: u8, is_token: bool, tapped: bool, damage: i32, deathtouch_damage: bool, counters: i32, sick: bool, skip_untap: i32, transformed: bool, temp: Vec<TempEffect>, attacking: bool, blocked: bool },
 }
 
 // ---------------------------------------------------------------------------
@@ -741,6 +741,7 @@ impl State {
             transformed: c.transformed,
             temp: c.temp.clone(),
             attacking: self.attackers.contains(&c.oid),
+            blocked: self.blocked.contains(&c.oid),
         }
     }
 
@@ -977,7 +978,13 @@ impl State {
         if amount <= 0 {
             return;
         }
-        let kws = self.keywords(source);
+        // A source still on the battlefield uses its current characteristics
+        // (e.g. deathtouch granted in response); last known information only
+        // once it has left (rule 608.2h).
+        let (kws, controller) = match self.live(source) {
+            Some(ci) => (self.keywords(self.c(ci)), self.c(ci).controller),
+            None => (self.keywords(source), source.controller),
+        };
         let d = db();
         match target {
             Ref::Player(i) => self.players[i as usize].life -= amount,
@@ -994,7 +1001,7 @@ impl State {
             Ref::Stack(_) => panic!("damage to a stack item"),
         }
         if kws & d.kw("lifelink") != 0 {
-            self.players[source.controller as usize].life += amount;
+            self.players[controller as usize].life += amount;
         }
     }
 
