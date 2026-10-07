@@ -363,3 +363,11 @@ def test_training_seeds_and_metrics(tmp_path, in_process):
     assert min(seeds) >= train_mod.TRAIN_SEED_BASE > game_seed(EVAL_SEED + 10**6, 3)
     assert all(sp.seed >= train_mod.TRAIN_SEED_BASE for it in (9, 39) for sp in t._train_specs(it))  # it=9 used to hit EVAL_SEED + s
     assert all({"win_vs_pool", "win_vs_bot"} <= r.keys() for r in _rows(run))
+
+
+def test_request_ints_for_sizes_the_server_slot_from_the_games_per_request():
+    from mtg_ml.rl.train import request_ints_for
+
+    assert request_ints_for(2048, 13) == 1 << 22  # the overnight run: 79 decisions per request, 1.3M ints seen
+    assert request_ints_for(256, 63) == 1 << 18  # many workers: the floor
+    assert request_ints_for(2048, 1, groups=1) >= 2048 * (1 << 15)
