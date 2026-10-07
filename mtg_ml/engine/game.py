@@ -322,7 +322,7 @@ class Game:
         g._snap = snap
         g._snapshots = False
         g._edited = False
-        g._gen =g._main(g._args["start_step"], resume=(snap.step, snap.skip_draw))
+        g._gen = g._main(g._args["start_step"], resume=(snap.step, snap.skip_draw))
         g._primed = False
         g._advance(None)
         for a in self.actions[snap.n_actions :]:
