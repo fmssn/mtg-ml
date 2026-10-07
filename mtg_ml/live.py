@@ -13,7 +13,9 @@ The player also gets a frame per model decision, so the viewer can play the
 model's turn back step by step. Those show the chosen option only for
 decision kinds whose choice is public (`rl.features.PUBLIC_KINDS`, the rule
 the model itself sees its opponent by); a scry or a put-back shows just
-its kind.
+its kind. The prompt never goes out: a public choice is safe to name, but a
+prompt can mention a card only the decider knows (Delver of Secrets asks
+"reveal <top of my library>?").
 
 The browser picks a checkpoint by name from the `--models` directory, never
 by path: loading a checkpoint unpickles it, which can run code.
@@ -88,11 +90,14 @@ class LiveGame:
             choice = self.model.act(g)
             options = [o.label for o in d.options]
             self._record({"player": d.player, "kind": d.kind, "prompt": d.prompt, "options": options, "chosen": choice, **(self.model.last_info or {})})
+            # The chosen option of a public kind is safe to show; the prompt is
+            # not: it can name a card only the decider knows (Delver of
+            # Secrets: "reveal <top of my library>?"), so it stays on the server.
             if d.kind in PUBLIC_KINDS:
-                shown = {"prompt": d.prompt, "options": [options[choice]]}
+                shown = [options[choice]]
             else:
-                shown = {"prompt": "", "options": [f"(hidden {d.kind.replace('_', ' ')})"]}
-            self._view_frame({"player": d.player, "kind": d.kind, **shown, "chosen": 0})
+                shown = [f"(hidden {d.kind.replace('_', ' ')})"]
+            self._view_frame({"player": d.player, "kind": d.kind, "prompt": "", "options": shown, "chosen": 0})
             take(g, self.agents, choice)
         decision = None
         if not g.over:
