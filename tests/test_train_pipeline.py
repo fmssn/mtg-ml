@@ -371,3 +371,15 @@ def test_request_ints_for_sizes_the_server_slot_from_the_games_per_request():
     assert request_ints_for(2048, 13) == 1 << 22  # the overnight run: 79 decisions per request, 1.3M ints seen
     assert request_ints_for(256, 63) == 1 << 18  # many workers: the floor
     assert request_ints_for(2048, 1, groups=1) >= 2048 * (1 << 15)
+
+
+def test_restore_torch_rng_accepts_states_moved_by_map_location():
+    from mtg_ml.rl.train import restore_torch_rng
+
+    state = torch.get_rng_state()
+    a = torch.rand(3)
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    # what torch.load(latest.pt, map_location=cfg.device) hands back: the ByteTensor on the training device
+    restore_torch_rng({"torch_rng": state.to(dev), "cuda_rng": [s.to(dev) for s in torch.cuda.get_rng_state_all()] if torch.cuda.is_available() else None})
+    assert torch.equal(torch.rand(3), a)
+    restore_torch_rng({})  # older checkpoints: nothing to restore
