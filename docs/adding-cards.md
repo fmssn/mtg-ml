@@ -165,7 +165,7 @@ For each new card:
 - [ ] `pytest` passes (both engine variants, `test_card_spec.py`, golden digests).
 - [ ] `python -m mtg_ml.difftest fuzz --games 500 --jobs 8 --with-card "SEAT:NAME:4"` reports 0 divergences, and the card was actually played.
 - [ ] If it joins a decklist: `decks.py`, golden digests regenerated on purpose (`python -m mtg_ml.trace record --games 210`, say so in the commit), the deck's bot taught to play it, README decklist text.
-- [ ] RL: nothing to register (hashed features), but existing checkpoints have never seen the card; plan to fine-tune.
+- [ ] RL: nothing to register (hashed features), but existing checkpoints have never seen the card; plan to fine-tune. From feature set 5 on the card's entity also carries shape tokens derived from its spec (`cards.card_shape`, [features.md](features.md#card-shapes-and-hand-entities-set-5)), so a card that only uses existing ops starts out looking like the cards that work alike. A new spec field that changes what a card does belongs in `card_shape` in both `cards.py` and `native/src/cards.rs` (`test_card_shapes_identical` checks they agree).
 
 ## Reference: cards.toml fields
 

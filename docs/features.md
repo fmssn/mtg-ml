@@ -17,12 +17,13 @@ feature set is versioned and travels with the model:
 | 2 | + the readiness/lethal and known-position state features, the `e:skip_untap` / `e:targets` / `e:targeted_by` / `e:x` entity features and the `pv:` option previews below; from PR #23 the `self:deck:{deck}` state feature (a seat not on its usual deck) and the ` (plotted)` mark on exiled card names (`view._exiled`; set 1 uses the plain name, the view text keeps the mark) |
 | 3 | + `opp:deck:{deck}` (the opponent not on its seat's usual deck), so one network can play every matchup of a `--matchup` mix; on jund_blue identical to set 2, so `--init <set-2 checkpoint> --features 3` changes nothing there |
 | 4 | + the rules-level gaps found by the r4-control game review ([below](#feature-set-4)): combat relations (who blocks whom, blocked / unblocked attackers, block previews), incoming combat damage, `choose_x` previews and an X option -> spell pointer, mana colours (sources, hand needs, colour previews on land plays, basic searches and mana payment). Only adds strings: every set-3 string is still there. New rows start untrained, so a set-3 checkpoint needs a fine-tune with `--features 4` |
+| 5 | + cards described by what they do ([below](#card-shapes-and-hand-entities-set-5)): shape tokens from the card spec on permanents and stack items, the ops a stack item will resolve, the decider's own hand cards as entities, and cast / play-land / plot options pointing at them. Step 4 of the representation plan (PR #32, `docs/representation-plan.md`) |
 
 - `PolicyNet(features=...)` stores it in `config["features"]`, only when it
   is not 1, so a config without the key (every checkpoint before this) is
   set 1.
 - Training (`--features`, default 0 = unset): a new run takes the latest
-  (4); `--init` and `--exploit` keep the source checkpoint's version (no
+  (5); `--init` and `--exploit` keep the source checkpoint's version (no
   weights depend on it, so `--features N` may move a fine-tune to another
   set, but then the parent sees inputs it never learned); a resumed run keeps
   its checkpoint's, and `--features N` on a resume overrides it and writes it
@@ -50,7 +51,9 @@ feature set is versioned and travels with the model:
   engines against it, and `make difftest` compares both versions.
   `tests/data/features_v3_digests.json` does the same for sets 2 and 3
   (recorded before set 4, all three matchups, with option previews):
-  `test_feature_sets_2_and_3_are_unchanged`.
+  `test_feature_sets_2_and_3_are_unchanged`; `features_v4_digests.json` for
+  set 4 on the same games, recorded before set 5:
+  `test_feature_set_4_is_unchanged`.
 
 ### Models trained on set 2 without the key
 
@@ -106,7 +109,8 @@ size. Added in set 2 (representation items 10 and 11):
 ## Entities (`encode.entity_features`)
 
 One feature list per permanent (battlefield order) and stack item (from the
-top). Options point at the entities they are about. Added in set 2:
+top), and from set 5 on per card in the decider's hand. Options point at the
+entities they are about. Added in set 2:
 
 | feature | on | meaning |
 |---|---|---|
@@ -133,9 +137,9 @@ only public objects and the decider's own cards and mana.
 
 Effects are read from the card spec ops (`cards.toml`), not card names, so a
 new card that uses `damage_each_creature` or `damage_target` gets previews
-without code. Not covered yet: hand cards are still not entities, so cast
-options point at nothing; `destroy_target` and other removal get no lethality
-preview.
+without code. Not covered yet: `destroy_target` and other removal get no
+lethality preview. (Before set 5 hand cards were not entities, so cast
+options pointed at nothing.)
 
 ## Feature set 4
 
@@ -222,3 +226,73 @@ red cards stranded in hand.
 | `pv:adds_color:{C}` | land play, `('search', <card>)` options | the land makes C |
 | `pv:adds_missing_color` | same | one of those colours is needed by the hand and made by nothing the player controls |
 | `pv:colors_left:{C}` | `pay_mana` option | C can still be produced after this unit and the rest of the cost are paid (exact: the remaining cost minus this unit plus {C} is payable without this source). The engines keep the pending payment in `Game.paying` for it; it changes no rule |
+
+## Card shapes and hand entities (set 5)
+
+Before set 5 the name was the only entity feature that said what an ability,
+trigger or spell does, so a card the network never saw was close to blank.
+Set 5 adds tokens derived from the card's spec in `cards.toml`. Both engines
+compute them once per card, face and token when the pool loads
+(`cards.card_shape`, `native/src/cards.rs::card_shape`;
+`mtg_ml_native.card_shapes()` lists them). `e:name` stays, so known cards
+keep their learned identity, and the shape tokens let a new deck's cards
+start partly familiar. Two cards whose specs differ only in name (Swamp and
+Vault of Whispers, or an unseen Chain Lightning and Lightning Bolt) share
+every shape token.
+
+### Shape tokens (`CardDef.shape`)
+
+| token | from the spec |
+|---|---|
+| `e:mv>=k` (k = 1..7) | mana value of the mana cost (X counts 0) |
+| `e:cost:x` | `{X}` in the mana cost |
+| `e:color:{C}` | each colour (WUBRG) of the face |
+| `e:cost:reduction:{kind}` | `cost_reduction` (affinity, spells in the graveyard, cards drawn) |
+| `e:cost:additional_sac`, `e:cost:additional_sac:{filter}` | `additional_sac` |
+| `e:cost:additional_discard` | `additional_discard` |
+| `e:cost:{flashback,escape,madness,bestow,plot,overload}` | that alternative way to cast |
+| `e:cost:flashback` + `e:cost:sac_lands` | `flashback_cost` (sacrifice lands) |
+| `e:cost:alternative` + `e:cost:sac_lands` | `alternative_cost` (Fireblast) |
+| `e:ward`, `e:enters_tapped`, `e:etb_x_counters`, `e:transforms` | `ward`, `enters_tapped`, `etb_x_counters`, `back` |
+| `e:spell:target:{kind}` | the spell's target kinds, every mode's too |
+| `e:spell:op:{op}` | the spell's ops, every mode's and the overload effect's |
+| `e:spell:modal` | `modes` |
+| `e:ab:zone:{battlefield,hand}` | per ability: where it is activated |
+| `e:ab:mana`, `e:ab:mana:{C}` | a mana ability and each colour it makes (C for colourless) |
+| `e:ab:mv:{1..3}` | the activation's mana value, capped at 3 |
+| `e:ab:{tap,sac_self,sac_other,discard_self,discard_other,exile_self}`, `e:ab:sac_other:{filter}` | the activation's other costs |
+| `e:ab:x`, `e:ab:sorcery_speed` | `x_target_mv` / `x_reveal`, `sorcery_speed` |
+| `e:ab:target:{kind}`, `e:ab:op:{op}` | the ability's targets and ops |
+| `e:trig:{event}` | per trigger: its event (`etb`, `cast`, `you_cast`, ...) |
+| `e:trig:cond:{key}:{value}` | its condition (`spell:noncreature`, `sacrificed_subtype:Eldrazi`) |
+| `e:trig:op:{op}` | its ops |
+
+Every op token `{prefix}{op}` is followed by `{prefix}{op}:n>=k` (k = 1..4)
+when the op has an amount `n` (damage, cards drawn, life), then by the same
+under `e:op:` (`e:op:damage_target:n>=1` on Lava Dart and on Makeshift
+Munitions' ability alike), then by the ops of an `optional_payment`. Every
+target token `{prefix}{kind}` is followed by `e:target:{kind}` in the same way. A `custom` op is just `op:custom`: the name says the
+rest. The list is a bag over all of a card's abilities and triggers, deduplicated
+with the first occurrence first.
+
+### Where they appear
+
+| entity | set-5 tokens |
+|---|---|
+| permanent | its current face's shape (a transformed Delver has the Aberration's) |
+| spell on the stack | its card's shape, plus `e:res:op:{op}` |
+| ability or trigger on the stack | `e:res:op:{op}`: the ops it will resolve (the chosen mode's for a modal spell, the overload effect when overloaded); the engine's ward and madness triggers have none |
+| hand card (new) | `e:zone:hand`, `e:name:{name}`, `e:ctrl:self`, printed `e:type:` / `e:kw:` / `e:power>=k` / `e:toughness>=k`, its shape, and `e:castable` when the viewer is at a priority decision with an option to cast it from hand |
+
+Hand entities are the viewer's own hand only, in hand order, after the
+permanents and the stack. The opponent's hand contents never appear, and its
+size stays a state feature. `MAX_ENTITIES = 64` truncates in that order
+(permanents, stack, hand). Cast, play-land and plot options point at their
+hand card (`option_object_ids`), and hand abilities (cycling) already point
+at their card, so they now reach the entity too. Cards cast from another zone
+(flashback, escape, plot, madness) are not entities, so those options have no
+card pointer.
+
+The model needs no change. Entities per sample are dynamic, and a hand adds
+about 7 entities of 10-20 tokens each, far below the inference server's
+per-decision budget (`REQUEST_INTS_PER_GAME`).

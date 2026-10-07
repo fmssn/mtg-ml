@@ -868,12 +868,19 @@ fn loaded_spec() -> String {
     db().spec_text.clone()
 }
 
+/// {name: cards.py `card_shape`} for every card, face and token (tests).
+#[pyfunction]
+fn card_shapes() -> std::collections::HashMap<String, Vec<String>> {
+    db().defs.iter().map(|d| (d.name.clone(), d.shape.clone())).collect()
+}
+
 #[pymodule]
 fn mtg_ml_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGame>()?;
     m.add_class::<CardView>()?;
     m.add_function(wrap_pyfunction!(load_cards, m)?)?;
     m.add_function(wrap_pyfunction!(loaded_spec, m)?)?;
+    m.add_function(wrap_pyfunction!(card_shapes, m)?)?;
     m.add("NativeRulesError", m.py().get_type_bound::<NativeRulesError>())?;
     Ok(())
 }
