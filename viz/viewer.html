@@ -252,6 +252,23 @@ label.tg{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-
 #drop{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--muted);z-index:50;background:var(--felt2)}
 #drop.on{display:flex}
 #drop.drag{outline:3px dashed var(--accent);outline-offset:-20px}
+
+/* live play */
+#board.flip #mat0{order:-1}
+#board.flip #mat1{order:1}
+#decision .opts{display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto}
+#decision .opt{text-align:left;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 8px;cursor:pointer;font-size:12.5px;display:flex;gap:8px}
+#decision .opt:hover:not(:disabled){border-color:var(--accent)}
+#decision .opt:disabled{opacity:.5;cursor:wait}
+#decision .opt kbd{flex:none}
+#decision .lerr{color:var(--bad);font-size:12px;margin-top:6px}
+#decision .lact{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+#next.you{border-left:5px solid var(--accent);box-shadow:0 0 0 1px #f0c86940,0 6px 30px #f0c86926}
+.live-badge{background:var(--accent);color:#211800;border-radius:4px;padding:0 6px;font-size:11px;font-weight:700;margin-right:6px}
+#modal form{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;min-width:min(420px,80vw)}
+#modal form select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+#modal form .full{grid-column:1/3}
+#modal .note{color:var(--muted);font-size:12px}
 </style>
 </head>
 <body>
@@ -260,6 +277,7 @@ label.tg{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-
     <h1>MTG Replay</h1>
     <select id="pick" title="Recorded replays"></select>
     <label class="btn" title="Open a replay JSON file">Open file…<input id="file" type="file" accept=".json" hidden></label>
+    <button class="btn" id="bLive" title="Play a game against a checkpoint">Play vs model…</button>
     <div class="meta" id="meta"></div>
     <button class="btn" id="bPanel" title="Show or hide the side panel (L)">Hide panel</button>
   </div>
@@ -297,9 +315,10 @@ label.tg{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-
       <button class="btn" id="bNextT" title="Next turn (Shift+→)">turn ⇥</button>
       <button class="btn" id="bEnd" title="End (End)">⏭</button>
       <div id="timeline" title="Click to jump. Keys: ←/→ step, Shift+←/→ turn, Space play, L side panel"></div>
-      <select id="speed" class="btn" title="Playback speed"><option value="0.5">0.5 step/s</option><option value="1">1 step/s</option><option value="2" selected>2 steps/s</option><option value="4">4 steps/s</option><option value="8">8 steps/s</option></select>
+      <select id="speed" class="btn" title="Playback speed"><option value="0.25">0.25 step/s</option><option value="0.5">0.5 step/s</option><option value="1">1 step/s</option><option value="2" selected>2 steps/s</option><option value="4">4 steps/s</option><option value="8">8 steps/s</option></select>
       <label class="tg" title="Skip passes and mana payments with nothing happening"><input type="checkbox" id="keyOnly" checked> key moments</label>
       <label class="tg"><input type="checkbox" id="showHands" checked> hands</label>
+      <label class="tg" id="liveConfirmL" style="display:none" title="Live games: stop at each of the model's moves; Space or → shows the next one"><input type="checkbox" id="liveConfirm" checked> confirm model moves</label>
       <span class="info" id="pos"></span>
     </div>
   </div>
@@ -316,7 +335,12 @@ const PCLS = ['p0c','p1c'];
 let lastFitTurn = -1;
 let R = null, idx = 0, shown = null, playing = false, timer = null, file = '';
 let keyFrames = [], turnStarts = [];
-const pref = {keyOnly: true, showHands: true, speed: 2, panel: true};
+// Live game against a model (mtg_ml.live): {id, seat, over, replay, raw (frames as sent), busy, error}.
+let LIVE = null;
+const pending = d => d && d.chosen == null;  // the player's decision, not yet made
+const modelMove = d => LIVE && d && d.player !== LIVE.seat;  // live: only the chosen option is known
+const stepping = () => LIVE && pref.liveConfirm && !playing && idx < R.frames.length - 1;  // Space confirms the next model move
+const pref = {keyOnly: true, showHands: true, speed: 2, panel: true, liveConfirm: true};
 
 // ---------------------------------------------------------------- Scryfall images
 const IMG_KEY = 'mtgml-scryfall-v1';
@@ -436,7 +460,7 @@ function render(force) {
   fit(force === 'refit' || s.turn !== lastFitTurn);
   lastFitTurn = s.turn;
   shown = idx;
-  try { history.replaceState(null, '', `#r=${encodeURIComponent(file)}&f=${idx}`); } catch (e) {}
+  try { history.replaceState(null, '', LIVE ? `#live=${encodeURIComponent(LIVE.id)}&f=${idx}` : `#r=${encodeURIComponent(file)}&f=${idx}`); } catch (e) {}
   requestAnimationFrame(drawArrows);
 }
 
@@ -502,7 +526,7 @@ function renderMat(p, s, ps, entered, f) {
     groups.length ? groups.map(g => permHtml(g, entered, attachedTo, s)).join('') : `<span class="empty">no ${name.toLowerCase()}</span>`}</div></div>`;
 
   const hand = pref.showHands
-    ? P.hand.map(c => cardHtml(c.name, {uid: c.uid, cls: entered.has(c.uid) ? 'entered' : ''})).join('')
+    ? P.hand.map(c => c.hidden ? backHtml() : cardHtml(c.name, {uid: c.uid, cls: entered.has(c.uid) ? 'entered' : ''})).join('')
     : P.hand.map(backHtml).join('');
   const dLife = P.life - prevP.life;
   const deciding = f.decision && f.decision.player === p;
@@ -546,14 +570,35 @@ function renderCenter(s) {
     </div>`).join('') : `<span class="stack-empty">empty</span>`);
 }
 
+// While a live game's newest frames play back (or the player looks back).
+function liveNote() {
+  if (!LIVE || idx >= R.frames.length - 1) return '';
+  const end = R.frames[R.frames.length - 1].decision;
+  const skip = `<a href="#" id="bLiveNow">${pending(end) ? 'skip to your move' : 'skip to the end'}</a>`;
+  if (stepping()) {
+    const left = (pref.keyOnly ? keyFrames : R.frames.map((_, i) => i)).filter(k => k > idx).length;
+    return `<div class="dp" style="margin-bottom:8px;color:var(--text)"><kbd>Space</kbd> / <kbd>→</kbd> next model move (${left} to go) · ${skip}</div>`;
+  }
+  return `<div class="dp" style="margin-bottom:8px">${playing ? "the model's moves are playing back" : 'you are looking at the past'} · ${skip}</div>`;
+}
 function renderDecision(f) {
   const d = f.decision, el = $('#decision');
   if (!d) {
     const m = R.meta;
-    el.innerHTML = `<h3>Result</h3><div class="dh">${m.winner == null ? 'Draw' : `<span class="${PCLS[m.winner]}">${esc(m.decks[m.winner])}</span> wins`}</div><div class="dp">${esc(m.end_reason)} · turn ${m.turns}</div>`;
+    el.innerHTML = liveNote() + `<h3>Result</h3><div class="dh">${m.winner == null ? 'Draw' : `<span class="${PCLS[m.winner]}">${esc(m.decks[m.winner])}</span> wins`}</div><div class="dp">${esc(m.end_reason)} · turn ${m.turns}</div>`
+      + (LIVE ? `<div class="lact">${LIVE.replay ? `<button class="btn" id="bLiveReplay" title="The whole game with both hands and the model's policy">Watch full replay</button>` : ''}<button class="btn" id="bLiveAgain">New game</button></div>` : '');
     return;
   }
-  el.innerHTML = `<h3>Next action · all ${d.options.length} option${d.options.length > 1 ? 's' : ''}</h3>
+  if (pending(d)) {
+    const can = LIVE && !LIVE.busy && idx === R.frames.length - 1;
+    el.innerHTML = `<h3>Your move · ${d.options.length} option${d.options.length > 1 ? 's' : ''}</h3>
+      <div class="dh">${esc(d.kind.replace(/_/g, ' '))}</div><div class="dp">${esc(humanize(d.prompt))}</div>
+      <div class="opts">${d.options.map((o, i) => `<button class="opt" data-opt="${i}" ${can ? '' : 'disabled'}>${i < 9 ? `<kbd>${i + 1}</kbd>` : ''}<span>${esc(humanize(o))}</span></button>`).join('')}</div>
+      ${LIVE?.busy ? '<div class="dp" style="margin-top:6px">the model is thinking…</div>' : ''}
+      ${LIVE?.error ? `<div class="lerr">${esc(LIVE.error)}</div>` : ''}`;
+    return;
+  }
+  el.innerHTML = liveNote() + `<h3>${modelMove(d) ? "Model's action" : `Next action · all ${d.options.length} option${d.options.length > 1 ? 's' : ''}`}</h3>
     <div class="dh"><span class="${PCLS[d.player]}">${esc(R.meta.decks?.[d.player] || 'P' + d.player)}</span> · ${esc(d.kind.replace(/_/g, ' '))}</div>
     <div class="dp">${esc(humanize(d.prompt))}</div>
     <ol>${d.options.map((o, i) => `<li class="${i === d.chosen ? 'ch' : ''}">${d.policy ? `<span class="pbar" style="--p:${d.policy[i]}"><i></i><span>${Math.round(d.policy[i] * 100)}%</span></span>` : ''}<span>${esc(humanize(o))}</span></li>`).join('')}</ol>`;
@@ -598,6 +643,13 @@ function renderNext(f, s) {
     el.innerHTML = `<div class="nbody"><div class="nhead">game over</div><div class="over ${m.winner == null ? '' : PCLS[m.winner]}">${m.winner == null ? 'Draw' : esc(m.decks[m.winner]) + ' wins'}</div><div class="nctx">${esc(m.end_reason)} · turn ${m.turns}</div></div>`;
     return;
   }
+  if (pending(d)) {
+    el.className = 'you' + (idx + '|you' !== lastNextKey ? ' fresh' : '');
+    lastNextKey = idx + '|you';
+    el.innerHTML = `<div class="nbody"><div class="nhead"><span style="letter-spacing:.06em;color:var(--accent)">your move</span><span class="nkind">${esc(KIND[d.kind] || d.kind.replace(/_/g, ' '))}</span></div>
+      <div class="nact">${esc(humanize(d.prompt))}</div><div class="nctx">${d.options.length} option${d.options.length > 1 ? 's' : ''} · pick one in the side panel or press 1–9</div></div>`;
+    return;
+  }
   const label = d.options[d.chosen], inv = involved(d, s), pass = label === 'Pass priority';
   const key = idx + '|' + label;
   el.className = `p${d.player}${pass ? ' pass' : ''}${key !== lastNextKey ? ' fresh' : ''}`;
@@ -609,7 +661,7 @@ function renderNext(f, s) {
       <div class="nhead"><span class="${PCLS[d.player]}" style="letter-spacing:.06em">${esc(R.meta.decks?.[d.player] || 'P' + d.player)} is about to</span><span class="nkind">${esc(KIND[d.kind] || d.kind.replace(/_/g, ' '))}</span></div>
       <div class="nact">${esc(pass ? 'Pass priority' : humanize(label))}</div>
       <div class="nctx">${esc(humanize(d.prompt))}</div>
-      <div class="nmeta">${d.options.length > 1 ? `<div class="nalt">chose 1 of ${d.options.length} options<div class="altpop">${alts}</div></div>` : `<div class="nalt">only option</div>`}
+      <div class="nmeta">${d.options.length > 1 ? `<div class="nalt">chose 1 of ${d.options.length} options<div class="altpop">${alts}</div></div>` : modelMove(d) ? '' : `<div class="nalt">only option</div>`}
       ${d.policy ? `<span class="conf" title="Probability the model gave this option">${Math.round(d.policy[d.chosen] * 100)}% sure</span>` : ''}
       ${d.value != null ? `<span class="winest" title="Value head: the return the model expects from here, roughly +1 for a win and -1 for a loss (discounted, may include life shaping). Not a calibrated win probability.">value <b>${d.value >= 0 ? '+' : ''}${d.value.toFixed(2)}</b></span>` : ''}</div>
     </div>`;
@@ -811,7 +863,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') $('#modal').classList.remove('on');
   else if (e.key === 'ArrowRight') { e.shiftKey ? turnJump(1) : step(1); e.preventDefault(); }
   else if (e.key === 'ArrowLeft') { e.shiftKey ? turnJump(-1) : step(-1); e.preventDefault(); }
-  else if (e.key === ' ') { setPlaying(!playing); e.preventDefault(); }
+  else if (e.key === ' ') { stepping() ? step(1) : setPlaying(!playing); e.preventDefault(); }
   else if (e.key === 'l' || e.key === 'L') setPanel(!pref.panel);
   else if (e.key === 'Home') seek(0);
   else if (e.key === 'End') seek(R.frames.length - 1);
@@ -819,13 +871,14 @@ document.addEventListener('keydown', e => {
 function savePref() { try { localStorage.setItem('mtgml-viewer-pref', JSON.stringify(pref)); } catch (e) {} }
 try { Object.assign(pref, JSON.parse(localStorage.getItem('mtgml-viewer-pref') || '{}')); } catch (e) {}
 $('#app').classList.toggle('nopanel', !pref.panel); $('#bPanel').textContent = pref.panel ? 'Hide panel' : 'Show panel';
-$('#keyOnly').checked = pref.keyOnly; $('#showHands').checked = pref.showHands; $('#speed').value = String(pref.speed);
+$('#keyOnly').checked = pref.keyOnly; $('#showHands').checked = pref.showHands; $('#liveConfirm').checked = pref.liveConfirm;
+$('#liveConfirm').onchange = e => { pref.liveConfirm = e.target.checked; savePref(); if (pref.liveConfirm) setPlaying(false); render(); }; $('#speed').value = String(pref.speed);
 
 // ---------------------------------------------------------------- loading
 // Every replay is checked and normalised before use: numbers become numbers,
 // strings strings, unknown fields are dropped. Together with esc() on every
 // string that reaches markup, a crafted file cannot inject HTML.
-function validateReplay(rep) {
+function validateReplay(rep, live = false) {
   const fail = what => { throw new Error('invalid replay: ' + what); };
   const obj = (v, w) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : fail(w);
   const arr = (v, w) => Array.isArray(v) ? v : fail(w);
@@ -835,7 +888,7 @@ function validateReplay(rep) {
   const optSeat = (v, w) => v == null ? null : seat(v, w);
   const str = v => v == null ? '' : String(v);
   const strs = (v, w) => arr(v ?? [], w).map(str);
-  const card = (c, w) => { obj(c, w); return {uid: num(c.uid, w + '.uid'), name: str(c.name)}; };
+  const card = (c, w) => { obj(c, w); const o = {uid: num(c.uid, w + '.uid'), name: str(c.name)}; if (c.hidden) o.hidden = true; return o; };
   const perm = c => {
     obj(c, 'permanent');
     const p = {...card(c, 'permanent'), oid: num(c.oid, 'oid'), controller: seat(c.controller, 'controller'), types: strs(c.types, 'types')};
@@ -860,10 +913,11 @@ function validateReplay(rep) {
       controller: seat(it.controller, 'stack controller'), targets: strs(it.targets, 'targets'),
       target_oids: arr(it.target_oids ?? [], 'target_oids').map(x => num(x, 'target oid')), x: num(it.x ?? 0, 'x'), method: str(it.method || 'normal')};
   };
-  const decision = d => {
+  const decision = (d, last) => {
     if (d == null) return null;
     obj(d, 'decision');
     const out = {player: seat(d.player, 'decision player'), kind: str(d.kind), prompt: str(d.prompt), options: strs(d.options, 'options')};
+    if (live && last && d.chosen == null) { out.chosen = null; return out; }  // a live game waiting for the player
     out.chosen = num(d.chosen, 'chosen');
     if (!Number.isInteger(out.chosen) || out.chosen < 0 || out.chosen >= out.options.length) fail('chosen');
     if (d.policy != null) {
@@ -886,12 +940,12 @@ function validateReplay(rep) {
     cards[name] = {types: strs(c.types, 'types'), subtypes: strs(c.subtypes, 'subtypes'), cost: str(c.cost), text: str(c.text),
       power: optNum(c.power, 'power'), toughness: optNum(c.toughness, 'toughness'), token: !!c.token};
   }
-  const frames = arr(rep.frames, 'frames').map(f => {
+  const frames = arr(rep.frames, 'frames').map((f, fi, all) => {
     obj(f, 'frame');
     const s = obj(f.state, 'state');
     const players = arr(s.players, 'players');
     if (players.length !== 2) fail('players');
-    return {events: strs(f.events, 'events'), decision: decision(f.decision),
+    return {events: strs(f.events, 'events'), decision: decision(f.decision, fi === all.length - 1),
       state: {turn: num(s.turn, 'turn'), active: seat(s.active, 'active'), step: str(s.step), players: players.map(player),
         battlefield: arr(s.battlefield, 'battlefield').map(perm), stack: arr(s.stack ?? [], 'stack').map(stackItem)}};
   });
@@ -904,13 +958,20 @@ function showLoadError(err) {
   $('#drop').firstElementChild.textContent = 'Could not open this replay (' + err.message + '). Drop another replay JSON here.';
 }
 let loadGen = 0;
+function placeMats(bottom) {
+  $('#board').classList.toggle('flip', bottom === 1);
+  for (const p of [0, 1]) $('#mat' + p).className = `mat ${p === bottom ? 'bottom' : 'top'} p${p}`;
+}
 function load(rep, name, frame = 0) {
-  try { rep = validateReplay(rep); } catch (err) { showLoadError(err); return; }
+  try { rep = validateReplay(rep, !!LIVE); } catch (err) { showLoadError(err); return; }
   setPlaying(false);
   R = rep; file = name; shown = null;
   $('#drop').classList.remove('on');
+  placeMats(LIVE ? LIVE.seat : 0);
+  $('#liveConfirmL').style.display = LIVE ? '' : 'none';
   const m = R.meta;
-  $('#meta').innerHTML = `<span class="p0c">${esc(m.decks[0])}</span> (${esc(m.agents[0])}) vs <span class="p1c">${esc(m.decks[1])}</span> (${esc(m.agents[1])}) · seed ${m.seed} · ${esc(m.engine)} · ${R.frames.length} frames · ${m.turns} turns · winner: ${m.winner == null ? 'draw' : `<span class="${PCLS[m.winner]}">${esc(m.decks[m.winner])}</span>`} (${esc(m.end_reason)})`;
+  if (LIVE) $('#meta').innerHTML = `<span class="live-badge">LIVE</span><span class="p0c">${esc(m.decks[0])}</span> (${esc(m.agents[0])}) vs <span class="p1c">${esc(m.decks[1])}</span> (${esc(m.agents[1])}) · ${esc(m.engine)} · turn ${m.turns}${LIVE.over ? ` · winner: ${m.winner == null ? 'draw' : `<span class="${PCLS[m.winner]}">${esc(m.decks[m.winner])}</span>`} (${esc(m.end_reason)})` : ''}`;
+  else $('#meta').innerHTML = `<span class="p0c">${esc(m.decks[0])}</span> (${esc(m.agents[0])}) vs <span class="p1c">${esc(m.decks[1])}</span> (${esc(m.agents[1])}) · seed ${m.seed} · ${esc(m.engine)} · ${R.frames.length} frames · ${m.turns} turns · winner: ${m.winner == null ? 'draw' : `<span class="${PCLS[m.winner]}">${esc(m.decks[m.winner])}</span>`} (${esc(m.end_reason)})`;
   indexReplay(); buildLog(); buildTimeline();
   idx = Math.max(0, Math.min(frame, R.frames.length - 1));
   render('refit');
@@ -932,17 +993,104 @@ async function loadFile(f) {
     if (gen === loadGen) load(rep, f.name);
   } catch (err) { if (gen === loadGen) showLoadError(err); }
 }
-$('#pick').onchange = e => loadFromServer(e.target.value, 0);
-$('#file').onchange = e => { const f = e.target.files[0]; if (f) loadFile(f); };
+$('#pick').onchange = e => { LIVE = null; loadFromServer(e.target.value, 0); };
+$('#file').onchange = e => { const f = e.target.files[0]; if (f) { LIVE = null; loadFile(f); } };
 addEventListener('dragover', e => { e.preventDefault(); $('#drop').classList.add('on', 'drag'); });
 addEventListener('dragleave', e => { if (!e.relatedTarget) { $('#drop').classList.remove('drag'); if (R) $('#drop').classList.remove('on'); } });
 addEventListener('drop', async e => {
   e.preventDefault(); $('#drop').classList.remove('drag');
-  const f = e.dataTransfer.files[0]; if (f) loadFile(f);
+  const f = e.dataTransfer.files[0]; if (f) { LIVE = null; loadFile(f); }
+});
+
+// ---------------------------------------------------------------- live play (mtg_ml.live)
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({error: 'HTTP ' + r.status}));
+  if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+  return j;
+}
+// Server answers carry the frames from live.since on; earlier ones are kept.
+function applyLive(view, resume = false) {
+  const L = view.live;
+  loadGen++;  // a replay still loading must not replace the game
+  if (!LIVE || LIVE.id !== L.id) LIVE = {id: L.id, raw: []};
+  Object.assign(LIVE, {seat: L.seat, over: L.over, replay: L.replay, busy: false, error: null});
+  // Play the model's moves back from the first frame the player hasn't seen.
+  const first = Math.min(L.since + (LIVE.raw.length ? 1 : 0), L.since + view.frames.length - 1);
+  LIVE.raw.splice(L.since, Infinity, ...view.frames);
+  const last = LIVE.raw.length - 1;
+  load({format: view.format, meta: view.meta, cards: view.cards, frames: LIVE.raw}, 'live', first);
+  const start = resume ? last : pref.keyOnly ? keyFrames.find(k => k >= first) ?? last : first;
+  if (start < last) { seek(start); if (!pref.liveConfirm) { setPlaying(true); render(); } } else seek(last);
+  if (L.over) refreshList();
+}
+async function choose(i) {
+  if (!LIVE || LIVE.busy || LIVE.over || idx !== R.frames.length - 1) return;
+  const frame = R.frames.length - 1;
+  LIVE.busy = true; LIVE.error = null; render();
+  try { applyLive(await api(`api/live/${encodeURIComponent(LIVE.id)}/choose`, {frame, index: i, since: frame})); }
+  catch (err) { LIVE.busy = false; LIVE.error = err.message; render(); }
+}
+async function openLiveDialog() {
+  const box = $('#modal .box');
+  box.innerHTML = `<h2><span>Play against a model</span><button class="btn" onclick="$('#modal').classList.remove('on')">close</button></h2><div class="note">loading…</div>`;
+  $('#modal').classList.add('on');
+  let opt;
+  try { opt = await api('api/live/options'); } catch (err) {
+    box.querySelector('.note').textContent = `Live play is not available: ${err.message}. Start the server with: python -m mtg_ml.replay serve --models runs/`;
+    return;
+  }
+  if (!opt.models.length) { box.querySelector('.note').textContent = 'No checkpoints (*.pt) in the --models directory.'; return; }
+  const mu = Object.keys(opt.matchups);
+  box.innerHTML = `<h2><span>Play against a model</span><button class="btn" onclick="$('#modal').classList.remove('on')">close</button></h2>
+    <form id="liveForm">
+      <label>Model</label><select name="model">${opt.models.map(m => `<option>${esc(m)}</option>`).join('')}</select>
+      <label>Matchup</label><select name="matchup">${mu.map(k => `<option value="${esc(k)}">${esc(opt.matchups[k].join(' vs '))}</option>`).join('')}</select>
+      <label>You play</label><select name="seat"></select>
+      <label>Model plays</label><label class="tg"><input type="checkbox" name="greedy"> greedy (its most likely move) instead of sampling</label>
+      <div class="full note">The model sees only what a player would. Its policy and value appear in the full replay after the game.</div>
+      <div class="full"><button class="btn on" type="submit">Start game</button> <span class="lerr" id="liveErr"></span></div>
+    </form>`;
+  const form = $('#liveForm');
+  const seats = () => { const d = opt.matchups[form.matchup.value]; form.seat.innerHTML = d.map((n, i) => `<option value="${i}">${esc(n)} (seat ${i})</option>`).join(''); };
+  form.matchup.onchange = seats; seats();
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Loading model…';
+    try {
+      const view = await api('api/live/new', {model: form.model.value, matchup: form.matchup.value, seat: +form.seat.value, greedy: form.greedy.checked});
+      LIVE = null; $('#modal').classList.remove('on'); applyLive(view);
+    } catch (err) { $('#liveErr').textContent = err.message; btn.disabled = false; btn.textContent = 'Start game'; }
+  };
+}
+async function refreshList() {
+  try {
+    const list = await api('api/replays');
+    $('#pick').innerHTML = list.map(r => `<option value="${esc(r.file)}">${esc(r.file)}</option>`).join('');
+    $('#pick').style.display = '';
+    if (!LIVE) $('#pick').value = file;
+  } catch (e) {}
+}
+$('#bLive').onclick = openLiveDialog;
+document.addEventListener('click', e => {
+  const o = e.target.closest('#decision .opt');
+  if (o && !o.disabled) return choose(+o.dataset.opt);
+  if (e.target.id === 'bLiveNow') { e.preventDefault(); setPlaying(false); seek(R.frames.length - 1); }
+  if (e.target.id === 'bLiveAgain') openLiveDialog();
+  if (e.target.id === 'bLiveReplay') { const f = LIVE.replay; LIVE = null; $('#pick').value = f; loadFromServer(f, 0); }
+});
+document.addEventListener('keydown', e => {
+  if (!LIVE || !R || e.target.closest('input, select, textarea')) return;
+  const d = R.frames[idx].decision;
+  if (pending(d) && /^[1-9]$/.test(e.key) && +e.key <= d.options.length) { choose(+e.key - 1); e.preventDefault(); }
 });
 
 (async function init() {
   const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get('live')) {  // a reload during a live game: pick it up again
+    try { applyLive(await api(`api/live/${encodeURIComponent(h.get('live'))}?since=0`), true); refreshList(); return; }
+    catch (e) { LIVE = null; }
+  }
   try {
     const list = await (await fetch('api/replays')).json();
     $('#pick').innerHTML = list.map(r => `<option value="${esc(r.file)}">${esc(r.file)}${r.winner != null ? ` · ${r.winner === 0 ? 'Jund' : 'Blue'} wins T${esc(r.turns)}` : ''}</option>`).join('') || '<option>no replays yet</option>';
