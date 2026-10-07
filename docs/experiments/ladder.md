@@ -47,7 +47,7 @@ The code is in `mtg_ml/rl/evaluate.py` (`rate_ladder`, `fit_elo`), added in PR f
    - Its Elo is the maximum-likelihood rating against the fixed rung ratings. The score equation is solved by bisection, with one virtual draw per rung.
    - The standard error comes from the Fisher information.
    - Logged as `ladder/elo`, `ladder/elo_se`, and per rung `ladder/<rung>`.
-3. **Range.** The ladder spans 0 to 79, and the best checkpoints (round 3) are at 145-171, well above the top rung. Ratings well above the top rung extrapolate and get noisier.
+3. **Range.** The ladder spans 0 to 79, and the best finished checkpoints (round 3) are at 143-154 (r3-attn read 171 mid-run), well above the top rung. Ratings well above the top rung extrapolate and get noisier.
 
    When the best arm passes ~150, start a new ladder **L2**:
    - L2 is L1's rungs plus the new one;

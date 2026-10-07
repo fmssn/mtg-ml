@@ -2,7 +2,7 @@
 # Standard post-run evaluation of archived runs: 2000-game benchmark sampled + greedy, appended to <id>/evals.txt.
 # Usage: final_evals.sh <code dir> <id>... ; extra env: H2H="<id> <control id>" pairs separated by ';'
 A=~/mtg-ml-checkpoints; code=$1; shift
-cd $code
+cd "$code" || exit 1
 E="nice -n 10 env MTG_ENGINE=native PYTHONPATH=. OMP_NUM_THREADS=1 $HOME/mtg-ml-v3/.venv/bin/python -m mtg_ml.rl.evaluate"
 for id in "$@"; do
   for m in "" --greedy; do

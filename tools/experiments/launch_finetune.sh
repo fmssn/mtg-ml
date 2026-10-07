@@ -1,7 +1,7 @@
 #!/bin/bash
-# Next-actions fine-tunes (2026-10-07). Usage: launch_next.sh <name> <cpus> <gpus by PCI index: train,server> <mode: ft|fresh> [extra flags]
+# Next-actions fine-tunes (2026-10-07). Usage: launch_finetune.sh <name> <cpus> <gpus by PCI index: train,server> <mode: ft|fresh> [extra flags]
 # ft: resume a copy of the overnight self-play checkpoint + pool (8.4M games) for 1M more games.
-cd ~/mtg-ml-next2 && mkdir -p runs
+cd ~/mtg-ml-next2 || exit 1; mkdir -p runs
 PY=~/mtg-ml-v3/.venv/bin/python
 SRC=${SRC:-$HOME/mtg-ml-overnight/runs/overnight-selfplay}
 name=$1 cpus=$2 gpus=$3 mode=$4; shift 4
