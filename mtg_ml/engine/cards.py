@@ -497,7 +497,10 @@ def make_effect(ops: list[dict] | None):
         return None
     for op in ops:
         if op["op"] not in OPS:
-            raise ValueError(f"unknown op {op['op']!r}")
+            raise ValueError(
+                f"unknown op {op['op']!r}: add it to OPS (mtg_ml/engine/cards.py) and to Op, parse_ops and Op::name"
+                " (native/src/cards.rs) and Eng::run_op (native/src/engine.rs); card_shape picks the name up by itself"
+            )
         if op["op"] == "custom" and op["fn"] not in CUSTOM:
             raise ValueError(f"unknown custom effect {op['fn']!r}")
         if op["op"] == "optional_payment":
@@ -511,7 +514,38 @@ def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:
     return tuple(TargetSpec(k) for k in kinds or ())
 
 
+# Spec fields, split by whether `card_shape` turns them into shape tokens
+# (feature set 5). A new field goes into exactly one of the two sets of its
+# level, and into card_def / _ability / _trigger and card_shape here and in
+# native/src/cards.rs (parse_card / card_shape); `_check_fields` says so.
+SHAPE_CARD_FIELDS = frozenset({
+    "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow",
+    "plot", "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect",
+    "modes", "overload_effect", "abilities", "triggers",
+})  # fmt: skip
+# Shown on entities otherwise (name, printed types, keywords, P/T) or not at all.
+NON_SHAPE_CARD_FIELDS = frozenset({"name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"})
+SHAPE_ABILITY_FIELDS = frozenset({
+    "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone",
+    "sorcery_speed", "mana", "targets",
+})  # fmt: skip
+NON_SHAPE_ABILITY_FIELDS = frozenset({"name"})
+SHAPE_TRIGGER_FIELDS = frozenset({"event", "effect", "condition"})
+NON_SHAPE_TRIGGER_FIELDS = frozenset({"name"})
+
+
+def _check_fields(spec: dict, what: str, shape: frozenset, non_shape: frozenset, owner: str) -> None:
+    unknown = set(spec) - shape - non_shape
+    if unknown:
+        raise ValueError(
+            f"{owner}: unknown {what} fields {sorted(unknown)}: add each to SHAPE_{what.upper()}_FIELDS (and to card_shape) or"
+            f" NON_SHAPE_{what.upper()}_FIELDS in mtg_ml/engine/cards.py, read it in card_def / _ability / _trigger, and do the"
+            " same in native/src/cards.rs (the allowed keys of parse_card, card_shape); docs/adding-cards.md"
+        )
+
+
 def _ability(a: dict) -> AbilityDef:
+    _check_fields(a, "ability", SHAPE_ABILITY_FIELDS, NON_SHAPE_ABILITY_FIELDS, a.get("name", "?"))
     return AbilityDef(
         name=a["name"],
         effect=make_effect(a.get("effect")),
@@ -532,6 +566,7 @@ def _ability(a: dict) -> AbilityDef:
 
 
 def _trigger(t: dict) -> TriggerDef:
+    _check_fields(t, "trigger", SHAPE_TRIGGER_FIELDS, NON_SHAPE_TRIGGER_FIELDS, t.get("name", "?"))
     return TriggerDef(t["name"], t["event"], make_effect(t["effect"]), _condition(t.get("condition")))
 
 
@@ -658,15 +693,7 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
 
 
 def card_def(spec: dict) -> CardDef:
-    known = {
-        "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward",
-        "targets", "effect", "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped",
-        "etb_x_counters", "back", "modes", "abilities", "triggers", "madness", "plot", "overload", "overload_effect",
-        "additional_discard", "alternative_cost", "flashback_cost",
-    }  # fmt: skip
-    unknown = set(spec) - known
-    if unknown:
-        raise ValueError(f"{spec.get('name')}: unknown fields {sorted(unknown)}")
+    _check_fields(spec, "card", SHAPE_CARD_FIELDS, NON_SHAPE_CARD_FIELDS, spec.get("name", "?"))
     cr = spec.get("cost_reduction")
     d = CardDef(
         name=spec["name"],

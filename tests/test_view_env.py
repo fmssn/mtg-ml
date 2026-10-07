@@ -417,17 +417,40 @@ def test_feature_sets_2_and_3_are_unchanged():
             assert features_digest(m, n, s, features) == want[f"{m}:{n}:{s}:{features}"], (m, n, s, features)
 
 
+def pinned_features_digest(game: dict, features: int) -> str:
+    """`features_digest` of a game whose decks are spelled out (seed, decks,
+    match_game, deck_names), so deck and sideboard changes cannot move it."""
+    import hashlib
+    import json
+
+    from mtg_ml.encode import entity_features, option_preview
+    from mtg_ml.rl.features import featurize
+
+    g = new_game(tuple(game["decks"]), seed=game["seed"], max_turns=30, match_game=game["match_game"], deck_names=tuple(game["deck_names"]))
+    r = random.Random(game["seed"])
+    h = hashlib.sha256()
+    while not g.over:
+        p = g.decision.player
+        ents, index = entity_features(g, p, features)
+        previews = [option_preview(g, p, i, features) for i in range(len(g.legal_options()))]
+        rec = [featurize(g, p, features=features), state_features(g, 0, features), state_features(g, 1, features), ents, sorted(index.items()), previews]
+        h.update(json.dumps(rec).encode())
+        g.step(r.randrange(len(g.legal_options())))
+    return h.hexdigest()
+
+
 def test_feature_set_4_is_unchanged():
-    """Set 4 is byte for byte what it was before set 5 was added (digests
-    recorded with that code, `tests/data/features_v4_digests.json`, on the
-    same games as the set 2 and 3 digests)."""
+    """Set 4 is byte for byte what it was before set 5 was added: digests
+    recorded with that code (`tests/data/features_v4_digests.json`) on the
+    games of the set 2 and 3 digests, their decks pinned in the file."""
     import json
     import os
 
     with open(os.path.join(os.path.dirname(__file__), "data", "features_v4_digests.json")) as f:
-        want = json.load(f)
-    for m, n, s in V3_DIGEST_GAMES:
-        assert features_digest(m, n, s, 4) == want[f"{m}:{n}:{s}:4"], (m, n, s)
+        games = json.load(f)
+    assert len(games) == 18
+    for key, game in games.items():
+        assert pinned_features_digest(game, 4) == game["digest"], key
 
 
 def _pointers(g, label: str, features: int) -> list[int]:

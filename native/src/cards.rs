@@ -534,7 +534,7 @@ fn get_str_list(t: &Table, k: &str) -> Result<Vec<String>, String> {
 fn check_keys(t: &Table, allowed: &[&str], what: &str) -> Result<(), String> {
     for k in t.keys() {
         if !allowed.contains(&k.as_str()) {
-            return Err(format!("unknown {what} field {k:?}"));
+            return Err(format!("unknown {what} field {k:?}: add it to the allowed keys here and to the parser and card_shape (native/src/cards.rs), and to card_def / _ability / _trigger, the SHAPE_ or NON_SHAPE_ field sets and card_shape (mtg_ml/engine/cards.py); docs/adding-cards.md"));
         }
     }
     Ok(())
