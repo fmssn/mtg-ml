@@ -42,6 +42,10 @@ New user-facing apps (replay viewer, dashboards) go under `apps/<name>/` and sho
 - Don't commit checkpoints, `runs/`, or large binaries.
 - Benchmark numbers in docs should say which machine they were measured on.
 
+## Training experiments
+
+Every training run meant to answer a question is recorded in `docs/experiments/` (how: its README): an entry in `ledger.md` and `ledger.jsonl` with parent checkpoint, code ref, exact flags, benchmark (sampled and greedy) and ladder L1 Elo (`ladder.md` says how it is computed), and a verdict, failed ideas included. Finished runs are archived on h100-private with `~/mtg-ml-checkpoints/archive_run.sh`; that directory is append-only.
+
 ## PR workflow (GitHub Copilot reviews every PR)
 
 1. **Open a draft PR early**, as soon as the first meaningful commit is pushed: `gh pr create --draft`. This starts CI and Copilot's review while work continues.
