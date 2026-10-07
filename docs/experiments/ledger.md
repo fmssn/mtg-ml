@@ -14,7 +14,8 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
 | 20261007-red-madness-1m | new deck: Red Madness learner vs frozen r1-control Jund, warm-started from it | 1M | (vs Jund bot) 89.9% | 92.6% | | new-deck baseline⁴ |
-| 20261007-r5-mix-h256 | fresh h256 entity net on the three-deck mix (feature set 3) | 10M | running | | | |
+| 20261007-r5-mix-h256 | fresh h256 entity net on the three-deck mix, lr 1.5e-4 → 1.5e-5 (restarted 15:23) | 10M | running | | | |
+| 20261007-r5-mix-h256-lr3e-4 | the same at the h128 lr (3e-4 → 3e-5) | 2.6M | 38.1% at 2.5M | | -69 at 2.5M | abort: steps too large |
 | 20261007-r5-mix-h128 | fresh h128 entity net on the three-deck mix, same flags (width control) | 10M | running | | | |
 | 20261007-r4-mix | r3-postboard + Red Madness: one network on jund_blue, jund_madness, blue_madness (feature set 3) | 10.4M + 10M | running | | | |
 | 20261007-r4-control | r3-postboard, jund_blue only, same schedule and feature set 3 | 10.4M + 10M | running | | | |
@@ -45,6 +46,7 @@ Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoi
 - **Parent**: none (fresh). A trained h128 cannot be widened, so both arms start from zero.
 - **Code**: PR fmssn/mtg-ml#28 (matchup mix, feature set 3, stack fix), box copy `~/mtg-ml-r4`.
 - **Flags** (both arms): `--hidden {128|256} --trunk entity --value-net shared --engine native --device cuda --inference server --server-device cuda:1 --workers 20 --games-per-iter 2048 --total-games 10000000 --seed 5 --features 3 --postboard-frac 0.2 --matchup jund_blue,jund_madness,blue_madness --ppo-lr 3e-4 --ppo-lr-final 3e-5 --lr-anneal-games 10000000 --eval-every-games 500000 --bench-games 1000 --bench-greedy-games 1000 --ladder <L1>`; cores 0-63 shared with r4 (speeds not comparable to other rounds).
+- **First h256 attempt (aborted)**: at the h128 learning rate h256 fell behind and stalled from 1.5M games (Jund vs Blue bot 38.1% vs h128's 49.5% at 2.5M, Elo -69 vs -14, 3-13 points behind on every new pairing). Its updates were ~70% larger (approx KL 0.026 vs 0.015, clip fraction 0.15 vs 0.11). Archived as `20261007-r5-mix-h256-lr3e-4`; restarted at half the lr (`--ppo-lr 1.5e-4 --ppo-lr-final 1.5e-5`). Lesson: scale the lr down with width.
 - **Result**: running.
 
 ## 20261007-r4 · one network for three decks
