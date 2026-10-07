@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import zlib
 
-from ..encode import entity_features, option_object_ids, option_preview, state_features
+from ..encode import FEATURES, check_features, entity_features, option_object_ids, option_preview, state_features
 
 STATE_DIM = 1 << 16
 OPTION_DIM = 1 << 15
@@ -36,33 +36,37 @@ def option_tokens(kind: str, key: tuple) -> list[str]:
     return toks
 
 
-def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM):
-    """(state indices, [option indices, ...]) for `player` at the current decision."""
+def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM, features: int = FEATURES):
+    """(state indices, [option indices, ...]) for `player` at the current
+    decision, in feature-set version `features` (`encode.FEATURES`): pass the
+    deciding policy's `policy_features(net)`."""
+    check_features(features)
     if getattr(game, "NATIVE", False):
-        return game.featurize(player, state_dim, option_dim)
+        return game.featurize(player, state_dim, option_dim, features)
     d = game.decision
-    feats = state_features(game, player)
+    feats = state_features(game, player, features)
     feats.append(f"seat:{player}")
     feats.append(f"decision:{d.kind}")
     state = sorted({_h(f, state_dim) for f in feats})
-    ents, index = entity_features(game, player)
+    ents, index = entity_features(game, player, features)
     for e in ents:
         state.append(state_dim)
         state.extend(sorted({_h(t, state_dim) for t in e}))
     opts = []
     for i, o in enumerate(game.legal_options()):
-        toks = sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key) + option_preview(game, player, i)})
+        toks = sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key) + option_preview(game, player, i, features)})
         toks += sorted({option_dim + index[i] for i in option_object_ids(o) if i in index})
         opts.append(toks)
     return state, opts
 
 
-def featurize_flat(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM):
+def featurize_flat(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM, features: int = FEATURES):
     """`featurize` with the options flattened: (state, option lengths, all
     option tokens). What rollouts record and send to the inference server."""
+    check_features(features)
     if getattr(game, "NATIVE", False):
-        return game.featurize_flat(player, state_dim, option_dim)
-    state, opts = featurize(game, player, state_dim, option_dim)
+        return game.featurize_flat(player, state_dim, option_dim, features)
+    state, opts = featurize(game, player, state_dim, option_dim, features)
     return state, [len(o) for o in opts], [t for o in opts for t in o]
 
 

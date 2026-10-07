@@ -177,3 +177,65 @@ def test_entity_trunk_scores_options_through_their_entities():
     assert torch.isfinite(values).all() and torch.isfinite(logits.max(-1).values).all()
     logits[torch.isfinite(logits)].sum().backward()
     assert net.pointer.weight.grad.abs().sum() > 0
+
+
+def _ckpt(tmp_path, name, **kw):
+    net = PolicyNet(hidden=16, **kw)
+    path = str(tmp_path / name)
+    torch.save({"config": net.config, "model": net.state_dict()}, path)
+    return net, path
+
+
+def test_feature_set_version_travels_with_the_model(tmp_path):
+    """`features` is in the config only when not 1, so configs written before
+    it existed are unchanged and mean feature set 1; it survives a save."""
+    from mtg_ml.encode import FEATURES
+    from mtg_ml.rl.rollout import checkpoint_config, load_net, policy_features
+
+    old, old_path = _ckpt(tmp_path, "old.pt")
+    new, new_path = _ckpt(tmp_path, "new.pt", features=2)
+    assert "features" not in old.config and old.features == 1 and new.config["features"] == 2
+    assert checkpoint_config(new_path) == new.config and checkpoint_config(old_path) == old.config
+    assert (policy_features(old_path), policy_features(new_path)) == (1, 2)
+    assert load_net(new_path).features == 2 and load_net(old_path).features == 1
+    assert TrainConfig().features == FEATURES == 2  # new runs train on the latest set
+    with pytest.raises(ValueError):
+        PolicyNet(hidden=16, features=3)
+
+
+def test_each_seat_is_featurized_with_its_own_policys_version(tmp_path, monkeypatch):
+    """A learner on feature set 2 against a pool snapshot on set 1: every
+    decision is featurized in the deciding seat's version, and what the
+    learner records is exactly that."""
+    from mtg_ml.rl import rollout
+
+    _, new_path = _ckpt(tmp_path, "new.pt", features=2)
+    _, old_path = _ckpt(tmp_path, "old.pt")
+    calls = []
+    real = rollout.featurize_flat
+
+    def spy(g, p, features):
+        calls.append((id(g), p, features))
+        return real(g, p, features=features)
+
+    monkeypatch.setattr(rollout, "featurize_flat", spy)
+    specs = [GameSpec(1, (LEARNER, old_path)), GameSpec(2, (old_path, LEARNER))]
+    res = run_job(Job(specs, new_path, 1, max_turns=10))
+    per_game: dict = {}
+    for gid, p, f in calls:
+        per_game.setdefault(gid, set()).add((p, f))
+    assert sorted(sorted(v) for v in per_game.values()) == [[(0, 1), (1, 2)], [(0, 2), (1, 1)]]
+    assert len(res.actions) == sum(1 for _, _, f in calls if f == 2)  # the learner records its own (set 2) decisions
+
+
+def test_model_agent_uses_its_networks_feature_set(tmp_path, monkeypatch):
+    from mtg_ml.rl import agent as agent_mod
+
+    _, old_path = _ckpt(tmp_path, "old.pt")
+    seen = []
+    real = agent_mod.featurize_flat
+    monkeypatch.setattr(agent_mod, "featurize_flat", lambda g, p, features: seen.append(features) or real(g, p, features=features))
+    g = Game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=3)
+    a = agent_mod.ModelAgent(old_path, seat=g.decision.player)
+    a.act(g)
+    assert seen == [1]

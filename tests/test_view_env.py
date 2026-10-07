@@ -198,3 +198,40 @@ def test_option_previews_on_targets_ward_and_lethal_damage():
     g = scenario(p0={"battlefield": ["Makeshift Munitions", "Clue", "Swamp", "Swamp", "Swamp"]}, p1={"battlefield": ["Tolarian Terror"]})
     choose(g, "Makeshift Munitions: 1 damage")
     assert {"pv:target_ward:2", "pv:ward_payable"} <= _preview(g, "Target Tolarian Terror")
+
+
+def test_feature_set_1_reproduces_the_features_before_set_2():
+    """Feature set 1 is byte for byte what main produced before set 2 was
+    added (digests recorded with that code, `tests/data/features_v1_digests.json`),
+    so checkpoints trained on it see exactly their inputs."""
+    import hashlib
+    import json
+    import os
+
+    from mtg_ml.encode import entity_features
+    from mtg_ml.match import match_decks
+    from mtg_ml.rl.features import featurize
+
+    with open(os.path.join(os.path.dirname(__file__), "data", "features_v1_digests.json")) as f:
+        want = json.load(f)
+    for seed in range(0, 24, 3):  # a third of the recorded games keeps it quick
+        g = new_game(match_decks(1 + seed % 2), seed=seed, max_turns=30)
+        r = random.Random(seed)
+        h = hashlib.sha256()
+        while not g.over:
+            p = g.decision.player
+            rec = [featurize(g, p, features=1), state_features(g, 0, features=1), state_features(g, 1, features=1), entity_features(g, p, features=1)[0]]
+            h.update(json.dumps(rec).encode())
+            g.step(r.randrange(len(g.legal_options())))
+        assert h.hexdigest() == want[str(seed)], f"seed {seed}"
+
+
+def test_feature_set_2_adds_to_set_1():
+    from mtg_ml.encode import entity_features, option_preview
+
+    g = scenario(p0={"battlefield": ["Krark-Clan Shaman", "Ichor Wellspring"]}, p1={"battlefield": ["Delver of Secrets"]})
+    f1, f2 = state_features(g, 0, features=1), state_features(g, 0, features=2)
+    assert set(f1) < set(f2) and not any("ready_power" in x for x in f1)
+    i = next(i for i, o in enumerate(g.legal_options()) if o.label.startswith("Krark-Clan Shaman"))
+    assert option_preview(g, 0, i, features=1) == [] and option_preview(g, 0, i, features=2)
+    assert entity_features(g, 0, features=1)[1] == entity_features(g, 0, features=2)[1]

@@ -11,7 +11,8 @@ before every `game.step(a)`, whoever decides (`agents.take` does). Memory
 resets whenever the agent sees a different game object, so one agent can play
 a whole match. After `act`, `last_info` holds the policy (one probability per
 option) and the value estimate (the predicted discounted return, not a
-calibrated win probability).
+calibrated win probability). Decisions are featurized in the network's own
+feature-set version (`PolicyNet.features`).
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ class ModelAgent:
 
         torch = self.torch
         self._track(game)
-        state, o_len, o_flat = featurize_flat(game, self.seat)
+        state, o_len, o_flat = featurize_flat(game, self.seat, features=self.net.features)
         ps = PackedSamples()
         ps.extend([(state, o_len, o_flat, encode_event_hashes(self.events))])
         self.events = []

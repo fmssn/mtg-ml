@@ -6,7 +6,9 @@ A job plays games (`GameSpec`). Each game has a policy per seat:
     "bot"       the scripted bot for that seat's deck (`mtg_ml.bots`),
     <path>      a frozen checkpoint from the opponent pool.
 Each (game, seat) carries its own recurrent state and the events it saw
-since its last decision. Every recorded player trajectory gets terminal reward +1 / -1 / 0 plus
+since its last decision, and is featurized in the feature-set version of
+its own policy (`policy_features`), so a pool snapshot or ladder rung
+trained before a feature set existed never sees its features. Every recorded player trajectory gets terminal reward +1 / -1 / 0 plus
 optional potential-based life shaping, then GAE (`_finish`): per decision
 (gamma, lam), or per game turn (`Job.gamma_turn`, `Job.lam_turn`), with the
 recorded values clamped to the reachable return range first.
@@ -39,9 +41,12 @@ live game, reused when a game ends; a seat's first decision is `fresh`).
 
 from __future__ import annotations
 
+import io
 import itertools
 import os
+import pickle
 import time
+import zipfile
 from array import array
 from dataclasses import dataclass, field, fields, replace
 from operator import itemgetter
@@ -49,6 +54,7 @@ from operator import itemgetter
 from ..agents import RandomAgent
 from ..bots import make_bot
 from ..backend import game_class
+from ..encode import check_features
 from ..engine import Game
 from ..engine.objects import (
     ASSIGN_DAMAGE,
@@ -115,6 +121,64 @@ def load_net(path: str):
         net = PolicyNet(**ckpt["config"])
     net.load_state_dict(ckpt["model"], assign=True)
     return net.eval()
+
+
+class _Stub:
+    """Whatever a checkpoint pickles besides plain containers (tensors,
+    storages, numpy arrays): `checkpoint_config` only wants the config."""
+
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(cls)
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        return _Stub()
+
+    def __setstate__(self, state):
+        pass
+
+
+class _ConfigUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module in ("builtins", "collections", "copyreg", "_codecs"):
+            return super().find_class(module, name)
+        return _Stub
+
+    def persistent_load(self, pid):
+        return None
+
+
+def checkpoint_config(path: str) -> dict:
+    """A checkpoint's `config` without torch: rollout workers that use the
+    inference server never import it. Reads the pickle of torch's zip format
+    with every tensor stubbed out (no tensor data is read); falls back to
+    `torch.load` for anything else."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            name = next(n for n in z.namelist() if n.endswith("/data.pkl") or n == "data.pkl")
+            return dict(_ConfigUnpickler(io.BytesIO(z.read(name))).load()["config"])
+    except (zipfile.BadZipFile, StopIteration, KeyError, TypeError, pickle.UnpicklingError, AttributeError):
+        import torch
+
+        return torch.load(path, map_location="cpu", weights_only=False)["config"]
+
+
+_FEATURES: dict[tuple, int] = {}
+
+
+def policy_features(path: str, version: int = 0) -> int:
+    """Feature-set version of the policy in checkpoint `path` (its config's
+    `features`; absent = 1), cached per process like `load_policy`: a
+    learner version replaces the previous learner version."""
+    key = (path, version)
+    if key not in _FEATURES:
+        if version:
+            for k in [k for k in _FEATURES if k[1]]:
+                del _FEATURES[k]
+        _FEATURES[key] = check_features(checkpoint_config(path).get("features", 1))
+    return _FEATURES[key]
 
 
 def load_policy(path: str, version: int = 0):
@@ -492,6 +556,9 @@ def _play(job: Job) -> Result:
     inflight: list = [None] * n_groups  # (handle, items) per group
     out = Result()
 
+    def features(pol: str) -> int:
+        return policy_features(job.learner_path, job.learner_version) if pol == LEARNER else policy_features(pol)
+
     def start(i: int) -> _Live:
         spec = job.games[i]
         g = Game(_decks(spec.match_game), seed=spec.seed, starting_player=spec.starting_player, max_turns=job.max_turns, match_game=spec.match_game, auto_mana=job.auto_mana, auto_pass=job.auto_pass)
@@ -526,7 +593,7 @@ def _play(job: Job) -> Result:
                     continue
                 live.append(lv)
                 seat = lv.seats[p]
-                state, o_len, o_flat = featurize_flat(g, p)
+                state, o_len, o_flat = featurize_flat(g, p, features=features(pol))
                 # int32 arrays once: batching and recording then only copy memory
                 x = (array("i", state), array("i", o_len), array("i", o_flat), array("i", encode_event_hashes(seat.events)))
                 seat.events = []

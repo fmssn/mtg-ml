@@ -104,6 +104,7 @@ from dataclasses import asdict, dataclass, field, fields
 import torch
 
 from ..backend import ENV_VAR, engine_name
+from ..encode import FEATURE_VERSIONS, FEATURES
 from .collect import PoolProcess, PoolThread, cpu_layout, release
 from .evaluate import EVAL_BLOCKS, evaluate_policy
 from .model import PolicyNet, load_partial
@@ -144,6 +145,7 @@ class TrainConfig:
     value_bound: str = "none"  # "tanh": squash the value head into (-1, 1) (new runs and --init only; a resumed run keeps its checkpoint's)
     value_clamp: float = 1.0  # GAE bootstraps from values clamped to +-(this + shaping); 0 = raw values
     entity_attn: int = 0  # trunk "entity": self-attention layers over each decision's entities (4 heads, FFN 2x; 0 = none)
+    features: int = FEATURES  # feature-set version the policy reads (encode.FEATURE_VERSIONS; docs/features.md): new runs and --init, a resumed run keeps its checkpoint's
     memory: str = "gru"  # "gru" (recurrent over the player's decisions) or "none"
     gamma: float = 0.995
     lam: float = 0.95
@@ -163,7 +165,7 @@ class TrainConfig:
     pool_sampling: str = "uniform"  # the other pool games: "uniform" over the pool, or "pfsp": weighted (1 - learner's win rate vs it) ** pfsp_power
     pfsp_power: float = 2.0
     pfsp_ema: float = 0.05  # per-game step of the running win rate vs each pool opponent (starts at 0.5)
-    init: str = ""  # a new run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, with --value-bound and --entity-attn on top (new attention layers start as the identity)
+    init: str = ""  # a new run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, with --value-bound, --entity-attn and --features on top (new attention layers start as the identity)
     exploit: str = ""  # exploiter mode: every training game is the learner on --exploit-deck vs this frozen policy file
     exploit_deck: str = "jund"  # "jund" (learner seat 0) or "blue" (seat 1)
     eval_every: int = 10  # evaluate every this many iterations (0 = only by eval_every_games)
@@ -258,9 +260,10 @@ class Trainer:
         elif init:  # the source's architecture, with --value-bound and --entity-attn on top
             config = {k: v for k, v in torch.load(init, map_location="cpu", weights_only=False)["config"].items() if k != "value_bound"}
             config["entity_attn"] = cfg.entity_attn or config.get("entity_attn", 0)
+            config["features"] = cfg.features  # no weights depend on it: a fine-tune may move to a newer feature set
             self.net = PolicyNet(**config, value_bound=cfg.value_bound)
         else:
-            self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn)
+            self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn, features=cfg.features)
         self.net.to(cfg.device)
         # a tensor lr when annealing: the update's CUDA graphs read it, so a new value each iteration costs no recapture
         self.opt = make_optimizer(self.net.parameters(), cfg.ppo.lr, cfg.device, tensor_lr=cfg.lr_anneal_games > 0)
@@ -320,8 +323,9 @@ class Trainer:
         ck = torch.load(path, map_location=self.cfg.device, weights_only=False)
         with torch.device("meta"):  # its config with today's defaults filled in
             config = PolicyNet(**ck["config"]).config
-        own = {k: v for k, v in self.net.config.items() if k not in ("entity_attn", "value_bound")}  # value_bound has no weights
-        theirs = {k: v for k, v in config.items() if k not in ("entity_attn", "value_bound")}
+        skip = ("entity_attn", "value_bound", "features")  # value_bound and features have no weights
+        own = {k: v for k, v in self.net.config.items() if k not in skip}
+        theirs = {k: v for k, v in config.items() if k not in skip}
         if own != theirs or config.get("entity_attn", 0) > self.net.config.get("entity_attn", 0):
             raise ValueError(f"--init {path}: its network {ck['config']} does not fit {self.net.config}")
         new = load_partial(self.net, ck["model"])
@@ -731,7 +735,7 @@ def _rate(games, seat: int) -> float:
     return sum(g[1] == seat for g in games) / len(games) if games else float("nan")
 
 
-CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "exploit_deck": ("jund", "blue"), "lr_schedule": ("linear", "cosine"), "value_bound": ("none", "tanh")}
+CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "exploit_deck": ("jund", "blue"), "lr_schedule": ("linear", "cosine"), "value_bound": ("none", "tanh"), "features": FEATURE_VERSIONS}
 
 
 def _check(cfg: TrainConfig) -> None:

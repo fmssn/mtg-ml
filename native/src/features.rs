@@ -60,9 +60,22 @@ fn thermo<O: FeatureOut>(o: &mut O, name: &str, n: i64, steps: &[i64]) {
     }
 }
 
-/// `encode.state_features(game, viewer)`: the direct features in order, plus
+/// encode.py `FEATURES` / `FEATURE_VERSIONS`: feature-set versions (1: up to
+/// 2026-10-06; 2: + readiness, known positions, skip_untap, stack targets, X,
+/// option previews).
+pub const FEATURES: u8 = 2;
+
+pub fn check_features(features: u8) -> Result<u8, String> {
+    if (1..=FEATURES).contains(&features) {
+        Ok(features)
+    } else {
+        Err(format!("unknown feature-set version {features} (known: 1..={FEATURES})"))
+    }
+}
+
+/// `encode.state_features(game, viewer, features)`: the direct features in order, plus
 /// the per-object ones, which the sink counts and appends in `finish`.
-pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
+pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, o: &mut O) {
     let opp = 1 - viewer;
     direct!(o, "step:{}", st.step_name);
     direct!(o, "active:{}", rel(st.active, viewer));
@@ -121,6 +134,9 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
     thermo(o, "self:power", power[0], POWER_STEPS);
     thermo(o, "opponent:power", power[1], POWER_STEPS);
     thermo(o, "stack_count", st.stack.len() as i64, COUNT_STEPS);
+    if features < 2 {
+        return;
+    }
     board_features(st, viewer, o);
     for (side, p) in [("self", viewer), ("opponent", opp)] {
         let lib = &st.players[p as usize].library;
@@ -222,7 +238,8 @@ fn ent_thermo<E: EntityOut>(o: &mut E, name: &str, n: i64) {
 
 /// `encode.entity_features(game, viewer)`: permanents in battlefield order,
 /// then the stack from the top. Returns the object id of each entity.
-pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, o: &mut E) -> Vec<u32> {
+pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, o: &mut E) -> Vec<u32> {
+    let v2 = features >= 2;
     let mut ids = Vec::with_capacity(st.battlefield.len() + st.stack.len());
     for &ci in &st.battlefield {
         if ids.len() == MAX_ENTITIES {
@@ -269,10 +286,12 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, o: &mut E) -> 
         } else if c.counters < 0 {
             tok!(o, "e:counters:{}", c.counters);
         }
-        if c.skip_untap > 0 {
-            tok!(o, "e:skip_untap:{}", c.skip_untap);
+        if v2 {
+            if c.skip_untap > 0 {
+                tok!(o, "e:skip_untap:{}", c.skip_untap);
+            }
+            targeted_by(st, viewer, Ref::Perm(c.oid), o);
         }
-        targeted_by(st, viewer, Ref::Perm(c.oid), o);
         ids.push(c.oid);
     }
     for (i, it) in st.stack.iter().rev().enumerate() {
@@ -285,6 +304,10 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, o: &mut E) -> 
         tok!(o, "e:ctrl:{}", rel(it.controller, viewer));
         tok!(o, "e:stack_pos:{}", i.min(3));
         tok!(o, "e:stack_kind:{}", it.kind.name());
+        if !v2 {
+            ids.push(it.sid);
+            continue;
+        }
         if it.x > 0 {
             ent_thermo(o, "e:x", it.x as i64);
         }
@@ -736,11 +759,11 @@ pub fn option_token_hashes(kind: Kind, key: &Key, tag: &str, dim: u32, out: &mut
     }
 }
 
-/// `rl.features.featurize(game, player, state_dim, option_dim)`.
-pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32) -> Option<(Vec<u32>, Vec<Vec<u32>>)> {
+/// `rl.features.featurize(game, player, state_dim, option_dim, features)`.
+pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32, features: u8) -> Option<(Vec<u32>, Vec<Vec<u32>>)> {
     let d = st.decision.as_ref()?;
     let mut s = HashOut { buf: String::with_capacity(64), out: Vec::with_capacity(200), dim: state_dim, counted: Vec::with_capacity(96) };
-    state_features_into(st, player, &mut s);
+    state_features_into(st, player, features, &mut s);
     direct!(s, "seat:{player}");
     direct!(s, "decision:{}", d.kind.name());
     let mut state = s.finish();
@@ -749,7 +772,7 @@ pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32) -> Opt
     let start = state.len();
     let ids = {
         let mut eo = EntityHashes { out: &mut state, start, buf: String::with_capacity(48), dim: state_dim };
-        let ids = entity_features_into(st, player, &mut eo);
+        let ids = entity_features_into(st, player, features, &mut eo);
         eo.close();
         ids
     };
@@ -760,11 +783,13 @@ pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32) -> Opt
         .map(|o| {
             let mut v = Vec::with_capacity(2 * o.key.len() + 3);
             option_token_hashes(d.kind, &o.key, "", option_dim, &mut v);
-            option_preview(st, player, d.kind, &o.value, &mut |a| {
-                pbuf.clear();
-                let _ = pbuf.write_fmt(a);
-                v.push(crc32fast::hash(pbuf.as_bytes()) % option_dim);
-            });
+            if features >= 2 {
+                option_preview(st, player, d.kind, &o.value, &mut |a| {
+                    pbuf.clear();
+                    let _ = pbuf.write_fmt(a);
+                    v.push(crc32fast::hash(pbuf.as_bytes()) % option_dim);
+                });
+            }
             v.sort_unstable();
             v.dedup();
             let mut ptr: Vec<u32> = option_object_ids(st, o).iter().filter_map(|id| ids.iter().position(|x| x == id)).map(|k| option_dim + k as u32).collect();

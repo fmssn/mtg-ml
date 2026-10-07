@@ -2,8 +2,38 @@
 
 What the policy sees at a decision point. Everything is a string hashed with
 CRC32 into a fixed index space (`STATE_DIM = 2^16`, `OPTION_DIM = 2^15`), so
-adding a feature changes no dimension and old checkpoints still load (the new
-strings start as untrained embedding rows that collide with existing ones).
+adding a feature changes no dimension and old checkpoints still load.
+
+## Feature-set versions
+
+New strings would land on embedding rows a trained model never learned
+(random init, or rows it learned for colliding strings): checkpoints from
+before set 2 lost ~1.3 benchmark points when evaluated with it. So the
+feature set is versioned and travels with the model:
+
+| version | contents |
+|---|---|
+| 1 | everything up to 2026-10-06 |
+| 2 | + the readiness/lethal and known-position state features, the `e:skip_untap` / `e:targets` / `e:targeted_by` / `e:x` entity features and the `pv:` option previews below |
+
+- `PolicyNet(features=...)` stores it in `config["features"]`, only when it
+  is not 1, so a config without the key (every checkpoint before this) is
+  set 1. New training runs default to the latest (`--features 2`); `--init`
+  takes `--features` (no weights depend on it); a resumed run keeps its
+  checkpoint's.
+- The encoders take it: `encode.state_features / entity_features /
+  option_preview / encode_state`, `rl.features.featurize(_flat)` (keyword
+  `features`, default the latest, `encode.FEATURES`), and the native
+  `featurize` / `state_features` / `entity_features`.
+- Every network seat is featurized with its own policy's version: rollouts
+  (learner, pool snapshots, ladder rungs, local or server inference) read it
+  from each checkpoint with `rollout.policy_features` (no torch needed), and
+  `ModelAgent` (replays, `play`) from its network. Scripted bots don't read
+  features.
+- `tests/data/features_v1_digests.json` holds digests of the set-1 output
+  recorded with the code before set 2 existed;
+  `test_feature_set_1_reproduces_the_features_before_set_2` checks both
+  engines against it, and `make difftest` compares both versions.
 
 Both engines produce the same strings: `mtg_ml/encode.py` and
 `mtg_ml/rl/features.py` (Python reference), `native/src/features.rs` (Rust).
@@ -17,7 +47,7 @@ the strings behind it. Numbers are thermometers (`name>=k` for every step
 Global features of what the viewer can see: step, active player, turn, life,
 library, hand, graveyard and exile sizes, cards in hand / graveyard / exile,
 known library cards, floating mana, per-type board counts, total power, stack
-size. Added in 2026-10 (representation items 10 and 11):
+size. Added in set 2 (representation items 10 and 11):
 
 | feature | meaning |
 |---|---|
@@ -34,7 +64,7 @@ size. Added in 2026-10 (representation items 10 and 11):
 ## Entities (`encode.entity_features`)
 
 One feature list per permanent (battlefield order) and stack item (from the
-top). Options point at the entities they are about. Added:
+top). Options point at the entities they are about. Added in set 2:
 
 | feature | on | meaning |
 |---|---|---|
@@ -43,7 +73,7 @@ top). Options point at the entities they are about. Added:
 | `e:targets:{kind}:{rel}` | stack item | it targets a `player`, `perm` or `spell` of `rel` |
 | `e:x>=k` | stack item | the chosen X |
 
-## Option previews (`encode.option_preview`, item 12)
+## Option previews (`encode.option_preview`, item 12, set 2)
 
 Engine-computed effects of an option, from the current state without
 changing it, hashed into the option's tokens next to its key tokens. They read

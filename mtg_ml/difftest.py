@@ -6,7 +6,8 @@ step the harness compares
 
 * the decision: player, kind, prompt, option labels and keys (in order);
 * `observe()` for both players and `state_features()` for both players;
-* `featurize()` for the deciding player (native fast path vs Python);
+* `featurize()` for the deciding player in the latest feature set and in set 1
+  (native fast path vs Python);
 * a dump of the full hidden state (libraries in order, `known_to`, object
   ids, damage, counters, the stack, pending triggers, combat, RNG position);
 * for scripted-bot seats, the bot's choice computed on each engine (the bots
@@ -161,6 +162,7 @@ def snapshot(g, full: bool = True) -> dict:
         s["features1"] = state_features(g, 1)
         if g.decision is not None:
             s["featurize"] = featurize(g, g.decision.player)
+            s["featurize_v1"] = featurize(g, g.decision.player, features=1)
             s["events"] = [event_hashes(g, i) for i in range(len(g.decision.options))]
         s["state"] = dump_state(g)
     return canonical(s)

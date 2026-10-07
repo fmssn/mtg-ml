@@ -22,6 +22,20 @@ import zlib
 from .engine.view import observe
 
 DEFAULT_DIM = 1 << 16
+# Feature-set versions. A policy is featurized with the version it was trained
+# on (`PolicyNet.config["features"]`, absent = 1), so adding features never
+# feeds a trained model hashed rows it has not learned.
+#   1: the set up to 2026-10-06
+#   2: + lethal / readiness, known library positions, skip_untap, stack
+#      targets and X, option previews (docs/features.md)
+FEATURES = 2  # the latest; what new runs train on
+FEATURE_VERSIONS = (1, 2)
+
+
+def check_features(features: int) -> int:
+    if features not in FEATURE_VERSIONS:
+        raise ValueError(f"unknown feature-set version {features!r} (known: {FEATURE_VERSIONS})")
+    return features
 _ID = re.compile(r"#(\d+)")
 
 
@@ -64,14 +78,15 @@ def _counted(raw: list[str]) -> list[str]:
     return out
 
 
-def state_features(game, viewer: int) -> list[str]:
+def state_features(game, viewer: int, features: int = FEATURES) -> list[str]:
     """Global features of what `viewer` can see. Numbers (turn, life, hand
     and graveyard sizes, board power) are thermometers; cards in hand,
     graveyard and exile and the per-type board counts keep their
     multiplicity through `_counted`. Permanents and stack items themselves
-    are entities (`entity_features`)."""
+    are entities (`entity_features`). `features`: the feature-set version."""
+    check_features(features)
     if getattr(game, "NATIVE", False):
-        return game.state_features(viewer)
+        return game.state_features(viewer, features)
     o = observe(game, viewer)
     f = [f"step:{o['step']}", f"active:{o['active']}", f"postboard:{o['match_game'] > 1}"]
     f += _thermo("turn", o["turn"], TURN_STEPS)
@@ -111,6 +126,8 @@ def state_features(game, viewer: int) -> list[str]:
     for side in ("self", "opponent"):
         f += _thermo(f"{side}:power", power[side], POWER_STEPS)
     f += _thermo("stack_count", len(o["stack"]))
+    if features < 2:
+        return f + _counted(raw)
     f += _board_features(o, viewer, game)
     for side in ("self", "opponent"):
         n = o[side]["library_count"]
@@ -169,18 +186,20 @@ ENT_STEPS = (*range(1, 9), 10, 12, 15)
 MAX_ENTITIES = 64  # permanents and stack items beyond this are left out
 
 
-def entity_features(game, viewer: int) -> tuple[list[list[str]], dict[int, int]]:
+def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[list[str]], dict[int, int]]:
     """One feature list per object the cards can point at: every permanent
     (battlefield order), then the stack from the top. Returns the lists and
     {oid or stack id: entity index}; the two id spaces are shared, so labels
     like `Tolarian Terror#12` resolve unambiguously. Everything about one
     object stays together, so two Tolarian Terrors, one tapped and damaged,
     are two different entities rather than a bag of shared name features."""
+    check_features(features)
     if getattr(game, "NATIVE", False):
-        return game.entity_features(viewer)
+        return game.entity_features(viewer, features)
     o = observe(game, viewer)
     ents, index = [], {}
-    targeted = _targeted_by(o["stack"])
+    v2 = features >= 2
+    targeted = _targeted_by(o["stack"]) if v2 else {}
     for p in o["battlefield"]:
         e = [f"e:name:{p['name']}", f"e:ctrl:{p['controller']}"]
         e += [f"e:type:{t}" for t in p["types"]]
@@ -200,7 +219,7 @@ def entity_features(game, viewer: int) -> tuple[list[list[str]], dict[int, int]]
             e += _thermo("e:counters", p["counters"], ENT_STEPS)
         elif p["counters"] < 0:
             e.append(f"e:counters:{p['counters']}")
-        if p["skip_untap"] > 0:
+        if v2 and p["skip_untap"] > 0:
             e.append(f"e:skip_untap:{p['skip_untap']}")
         e += targeted.get(p["oid"], [])
         index[p["oid"]] = len(ents)
@@ -208,9 +227,9 @@ def entity_features(game, viewer: int) -> tuple[list[list[str]], dict[int, int]]
     for i, it in enumerate(reversed(o["stack"])):
         index[it["sid"]] = len(ents)
         e = ["e:stack", f"e:name:{it['name']}", f"e:ctrl:{it['controller']}", f"e:stack_pos:{min(i, 3)}", f"e:stack_kind:{it['kind']}"]
-        if it["x"] > 0:
+        if v2 and it["x"] > 0:
             e += _thermo("e:x", it["x"], ENT_STEPS)
-        for label in it["targets"]:
+        for label in it["targets"] if v2 else ():
             kind, rel = _parse_target(label)
             e.append(f"e:targets:{kind}:{rel}")
         e += targeted.get(it["sid"], [])
@@ -351,11 +370,13 @@ def _target_preview(game, player: int, ref) -> list[str]:
     return f
 
 
-def option_preview(game, player: int, i: int) -> list[str]:
+def option_preview(game, player: int, i: int, features: int = FEATURES) -> list[str]:
     """Engine-computed effects of taking option `i` of the current decision,
     from the current state without changing it (`pv:` tokens): creatures a
     sweeper ability kills per side, ward and lethal damage on a target, mana
-    and colours left after a cast or activation."""
+    and colours left after a cast or activation. Feature set 2 and up."""
+    if check_features(features) < 2:
+        return []
     if getattr(game, "NATIVE", False):
         return game.option_preview(player, i)
     kind = game.decision.kind
@@ -387,9 +408,9 @@ def hash_feature(feature: str, dim: int = DEFAULT_DIM) -> int:
     return zlib.crc32(feature.encode()) % dim
 
 
-def encode_state(game, viewer: int, dim: int = DEFAULT_DIM) -> list[int]:
+def encode_state(game, viewer: int, dim: int = DEFAULT_DIM, features: int = FEATURES) -> list[int]:
     """Sorted unique feature indices (a multi-hot sparse vector)."""
-    return sorted({hash_feature(x, dim) for x in state_features(game, viewer)})
+    return sorted({hash_feature(x, dim) for x in state_features(game, viewer, features)})
 
 
 def action_keys(game) -> list[tuple]:
