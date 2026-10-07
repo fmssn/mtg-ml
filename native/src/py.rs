@@ -303,6 +303,7 @@ impl PyGame {
         Ok(())
     }
     /// Scenario setups: put player `p`'s venture marker in a room (None: no dungeon).
+    #[pyo3(signature = (p, room))]
     fn set_dungeon_room(&mut self, p: usize, room: Option<&str>) -> PyResult<()> {
         let p = Self::pidx(p)?;
         let idx = match room {

@@ -87,9 +87,9 @@ out = { "Masked Vandal" = 4 }
 [[plan]]
 deck = "mono_blue_terror"
 opponent = "elves"
-why = "Nothing in Blue's sideboard helps (no red cards, no instants worth a Dispel, no artifacts worth a Steel Sabotage)."
-in = {}
-out = {}
+why = "Little in Blue's six helps (no red cards, one instant): a Force Spike Elves' mana creatures pay through becomes a Steel Sabotage for Food or Treasure."
+in = { "Steel Sabotage" = 1 }
+out = { "Force Spike" = 1 }
 
 [[plan]]
 deck = "elves"

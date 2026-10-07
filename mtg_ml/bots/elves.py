@@ -62,6 +62,7 @@ class ElvesBot(Bot):
             "Spinewoods Paladin": 4,
             "Vitu-Ghazi Inspector": 2.5,
             "Deglamer": 2,
+            "Faerie Macabre": 2,
         }.get(name, 1.0)
 
     def land_need(self, g: Game) -> float:
@@ -94,6 +95,16 @@ class ElvesBot(Bot):
         if g.is_land(c):
             return 3.0
         return 0.5 if c.is_token else 1.5
+
+    def gy_targets(self, g: Game) -> list[Card]:
+        """Opponent graveyard cards worth exiling: fuel for Tolarian Terror and
+        Cryptic Serpent, escape and flashback cards, Sneaky Snacker."""
+        out = []
+        for c in g.players[self.opp].graveyard:
+            f = c.face
+            if f.is_type("Instant") or f.is_type("Sorcery") or f.escape is not None or f.flashback is not None or any(t.event == "third_draw" for t in f.triggers):
+                out.append(c)
+        return out
 
     def unblocked_attackers(self, g: Game) -> list[Card]:
         out = []
@@ -175,6 +186,8 @@ class ElvesBot(Bot):
             if self.land_need(g) > 0 and self.mana_available(g) < 6 and (self.main_phase(g) or self.opp_end_step(g)):
                 return 4.0
             return NEG
+        if n == "Faerie Macabre":  # never cast (no black mana): discard it as graveyard hate
+            return 6.0 if len(self.gy_targets(g)) >= 2 else NEG
         if n == "Food":
             return 2.0 if self.opp_end_step(g) and self.me(g).life <= 12 else NEG
         if n == "Treasure":
@@ -238,6 +251,10 @@ class ElvesBot(Bot):
 
     def score_exile_from_graveyard(self, g: Game, d: Decision, o: Option) -> float:
         c = o.value
+        if o.key[0] == "exile_any_gy":  # Faerie Macabre
+            if c is None:
+                return 0.0
+            return (2.0 if c in self.gy_targets(g) else 0.5) if o.key[1] == "opponent" else -1.0
         if self.building(g, d) == "Masked Vandal" or d.prompt.startswith("Masked Vandal"):
             if c is None:
                 return 0.0

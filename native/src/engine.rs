@@ -323,7 +323,6 @@ impl Eng {
                 let st = self.s();
                 let sid = st.new_id();
                 let name = format!("{}: {}", st.src(&t.source).name(), t.tdef.name);
-                let tspecs = t.tdef.targets.clone();
                 st.push_log_lazy(|_| format!("trigger -> stack: {name}"));
                 st.stack.push(StackItem {
                     sid,
@@ -1578,11 +1577,6 @@ impl Eng {
             Op::CountersTarget { n } => {
                 if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
                     self.s().cm(c).counters += n;
-                }
-            }
-            Op::ExileTarget => {
-                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
-                    self.s().mv(c, Zone::Exile);
                 }
             }
             Op::ShuffleTargetIntoLibrary => {

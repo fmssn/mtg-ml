@@ -11,7 +11,7 @@ from mtg_ml.bots import make_bot
 from mtg_ml.engine import objects as O
 from mtg_ml.engine.view import determinize
 from mtg_ml.match import MATCHUPS, game_args
-from mtg_ml.engine.decks import DECKS, SIDEBOARD_PLANS, SIDEBOARDS, postboard
+from mtg_ml.engine import DECKS, SIDEBOARD_PLANS, SIDEBOARDS, postboard
 
 FORESTS = lambda n: ["Forest"] * n  # noqa: E731
 SWAMPS = lambda n: ["Swamp"] * n  # noqa: E731

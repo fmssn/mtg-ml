@@ -102,6 +102,26 @@ RED_MADNESS_SIDEBOARD = {
     "End the Festivities": 2,
 }
 
+# Modal counts of the cards in >= 50% of Q3 2026 lists sum to 61; Sagu
+# Wildling (mean 1.85 copies) goes from 3 to 2. Land Grant (40%) is out.
+ELVES = {
+    "Forest": 12,
+    "Gingerbread Cabin": 1,
+    "Llanowar Elves": 4,
+    "Fyndhorn Elves": 3,
+    "Elvish Mystic": 2,
+    "Priest of Titania": 4,
+    "Quirion Ranger": 4,
+    "Timberwatch Elf": 4,
+    "Masked Vandal": 4,
+    "Nyxborn Hydra": 4,
+    "Avenging Hunter": 4,
+    "Generous Ent": 4,
+    "Sagu Wildling": 2,
+    "Winding Way": 4,
+    "Lead the Stampede": 4,
+}
+
 # Elves: the Q3 2026 modal sideboard (cards in >= 50% of lists): 4 Monstrous
 # Emergence, 3 Faerie Macabre, 3 Vitu-Ghazi Inspector, 3 Spinewoods Paladin,
 # then 2 Deglamer (the most played card below 50%) for 15.

@@ -254,7 +254,6 @@ pub enum Op {
     /// +n/+n until end of turn, or +X/+X with X = the Elves on the battlefield.
     PumpTarget { n: i32, count_elves: bool },
     CountersTarget { n: i32 },
-    ExileTarget,
     ShuffleTargetIntoLibrary,
     /// Top n cards: one card type (`take`, or chosen from `choose`) to hand, the rest to the graveyard or the bottom.
     Dig { n: i32, take: Option<String>, choose: Vec<String>, rest_graveyard: bool },
@@ -804,7 +803,6 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 None => Op::PumpTarget { n: n()?, count_elves: false },
             },
             "counters_target" => Op::CountersTarget { n: n()? },
-            "exile_target" => Op::ExileTarget,
             "shuffle_target_into_library" => Op::ShuffleTargetIntoLibrary,
             "dig" => {
                 let take = get_str(t, "take")?.map(|s| s.to_string());
@@ -1287,6 +1285,9 @@ fn parse_dungeon(id: DefId, t: &Table, db: &CardDb, tokens: &HashMap<String, Def
         enters_tapped_unless_forests: 0,
         additional_power: false,
         collect_evidence: 0,
+        bargain: false,
+        phyrexian_cost: None,
+        phyrexian_life: 0,
         shape: vec![],
     };
     Ok((d, next))

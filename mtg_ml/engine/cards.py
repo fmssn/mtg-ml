@@ -328,12 +328,6 @@ def _op_counters_target(g, item, op):
         t.counters += op["n"]
 
 
-def _op_exile_target(g, item, op):
-    t = g.target(item)
-    if t is not None:
-        g._move(t, "exile")
-
-
 def _op_shuffle_target_into_library(g, item, op):
     """Its owner shuffles the targeted permanent into their library (Deglamer)."""
     t = g.target(item)
@@ -461,7 +455,6 @@ OPS = {
     "untap_target": _op_untap_target,
     "pump_target": _op_pump_target,
     "counters_target": _op_counters_target,
-    "exile_target": _op_exile_target,
     "shuffle_target_into_library": _op_shuffle_target_into_library,
     "dig": _op_dig,
     "may_exile_from_graveyard": _op_may_exile_from_graveyard,
