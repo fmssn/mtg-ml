@@ -56,6 +56,9 @@ STEPS = (
 )
 
 MAX_HAND = 7
+# Cast modes from the hand, in the order they are offered.
+HAND_MODES = ("normal", "bestow", "overload", "alternative", "phyrexian", "bargain")
+BARGAIN_SAC = "artifact_enchantment_or_token"  # bargain's sacrifice filter
 
 
 class GameOver(Exception):
@@ -637,7 +640,7 @@ class Game:
                     opts.append(Option(f"Cast {card.name} ({sm.name})", ("cast", card.name, "hand", "normal", sm.name), ("cast", card, "normal", i)))
             if card.face.modes:
                 continue
-            for mode in ("normal", "bestow", "overload", "alternative"):
+            for mode in HAND_MODES:
                 if self._can_cast(p, card, mode):
                     label = f"Cast {card.name}" + ("" if mode == "normal" else f" ({mode})")
                     opts.append(Option(label, ("cast", card.name, "hand", mode), ("cast", card, mode)))
@@ -990,9 +993,10 @@ class Game:
     # Events and triggers
     # ------------------------------------------------------------------
 
-    def _emit_etb(self, card: Card) -> None:
+    def _emit_etb(self, card: Card, method: str | None = None) -> None:
+        """method: how the permanent was cast, if it resolved as a spell."""
         for t in card.face.triggers:
-            if t.event == "etb":
+            if t.event == "etb" and (t.condition is None or t.condition(self, card, method)):
                 self.pending.append(PendingTrigger(card.controller, card, t))
 
     def _emit_sacrifice(self, lki: Card) -> None:
@@ -1059,11 +1063,20 @@ class Game:
                     controller=t.controller,
                     name=f"{t.source.name}: {t.tdef.name}",
                     effect=t.tdef.effect,
+                    target_specs=t.tdef.targets,
                     source=t.source,
                     data=dict(t.data),
                 )
                 self.stack.append(item)
                 self._log(f"trigger -> stack: {item.name}")
+                if item.target_specs:
+                    # 603.3d: a triggered ability without legal targets is removed from the stack.
+                    if any(not self.target_candidates(spec, p, exclude_sid=item.sid, chosen=[]) for spec in item.target_specs):
+                        self.stack.remove(item)
+                        self._log(f"{item.name}: no legal targets")
+                        continue
+                    yield from self._choose_targets(p, item)
+                    self._emit_targeted(item)
 
     # ------------------------------------------------------------------
     # State-based actions
@@ -1113,6 +1126,13 @@ class Game:
         if k == "creature_of_target_player" and chosen:
             q = chosen[-1][1]
             return [("perm", c.oid) for c in self.battlefield if self.is_creature(c) and c.controller == q]
+        if k == "another_creature":
+            # A creature not already chosen as a target of the same spell. With
+            # nothing chosen yet (casting checks) it needs a second creature.
+            creatures = [("perm", c.oid) for c in self.battlefield if self.is_creature(c)]
+            if not chosen:
+                return creatures if len(creatures) >= 2 else []
+            return [r for r in creatures if r not in chosen]
         if k.endswith("spell"):
             return [("stack", it.sid) for it in self.stack if it.kind == "spell" and it.sid != exclude_sid and self._spell_matches(spec, it)]
         out = []
@@ -1125,8 +1145,10 @@ class Game:
 
     def _perm_matches(self, spec: TargetSpec, c: Card, controller: int) -> bool:
         k = spec.kind
-        if k in ("creature", "any", "creature_of_target_player"):
+        if k in ("creature", "any", "creature_of_target_player", "another_creature"):
             return self.is_creature(c)
+        if k == "artifact_or_enchantment_you_dont_control":
+            return c.controller != controller and bool(self.types(c) & {"Artifact", "Enchantment"})
         if k == "nonlegendary_creature":
             return self.is_creature(c) and "Legendary" not in c.face.supertypes
         if k == "creature_you_control":
@@ -1162,8 +1184,12 @@ class Game:
             return "R" in d.colors
         if k == "instant_spell":
             return d.is_type("Instant")
+        if k == "sorcery_spell":
+            return d.is_type("Sorcery")
         if k == "artifact_spell":
             return d.is_type("Artifact")
+        if k == "artifact_or_enchantment_spell":
+            return d.is_type("Artifact") or d.is_type("Enchantment")
         return False
 
     def target_legal(self, item: StackItem, i: int) -> bool:
@@ -1254,6 +1280,8 @@ class Game:
             elif flt == "artifact_or_creature" and (self.is_artifact(c) or self.is_creature(c)):
                 out.append(c)
             elif flt == "mountain" and self.is_land(c) and "Mountain" in c.face.subtypes:
+                out.append(c)
+            elif flt == BARGAIN_SAC and (c.is_token or self.types(c) & {"Artifact", "Enchantment"}):
                 out.append(c)
         return out
 
@@ -1427,7 +1455,16 @@ class Game:
             return O.FREE if d.plot is not None else None
         if mode == "alternative":
             return O.FREE if d.alternative_sac is not None else None
+        if mode == "phyrexian":
+            return d.phyrexian_cost
+        if mode == "bargain":
+            return d.cost if d.bargain else None
         return None
+
+    @staticmethod
+    def _mode_additional_sac(card: Card, mode: str) -> str | None:
+        """Sacrifice filter of an additional cost: the card's own, or bargain's."""
+        return BARGAIN_SAC if mode == "bargain" else card.face.additional_sac
 
     def _mode_sac(self, card: Card, mode: str) -> tuple[str, int] | None:
         """Lands sacrificed instead of (part of) the cost: (filter, count)."""
@@ -1455,7 +1492,7 @@ class Game:
         base = self._mode_cost(card, mode)
         if base is None:
             return False
-        if mode in ("normal", "bestow", "overload", "alternative") and card.zone != "hand":
+        if mode in HAND_MODES and card.zone != "hand":
             return False
         if mode in ("flashback", "escape") and card.zone != "graveyard":
             return False
@@ -1475,11 +1512,13 @@ class Game:
             return False
         if d.additional_discard and len(self.players[p].hand) - (card.zone == "hand") < 1:
             return False
+        if mode == "phyrexian" and self.players[p].life < d.phyrexian_life:
+            return False
         sac = self._mode_sac(card, mode)
         if sac is not None and len(self.sac_candidates(p, sac[0])) < sac[1]:
             return False
         cost = base.with_x(0).reduced(self._cost_reduction(p, card))
-        return self._cost_feasible(p, RemainingCost.of(cost), d.additional_sac)
+        return self._cost_feasible(p, RemainingCost.of(cost), self._mode_additional_sac(card, mode))
 
     def _cast(self, p: int, card: Card, mode: str, choice: int | None = None):
         d = card.face
@@ -1502,18 +1541,22 @@ class Game:
         self._log(f"p{p} casts {card.name} ({mode}) from {from_zone}")
         base = self._mode_cost(card, mode)
         reduction = self._cost_reduction(p, card)
+        add_sac = self._mode_additional_sac(card, mode)
         if base.x:
             xs = []
             x = 0
-            while self._cost_feasible(p, RemainingCost.of(base.with_x(x).reduced(reduction)), d.additional_sac):
+            while self._cost_feasible(p, RemainingCost.of(base.with_x(x).reduced(reduction)), add_sac):
                 xs.append(x)
                 x += 1
             item.x = yield from self.ask(p, O.CHOOSE_X, f"Choose X for {card.name}", [Option(f"X={v}", ("x", v), v) for v in xs])
         yield from self._choose_targets(p, item)
         cost = base.with_x(item.x).reduced(reduction)
-        yield from self._pay_mana(p, RemainingCost.of(cost), d.additional_sac, what=card.name)
-        if d.additional_sac:
-            yield from self._choose_sacrifice(p, d.additional_sac, card.name)
+        yield from self._pay_mana(p, RemainingCost.of(cost), add_sac, what=card.name)
+        if mode == "phyrexian":
+            self.players[p].life -= d.phyrexian_life
+            self._log(f"p{p} pays {d.phyrexian_life} life for {card.name}")
+        if add_sac:
+            yield from self._choose_sacrifice(p, add_sac, card.name)
         if d.additional_discard:
             gone = yield from self.choose_discard(p, card.name)
             item.data["discarded_land"] = self.is_land(gone)
@@ -1683,7 +1726,7 @@ class Game:
             new.counters = item.x
         if host is not None:
             new.attached_to = host.oid
-        self._emit_etb(new)
+        self._emit_etb(new, item.method)
         if False:
             yield
 

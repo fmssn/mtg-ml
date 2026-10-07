@@ -676,5 +676,131 @@
    "Storm"
   ],
   "cmc": 2.0
+ },
+ {
+  "name": "Hydroblast",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Choose one \u2014\n\u2022 Counter target spell if it's red.\n\u2022 Destroy target permanent if it's red.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Envelop",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Counter target sorcery spell.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Annul",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Counter target artifact or enchantment spell.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Gut Shot",
+  "mana_cost": "{R/P}",
+  "type_line": "Instant",
+  "oracle_text": "({R/P} can be paid with either {R} or 2 life.)\nGut Shot deals 1 damage to any target.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Troublemaker Ouphe",
+  "mana_cost": "{1}{G}",
+  "type_line": "Creature \u2014 Ouphe",
+  "oracle_text": "Bargain (You may sacrifice an artifact, enchantment, or token as you cast this spell.)\nWhen this creature enters, if it was bargained, exile target artifact or enchantment an opponent controls.",
+  "power": "2",
+  "toughness": "2",
+  "keywords": [
+   "Bargain"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Breath Weapon",
+  "mana_cost": "{2}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Breath Weapon deals 2 damage to each non-Dragon creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 3.0
+ },
+ {
+  "name": "Faerie Macabre",
+  "mana_cost": "{1}{B}{B}",
+  "type_line": "Creature \u2014 Faerie Rogue",
+  "oracle_text": "Flying\nDiscard this card: Exile up to two target cards from graveyards.",
+  "power": "2",
+  "toughness": "2",
+  "keywords": [
+   "Flying"
+  ],
+  "cmc": 3.0
+ },
+ {
+  "name": "Terminate",
+  "mana_cost": "{B}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Destroy target creature. It can't be regenerated.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Cast into the Fire",
+  "mana_cost": "{1}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Choose one \u2014\n\u2022 Cast into the Fire deals 1 damage to each of up to two target creatures.\n\u2022 Exile target artifact.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "End the Festivities",
+  "mana_cost": "{R}",
+  "type_line": "Sorcery",
+  "oracle_text": "End the Festivities deals 1 damage to each opponent and each creature and planeswalker they control.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Smash to Smithereens",
+  "mana_cost": "{1}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Destroy target artifact. Smash to Smithereens deals 3 damage to that artifact's controller.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Ancient Grudge",
+  "mana_cost": "{1}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Destroy target artifact.\nFlashback {G} (You may cast this card from your graveyard for its flashback cost. Then exile it.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flashback"
+  ],
+  "cmc": 2.0
  }
 ]

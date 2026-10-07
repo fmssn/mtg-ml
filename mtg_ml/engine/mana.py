@@ -41,9 +41,30 @@ class ManaCost:
                 x += 1
             elif sym in MANA_TYPES:
                 colored[sym] = colored.get(sym, 0) + 1
+            elif len(sym) == 3 and sym.endswith("/P") and sym[0] in COLORS:
+                # Phyrexian mana counts as its colour here (mana value, colour);
+                # paying 2 life instead is the cast mode "phyrexian".
+                colored[sym[0]] = colored.get(sym[0], 0) + 1
             else:
                 raise ValueError(f"unsupported mana symbol {{{sym}}} in {text!r}")
         return ManaCost(generic, tuple(sorted(colored.items())), x)
+
+    @staticmethod
+    def phyrexian(text: str | None) -> "ManaCost":
+        """The phyrexian symbols of a cost text ({R/P} -> {R}), as a cost."""
+        colored: dict[str, int] = {}
+        for sym in _SYMBOL.findall(text or ""):
+            if len(sym) == 3 and sym.endswith("/P"):
+                colored[sym[0]] = colored.get(sym[0], 0) + 1
+        return ManaCost(0, tuple(sorted(colored.items())))
+
+    def minus_colored(self, other: "ManaCost") -> "ManaCost":
+        """This cost without `other`'s coloured symbols (each must be present)."""
+        c = self.colored_dict()
+        for k, n in other.colored:
+            assert c.get(k, 0) >= n, (self, other)
+            c[k] -= n
+        return ManaCost(self.generic, tuple(sorted((k, n) for k, n in c.items() if n)), self.x)
 
     def colored_dict(self) -> dict[str, int]:
         return dict(self.colored)

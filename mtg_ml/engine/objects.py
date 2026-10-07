@@ -82,7 +82,7 @@ class TargetSpec(_Immutable):
     """kind is one of: creature, nonlegendary_creature, nonartifact_creature,
     creature_you_control, land, nonland_permanent, artifact, blue_permanent,
     red_permanent, spell, blue_spell, red_spell, instant_spell,
-    artifact_spell, player, opponent, any (creature or player)."""
+    sorcery_spell, artifact_spell, player, opponent, any (creature or player)."""
 
     kind: str
 
@@ -126,6 +126,7 @@ class TriggerDef(_Immutable):
     event: str
     effect: Effect
     condition: Callable[..., bool] | None = None
+    targets: tuple[TargetSpec, ...] = ()  # chosen as the trigger is put on the stack
 
 
 @dataclass
@@ -158,6 +159,11 @@ class CardDef(_Immutable):
     # Costs of sacrificing lands instead of mana: (sacrifice filter, count).
     alternative_sac: tuple[str, int] | None = None  # cast mode "alternative" (Fireblast)
     flashback_sac: tuple[str, int] | None = None  # flashback cost (Lava Dart)
+    # Phyrexian mana ({R/P}): cast mode "phyrexian" pays `phyrexian_cost` (the
+    # cost without those symbols) and 2 life per symbol (Gut Shot).
+    phyrexian_cost: ManaCost | None = None
+    phyrexian_life: int = 0
+    bargain: bool = False  # cast mode "bargain": also sacrifice an artifact, enchantment or token
     # permanents
     abilities: tuple[AbilityDef, ...] = ()
     triggers: tuple[TriggerDef, ...] = ()

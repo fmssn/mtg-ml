@@ -24,7 +24,10 @@ LEMBAS_LIFE = 8
 HOLD_REMOVAL_MANA = True  # on our turn, keep {1}{B} open for instant-speed removal we hold
 HOLD_FROM_TURN = 3  # ...from this game turn on, or earlier when Blue already has a threat
 SPARE_LAND_COUNT = 6  # with this many lands, an extra land is cheap sacrifice fodder
-REMOVAL = ("Cast Down", "Go for the Throat", "Red Elemental Blast")
+REMOVAL = ("Cast Down", "Go for the Throat", "Terminate", "Red Elemental Blast", "Pyroblast")
+BLASTS = ("Red Elemental Blast", "Pyroblast")  # Pyroblast targets anything, but only hurts blue
+WEATHER_LIFE = 12  # cast Weather the Storm at or below this life (at their end step, or when burned)
+BREATH_MIN_VALUE = 3.0  # net threat value Breath Weapon must kill
 
 BRIDGES = {"Drossforge Bridge", "Slagwoods Bridge", "Vault of Whispers"}
 CURVE = {  # main-phase cast priority
@@ -37,6 +40,7 @@ CURVE = {  # main-phase cast priority
     "Lembas": 4.5,
     "Nihil Spellbomb": 4,
     "Makeshift Munitions": 3,
+    "Troublemaker Ouphe": 5,
 }
 
 
@@ -52,8 +56,15 @@ class JundBot(Bot):
         return {
             "Cast Down": 5,
             "Go for the Throat": 5,
+            "Terminate": 5,
             "Red Elemental Blast": 4.5,
+            "Pyroblast": 4.5,
             "Duress": 2.5,
+            "Weather the Storm": 3,
+            "Breath Weapon": 3,
+            "Troublemaker Ouphe": 2.5,
+            "Ancient Grudge": 2.5,
+            "Faerie Macabre": 2,
             "Writhing Chrysalis": 4.5,
             "Refurbished Familiar": 4,
             "Cleansing Wildfire": 3.5,
@@ -87,7 +98,11 @@ class JundBot(Bot):
     def blue_counter_up(self, g: Game) -> bool:
         return len(self.untapped_lands(g, self.opp)) >= 2
 
-    DURESS_ORDER = {"Counterspell": 6, "Dispel": 5, "Blue Elemental Blast": 4.5, "Steel Sabotage": 4, "Brainstorm": 3, "Lorien Revealed": 2.5, "Ponder": 2, "Force Spike": 2}
+    DURESS_ORDER = {
+        "Counterspell": 6, "Dispel": 5, "Hydroblast": 5, "Blue Elemental Blast": 4.5, "Annul": 4, "Steel Sabotage": 4, "Brainstorm": 3, "Lorien Revealed": 2.5,
+        "Ponder": 2, "Force Spike": 2,
+        "Fireblast": 5, "Lightning Bolt": 4.5, "Fiery Temper": 3.5, "Grab the Prize": 2.5, "End the Festivities": 2.5, "Cast into the Fire": 2.5, "Faithless Looting": 1.5,
+    }  # fmt: skip
 
     def score_choose_card(self, g: Game, d: Decision, o: Option) -> float:
         if o.key[0] == "duress":
@@ -140,7 +155,20 @@ class JundBot(Bot):
         opp_creatures = self.creatures(g, self.opp)
         if n == "Duress":
             return 13.0 if main and g.players[self.opp].hand else NEG
-        if n in ("Cast Down", "Go for the Throat"):
+        if n == "Weather the Storm":
+            life = self.me(g).life
+            burned = any(it.kind == "spell" and it.controller == self.opp and ("player", self.p) in it.targets for it in g.stack)
+            if life <= WEATHER_LIFE and (self.opp_end_step(g) or burned or life <= 5):
+                return 20.0
+            return NEG
+        if n == "Breath Weapon":
+            v = self.sweep_value(g, damage=2, fliers=True)
+            return 22.0 if v >= BREATH_MIN_VALUE and (main or self.opp_end_step(g) or g.step_name in ("declare_attackers", "declare_blockers")) else NEG
+        if n == "Ancient Grudge":
+            if not self.opp_artifacts(g) or (g.stack and not self.opp_end_step(g)):
+                return NEG
+            return (9.0 if mode == "flashback" else 10.0) if main or self.opp_end_step(g) else NEG
+        if n in ("Cast Down", "Go for the Throat", "Terminate"):
             targets = [c for c in opp_creatures if self.threat(g, c) >= REMOVAL_MIN_THREAT and not (n == "Go for the Throat" and g.is_artifact(c))]
             if not targets:
                 return NEG
@@ -170,6 +198,9 @@ class JundBot(Bot):
             return NEG
         if n == "Nyxborn Hydra":
             return CURVE[n] if self.mana_available(g) >= 3 else NEG
+        if n == "Troublemaker Ouphe" and mode == "bargain":
+            cheap = any(self.sac_cost(g, c) <= 1.0 for c in g.sac_candidates(self.p, "artifact_enchantment_or_token"))
+            return CURVE[n] + 4 if cheap and self.opp_artifacts(g, enchantments=True) else NEG
         if n in CURVE:
             return CURVE[n] + 0.1 * self.cost(g, card)
         return NEG
@@ -208,8 +239,12 @@ class JundBot(Bot):
             return 5.0
         return self.BLUE_SPELL_VALUE.get(it.name, 1.0)
 
+    def opp_artifacts(self, g: Game, enchantments: bool = False) -> list[Card]:
+        kinds = {"Artifact", "Enchantment"} if enchantments else {"Artifact"}
+        return [c for c in g.battlefield if c.controller == self.opp and g.types(c) & kinds]
+
     def modal_score(self, g: Game, card: Card, mode: str) -> float:
-        if card.name == "Red Elemental Blast":
+        if card.name in BLASTS:
             if mode == "counter":
                 blue = [it for it in g.stack if it.kind == "spell" and "U" in it.card.face.colors]
                 best = max((self.blue_spell_value(g, it) for it in blue), default=NEG)
@@ -255,6 +290,11 @@ class JundBot(Bot):
             return 3.0 if self.opp_end_step(g) else NEG
         if n == "Map":
             return 2.0 if self.main_phase(g) and g.step_name == "main2" and self.creatures(g, self.p) else NEG
+        if n == "Faerie Macabre":
+            gy = g.players[self.opp].graveyard
+            fuel = sum(1 for c in gy if c.face.is_type("Instant") or c.face.is_type("Sorcery"))
+            live = any(c.face.flashback is not None or c.face.escape is not None or any(t.event == "third_draw" for t in c.face.triggers) for c in gy)
+            return 14.0 if fuel >= SPELLBOMB_GY_FUEL or live else NEG
         if n == "Twisted Landscape":
             if "cycling" in ability:
                 return 3.0 if self.opp_end_step(g) and self.land_need(g) < -1 else NEG
@@ -270,11 +310,12 @@ class JundBot(Bot):
     def pings_dead(self, g: Game, c: Card) -> bool:
         return g.toughness(c) - c.damage <= 1 and self.threat(g, c) >= 2
 
-    def sweep_value(self, g: Game) -> float:
-        """Krark-Clan Shaman: 1 damage to each creature without flying."""
+    def sweep_value(self, g: Game, damage: int = 1, fliers: bool = False) -> float:
+        """Krark-Clan Shaman: 1 damage to each creature without flying
+        (Breath Weapon: 2 damage to each creature, `fliers` too)."""
         v = 0.0
         for c in g.battlefield:
-            if not g.is_creature(c) or g.has(c, "flying") or g.toughness(c) - c.damage > 1:
+            if not g.is_creature(c) or (g.has(c, "flying") and not fliers) or g.toughness(c) - c.damage > damage:
                 continue
             v += self.threat(g, c) if c.controller == self.opp else -self.creature_value(g, c)
         return v * 3 if v > 1 else NEG
@@ -322,14 +363,18 @@ class JundBot(Bot):
         spell = self.building(g, d)
         c = self.ref_card(g, o)
         v = o.value
-        if spell == "Red Elemental Blast":
+        if spell in BLASTS:
             it = self.ref_spell(g, o)
             if it is not None:
-                return self.blue_spell_value(g, it)
-            if c is None or c.controller == self.p:
+                return self.blue_spell_value(g, it) if "U" in it.card.face.colors else NEG
+            if c is None or c.controller == self.p or "U" not in c.face.colors:
                 return NEG
             return self.threat(g, c) - (20 if c.face.ward and self.mana_available(g) < c.face.ward else 0)
-        if spell in ("Cast Down", "Go for the Throat", "Makeshift Munitions"):
+        if spell in ("Troublemaker Ouphe", "Ancient Grudge"):
+            if c is None or c.controller == self.p:
+                return NEG
+            return c.face.mana_value + (self.creature_value(g, c) if g.is_creature(c) else 0) + (0 if c.is_token else 1)
+        if spell in ("Cast Down", "Go for the Throat", "Terminate", "Makeshift Munitions"):
             if spell == "Makeshift Munitions" and v[0] == "player":
                 return 5.0 if v[1] == self.opp and g.players[self.opp].life <= 2 else NEG
             if c is None or c.controller == self.p:
