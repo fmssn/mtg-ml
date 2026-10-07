@@ -95,6 +95,10 @@ class AbilityDef:
     sac_self: bool = False
     sac_other: str | None = None  # 'artifact' | 'artifact_or_creature'
     discard_self: bool = False  # cycling-style abilities
+    discard_other: bool = False  # discard a card as a cost (Blood)
+    exile_self: bool = False  # exile this permanent as a cost (Relic of Progenitus)
+    x_target_mv: int = 0  # cost has this many {X}, X = the target's mana value (Gorilla Shaman)
+    x_reveal: str | None = None  # 'red': X = number of red cards revealed from hand (Martyr of Ashes)
     zone: str = "battlefield"  # 'hand' for cycling
     sorcery_speed: bool = False
     mana: tuple[str, ...] | None = None  # set => mana ability producing one of these
@@ -104,7 +108,9 @@ class AbilityDef:
 @dataclass
 class TriggerDef:
     """event: etb | to_graveyard_from_battlefield | cast | you_sacrifice_another
-    | your_upkeep. condition(game, source, event_data) -> bool."""
+    | your_upkeep | you_cast (another spell you cast, from the battlefield)
+    | third_draw (you draw your third card in a turn, from the graveyard).
+    condition(game, source, event_data) -> bool."""
 
     name: str
     event: str
@@ -134,6 +140,14 @@ class CardDef:
     escape: ManaCost | None = None
     escape_exile: int = 0
     bestow: ManaCost | None = None
+    madness: ManaCost | None = None
+    plot: ManaCost | None = None
+    overload: ManaCost | None = None
+    overload_effect: Effect | None = None
+    additional_discard: bool = False  # discard a card as an additional cost
+    # Costs of sacrificing lands instead of mana: (sacrifice filter, count).
+    alternative_sac: tuple[str, int] | None = None  # cast mode "alternative" (Fireblast)
+    flashback_sac: tuple[str, int] | None = None  # flashback cost (Lava Dart)
     # permanents
     abilities: tuple[AbilityDef, ...] = ()
     triggers: tuple[TriggerDef, ...] = ()
@@ -146,9 +160,15 @@ class CardDef:
         return t in self.types
 
     @property
+    def mana_value(self) -> int:
+        return self.cost.mana_value
+
+    @property
     def is_permanent_card(self) -> bool:
         return bool(self.types & {"Artifact", "Creature", "Enchantment", "Land", "Planeswalker", "Battle"})
 
+
+FREE = ManaCost()  # "without paying its mana cost" (plot) and land-sacrifice alternative costs
 
 # ---------------------------------------------------------------------------
 # Game objects
@@ -186,6 +206,7 @@ class Card:
     sick: bool = False  # not continuously controlled since start of turn
     attached_to: int | None = None  # oid of enchanted creature (bestow)
     skip_untap: int = 0
+    plotted_turn: int = 0  # turn this card was plotted on (exile), 0 = not plotted
     temp: list[TempEffect] = field(default_factory=list)
     known_to: set[int] = field(default_factory=set)
 
@@ -215,6 +236,7 @@ class Card:
         self.sick = False
         self.attached_to = None
         self.skip_untap = 0
+        self.plotted_turn = 0
         self.temp = []
 
     def __repr__(self) -> str:
@@ -232,7 +254,7 @@ class StackItem:
     targets: list[tuple] = field(default_factory=list)  # ('player', i) | ('perm', oid) | ('stack', sid)
     card: Card | None = None  # spells: the card on the stack
     source: Card | None = None  # abilities: (LKI of) the source
-    method: str = "normal"  # normal | flashback | escape | bestow
+    method: str = "normal"  # normal | flashback | escape | bestow | madness | plot | overload | alternative
     cast_from: str = "hand"
     x: int = 0
     data: dict = field(default_factory=dict)
@@ -261,3 +283,4 @@ class Player:
     land_plays: int = 0
     drew_from_empty: bool = False
     cards_drawn_this_turn: int = 0
+    landfall_turn: int = 0  # last turn a land entered the battlefield under this player's control

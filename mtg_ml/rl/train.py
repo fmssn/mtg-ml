@@ -33,6 +33,17 @@ Each iteration:
      `--ladder-ratings`, else `<run>/ladder.json`, rated once by the first
      evaluation if missing); logged as `eval/*`, `bench/*` and `ladder/*`.
 
+A new deck against a fixed opponent: `--matchup` picks each seat's deck,
+and exploiter mode puts the learner on one of them, e.g. Red Madness
+(`--exploit-deck red`, seat 1 of `jund_madness`) against a frozen Jund
+checkpoint (`--exploit`), starting from that checkpoint's weights (the
+network's rules knowledge carries over; the `self:deck:` feature tells it
+which deck it holds). The evaluation then scores the learner's deck, with
+the frozen policy in place of pool0 (`eval/opponent/<deck>`,
+`bench/<deck>_vs_bot*`):
+
+    python -m mtg_ml.rl.train --run runs/red --matchup jund_madness --exploit jund.pt --exploit-deck red
+
 Processes (`rl/collect.py`). The trainer's main thread only updates and
 publishes. The rollout workers belong to a collector process, which
 streams the games (`rollout.play`), merges the results and hands the merged
@@ -105,8 +116,9 @@ import torch
 
 from ..backend import ENV_VAR, engine_name
 from ..encode import FEATURE_VERSIONS, FEATURES
+from ..match import matchup_decks
 from .collect import PoolProcess, PoolThread, cpu_layout, release
-from .evaluate import EVAL_BLOCKS, evaluate_policy
+from .evaluate import DECK_KEYS, EVAL_BLOCKS, evaluate_policy
 from .model import PolicyNet, load_partial
 from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update, set_lr
 from .rollout import BOT, KIND_ID, LEARNER, GameSpec, Job, checkpoint_config, create_pool, play
@@ -167,7 +179,7 @@ class TrainConfig:
     pfsp_ema: float = 0.05  # per-game step of the running win rate vs each pool opponent (starts at 0.5)
     init: str = ""  # a new run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, with --value-bound, --entity-attn and --features on top (new attention layers start as the identity)
     exploit: str = ""  # exploiter mode: every training game is the learner on --exploit-deck vs this frozen policy file
-    exploit_deck: str = "jund"  # "jund" (learner seat 0) or "blue" (seat 1)
+    exploit_deck: str = "jund"  # the learner's deck: "jund", "blue" or "red", one of --matchup's (evaluate.DECK_KEYS)
     eval_every: int = 10  # evaluate every this many iterations (0 = only by eval_every_games)
     eval_every_games: int = 0  # also evaluate whenever the training games cross a multiple of this (e.g. 250000)
     eval_process: int = 1  # 1: evaluate in a process of its own, never waiting for it; 0: on the training pool, blocking
@@ -182,6 +194,7 @@ class TrainConfig:
     ladder_ratings: str = ""  # JSON with the rungs' Elo (`evaluate ladder`); "" = <run>/ladder.json, rated by the first evaluation if missing
     ladder_greedy: int = 0  # 1: ladder games (and the rating round robin) with greedy play
     max_turns: int = 100
+    matchup: str = "jund_blue"  # match.MATCHUPS: the deck in each seat
     auto_mana: int = 0  # 1: pay non-strategic mana costs automatically (colour-preserving payer; docs/action-decomposition.md)
     auto_pass: int = 0  # 1: auto-pass priority when the only other options are side-effect-free sacrifice-for-mana abilities
     seed: int = 0
@@ -249,6 +262,7 @@ class Trainer:
                 raise FileNotFoundError(f"ladder file {path} does not exist")
         self.ladder_ratings = cfg.ladder_ratings or os.path.join(cfg.run, "ladder.json")
         self.evaluating = bool(cfg.eval_every or cfg.eval_every_games)
+        self.exploit_seat = exploit_seat(cfg)  # also validates --matchup
         torch.manual_seed(cfg.seed)
         self.rng = random.Random(cfg.seed)
         ck = torch.load(self.latest, map_location=cfg.device, weights_only=False) if os.path.exists(self.latest) else None
@@ -282,10 +296,7 @@ class Trainer:
             self.iteration = self.checkpointed = ck["iteration"]
             self.games_total = ck.get("games_total", self.iteration * cfg.games_per_iter)
             self.rng.setstate(ck["rng"])
-            if "torch_rng" in ck:  # older checkpoints lack it: the update's minibatch shuffles then restart from cfg.seed
-                torch.set_rng_state(ck["torch_rng"])
-                if ck.get("cuda_rng") is not None and torch.cuda.is_available():
-                    torch.cuda.set_rng_state_all(ck["cuda_rng"])
+            restore_torch_rng(ck)
             self.lr_origin = ck.get("lr_anneal_origin")
             self.pfsp = dict(ck.get("pfsp") or {})
             self._drop_lost_iterations()
@@ -454,7 +465,7 @@ class Trainer:
         for k in range(c.games_per_iter):
             if c.exploit:
                 main = os.path.abspath(c.exploit)
-                seats = (LEARNER, main) if c.exploit_deck == "jund" else (main, LEARNER)
+                seats = (LEARNER, main) if self.exploit_seat == 0 else (main, LEARNER)
             else:
                 r = self.rng.random()
                 if r < c.self_play_frac:
@@ -471,7 +482,7 @@ class Trainer:
                         opp = self.rng.choices(self.pool, weights)[0] if weights else self.rng.choice(self.pool)
                     seats = (LEARNER, opp) if self.rng.random() < 0.5 else (opp, LEARNER)
             game_no = 2 if self.rng.random() < c.postboard_frac else 1
-            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no))
+            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no, matchup=c.matchup))
         return specs
 
     def _pfsp_weights(self) -> list[float] | None:
@@ -511,7 +522,8 @@ class Trainer:
     def _eval_args(self, e: _Eval, n_jobs: int, inference: str) -> tuple:
         c = self.cfg
         return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference,
-                self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass), self.pool_features)
+                self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass),
+                c.matchup, self.exploit_seat, os.path.abspath(c.exploit) if c.exploit else "", self.pool_features)
 
     def _request_eval(self) -> dict:
         """Evaluate the newest policy file. Inline (`--eval-process 0`): on the
@@ -649,6 +661,19 @@ class Trainer:
             self.saver.shutdown()
 
 
+def restore_torch_rng(ck: dict) -> None:
+    """Restore the torch (and CUDA) generator states saved in a checkpoint.
+    `torch.load(map_location=cuda)` moves the saved ByteTensors to the GPU,
+    which set_rng_state rejects, so they go back to the CPU first. Older
+    checkpoints lack them: the update's minibatch shuffles then restart from
+    cfg.seed."""
+    if "torch_rng" not in ck:
+        return
+    torch.set_rng_state(ck["torch_rng"].cpu())
+    if ck.get("cuda_rng") is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all([s.cpu() for s in ck["cuda_rng"]])
+
+
 def _save(obj: dict, path: str) -> str:
     """torch.save through a temporary file: readers see the old file or the new one, never part of one."""
     tmp = path + ".tmp"
@@ -739,7 +764,17 @@ def _rate(games, seat: int) -> float:
     return sum(g[1] == seat for g in games) / len(games) if games else float("nan")
 
 
-CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "exploit_deck": ("jund", "blue"), "lr_schedule": ("linear", "cosine"), "value_bound": ("none", "tanh"), "features": (0, *FEATURE_VERSIONS)}
+CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "exploit_deck": tuple(DECK_KEYS.values()), "lr_schedule": ("linear", "cosine"), "value_bound": ("none", "tanh"), "features": (0, *FEATURE_VERSIONS)}
+
+
+def exploit_seat(cfg: TrainConfig) -> int | None:
+    """The learner's seat in exploiter mode (where --exploit-deck sits in --matchup), else None."""
+    decks = [DECK_KEYS[d] for d in matchup_decks(cfg.matchup)]
+    if not cfg.exploit:
+        return None
+    if cfg.exploit_deck not in decks:
+        raise ValueError(f"--exploit-deck {cfg.exploit_deck} is not in --matchup {cfg.matchup} ({', '.join(decks)})")
+    return decks.index(cfg.exploit_deck)
 
 
 def _check(cfg: TrainConfig) -> None:

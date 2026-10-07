@@ -226,6 +226,28 @@ def test_feature_set_1_reproduces_the_features_before_set_2():
         assert h.hexdigest() == want[str(seed)], f"seed {seed}"
 
 
+def test_feature_set_1_has_no_strings_added_after_it():
+    """PR #23's `self:deck:` state feature and the plotted mark on exiled
+    card names are set 2 only: set 1 stays what set-1 models learned. The
+    view text keeps the mark."""
+    from mtg_ml.encode import entity_features
+    from mtg_ml.engine.view import observe
+    from mtg_ml.match import game_args
+
+    seen = set()
+    for seed in (0, 3):  # games where Red plots a card
+        g = new_game(seed=seed, max_turns=30, **game_args(1, "jund_madness"))
+        r = random.Random(seed)
+        while not g.over:
+            for v in (0, 1):
+                v1 = state_features(g, v, features=1) + [t for e in entity_features(g, v, features=1)[0] for t in e]
+                assert not any(x.startswith("self:deck:") or "(plotted)" in x for x in v1)
+                seen |= {k for x in state_features(g, v, features=2) for k in ("self:deck:red_madness", "(plotted)") if k in x}
+                seen |= {"view" for x in observe(g, v)["self"]["exile"] if x.endswith(" (plotted)")}
+            g.step(r.randrange(len(g.legal_options())))
+    assert seen == {"self:deck:red_madness", "(plotted)", "view"}
+
+
 def test_feature_set_2_adds_to_set_1():
     from mtg_ml.encode import entity_features, option_preview
 

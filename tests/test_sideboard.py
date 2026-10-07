@@ -4,9 +4,9 @@ from helpers import bf, choose, find, has, labels, names, pass_priority, pay, re
 
 from mtg_ml.agents import RandomAgent
 from mtg_ml.bots import make_bot
-from mtg_ml.engine import DECKS, SIDEBOARDS, postboard
+from mtg_ml.engine import DECKS, SIDEBOARD_PLANS, SIDEBOARDS, postboard
 from mtg_ml.engine import objects as O
-from mtg_ml.match import MatchResult, match_decks, next_starting_player, play_match
+from mtg_ml.match import MATCHUPS, MatchResult, deck_names, match_decks, next_starting_player, play_match
 
 ISLANDS = lambda n: ["Island"] * n  # noqa: E731
 
@@ -119,12 +119,22 @@ def test_steel_sabotage_counters_artifact_or_bounces():
 
 
 def test_postboard_decks_are_legal():
-    for d in DECKS:
-        pb = postboard(d)
-        assert sum(pb.values()) == 60 and all(n <= 4 or name in ("Island",) for name, n in pb.items())
+    for d, o in SIDEBOARD_PLANS:
+        pb = postboard(d, o)
+        assert sum(pb.values()) == 60 and all(n <= 4 or name in ("Island", "Mountain") for name, n in pb.items())
         assert set(pb) - set(DECKS[d]) <= set(SIDEBOARDS[d])
+    for a, b in MATCHUPS.values():
+        assert (a, b) in SIDEBOARD_PLANS and (b, a) in SIDEBOARD_PLANS
     g1, g2 = match_decks(1), match_decks(2)
     assert "Duress" not in g1[0] and "Duress" in g2[0] and "Dispel" in g2[1]
+    g1, g2 = match_decks(1, "jund_madness"), match_decks(2, "jund_madness")
+    assert "Fiery Temper" in g1[1] and "Electrickery" not in g1[1] and "Electrickery" in g2[1]
+    assert g2[0].count("Weather the Storm") == 3 and g2[0].count("Cleansing Wildfire") == 2 and "Red Elemental Blast" not in g2[0]
+
+
+def test_deck_names_only_for_non_default_decks():
+    assert deck_names("jund_blue") == (None, None)
+    assert deck_names("jund_madness") == (None, "red_madness")
 
 
 def test_match_loser_starts_next_game_and_best_of_three():

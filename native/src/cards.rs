@@ -66,9 +66,15 @@ pub enum TK {
     Player,
     Opponent,
     Any,
+    CreatureYouDontControl,
+    Permanent,
+    NoncreatureArtifact,
+    PlayerWithCreature,
+    /// A creature controlled by the player chosen as the previous target.
+    CreatureOfTargetPlayer,
 }
 
-const TK_NAMES: [(&str, TK); 17] = [
+const TK_NAMES: [(&str, TK); 22] = [
     ("creature", TK::Creature),
     ("nonlegendary_creature", TK::NonlegendaryCreature),
     ("nonartifact_creature", TK::NonartifactCreature),
@@ -86,6 +92,11 @@ const TK_NAMES: [(&str, TK); 17] = [
     ("player", TK::Player),
     ("opponent", TK::Opponent),
     ("any", TK::Any),
+    ("creature_you_dont_control", TK::CreatureYouDontControl),
+    ("permanent", TK::Permanent),
+    ("noncreature_artifact", TK::NoncreatureArtifact),
+    ("player_with_creature", TK::PlayerWithCreature),
+    ("creature_of_target_player", TK::CreatureOfTargetPlayer),
 ];
 
 impl TK {
@@ -104,13 +115,15 @@ impl TK {
 pub enum SacFilter {
     Artifact,
     ArtifactOrCreature,
+    Mountain,
 }
 
 impl SacFilter {
-    fn parse(s: &str) -> Result<SacFilter, String> {
+    pub fn parse(s: &str) -> Result<SacFilter, String> {
         match s {
             "artifact" => Ok(SacFilter::Artifact),
             "artifact_or_creature" => Ok(SacFilter::ArtifactOrCreature),
+            "mountain" => Ok(SacFilter::Mountain),
             _ => Err(format!("unknown sacrifice filter {s:?}")),
         }
     }
@@ -118,6 +131,7 @@ impl SacFilter {
         match self {
             SacFilter::Artifact => "artifact",
             SacFilter::ArtifactOrCreature => "artifact_or_creature",
+            SacFilter::Mountain => "mountain",
         }
     }
 }
@@ -137,6 +151,19 @@ pub enum Event {
     YouSacrificeAnother,
     YourUpkeep,
     BecomesTarget,
+    /// Another spell its controller casts (from the battlefield).
+    YouCast,
+    /// Its owner draws their third card in a turn (from the graveyard).
+    ThirdDraw,
+    /// Engine-internal: the madness trigger.
+    Discarded,
+}
+
+/// `you_cast` trigger condition `{ spell = ... }`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CastFilter {
+    Noncreature,
+    InstantOrSorcery,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,6 +175,8 @@ pub enum Custom {
     OpponentDiscardsElseDraw,
     Wildfire,
     Duress,
+    HighwayRobbery,
+    RelicExileOne,
 }
 
 /// Whose life an op changes.
@@ -170,19 +199,26 @@ pub struct SearchFilter {
 pub enum Op {
     Draw { n: i32, n_cast_from_graveyard: Option<i32> },
     Mill { target_player: bool, n: i32 },
-    CounterTarget,
+    /// if_color: colour bit the target spell must have (0 = any).
+    CounterTarget { if_color: u8 },
     CounterTargetUnlessPaid { cost: ManaCost },
-    DestroyTarget,
+    DestroyTarget { if_color: u8, mv_is_x: bool },
     BounceTarget,
     TapTarget { skip_untap: i32 },
     GrantTarget { keywords: u32 },
     CreateToken { token: DefId, n: i32 },
-    GainLife { n: i32 },
+    /// per_storm: n for each spell cast before this one this turn (Weather the Storm's storm trigger).
+    GainLife { n: i32, per_storm: bool },
     LoseLife { who: Who, n: i32 },
     CounterOnSource,
-    DamageTarget { n: i32 },
-    DamageEachCreature { n: i32, without: u32 },
+    DamageTarget { n: i32, index: usize, n_landfall: Option<i32> },
+    DamageEachOpponent { n: i32, if_discarded_nonland: bool },
+    /// x: the amount is the item's X (n unused); opponent_only: whose = "opponent".
+    DamageEachCreature { n: i32, x: bool, without: u32, opponent_only: bool },
+    Discard { n: i32 },
+    ReturnToBattlefield { tapped: bool },
     ExileGraveyard,
+    ExileAllGraveyards,
     SearchLibrary { filter: SearchFilter, to_battlefield: bool, tapped: bool, reveal: bool, what: String },
     OptionalPayment { cost: ManaCost, prompt: String, then: Vec<Op> },
     Scry { n: i32 },
@@ -191,6 +227,8 @@ pub enum Op {
     Custom(Custom),
     /// Engine-internal: the ward trigger.
     Ward,
+    /// Engine-internal: the madness trigger.
+    Madness,
 }
 
 #[derive(Clone, Debug)]
@@ -202,6 +240,12 @@ pub struct AbilityDef {
     pub sac_self: bool,
     pub sac_other: Option<SacFilter>,
     pub discard_self: bool,
+    pub discard_other: bool,
+    pub exile_self: bool,
+    /// The cost has this many {X}, X = the target's mana value.
+    pub x_target_mv: i32,
+    /// X = number of red cards revealed from hand.
+    pub x_reveal: bool,
     pub zone_hand: bool,
     pub sorcery_speed: bool,
     pub mana: Option<Vec<u8>>,
@@ -214,6 +258,7 @@ pub struct TriggerDef {
     pub event: Event,
     pub effect: Vec<Op>,
     pub sacrificed_subtype: Option<String>,
+    pub cast_filter: Option<CastFilter>,
 }
 
 #[derive(Clone, Debug)]
@@ -244,6 +289,14 @@ pub struct CardDef {
     pub escape: Option<ManaCost>,
     pub escape_exile: i32,
     pub bestow: Option<ManaCost>,
+    pub madness: Option<ManaCost>,
+    pub plot: Option<ManaCost>,
+    pub overload: Option<ManaCost>,
+    pub overload_effect: Option<Vec<Op>>,
+    pub additional_discard: bool,
+    /// Lands sacrificed instead of mana: (filter, count).
+    pub alternative_sac: Option<(SacFilter, i32)>,
+    pub flashback_sac: Option<(SacFilter, i32)>,
     pub abilities: Vec<AbilityDef>,
     pub triggers: Vec<TriggerDef>,
     pub enters_tapped: bool,
@@ -259,6 +312,9 @@ impl CardDef {
     pub fn is_permanent_card(&self) -> bool {
         self.types & (T_ARTIFACT | T_CREATURE | T_ENCHANTMENT | T_LAND | T_PLANESWALKER | T_BATTLE) != 0
     }
+    pub fn mana_value(&self) -> i32 {
+        self.cost.mana_value()
+    }
     pub fn has_subtype(&self, s: &str) -> bool {
         self.subtypes.iter().any(|x| x == s)
     }
@@ -273,6 +329,9 @@ pub struct CardDb {
     pub tokens: HashMap<String, DefId>,
     pub keyword_names: Vec<String>,
     pub ward: TriggerDef,
+    pub madness: TriggerDef,
+    /// `objects.FREE`: the cost of plot casts and land-sacrifice alternatives.
+    pub free: ManaCost,
     pub spec_text: String,
 }
 
@@ -346,7 +405,9 @@ impl CardDb {
             cards: HashMap::new(),
             tokens: HashMap::new(),
             keyword_names: kws,
-            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None },
+            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None, cast_filter: None },
+            madness: TriggerDef { name: "madness".into(), event: Event::Discarded, effect: vec![Op::Madness], sacrificed_subtype: None, cast_filter: None },
+            free: ManaCost::default(),
             spec_text: text.to_string(),
         };
         // Names first so effects can reference tokens and cards can reference faces.
@@ -473,9 +534,15 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "tap_target" => &["op", "skip_untap"],
             "grant_target" => &["op", "keywords"],
             "create_token" => &["op", "token", "n"],
-            "gain_life" | "damage_target" | "scry" => &["op", "n"],
+            "gain_life" => &["op", "n", "per_storm"],
+            "scry" | "discard" => &["op", "n"],
+            "damage_target" => &["op", "n", "index", "n_landfall"],
+            "damage_each_opponent" => &["op", "n", "if_discarded_nonland"],
+            "counter_target" => &["op", "if_color"],
+            "destroy_target" => &["op", "if_color", "mv_is_x"],
+            "return_to_battlefield" => &["op", "tapped"],
             "lose_life" => &["op", "who", "n"],
-            "damage_each_creature" => &["op", "n", "without"],
+            "damage_each_creature" => &["op", "n", "without", "x", "whose"],
             "search_library" => &["op", "supertype", "type", "subtypes_any", "dest", "tapped", "reveal", "what"],
             "optional_payment" => &["op", "cost", "prompt", "then"],
             "custom" => &["op", "fn"],
@@ -493,9 +560,9 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 },
                 n: n()?,
             },
-            "counter_target" => Op::CounterTarget,
+            "counter_target" => Op::CounterTarget { if_color: if_color(t)? },
             "counter_target_unless_paid" => Op::CounterTargetUnlessPaid { cost: ManaCost::parse(Some(req_str(t, "cost")?))? },
-            "destroy_target" => Op::DestroyTarget,
+            "destroy_target" => Op::DestroyTarget { if_color: if_color(t)?, mv_is_x: get_bool(t, "mv_is_x")? },
             "bounce_target" => Op::BounceTarget,
             "tap_target" => Op::TapTarget { skip_untap: get_int(t, "skip_untap")?.unwrap_or(0) },
             "grant_target" => Op::GrantTarget { keywords: get_str_list(t, "keywords")?.iter().fold(0, |m, k| m | db.kw(k)) },
@@ -503,7 +570,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 let name = req_str(t, "token")?;
                 Op::CreateToken { token: *tokens.get(name).ok_or_else(|| format!("unknown token {name:?}"))?, n: get_int(t, "n")?.unwrap_or(1) }
             }
-            "gain_life" => Op::GainLife { n: n()? },
+            "gain_life" => Op::GainLife { n: n()?, per_storm: get_bool(t, "per_storm")? },
             "lose_life" => Op::LoseLife {
                 who: match req_str(t, "who")? {
                     "you" => Who::You,
@@ -515,9 +582,29 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 n: n()?,
             },
             "counter_on_source" => Op::CounterOnSource,
-            "damage_target" => Op::DamageTarget { n: n()? },
-            "damage_each_creature" => Op::DamageEachCreature { n: n()?, without: get_str(t, "without")?.map(|k| db.kw(k)).unwrap_or(0) },
+            "damage_target" => Op::DamageTarget {
+                n: n()?,
+                index: get_int(t, "index")?.unwrap_or(0).max(0) as usize,
+                n_landfall: get_int(t, "n_landfall")?,
+            },
+            "damage_each_opponent" => Op::DamageEachOpponent { n: n()?, if_discarded_nonland: get_bool(t, "if_discarded_nonland")? },
+            "damage_each_creature" => {
+                let x = get_bool(t, "x")?;
+                Op::DamageEachCreature {
+                    n: if x { get_int(t, "n")?.unwrap_or(0) } else { n()? },
+                    x,
+                    without: get_str(t, "without")?.map(|k| db.kw(k)).unwrap_or(0),
+                    opponent_only: match get_str(t, "whose")? {
+                        None => false,
+                        Some("opponent") => true,
+                        Some(w) => return Err(format!("damage_each_creature: unknown whose {w:?}")),
+                    },
+                }
+            }
+            "discard" => Op::Discard { n: n()? },
+            "return_to_battlefield" => Op::ReturnToBattlefield { tapped: get_bool(t, "tapped")? },
             "exile_graveyard" => Op::ExileGraveyard,
+            "exile_all_graveyards" => Op::ExileAllGraveyards,
             "search_library" => Op::SearchLibrary {
                 filter: SearchFilter {
                     supertype: get_str(t, "supertype")?.map(|s| s.to_string()),
@@ -557,6 +644,8 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 "opponent_discards_else_draw" => Custom::OpponentDiscardsElseDraw,
                 "wildfire" => Custom::Wildfire,
                 "duress" => Custom::Duress,
+                "highway_robbery" => Custom::HighwayRobbery,
+                "relic_exile_one" => Custom::RelicExileOne,
                 f => return Err(format!("unknown custom effect {f:?}: add it to Custom (native/src/cards.rs) and Eng::custom (native/src/engine.rs)")),
             }),
             _ => return Err(format!("unknown op {op:?}: add it to Op (native/src/cards.rs) and Eng::run_op (native/src/engine.rs)")),
@@ -565,13 +654,36 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
     Ok(Some(ops))
 }
 
+/// `if_color = "U"`: the colour bit, 0 when absent.
+fn if_color(t: &Table) -> Result<u8, String> {
+    match get_str(t, "if_color")? {
+        None => Ok(0),
+        Some(c) if c.len() == 1 && color_bit(c.as_bytes()[0]) != 0 => Ok(color_bit(c.as_bytes()[0])),
+        Some(c) => Err(format!("unknown if_color {c:?}")),
+    }
+}
+
+/// `{ sacrifice = "mountain", n = N }`: lands sacrificed instead of mana.
+fn land_sac(t: &Table, k: &str) -> Result<Option<(SacFilter, i32)>, String> {
+    let v = match t.get(k) {
+        None => return Ok(None),
+        Some(Value::Table(v)) => v,
+        Some(_) => return Err(format!("{k} must be a table")),
+    };
+    if v.len() != 2 || req_str(v, "sacrifice")? != "mountain" {
+        return Err(format!("unsupported land sacrifice cost {v}"));
+    }
+    let n = get_int(v, "n")?.ok_or_else(|| format!("unsupported land sacrifice cost {v}"))?;
+    Ok(Some((SacFilter::Mountain, n)))
+}
+
 fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>, tokens: &HashMap<String, DefId>) -> Result<CardDef, String> {
     check_keys(
         t,
         &[
             "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward", "targets", "effect",
             "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped", "etb_x_counters", "back", "modes",
-            "abilities", "triggers",
+            "abilities", "triggers", "madness", "plot", "overload", "overload_effect", "additional_discard", "alternative_cost", "flashback_cost",
         ],
         "card",
     )?;
@@ -589,7 +701,15 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
     if let Some(v) = t.get("abilities") {
         for a in v.as_array().ok_or("abilities must be a list")? {
             let a = a.as_table().ok_or("abilities must be tables")?;
-            check_keys(a, &["name", "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "zone", "sorcery_speed", "mana", "targets"], "ability")?;
+            check_keys(
+                a,
+                &["name", "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone", "sorcery_speed", "mana", "targets"],
+                "ability",
+            )?;
+            let x_target_mv = get_int(a, "x_target_mv")?.unwrap_or(0);
+            if x_target_mv != 0 && targets(a)?.len() != 1 {
+                return Err("x_target_mv needs exactly one target".into());
+            }
             abilities.push(AbilityDef {
                 name: req_str(a, "name")?.to_string(),
                 effect: parse_ops(a.get("effect"), db, tokens)?,
@@ -598,6 +718,14 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
                 sac_self: get_bool(a, "sac_self")?,
                 sac_other: get_str(a, "sac_other")?.map(SacFilter::parse).transpose()?,
                 discard_self: get_bool(a, "discard_self")?,
+                discard_other: get_bool(a, "discard_other")?,
+                exile_self: get_bool(a, "exile_self")?,
+                x_target_mv,
+                x_reveal: match get_str(a, "x_reveal")? {
+                    None => false,
+                    Some("red") => true,
+                    Some(r) => return Err(format!("unknown x_reveal {r:?}")),
+                },
                 zone_hand: match get_str(a, "zone")?.unwrap_or("battlefield") {
                     "battlefield" => false,
                     "hand" => true,
@@ -614,11 +742,19 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         for tr in v.as_array().ok_or("triggers must be a list")? {
             let tr = tr.as_table().ok_or("triggers must be tables")?;
             check_keys(tr, &["name", "event", "effect", "condition"], "trigger")?;
-            let sacrificed_subtype = match tr.get("condition") {
-                None => None,
-                Some(Value::Table(c)) if c.len() == 1 && c.contains_key("sacrificed_subtype") => Some(req_str(c, "sacrificed_subtype")?.to_string()),
+            let (mut sacrificed_subtype, mut cast_filter) = (None, None);
+            match tr.get("condition") {
+                None => {}
+                Some(Value::Table(c)) if c.len() == 1 && c.contains_key("sacrificed_subtype") => sacrificed_subtype = Some(req_str(c, "sacrificed_subtype")?.to_string()),
+                Some(Value::Table(c)) if c.len() == 1 && c.contains_key("spell") => {
+                    cast_filter = Some(match req_str(c, "spell")? {
+                        "noncreature" => CastFilter::Noncreature,
+                        "instant_or_sorcery" => CastFilter::InstantOrSorcery,
+                        f => return Err(format!("unknown spell condition {f:?}")),
+                    })
+                }
                 Some(c) => return Err(format!("unsupported trigger condition {c}")),
-            };
+            }
             triggers.push(TriggerDef {
                 name: req_str(tr, "name")?.to_string(),
                 event: match req_str(tr, "event")? {
@@ -627,10 +763,13 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
                     "cast" => Event::Cast,
                     "you_sacrifice_another" => Event::YouSacrificeAnother,
                     "your_upkeep" => Event::YourUpkeep,
+                    "you_cast" => Event::YouCast,
+                    "third_draw" => Event::ThirdDraw,
                     e => return Err(format!("unknown trigger event {e:?}")),
                 },
                 effect: parse_ops(tr.get("effect"), db, tokens)?.ok_or("trigger without effect")?,
                 sacrificed_subtype,
+                cast_filter,
             });
         }
     }
@@ -668,10 +807,21 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
             Some("cards_drawn_this_turn") => Some(CostRed::CardsDrawnThisTurn),
             Some(c) => return Err(format!("unknown cost_reduction {c:?}")),
         },
-        flashback: mana(t, "flashback")?,
+        flashback: match mana(t, "flashback")? {
+            Some(m) => Some(m),
+            None if t.contains_key("flashback_cost") => Some(ManaCost::default()),
+            None => None,
+        },
         escape: mana(t, "escape")?,
         escape_exile: get_int(t, "escape_exile")?.unwrap_or(0),
         bestow: mana(t, "bestow")?,
+        madness: mana(t, "madness")?,
+        plot: mana(t, "plot")?,
+        overload: mana(t, "overload")?,
+        overload_effect: parse_ops(t.get("overload_effect"), db, tokens)?,
+        additional_discard: get_bool(t, "additional_discard")?,
+        alternative_sac: land_sac(t, "alternative_cost")?,
+        flashback_sac: land_sac(t, "flashback_cost")?,
         abilities,
         triggers,
         enters_tapped: get_bool(t, "enters_tapped")?,
@@ -697,6 +847,10 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 42);
+        assert_eq!(db.cards.len(), 60);
+        let blaze = db.def(db.cards["Searing Blaze"]);
+        assert_eq!(blaze.targets, vec![TK::PlayerWithCreature, TK::CreatureOfTargetPlayer]);
+        assert_eq!(db.def(db.cards["Lava Dart"]).flashback_sac, Some((SacFilter::Mountain, 1)));
+        assert!(db.def(db.cards["Lava Dart"]).flashback.as_ref().unwrap().is_zero());
     }
 }

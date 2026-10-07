@@ -60,7 +60,7 @@ def observe(g: Game, viewer: int) -> dict:
             "library_count": len(me.library),
             "library_known": known_library(me),
             "graveyard": [c.name for c in me.graveyard],
-            "exile": [c.name for c in me.exile],
+            "exile": [_exiled(c) for c in me.exile],
             "pool": dict(me.pool),
             "cards_drawn_this_turn": me.cards_drawn_this_turn,
             "mulligans": g.mulligans_taken[viewer],
@@ -72,7 +72,7 @@ def observe(g: Game, viewer: int) -> dict:
             "library_count": len(them.library),
             "library_known": known_library(them),
             "graveyard": [c.name for c in them.graveyard],
-            "exile": [c.name for c in them.exile],
+            "exile": [_exiled(c) for c in them.exile],
             "pool": dict(them.pool),
             "mulligans": g.mulligans_taken[opp],
         },
@@ -97,6 +97,14 @@ def observe(g: Game, viewer: int) -> dict:
     elif d is not None:
         obs["decision"] = {"kind": d.kind, "waiting_for": "opponent"}
     return obs
+
+
+PLOTTED = " (plotted)"
+
+
+def _exiled(c) -> str:
+    """An exiled card's name; plotted cards (castable later) are marked."""
+    return f"{c.name}{PLOTTED}" if c.plotted_turn else c.name
 
 
 def _ref_exists(g: Game, ref: tuple) -> bool:

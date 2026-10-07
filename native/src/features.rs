@@ -80,6 +80,9 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
     direct!(o, "step:{}", st.step_name);
     direct!(o, "active:{}", rel(st.active, viewer));
     direct!(o, "postboard:{}", if st.match_game > 1 { "True" } else { "False" });
+    if let Some(deck) = st.args.deck_names[viewer as usize].as_ref().filter(|_| features >= 2) {
+        direct!(o, "self:deck:{deck}");
+    }
     thermo(o, "turn", st.turn as i64, TURN_STEPS);
     if st.active == viewer {
         direct!(o, "land_played:{}", if st.lands_played > 0 { "True" } else { "False" });
@@ -95,7 +98,12 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
             raw!(o, "{side}:gy:{}", st.c(c).name());
         }
         for &c in &pl.exile {
-            raw!(o, "{side}:exile:{}", st.c(c).name());
+            // set 1 predates the plotted mark
+            if features >= 2 {
+                raw!(o, "{side}:exile:{}", st.c(c).exiled_name());
+            } else {
+                raw!(o, "{side}:exile:{}", st.c(c).name());
+            }
         }
         for (c, n) in &pl.pool {
             direct!(o, "{side}:pool:{}:{n}", color_str(*c));
@@ -421,9 +429,12 @@ fn mana_preview(st: &State, player: u8, cost: &ManaCost, sac: Option<SacFilter>,
 fn kills_preview(st: &State, player: u8, ops: Option<&[Op]>, source: &Card, out: &mut impl FnMut(std::fmt::Arguments)) {
     let mut dmg: Vec<(u32, i32)> = vec![];
     for op in ops.unwrap_or(&[]) {
-        if let Op::DamageEachCreature { n, without } = op {
+        if let Op::DamageEachCreature { n, x: false, without, opponent_only } = op {
             for &ci in &st.battlefield {
                 let c = st.c(ci);
+                if *opponent_only && c.controller == player {
+                    continue;
+                }
                 if st.is_creature(c) && !(*without != 0 && st.keywords(c) & without != 0) {
                     match dmg.iter_mut().find(|e| e.0 == c.oid) {
                         Some(e) => e.1 += n,
@@ -512,11 +523,20 @@ fn target_preview(st: &State, player: u8, r: Ref, out: &mut impl FnMut(std::fmt:
         _ => None,
     };
     let deathtouch = source.map(|s| st.has(st.live(s).map(|ci| st.c(ci)).unwrap_or(s), "deathtouch")).unwrap_or(false);
+    let landfall = st.players[item.controller as usize].landfall_turn == st.turn;
     for op in item.effect.unwrap_or(&[]) {
-        if let Op::DamageTarget { n } = op {
+        // Only the op for the target being chosen.
+        if let Op::DamageTarget { n, index, n_landfall } = op {
+            if *index != item.targets.len() {
+                continue;
+            }
+            let n = match n_landfall {
+                Some(l) if landfall => *l,
+                _ => *n,
+            };
             let lethal = match (r, target) {
-                (Ref::Player(p), _) => *n >= st.players[p as usize].life,
-                (_, Some(c)) => st.is_creature(c) && dies_to(st, c, *n, deathtouch),
+                (Ref::Player(p), _) => n >= st.players[p as usize].life,
+                (_, Some(c)) => st.is_creature(c) && dies_to(st, c, n, deathtouch),
                 _ => false,
             };
             if lethal {
@@ -549,6 +569,7 @@ pub fn option_preview(st: &State, player: u8, kind: Kind, val: &Val, out: &mut i
                 _ => return,
             };
             let effect = match choice {
+                _ if *method == Method::Overload => d.overload_effect.as_deref(),
                 Some(i) => Some(d.modes[*i as usize].effect.as_slice()),
                 None => d.effect.as_deref(),
             };

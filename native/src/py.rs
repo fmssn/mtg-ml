@@ -95,16 +95,18 @@ fn data_list(py: Python<'_>, st: &State, d: &Data) -> PyObject {
     if let Some(s) = d.spell_sid {
         v.push(("spell_sid", s.into_py(py)));
     }
+    if let Some(b) = d.discarded_land {
+        v.push(("discarded_land", b.into_py(py)));
+    }
+    if let Some(n) = d.storm {
+        v.push(("storm", n.into_py(py)));
+    }
     v.sort_by(|a, b| a.0.cmp(b.0));
     v.into_py(py)
 }
 
 fn sac_filter(s: &str) -> PyResult<SacFilter> {
-    match s {
-        "artifact" => Ok(SacFilter::Artifact),
-        "artifact_or_creature" => Ok(SacFilter::ArtifactOrCreature),
-        _ => Err(PyValueError::new_err(format!("unknown sacrifice filter {s:?}"))),
-    }
+    SacFilter::parse(s).map_err(PyValueError::new_err)
 }
 
 #[pyclass(unsendable, module = "mtg_ml_native", name = "Game")]
@@ -148,7 +150,7 @@ impl PyGame {
 #[pymethods]
 impl PyGame {
     #[new]
-    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=100, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1, auto_mana=false, auto_pass=false))]
+    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=100, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1, auto_mana=false, auto_pass=false, deck_names=(None, None)))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         decks: (Vec<String>, Vec<String>),
@@ -163,6 +165,7 @@ impl PyGame {
         match_game: i32,
         auto_mana: bool,
         auto_pass: bool,
+        deck_names: (Option<String>, Option<String>),
     ) -> PyResult<Self> {
         if let Some(p) = starting_player {
             Self::pidx(p as usize)?;
@@ -170,7 +173,21 @@ impl PyGame {
         if !STEPS.contains(&start_step.as_str()) {
             return Err(PyValueError::new_err(format!("{start_step:?} is not in list")));
         }
-        let args = Args { decks: [decks.0, decks.1], seed, starting_player, auto_single, max_turns, log, has_setup, start_step, mulligans, match_game, auto_mana, auto_pass };
+        let args = Args {
+            decks: [decks.0, decks.1],
+            seed,
+            starting_player,
+            auto_single,
+            max_turns,
+            log,
+            has_setup,
+            start_step,
+            mulligans,
+            match_game,
+            auto_mana,
+            auto_pass,
+            deck_names: [deck_names.0, deck_names.1],
+        };
         let g = Game::new(args).map_err(PyValueError::new_err)?;
         Ok(PyGame { g, version: 0 })
     }
@@ -281,8 +298,8 @@ impl PyGame {
 
     fn player(&self, py: Python<'_>, p: usize) -> PyResult<PyObject> {
         let pl = &self.st().players[Self::pidx(p)?];
-        Ok((pl.life, pl.library.clone(), pl.hand.clone(), pl.graveyard.clone(), pl.exile.clone(), pl.pool.iter().map(|(c, n)| (color_str(*c), *n)).collect::<Vec<_>>(), pl.drew_from_empty, pl.cards_drawn_this_turn)
-            .into_py(py))
+        let pool = pl.pool.iter().map(|(c, n)| (color_str(*c), *n)).collect::<Vec<_>>();
+        Ok((pl.life, pl.library.clone(), pl.hand.clone(), pl.graveyard.clone(), pl.exile.clone(), pool, pl.drew_from_empty, pl.cards_drawn_this_turn, pl.landfall_turn).into_py(py))
     }
 
     fn life(&self, p: usize) -> PyResult<i32> {
@@ -363,6 +380,8 @@ impl PyGame {
             Val::Cast(c, m, None) => ("cast", card(*c), m.name()).into_py(py),
             Val::Cast(c, m, Some(i)) => ("cast", card(*c), m.name(), *i).into_py(py),
             Val::Activate(c, i) => ("activate", card(*c), *i).into_py(py),
+            Val::Plot(c) => ("plot", card(*c)).into_py(py),
+            Val::Robbery(sac, c) => (if *sac { "sacrifice" } else { "discard" }, card(*c)).into_py(py),
             Val::Mana(c, i) => ("mana", card(*c), *i).into_py(py),
             Val::Card(c) => card(*c),
             Val::Ref(r) => ref_to_py(py, *r),
@@ -424,10 +443,21 @@ impl PyGame {
     fn lethal(&self, a: CIdx, b: CIdx) -> PyResult<i32> {
         Ok(self.st().lethal(self.card(a)?, self.card(b)?))
     }
-    fn target_candidates(&self, py: Python<'_>, kind: &str, controller: u8) -> PyResult<Vec<PyObject>> {
+    /// `chosen`: targets already chosen, as (kind, index) pairs.
+    #[pyo3(signature = (kind, controller, chosen=vec![]))]
+    fn target_candidates(&self, py: Python<'_>, kind: &str, controller: u8, chosen: Vec<(String, u32)>) -> PyResult<Vec<PyObject>> {
         Self::pidx(controller as usize)?;
         let k = TK::parse(kind).map_err(PyValueError::new_err)?;
-        Ok(self.st().target_candidates(k, controller, None).into_iter().map(|r| ref_to_py(py, r)).collect())
+        let chosen = chosen
+            .into_iter()
+            .map(|(kind, i)| match kind.as_str() {
+                "player" => Self::pidx(i as usize).map(|p| Ref::Player(p as u8)),
+                "perm" => Ok(Ref::Perm(i)),
+                "stack" => Ok(Ref::Stack(i)),
+                _ => Err(PyValueError::new_err(format!("bad target reference {kind:?}"))),
+            })
+            .collect::<PyResult<Vec<Ref>>>()?;
+        Ok(self.st().target_candidates(k, controller, None, &chosen).into_iter().map(|r| ref_to_py(py, r)).collect())
     }
 
     // -- scenario setup and determinization ----------------------------------
@@ -528,6 +558,7 @@ impl PyGame {
         let me = &st.players[viewer as usize];
         let them = &st.players[opp as usize];
         let names = |v: &Vec<CIdx>| v.iter().map(|&c| st.c(c).name()).collect::<Vec<_>>();
+        let exiled = |v: &Vec<CIdx>| v.iter().map(|&c| st.c(c).exiled_name().into_owned()).collect::<Vec<_>>();
         let known_library = |p: &Player| p.library.iter().enumerate().filter(|(_, &c)| st.c(c).known_to & pbit(viewer) != 0).map(|(i, &c)| (i, st.c(c).name())).collect::<Vec<_>>();
         let pool = |p: &Player| -> PyResult<Bound<'py, PyDict>> {
             let d = PyDict::new_bound(py);
@@ -549,7 +580,7 @@ impl PyGame {
         s.set_item("library_count", me.library.len())?;
         s.set_item("library_known", known_library(me))?;
         s.set_item("graveyard", names(&me.graveyard))?;
-        s.set_item("exile", names(&me.exile))?;
+        s.set_item("exile", exiled(&me.exile))?;
         s.set_item("pool", pool(me)?)?;
         s.set_item("cards_drawn_this_turn", me.cards_drawn_this_turn)?;
         s.set_item("mulligans", st.mulligans_taken[viewer as usize])?;
@@ -561,7 +592,7 @@ impl PyGame {
         t.set_item("library_count", them.library.len())?;
         t.set_item("library_known", known_library(them))?;
         t.set_item("graveyard", names(&them.graveyard))?;
-        t.set_item("exile", names(&them.exile))?;
+        t.set_item("exile", exiled(&them.exile))?;
         t.set_item("pool", pool(them)?)?;
         t.set_item("mulligans", st.mulligans_taken[opp as usize])?;
         o.set_item("opponent", t)?;
@@ -798,6 +829,7 @@ card_get! {
     sick: bool => |c: &Card| c.sick;
     attached_to: Option<u32> => |c: &Card| c.attached_to;
     skip_untap: i32 => |c: &Card| c.skip_untap;
+    plotted_turn: i32 => |c: &Card| c.plotted_turn;
     _known: Vec<u8> => |c: &Card| known_list(c.known_to);
     _temp: Vec<(Vec<&'static str>, i32, i32)> => |c: &Card| c.temp.iter().map(|t| (db().keyword_list(t.keywords), t.power, t.toughness)).collect::<Vec<_>>();
     @set set_tapped = "tapped", set_transformed = "transformed", set_sick = "sick", set_deathtouch_damage = "deathtouch_damage",

@@ -73,7 +73,7 @@ from ..engine.objects import (
     TARGET,
     YES_NO,
 )
-from ..match import match_decks
+from ..match import DEFAULT_MATCHUP, game_args, matchup_decks
 from .features import encode_event_hashes, event_hashes, featurize_flat
 from .samples import FIELDS, PackedSamples
 
@@ -89,18 +89,18 @@ KINDS = ("other", PRIORITY, PAY_MANA, TARGET, DECLARE_ATTACKER, DECLARE_BLOCKER,
          EXILE_FROM_GY, ORDER, ORDER_TRIGGERS, ASSIGN_DAMAGE, CHOOSE_MODE, MULLIGAN)  # fmt: skip
 KIND_ID = {k: i for i, k in enumerate(KINDS)}
 
-_DECKS: dict[int, tuple] = {}
+_DECKS: dict[tuple, dict] = {}
 _MODELS: dict[tuple, object] = {}
 _CLAIM = None  # the pool's shared next-spec index per matchup (multiprocessing Array), set by the pool initializer
 _PROFILE = None
 
 
-def _decks(match_game: int = 1):
-    """Maindecks for game 1, sideboarded decks for games 2 and 3."""
-    key = min(match_game, 2)
+def _game_args(match_game: int = 1, matchup: str = DEFAULT_MATCHUP) -> dict:
+    """Decks (maindecks for game 1, sideboarded for games 2 and 3) and deck names, as Game arguments."""
+    key = (min(match_game, 2), matchup)
     if key not in _DECKS:
-        _DECKS[key] = match_decks(key)
-    return _DECKS[key]
+        _DECKS[key] = game_args(key[0], matchup)
+    return {**_DECKS[key], "match_game": match_game}
 
 
 def load_net(path: str):
@@ -223,6 +223,7 @@ class GameSpec:
     seats: tuple[str, str]  # policy spec per seat
     starting_player: int | None = None
     match_game: int = 1  # 1 = maindecks, 2/3 = after sideboarding
+    matchup: str = DEFAULT_MATCHUP  # match.MATCHUPS: the deck in each seat
 
 
 @dataclass
@@ -363,7 +364,8 @@ class _Live:
         self.spec, self.game, self.slot = spec, game, slot
         self.trajs = (Trajectory(), Trajectory())
         self.seats = (_Seat(), _Seat())
-        self.agents = tuple(RandomAgent(seed=spec.seed * 2 + s) if pol == RANDOM else make_bot(s) if pol == BOT else None for s, pol in enumerate(spec.seats))
+        decks = matchup_decks(spec.matchup)
+        self.agents = tuple(RandomAgent(seed=spec.seed * 2 + s) if pol == RANDOM else make_bot(s, decks[s]) if pol == BOT else None for s, pol in enumerate(spec.seats))
 
 
 def _step(g: Game, seats: tuple[_Seat, _Seat], a: int) -> None:
@@ -567,7 +569,7 @@ def _play(job: Job) -> Result:
 
     def start(i: int) -> _Live:
         spec = job.games[i]
-        g = Game(_decks(spec.match_game), seed=spec.seed, starting_player=spec.starting_player, max_turns=job.max_turns, match_game=spec.match_game, auto_mana=job.auto_mana, auto_pass=job.auto_pass)
+        g = Game(**_game_args(spec.match_game, spec.matchup), seed=spec.seed, starting_player=spec.starting_player, max_turns=job.max_turns, auto_mana=job.auto_mana, auto_pass=job.auto_pass)
         return _Live(spec, g, free.pop())
 
     def finish(lv: _Live) -> None:

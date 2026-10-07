@@ -2,21 +2,95 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## Open (handoff 2026-10-07)
+
+- `r3-attn` was still training on h100-private (`~/mtg-ml-next2/runs/r3-attn`, cores 48-63, GPUs 5+4, ~20 s per iteration, ends at 1M games). When it ends: `archive_run.sh 20261007-r3-attn ...`, `final_evals.sh` with `H2H="20261007-r3-attn 20261007-r3-control"`, `ladder_final.py 20261007-r3-attn` (from `~/mtg-ml-next2`), then fill its row.
+- Suggested round 4: parent `20261007-r3-postboard`; settle postboard with a 5,000-game head to head; start ladder L2 (rungs: L1 + `r1-lranneal` + `r3-control`); one larger change (entity attention if it holds, a bigger model from scratch with the anneal and auto mana, or a new search design).
+- Scripts: `tools/experiments/`.
+
 ## Summary
 
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
-| 20261007-r2-* | round 2: features, bot games as Jund, PFSP, auto mana | 1M each | running | | | |
-| 20261007-r1-lranneal | lr 3e-4 → 3e-5 linear over 1M games | 8.4M + 1M | **72.1%** | 73.1% | 135 ± 13 (at +0.85M) | **adopt** |
-| 20261007-r1-control | none (fixed engine, value clamp) | 8.4M + 1M | 65.9% | 71.9% | 99 ± 13 (at +0.85M) | control |
-| 20261007-r1-gammaturn | discount per game turn (γ 0.97, λ 0.95) | 8.4M + 1M | 55.8%¹ | 65.7%¹ | 32 ± 12¹ | reject |
+| 20261007-red-madness-1m | new deck: Red Madness learner vs frozen r1-control Jund, warm-started from it | 1M | (vs Jund bot) 89.9% | 92.6% | | new-deck baseline⁴ |
+| 20261007-r3-attn | R3 + 1 entity self-attention layer (identity init) | 9.4M + 1M | running | | | |
+| 20261007-r3-postboard | R3 + 20% sideboarded games (vs 50%) | 9.4M + 1M | **74.9%** | 74.9% | **154 ± 13** | inconclusive (+) |
+| 20261007-r3-botjund | R3 + 25% games learner Jund vs blue bot | 9.4M + 1M | 74.2% | 75.0% | 143 ± 13 | reject |
+| 20261007-r3-control | lr-anneal final + 1M games at lr 3e-5, new features on | 9.4M + 1M | 73.0% | 74.7% | 146 ± 13 | control, **best parent** |
+| 20261007-r2-automana | r2-features + auto mana and auto pass | 8.4M + 1M | 64.7%³ | 71.6%³ | 83 ± 12 | reject |
+| 20261007-r2-pfsp | r2-features + PFSP pool sampling | 8.4M + 1M | 63.5% | 72.0% | 86 ± 12 | reject |
+| 20261007-r2-botjund | r2-features + 25% games learner Jund vs blue bot | 8.4M + 1M | 67.5% | 75.0% | 59 ± 12 | reject |
+| 20261007-r2-features | new state features and option previews (feature set 2) | 8.4M + 1M | 67.0% | 72.2% | 89 ± 12 | inconclusive (0) |
+| 20261007-r1-lranneal | lr 3e-4 → 3e-5 linear over 1M games | 8.4M + 1M | **72.1%** | 73.1% | 147 ± 13 | **adopt** |
+| 20261007-r1-control | none (fixed engine, value clamp) | 8.4M + 1M | 65.9% | 71.9% | 103 ± 13 | control |
+| 20261007-r1-gammaturn | discount per game turn (γ 0.97, λ 0.95) | 8.4M + 1M | 55.8%¹ | 65.7%¹ | 35 ± 12 | reject |
 | 20261007-r1-exploit-blue | exploiter, Blue only vs frozen main | 0.3M | 56.5% vs main² | | | no gap |
 | 20261007-r1-exploit-jund | exploiter, Jund only vs frozen main | 0.3M | 46.1% vs main² | | | no gap |
 | 20261006-search64-* | own-turn Gumbel AlphaZero search + distillation (PR #10, closed) | 500k + ~0.3M per attempt | 38–45% | | | **reject** |
-| 20261006-overnight-selfplay | open-ended self-play + pool | 8.4M | 64.6% | 70.9% | ~79 | parent |
-| 20261006-overnight-bot10 | + 10% games vs scripted bots | 8.4M | 65.6% | | | no effect |
+| 20261006-overnight-selfplay | open-ended self-play + pool | 8.4M | 64.6% | 70.9% | 103 ± 13 | parent |
+| 20261006-overnight-bot10 | + 10% games vs scripted bots | 8.4M | 65.6% | | 75 ± 12 | no effect |
 
-Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue).
+Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows.
+
+---
+
+## 20261007-red-madness-1m · a third deck against a frozen Jund
+
+- **Question**: can a new deck (Red Madness, `docs/red-madness.md`) be learned in 1M games against a fixed opponent, and what do its greedy games show about the engine and the training setup.
+- **Parent / opponent**: `20261007-r1-control` policy (Jund + Blue network, never trained against Red); the learner starts from its weights, the opponent stays frozen. (`r1-lranneal`, the stronger Jund, was not yet adopted when this launched.)
+- **Code**: `claude/mono-red-burn-pauper-627e45` @ 09020f2 (PR fmssn/mtg-ml#23) with this branch's original flags `--matchup jund_madness --learner-seat 1 --opponent J --init-from J`, which the merge renamed to `--matchup jund_madness --exploit J --exploit-deck red`. Native engine.
+- **Flags**: `--self-play-frac 0 --bot-frac 0 --engine native --device cuda --inference server --server-device cuda:1 --workers 22 --games-per-iter 2048 --total-games 1000000 --eval-every-games 100000 --bench-games 1000 --bench-greedy-games 1000 --eval-games 200`, defaults otherwise (postboard 0.5, shaping 0.2 annealed over 100 iterations). 489 iterations, 1.4 s each, ~15 minutes on cores 32-63 and two H100s.
+
+| games | win vs frozen Jund (training, sampled, g1+g2) | vs frozen Jund (eval, g1) | vs Jund bot sampled / greedy |
+|---|---|---|---|
+| 0 | 0.8% | | |
+| 0.1M | 64.6% | 68.5% | 75.7% / 82.6% |
+| 0.5M | 77.2% | 83.5% | 84.7% / 89.8% |
+| 1.0M | 78.7% | 88.5% | 89.9% / 92.6% |
+
+- **Controls**: the frozen Jund scores only 41% (greedy, 1,000 games) against the scripted Red bot, and the Jund bot 21% against it, so the opponent is weak in this matchup; the learner (88.5% vs the same Jund) is well beyond the scripted bot (59%).
+- **Review** (20 greedy games + statistics over 200 more): no engine mistakes found. Most of the win rate is the frozen Jund not knowing Red's threats; Red's own leaks are madness discards without {R} open (a third of Fiery Temper discards are lost), plot never used (0 / 366), greedy 1-land keeps, burn almost never aimed at creatures, sideboard cards near-unused. Details: `docs/red-madness-review.md`.
+- **Verdict**: baseline for the new deck; the setup (one frozen opponent that never saw Red) inflates the number. Next: train both sides (self-play over the jund_madness matchup), see the review.
+- **Archive**: `20261007-red-madness-1m` (evals.txt has the numbers above).
+
+---
+
+## 20261007-r3 · fine-tunes from the lr-anneal checkpoint
+
+- **Question**: does continuing the best checkpoint at low lr keep improving, and do postboard share, bot games or entity attention help on top.
+- **Parent**: `20261007-r1-lranneal` final (9.40M games), with its pool. Resumed at constant `--ppo-lr 3e-5` (the anneal's end value), 1M more games.
+- **Code**: `claude/next-integration-2` @ bdad997 (next-integration + PRs #17 auto mana, #18 entity attention, #19 features) plus the RNG-restore fix (PR #22). Feature set 2 is on for every arm (the parent was trained on set 1: the new feature rows start untrained).
+- **Flags**: as round 1 plus `--total-games 10400000 --ppo-lr 3e-5`; postboard adds `--postboard-frac 0.2`; botjund `--bot-frac 0.25 --bot-seat jund`. attn: fresh run `--init <lranneal final.pt> --entity-attn 1 --ppo-lr 3e-5 --total-games 1000000`, no copied pool (own snapshots only), fresh Adam state; ~20 s per iteration because the inference server has no stacked path for attention models.
+
+| arm | sampled | greedy | L1 Elo | head to head (2,000 paired games) |
+|---|---|---|---|---|
+| control | 73.0% (71.0–74.9) | 74.7% (72.7–76.6) | 146 ± 13 | vs parent lranneal: 51.7% (49.6–53.9) |
+| postboard 0.2 | 74.9% (72.9–76.7) | 74.9% (73.0–76.8) | 154 ± 13 | vs control: 52.0% (49.8–54.2) |
+| botjund | 74.2% (72.2–76.0) | 75.0% (73.0–76.8) | 143 ± 13 | vs control: 50.0% (47.9–52.2) |
+| attn | running | | 171 ± 13 at +0.25M | |
+
+**Findings**
+- *Continued low lr*: small further gains over the parent (sampled +0.9, greedy +1.6, head to head 51.7%, just inside noise). The run is close to its plateau at this lr.
+- *Postboard 0.2*: best on every number (+1.9 sampled, Elo +9, head to head 52.0%) but each within noise. Inconclusive, leaning positive; cheap to keep. Decide with a longer run or 5,000-game head to head.
+- *Bot games as Jund*: no gain over the control on anything. Reject (with round 2: same result twice).
+
+## 20261007-r2 · four fine-tunes from the overnight checkpoint, new code
+
+- **Parent and flags** as round 1 (overnight final, 1M more games at lr 3e-4); code `claude/next-integration-2` @ bdad997. **Feature set 2 was on in all four arms** (PR #19 was unconditional at the time; versioned since PR #24), so the three non-feature arms are compared against `r2-features`, and `r2-features` against `r1-control`.
+- Extra flags: botjund `--bot-frac 0.25 --bot-seat jund`; pfsp `--pool-sampling pfsp`; automana `--auto-mana 1 --auto-pass 1`.
+
+| arm | sampled | greedy | L1 Elo | head to head (2,000 paired games) |
+|---|---|---|---|---|
+| features | 67.0% (64.9–69.0) | 72.2% (70.2–74.1) | 89 ± 12 | vs r1-control: 49.0% (46.9–51.2) |
+| botjund | 67.5% (65.5–69.6) | 75.0% (73.0–76.8) | 59 ± 12 | vs features: 48.6% (46.5–50.8) |
+| pfsp | 63.5% (61.4–65.6) | 72.0% (70.0–73.9) | 86 ± 12 | vs features: 50.4% (48.2–52.6) |
+| automana | 64.7%³ | 71.6%³ | 83 ± 12 | vs features: 50.2% (48.1–52.4) |
+
+**Findings**
+- *Features (items 10-12)*: no measurable effect in 1M games, as the probes predicted (lethal already encoded; the KCS preview may need more than 1M games to be picked up from untrained rows). Inconclusive; kept on (feature set 2) since it costs ~2 µs per decision.
+- *Bot games as Jund*: +2.8 greedy on the benchmark it trains on, but lower Elo and 48.6% head to head: it specialises on the bot. Reject.
+- *PFSP*: nothing. With a pool of near-copies, win rates are all ~0.5 and the weights stay flat. Reject.
+- *Auto mana/pass*: trajectories 10% shorter (216 vs 241 decisions per game), no strength change. Reject as a strength lever; still useful for speed and as a cleaner action space for a fresh run.
 
 ---
 

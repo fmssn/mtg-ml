@@ -34,9 +34,13 @@ class Scenario:
     # Action decomposition options of the game (see Game.auto_mana/auto_pass).
     auto_mana: bool = False
     auto_pass: bool = False
+    matchup: str = "jund_blue"  # match.MATCHUPS
 
     def to_json(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if d["matchup"] == "jund_blue":
+            del d["matchup"]  # golden digests predate matchups
+        return d
 
     @staticmethod
     def from_json(d: dict) -> "Scenario":
@@ -48,13 +52,13 @@ class Scenario:
     def decks(self) -> tuple[list[str], list[str]]:
         from .match import match_decks
 
-        decks = [list(d) for d in match_decks(self.match_game)]
+        decks = [list(d) for d in match_decks(self.match_game, self.matchup)]
         for seat, name, n in self.extra:
             decks[seat][-n:] = [name] * n
         return decks[0], decks[1]
 
 
-def scenarios(n: int, start: int = 0, extra: tuple = (), auto_mana: bool = False, auto_pass: bool = False) -> list[Scenario]:
+def scenarios(n: int, start: int = 0, extra: tuple = (), auto_mana: bool = False, auto_pass: bool = False, matchup: str = "jund_blue") -> list[Scenario]:
     """A deterministic mix: random/chaos/bot seats, games 1-3, both starting
     players, occasional short turn limits and mulligan-free games."""
     out = []
@@ -72,6 +76,7 @@ def scenarios(n: int, start: int = 0, extra: tuple = (), auto_mana: bool = False
                 extra=tuple(extra),
                 auto_mana=auto_mana,
                 auto_pass=auto_pass,
+                matchup=matchup,
             )
         )
     return out
@@ -97,7 +102,9 @@ class ChaosAgent:
 def make_agents(sc: Scenario):
     from .agents import RandomAgent
     from .bots import make_bot
+    from .match import matchup_decks
 
+    decks = matchup_decks(sc.matchup)
     agents = []
     for seat, kind in enumerate(sc.agents):
         if kind == "random":
@@ -105,7 +112,7 @@ def make_agents(sc: Scenario):
         elif kind == "chaos":
             agents.append(ChaosAgent(sc.seed * 2 + seat))
         elif kind == "bot":
-            agents.append(make_bot(seat))
+            agents.append(make_bot(seat, decks[seat]))
         else:
             raise ValueError(f"unknown agent {kind!r}")
     return agents
@@ -113,10 +120,12 @@ def make_agents(sc: Scenario):
 
 def new_game(sc: Scenario, engine: str | None = None, log: bool = True):
     from .backend import game_class
+    from .match import deck_names
 
     cls = game_class(engine)
     return cls(
         sc.decks(),
+        deck_names=deck_names(sc.matchup),
         seed=sc.seed,
         starting_player=sc.starting_player,
         max_turns=sc.max_turns,

@@ -326,8 +326,9 @@ def fuzz(
     extra: tuple = (),
     auto_mana: bool = False,
     auto_pass: bool = False,
+    matchup: str = "jund_blue",
 ) -> int:
-    scs = scenarios(n, start, extra, auto_mana, auto_pass)
+    scs = scenarios(n, start, extra, auto_mana, auto_pass, matchup)
     t = time.perf_counter()
     work = [(sc, full_every, fork_every) for sc in scs]
     if jobs > 1:
@@ -384,6 +385,7 @@ def main(argv=None) -> None:
     )
     f.add_argument("--auto-mana", action="store_true", help="play with Game(auto_mana=True): colour-preserving auto payment")
     f.add_argument("--auto-pass", action="store_true", help="play with Game(auto_pass=True): collapse uneventful priority passes")
+    f.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue or jund_madness")
     r = sub.add_parser("repro", help="replay a saved divergence")
     r.add_argument("file")
     args = ap.parse_args(argv)
@@ -392,7 +394,7 @@ def main(argv=None) -> None:
         for spec in args.with_card:
             seat, name, n = spec.split(":")
             extra.append((int(seat), name, int(n)))
-        sys.exit(1 if fuzz(args.games, args.start, args.jobs, args.full_every, args.fork_every, args.out, args.quiet, tuple(extra), args.auto_mana, args.auto_pass) else 0)
+        sys.exit(1 if fuzz(args.games, args.start, args.jobs, args.full_every, args.fork_every, args.out, args.quiet, tuple(extra), args.auto_mana, args.auto_pass, args.matchup) else 0)
     with open(args.file) as fh:
         data = json.load(fh)
     saved = Divergence.from_json(data)

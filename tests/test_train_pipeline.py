@@ -371,3 +371,39 @@ def test_request_ints_for_sizes_the_server_slot_from_the_games_per_request():
     assert request_ints_for(2048, 13) == 1 << 22  # the overnight run: 79 decisions per request, 1.3M ints seen
     assert request_ints_for(256, 63) == 1 << 18  # many workers: the floor
     assert request_ints_for(2048, 1, groups=1) >= 2048 * (1 << 15)
+
+
+def test_new_deck_against_a_fixed_opponent_from_its_weights(tmp_path):
+    """--matchup with exploiter mode: the learner plays only Red Madness
+    (seat 1 of jund_madness) against a frozen checkpoint, starting from its weights."""
+    src = tmp_path / "src"
+    Trainer(_cfg(src, "--iterations", "1", *NO_EVAL, *IN_PROCESS)).train()
+    jund = str(src / "pool" / "iter_00000.pt")
+    run = tmp_path / "red"
+    cfg = _cfg(run, "--iterations", "2", "--matchup", "jund_madness", "--exploit", jund, "--exploit-deck", "red", "--hidden", "32",
+               *IN_PROCESS, *SMALL_EVAL, "--eval-every", "2")  # fmt: skip
+    t = Trainer(cfg)
+    init = torch.load(jund, weights_only=False)
+    assert t.net.config["hidden"] == init["config"]["hidden"] == 16  # the checkpoint's network, not --hidden 32
+    assert all(torch.equal(a, b) for a, b in zip(t.net.state_dict().values(), init["model"].values()))
+    specs = t._train_specs(0)
+    assert all(sp.seats == (os.path.abspath(jund), LEARNER) and sp.matchup == "jund_madness" for sp in specs)
+    t.train()
+    rows = _rows(run)
+    assert [r["iteration"] for r in rows] == [1, 2] and "win_vs_main" in rows[0]
+    assert "eval/opponent/red" in rows[1] and "eval/random/red" in rows[1] and "eval/random/jund" not in rows[1]
+    assert rows[1]["bench/red_vs_bot_n"] == 4
+    with pytest.raises(ValueError):
+        Trainer(_cfg(tmp_path / "bad", "--exploit", jund, "--exploit-deck", "red"))  # no red deck in jund_blue
+
+
+def test_restore_torch_rng_accepts_states_moved_by_map_location():
+    from mtg_ml.rl.train import restore_torch_rng
+
+    state = torch.get_rng_state()
+    a = torch.rand(3)
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    # what torch.load(latest.pt, map_location=cfg.device) hands back: the ByteTensor on the training device
+    restore_torch_rng({"torch_rng": state.to(dev), "cuda_rng": [s.to(dev) for s in torch.cuda.get_rng_state_all()] if torch.cuda.is_available() else None})
+    assert torch.equal(torch.rand(3), a)
+    restore_torch_rng({})  # older checkpoints: nothing to restore
