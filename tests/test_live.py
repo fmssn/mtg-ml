@@ -96,10 +96,13 @@ def test_live_game_to_the_end_writes_a_replay(manager, seat, tmp_path):
         shown = f["decision"]
         if d["player"] == seat:
             assert shown["options"] == d["options"] and shown["chosen"] == d["chosen"]
-        elif d["kind"] in PUBLIC_KINDS:
+            continue
+        # A prompt can name a card only the model knows (Delver: "reveal <top card>?").
+        assert shown["prompt"] == ""
+        if d["kind"] in PUBLIC_KINDS:
             assert shown["options"] == [d["options"][d["chosen"]]] and "policy" in d
         else:
-            assert shown["options"] == [f"(hidden {d['kind'].replace('_', ' ')})"] and shown["prompt"] == ""
+            assert shown["options"] == [f"(hidden {d['kind'].replace('_', ' ')})"]
     assert any(d["player"] != seat for d in full)
 
 
