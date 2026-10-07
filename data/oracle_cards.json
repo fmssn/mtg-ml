@@ -792,5 +792,22 @@
    "Flashback"
   ],
   "cmc": 2.0
+ },
+ {
+  "name": "Generous Ent",
+  "mana_cost": "{5}{G}",
+  "type_line": "Creature \u2014 Treefolk",
+  "oracle_text": "Reach\nWhen this creature enters, create a Food token. (It's an artifact with \"{2}, {T}, Sacrifice this token: You gain 3 life.\")\nForestcycling {1} ({1}, Discard this card: Search your library for a Forest card, reveal it, put it into your hand, then shuffle.)",
+  "power": "5",
+  "toughness": "7",
+  "keywords": [
+   "Reach",
+   "Landcycling",
+   "Food",
+   "Forestcycling",
+   "Typecycling",
+   "Cycling"
+  ],
+  "cmc": 6.0
  }
 ]
