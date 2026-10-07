@@ -7,7 +7,8 @@ use std::fmt::Write;
 
 use crc32fast::Hasher;
 
-use crate::cards::{db, TYPE_NAMES};
+use crate::cards::{db, Op, SacFilter, TYPE_NAMES};
+use crate::mana::{bit, ManaCost, Remaining};
 use crate::state::*;
 
 /// Kinds whose chosen option is public when the opponent makes it
@@ -120,6 +121,81 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
     thermo(o, "self:power", power[0], POWER_STEPS);
     thermo(o, "opponent:power", power[1], POWER_STEPS);
     thermo(o, "stack_count", st.stack.len() as i64, COUNT_STEPS);
+    board_features(st, viewer, o);
+    for (side, p) in [("self", viewer), ("opponent", opp)] {
+        let lib = &st.players[p as usize].library;
+        for (pos, &c) in lib.iter().enumerate() {
+            if st.c(c).known_to & pbit(viewer) == 0 {
+                continue;
+            }
+            if pos < KNOWN_POS_CAP {
+                direct!(o, "{side}:known_library:{pos}:{}", st.c(c).name());
+            } else if pos == lib.len() - 1 {
+                direct!(o, "{side}:known_library:bottom:{}", st.c(c).name());
+            }
+        }
+    }
+}
+
+/// `thermo` for `{side}:{name}` without allocating the name.
+fn side_thermo<O: FeatureOut>(o: &mut O, side: &str, name: &str, n: i64, steps: &[i64]) {
+    for &k in steps {
+        if n >= k {
+            direct!(o, "{side}:{name}>={k}");
+        }
+    }
+}
+
+/// encode.py `KNOWN_POS_CAP`.
+const KNOWN_POS_CAP: usize = 8;
+
+/// encode.py `_ready`: could this creature attack in its controller's
+/// current (if active) or next turn?
+fn ready(c: &Card, active: bool) -> bool {
+    if active {
+        !c.tapped && !c.sick
+    } else {
+        !(c.tapped && c.skip_untap > 0)
+    }
+}
+
+/// encode.py `_board_features`: ready power, the part of it the defender's
+/// untapped creatures cannot block, potential blockers, lethal flags and
+/// untapped mana sources, per side.
+fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
+    let d = db();
+    let (fly, reach) = (d.kw("flying"), d.kw("reach"));
+    // (controller, untapped, ready-if-its-controller-is-active, ready otherwise, power, keywords)
+    let creatures: Vec<(u8, bool, bool, bool, i64, u32)> = st
+        .battlefield
+        .iter()
+        .map(|&ci| st.c(ci))
+        .filter(|c| st.is_creature(c))
+        .map(|c| (c.controller, !c.tapped, ready(c, true), ready(c, false), st.power(c).max(0) as i64, st.keywords(c)))
+        .collect();
+    for (side, p) in [("self", viewer), ("opponent", 1 - viewer)] {
+        let active = st.active == p;
+        let blockers: Vec<u32> = creatures.iter().filter(|c| c.0 != p && c.1).map(|c| c.5).collect();
+        let (mut ready_power, mut evasive) = (0i64, 0i64);
+        for c in creatures.iter().filter(|c| c.0 == p && if active { c.2 } else { c.3 }) {
+            ready_power += c.4;
+            let blockable = blockers.iter().any(|&b| c.5 & fly == 0 || b & (fly | reach) != 0);
+            if !blockable {
+                evasive += c.4;
+            }
+        }
+        let life = st.players[(1 - p) as usize].life as i64;
+        side_thermo(o, side, "ready_power", ready_power, POWER_STEPS);
+        side_thermo(o, side, "ready_evasive_power", evasive, POWER_STEPS);
+        side_thermo(o, side, "potential_blockers", creatures.iter().filter(|c| c.0 == p && c.1).count() as i64, COUNT_STEPS);
+        if ready_power > 0 && ready_power >= life {
+            direct!(o, "{side}:lethal_on_board");
+        }
+        if evasive > 0 && evasive >= life {
+            direct!(o, "{side}:evasive_lethal_on_board");
+        }
+        side_thermo(o, side, "untapped_mana", st.mana_sources(p, &[]).len() as i64, COUNT_STEPS);
+    }
 }
 
 /// encode.py `ENT_STEPS` / `MAX_ENTITIES`.
@@ -193,6 +269,10 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, o: &mut E) -> 
         } else if c.counters < 0 {
             tok!(o, "e:counters:{}", c.counters);
         }
+        if c.skip_untap > 0 {
+            tok!(o, "e:skip_untap:{}", c.skip_untap);
+        }
+        targeted_by(st, viewer, Ref::Perm(c.oid), o);
         ids.push(c.oid);
     }
     for (i, it) in st.stack.iter().rev().enumerate() {
@@ -205,9 +285,40 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, o: &mut E) -> 
         tok!(o, "e:ctrl:{}", rel(it.controller, viewer));
         tok!(o, "e:stack_pos:{}", i.min(3));
         tok!(o, "e:stack_kind:{}", it.kind.name());
+        if it.x > 0 {
+            ent_thermo(o, "e:x", it.x as i64);
+        }
+        for &r in it.targets.iter().filter(|&&r| ref_exists(st, r)) {
+            let (kind, who) = match r {
+                Ref::Player(p) => ("player", p),
+                Ref::Perm(oid) => ("perm", st.c(st.perm(oid).unwrap()).controller),
+                Ref::Stack(sid) => ("spell", st.stack[st.stack_pos(sid).unwrap()].controller),
+            };
+            tok!(o, "e:targets:{kind}:{}", rel(who, viewer));
+        }
+        targeted_by(st, viewer, Ref::Stack(it.sid), o);
         ids.push(it.sid);
     }
     ids
+}
+
+fn ref_exists(st: &State, r: Ref) -> bool {
+    match r {
+        Ref::Player(_) => true,
+        Ref::Stack(s) => st.stack_pos(s).is_some(),
+        Ref::Perm(o) => st.perm(o).is_some(),
+    }
+}
+
+/// encode.py `_targeted_by`: who targets this object, and with what.
+fn targeted_by<E: EntityOut>(st: &State, viewer: u8, r: Ref, o: &mut E) {
+    for it in &st.stack {
+        for _ in it.targets.iter().filter(|&&t| t == r) {
+            let who = rel(it.controller, viewer);
+            tok!(o, "e:targeted_by:{who}");
+            tok!(o, "e:targeted_by:{who}:{}", it.name);
+        }
+    }
 }
 
 /// encode.py `option_object_ids`: every `#<digits>` in the label, plus the
@@ -236,6 +347,203 @@ pub fn option_object_ids(st: &State, o: &Opt) -> Vec<u32> {
         ids.push(st.c(c).oid);
     }
     ids
+}
+
+/// encode.py `MANA_LEFT_CAP` / `PREVIEW_COLORS`.
+const MANA_LEFT_CAP: i32 = 8;
+const PREVIEW_COLORS: [u8; 5] = [b'W', b'U', b'B', b'R', b'G'];
+
+/// encode.py `_dies_to`: would `n` more damage destroy creature `c`?
+fn dies_to(st: &State, c: &Card, n: i32, deathtouch: bool) -> bool {
+    if n <= 0 || st.has(c, "indestructible") {
+        return false;
+    }
+    deathtouch || c.damage + n >= st.toughness(c)
+}
+
+fn plus(cost: &ManaCost, generic: i32, color: Option<u8>) -> Remaining {
+    let mut c = cost.clone();
+    c.generic += generic;
+    if let Some(col) = color {
+        match c.colored.iter_mut().find(|(k, _)| *k == col) {
+            Some(e) => e.1 += 1,
+            None => {
+                c.colored.push((col, 1));
+                c.colored.sort();
+            }
+        }
+    }
+    Remaining::of(&c)
+}
+
+/// encode.py `_mana_preview`.
+fn mana_preview(st: &State, player: u8, cost: &ManaCost, sac: Option<SacFilter>, exclude: &[u32], out: &mut impl FnMut(std::fmt::Arguments)) {
+    let pl = &st.players[player as usize];
+    let sources = st.mana_sources(player, exclude);
+    let avail = pl.pool.iter().map(|(_, n)| n).sum::<i32>() + sources.len() as i32;
+    out(format_args!("pv:mana_left_after:{}", (avail - cost.mana_value()).clamp(0, MANA_LEFT_CAP)));
+    // Colours nothing can make are never left (skips the feasibility search).
+    let mut makes = pl.pool.iter().filter(|(_, n)| *n > 0).fold(0u8, |m, (c, _)| m | bit(*c));
+    for &(ci, ai) in &sources {
+        makes |= st.c(ci).face().abilities[ai].mana.as_ref().map_or(0, |v| v.iter().fold(0, |m, c| m | bit(*c)));
+    }
+    for col in PREVIEW_COLORS {
+        if makes & bit(col) != 0 && st.cost_feasible(player, &plus(cost, 0, Some(col)), sac, exclude, None, &[]) {
+            out(format_args!("pv:colors_left:{}", col as char));
+        }
+    }
+}
+
+/// encode.py `_kills_preview`.
+fn kills_preview(st: &State, player: u8, ops: Option<&[Op]>, source: &Card, out: &mut impl FnMut(std::fmt::Arguments)) {
+    let mut dmg: Vec<(u32, i32)> = vec![];
+    for op in ops.unwrap_or(&[]) {
+        if let Op::DamageEachCreature { n, without } = op {
+            for &ci in &st.battlefield {
+                let c = st.c(ci);
+                if st.is_creature(c) && !(*without != 0 && st.keywords(c) & without != 0) {
+                    match dmg.iter_mut().find(|e| e.0 == c.oid) {
+                        Some(e) => e.1 += n,
+                        None => dmg.push((c.oid, *n)),
+                    }
+                }
+            }
+        }
+    }
+    if dmg.is_empty() {
+        return;
+    }
+    let deathtouch = st.has(source, "deathtouch");
+    let (mut opp, mut me) = (0i64, 0i64);
+    for &ci in &st.battlefield {
+        let c = st.c(ci);
+        if let Some(&(_, n)) = dmg.iter().find(|e| e.0 == c.oid) {
+            if dies_to(st, c, n, deathtouch) {
+                if c.controller == player {
+                    me += 1;
+                } else {
+                    opp += 1;
+                }
+            }
+        }
+    }
+    for &k in COUNT_STEPS {
+        if opp >= k {
+            out(format_args!("pv:kills_opp>={k}"));
+        }
+    }
+    for &k in COUNT_STEPS {
+        if me >= k {
+            out(format_args!("pv:kills_self>={k}"));
+        }
+    }
+    if opp + me == 0 {
+        out(format_args!("pv:kills_none"));
+    }
+}
+
+/// encode.py `_item_cost`: (cost, sacrifice filter, excluded source) of the
+/// stack item whose targets are being chosen.
+fn item_cost(st: &State, item: &StackItem) -> (ManaCost, Option<SacFilter>, Vec<u32>) {
+    if item.kind == SKind::Spell {
+        let ci = item.card.expect("spell has a card");
+        let base = st.mode_cost(ci, item.method).expect("cast mode has a cost");
+        return (base.with_x(item.x).reduced(st.cost_reduction(item.controller, ci)), st.c(ci).face().additional_sac, vec![]);
+    }
+    if let Some(s) = &item.source {
+        let src = st.src(s);
+        for ab in &src.face().abilities {
+            if item.name == format!("{}: {}", src.name(), ab.name) {
+                return (ab.cost.clone(), ab.sac_other, if ab.tap { vec![src.oid] } else { vec![] });
+            }
+        }
+    }
+    (ManaCost::default(), None, vec![])
+}
+
+/// encode.py `_target_preview`.
+fn target_preview(st: &State, player: u8, r: Ref, out: &mut impl FnMut(std::fmt::Arguments)) {
+    let item = match st.stack.last() {
+        Some(it) if !matches!(r, Ref::Stack(_)) => it,
+        _ => return,
+    };
+    let mut target: Option<&Card> = None;
+    if let Ref::Perm(oid) = r {
+        let c = match st.perm(oid) {
+            Some(ci) => st.c(ci),
+            None => return,
+        };
+        let ward = c.face().ward;
+        if ward > 0 && c.controller != player {
+            out(format_args!("pv:target_ward:{ward}"));
+            let (cost, sac, exclude) = item_cost(st, item);
+            if st.cost_feasible(player, &plus(&cost, ward, None), sac, &exclude, None, &[]) {
+                out(format_args!("pv:ward_payable"));
+            }
+        }
+        target = Some(c);
+    }
+    let source: Option<&Card> = match (item.card, &item.source) {
+        (Some(ci), _) if item.kind == SKind::Spell => Some(st.c(ci)),
+        (_, Some(s)) => Some(st.src(s)),
+        _ => None,
+    };
+    let deathtouch = source.map(|s| st.has(st.live(s).map(|ci| st.c(ci)).unwrap_or(s), "deathtouch")).unwrap_or(false);
+    for op in item.effect.unwrap_or(&[]) {
+        if let Op::DamageTarget { n } = op {
+            let lethal = match (r, target) {
+                (Ref::Player(p), _) => *n >= st.players[p as usize].life,
+                (_, Some(c)) => st.is_creature(c) && dies_to(st, c, *n, deathtouch),
+                _ => false,
+            };
+            if lethal {
+                out(format_args!("pv:damage_lethal_to_target"));
+            }
+        }
+    }
+}
+
+/// encode.py `option_preview`: engine-computed effects of taking an option.
+pub fn option_preview(st: &State, player: u8, kind: Kind, val: &Val, out: &mut impl FnMut(std::fmt::Arguments)) {
+    match (kind, val) {
+        (Kind::Target, Val::Ref(r)) => target_preview(st, player, *r, out),
+        (Kind::Priority, Val::Activate(ci, ai)) => {
+            // A determinized copy re-deals hidden cards under pending options,
+            // so an option may name an ability, mode or cost the card no longer has.
+            let c = st.c(*ci);
+            let ab = match c.face().abilities.get(*ai as usize) {
+                Some(ab) => ab,
+                None => return,
+            };
+            kills_preview(st, player, ab.effect.as_deref(), c, out);
+            let exclude = if ab.tap { vec![c.oid] } else { vec![] };
+            mana_preview(st, player, &ab.cost, ab.sac_other, &exclude, out);
+        }
+        (Kind::Priority, Val::Cast(ci, method, choice)) => {
+            let d = st.c(*ci).face();
+            let base = match st.mode_cost(*ci, *method) {
+                Some(b) if choice.map_or(true, |i| (i as usize) < d.modes.len()) => b,
+                _ => return,
+            };
+            let effect = match choice {
+                Some(i) => Some(d.modes[*i as usize].effect.as_slice()),
+                None => d.effect.as_deref(),
+            };
+            kills_preview(st, player, effect, st.c(*ci), out);
+            let cost = base.with_x(0).reduced(st.cost_reduction(player, *ci));
+            mana_preview(st, player, &cost, d.additional_sac, &[], out);
+        }
+        _ => {}
+    }
+}
+
+/// String form of option previews (differential tests).
+pub fn option_preview_strings(st: &State, player: u8, i: usize) -> Option<Vec<String>> {
+    let d = st.decision.as_ref()?;
+    let o = d.options.get(i)?;
+    let mut v = vec![];
+    option_preview(st, player, d.kind, &o.value, &mut |a| v.push(a.to_string()));
+    Some(v)
 }
 
 /// String form of entities (differential tests).
@@ -445,12 +753,18 @@ pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32) -> Opt
         eo.close();
         ids
     };
+    let mut pbuf = String::with_capacity(32);
     let opts = d
         .options
         .iter()
         .map(|o| {
             let mut v = Vec::with_capacity(2 * o.key.len() + 3);
             option_token_hashes(d.kind, &o.key, "", option_dim, &mut v);
+            option_preview(st, player, d.kind, &o.value, &mut |a| {
+                pbuf.clear();
+                let _ = pbuf.write_fmt(a);
+                v.push(crc32fast::hash(pbuf.as_bytes()) % option_dim);
+            });
             v.sort_unstable();
             v.dedup();
             let mut ptr: Vec<u32> = option_object_ids(st, o).iter().filter_map(|id| ids.iter().position(|x| x == id)).map(|k| option_dim + k as u32).collect();

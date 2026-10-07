@@ -2,8 +2,10 @@
 
 Inspired by MageZero's StateEncoder: a state is a set of string features
 (hierarchical: a permanent contributes its name, its name+state and coarse
-type-level features), hashed into a fixed index space. Everything here works
-from `observe()`, so encoders never see hidden information.
+type-level features), hashed into a fixed index space. State and entity
+features work from `observe()`, so encoders never see hidden information;
+option previews (`option_preview`) read the engine, but only public objects
+and the decider's own cards and mana. Reference: docs/features.md.
 
 The hashed state is a set, so anything that matters as a number has to be
 spelled out as features: counts of identical objects (`_counted`) and
@@ -109,7 +111,58 @@ def state_features(game, viewer: int) -> list[str]:
     for side in ("self", "opponent"):
         f += _thermo(f"{side}:power", power[side], POWER_STEPS)
     f += _thermo("stack_count", len(o["stack"]))
+    f += _board_features(o, viewer, game)
+    for side in ("self", "opponent"):
+        n = o[side]["library_count"]
+        for pos, name in o[side]["library_known"]:
+            if pos < KNOWN_POS_CAP:
+                f.append(f"{side}:known_library:{pos}:{name}")
+            elif pos == n - 1:
+                f.append(f"{side}:known_library:bottom:{name}")
     return f + _counted(raw)
+
+
+KNOWN_POS_CAP = 8  # known library cards deeper than this (but not at the bottom) get no position feature
+
+
+def _ready(p: dict, active: bool) -> bool:
+    """Could this creature attack in its controller's current (if active)
+    or next turn? Active side: untapped and not summoning sick. Other side:
+    sickness wears off and it untaps, unless it is tapped and skips its next
+    untap step (Sleep of the Dead)."""
+    if active:
+        return not p["tapped"] and not p["sick"]
+    return not (p["tapped"] and p["skip_untap"] > 0)
+
+
+def _can_block(blocker: dict, attacker: dict) -> bool:
+    """`Game._can_block` on observed permanents."""
+    return "flying" not in attacker["keywords"] or "flying" in blocker["keywords"] or "reach" in blocker["keywords"]
+
+
+def _board_features(o: dict, viewer: int, game) -> list[str]:
+    """Lethal and readiness: per side, the power that could attack (`_ready`),
+    the part of it no untapped creature of the defender can block, the
+    defender's untapped creatures (potential blockers), whether either is
+    lethal against the defender's life, and untapped mana sources."""
+    f = []
+    creatures = [p for p in o["battlefield"] if p["power"] is not None]
+    for side, other, p_idx in (("self", "opponent", viewer), ("opponent", "self", 1 - viewer)):
+        active = o["active"] == side
+        attackers = [p for p in creatures if p["controller"] == side and _ready(p, active)]
+        blockers = [p for p in creatures if p["controller"] == other and not p["tapped"]]
+        ready = sum(max(p["power"], 0) for p in attackers)
+        evasive = sum(max(p["power"], 0) for p in attackers if not any(_can_block(b, p) for b in blockers))
+        life = o[other]["life"]
+        f += _thermo(f"{side}:ready_power", ready, POWER_STEPS)
+        f += _thermo(f"{side}:ready_evasive_power", evasive, POWER_STEPS)
+        f += _thermo(f"{side}:potential_blockers", sum(1 for p in creatures if p["controller"] == side and not p["tapped"]))
+        if ready > 0 and ready >= life:
+            f.append(f"{side}:lethal_on_board")
+        if evasive > 0 and evasive >= life:
+            f.append(f"{side}:evasive_lethal_on_board")
+        f += _thermo(f"{side}:untapped_mana", len(game.mana_sources(p_idx)))
+    return f
 
 
 ENT_STEPS = (*range(1, 9), 10, 12, 15)
@@ -127,6 +180,7 @@ def entity_features(game, viewer: int) -> tuple[list[list[str]], dict[int, int]]
         return game.entity_features(viewer)
     o = observe(game, viewer)
     ents, index = [], {}
+    targeted = _targeted_by(o["stack"])
     for p in o["battlefield"]:
         e = [f"e:name:{p['name']}", f"e:ctrl:{p['controller']}"]
         e += [f"e:type:{t}" for t in p["types"]]
@@ -146,15 +200,48 @@ def entity_features(game, viewer: int) -> tuple[list[list[str]], dict[int, int]]
             e += _thermo("e:counters", p["counters"], ENT_STEPS)
         elif p["counters"] < 0:
             e.append(f"e:counters:{p['counters']}")
+        if p["skip_untap"] > 0:
+            e.append(f"e:skip_untap:{p['skip_untap']}")
+        e += targeted.get(p["oid"], [])
         index[p["oid"]] = len(ents)
         ents.append(e)
     for i, it in enumerate(reversed(o["stack"])):
         index[it["sid"]] = len(ents)
-        ents.append(["e:stack", f"e:name:{it['name']}", f"e:ctrl:{it['controller']}", f"e:stack_pos:{min(i, 3)}", f"e:stack_kind:{it['kind']}"])
+        e = ["e:stack", f"e:name:{it['name']}", f"e:ctrl:{it['controller']}", f"e:stack_pos:{min(i, 3)}", f"e:stack_kind:{it['kind']}"]
+        if it["x"] > 0:
+            e += _thermo("e:x", it["x"], ENT_STEPS)
+        for label in it["targets"]:
+            kind, rel = _parse_target(label)
+            e.append(f"e:targets:{kind}:{rel}")
+        e += targeted.get(it["sid"], [])
+        ents.append(e)
     if len(ents) > MAX_ENTITIES:
         ents = ents[:MAX_ENTITIES]
         index = {k: v for k, v in index.items() if v < MAX_ENTITIES}
     return ents, index
+
+
+def _parse_target(label: str) -> tuple[str, str]:
+    """(kind, relation) of an observed target label: `player 1 (self)`,
+    `spell Counterspell#7 (opponent)` or `Swamp#3 (self)`."""
+    rel = label.rsplit("(", 1)[1].rstrip(")")
+    if label.startswith("player "):
+        return "player", rel
+    if label.startswith("spell "):
+        return "spell", rel
+    return "perm", rel
+
+
+def _targeted_by(stack: list[dict]) -> dict[int, list[str]]:
+    """{object id: features} for every permanent or spell a stack item
+    targets (stack from the bottom): who targets it and with what."""
+    out: dict[int, list[str]] = {}
+    for it in stack:
+        for label in it["targets"]:
+            m = _ID.search(label)
+            if m is not None and not label.startswith("player "):
+                out.setdefault(int(m.group(1)), []).extend((f"e:targeted_by:{it['controller']}", f"e:targeted_by:{it['controller']}:{it['name']}"))
+    return out
 
 
 def option_object_ids(option) -> list[int]:
@@ -166,6 +253,134 @@ def option_object_ids(option) -> list[int]:
     if isinstance(v, tuple) and len(v) == 3 and v[0] in ("activate", "mana"):
         ids.append(v[1].oid)
     return ids
+
+
+MANA_LEFT_CAP = 8
+PREVIEW_COLORS = ("W", "U", "B", "R", "G")
+
+
+def _ops(effect) -> tuple:
+    return getattr(effect, "ops", ()) if effect is not None else ()
+
+
+def _dies_to(game, c, n: int, deathtouch: bool) -> bool:
+    """Would `n` more damage destroy creature `c` (SBA 704.5g/h)?"""
+    if n <= 0 or game.has(c, "indestructible"):
+        return False
+    return deathtouch or c.damage + n >= game.toughness(c)
+
+
+def _mana_preview(game, player: int, cost, sac_filter, exclude: set[int]) -> list[str]:
+    """Mana left after paying `cost`: untapped mana sources plus floating
+    mana minus its mana value (payment is a separate decision, so this is an
+    estimate), and every colour that could still be produced afterwards
+    (exact: `cost` plus one mana of that colour is payable)."""
+    from .engine.mana import ManaCost, RemainingCost
+
+    avail = sum(game.players[player].pool.values()) + len(game.mana_sources(player, exclude))
+    f = [f"pv:mana_left_after:{min(max(avail - cost.mana_value, 0), MANA_LEFT_CAP)}"]
+    for col in PREVIEW_COLORS:
+        if game._cost_feasible(player, RemainingCost.of(cost.plus(ManaCost(0, ((col, 1),)))), sac_filter, exclude):
+            f.append(f"pv:colors_left:{col}")
+    return f
+
+
+def _kills_preview(game, player: int, ops, source) -> list[str]:
+    """Creatures the `damage_each_creature` ops would destroy, per side."""
+    dmg: dict[int, int] = {}
+    for op in ops:
+        if op["op"] != "damage_each_creature":
+            continue
+        without = op.get("without")
+        for c in game.battlefield:
+            if game.is_creature(c) and not (without and game.has(c, without)):
+                dmg[c.oid] = dmg.get(c.oid, 0) + op["n"]
+    if not dmg:
+        return []
+    deathtouch = game.has(source, "deathtouch")
+    kills = {"self": 0, "opp": 0}
+    for c in game.battlefield:
+        if c.oid in dmg and _dies_to(game, c, dmg[c.oid], deathtouch):
+            kills["self" if c.controller == player else "opp"] += 1
+    return _thermo("pv:kills_opp", kills["opp"]) + _thermo("pv:kills_self", kills["self"]) + ["pv:kills_none"] * (kills["opp"] + kills["self"] == 0)
+
+
+def _item_cost(game, item):
+    """(cost, sacrifice filter, excluded source oids) of the stack item being
+    put on the stack (targets are chosen before costs are paid)."""
+    from .engine.mana import ManaCost
+
+    if item.kind == "spell":
+        card = item.card
+        base = game._mode_cost(card, item.method)
+        return base.with_x(item.x).reduced(game._cost_reduction(item.controller, card)), card.face.additional_sac, set()
+    src = item.source
+    for ab in src.face.abilities:
+        if f"{src.name}: {ab.name}" == item.name:
+            return ab.cost, ab.sac_other, {src.oid} if ab.tap else set()
+    return ManaCost(), None, set()
+
+
+def _target_preview(game, player: int, ref) -> list[str]:
+    """Ward and lethal damage for a target choice of the top stack item."""
+    if not game.stack or ref[0] == "stack":
+        return []
+    item = game.stack[-1]
+    f = []
+    if ref[0] == "perm":
+        c = game.perm(ref[1])
+        if c is None:
+            return []
+        if c.face.ward and c.controller != player:
+            f.append(f"pv:target_ward:{c.face.ward}")
+            cost, sac, exclude = _item_cost(game, item)
+            from .engine.mana import ManaCost, RemainingCost
+
+            if game._cost_feasible(player, RemainingCost.of(cost.plus(ManaCost(c.face.ward))), sac, exclude):
+                f.append("pv:ward_payable")
+    source = item.card if item.kind == "spell" else item.source
+    for op in _ops(item.effect):
+        if op["op"] != "damage_target":
+            continue
+        if ref[0] == "player":
+            lethal = op["n"] >= game.players[ref[1]].life
+        else:
+            lethal = game.is_creature(c) and _dies_to(game, c, op["n"], source is not None and game.has(game.live(source) or source, "deathtouch"))
+        if lethal:
+            f.append("pv:damage_lethal_to_target")
+    return f
+
+
+def option_preview(game, player: int, i: int) -> list[str]:
+    """Engine-computed effects of taking option `i` of the current decision,
+    from the current state without changing it (`pv:` tokens): creatures a
+    sweeper ability kills per side, ward and lethal damage on a target, mana
+    and colours left after a cast or activation."""
+    if getattr(game, "NATIVE", False):
+        return game.option_preview(player, i)
+    kind = game.decision.kind
+    v = game.decision.options[i].value
+    if kind == "target" and isinstance(v, tuple):
+        return _target_preview(game, player, v)
+    if kind != "priority" or not isinstance(v, tuple) or v[0] not in ("cast", "activate"):
+        return []
+    # A determinized copy re-deals hidden cards under pending options, so an
+    # option may name an ability, mode or cost the card no longer has.
+    card = v[1]
+    if v[0] == "activate":
+        if v[2] >= len(card.face.abilities):
+            return []
+        ab = card.face.abilities[v[2]]
+        exclude = {card.oid} if ab.tap else set()
+        return _kills_preview(game, player, _ops(ab.effect), card) + _mana_preview(game, player, ab.cost, ab.sac_other, exclude)
+    mode, choice = v[2], (v[3] if len(v) > 3 else None)
+    d = card.face
+    base = game._mode_cost(card, mode)
+    if base is None or (choice is not None and choice >= len(d.modes)):
+        return []
+    effect = d.effect if choice is None else d.modes[choice].effect
+    cost = base.with_x(0).reduced(game._cost_reduction(player, card))
+    return _kills_preview(game, player, _ops(effect), card) + _mana_preview(game, player, cost, d.additional_sac, set())
 
 
 def hash_feature(feature: str, dim: int = DEFAULT_DIM) -> int:
