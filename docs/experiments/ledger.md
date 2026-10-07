@@ -2,6 +2,12 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## Open (handoff 2026-10-07)
+
+- `r3-attn` was still training on h100-private (`~/mtg-ml-next2/runs/r3-attn`, cores 48-63, GPUs 5+4, ~20 s per iteration, ends at 1M games). When it ends: `archive_run.sh 20261007-r3-attn ...`, `final_evals.sh` with `H2H="20261007-r3-attn 20261007-r3-control"`, `ladder_final.py 20261007-r3-attn` (from `~/mtg-ml-next2`), then fill its row.
+- Suggested round 4: parent `20261007-r3-postboard`; settle postboard with a 5,000-game head to head; start ladder L2 (rungs: L1 + `r1-lranneal` + `r3-control`); one larger change (entity attention if it holds, a bigger model from scratch with the anneal and auto mana, or a new search design).
+- Scripts: `tools/experiments/`.
+
 ## Summary
 
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
