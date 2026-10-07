@@ -20,6 +20,7 @@ Full numbers, the PyPy experiment and the method are under [Benchmarks](#benchma
 - [Building](#building)
 - [Choosing the engine](#choosing-the-engine)
 - [Architecture](#architecture)
+- [Copying a game](#copying-a-game)
 - [Determinism: how the two engines stay identical](#determinism-how-the-two-engines-stay-identical)
 - [Differential testing](#differential-testing)
 - [Benchmarks](#benchmarks)
@@ -63,7 +64,7 @@ taskset -c 48-63 ~/mtg-ml/.venv/bin/python -m maturin build --release -i ~/mtg-m
 | `python -m mtg_ml.rl.evaluate` | `--engine native` |
 | `rollout.Job` | `engine=` field (`None` = `$MTG_ENGINE`) |
 
-`NativeGame` (`mtg_ml/engine/native.py`) has the `Game` API: `decision` (`player`, `kind`, `prompt`, `options` with `label`, `key`, `value`), `legal_options()`, `step(i)`, `over` / `winner` / `end_reason`, `fork()`, `players`, `battlefield`, `stack`, `perm()`, `power()` and the other rules queries, `log`, `actions`, `rng`. `view.observe`, `view.determinize`, `encode.state_features` and `rl.features.featurize` dispatch to the native implementations. The scripted bots and `SearchBot` run unchanged on it.
+`NativeGame` (`mtg_ml/engine/native.py`) has the `Game` API: `decision` (`player`, `kind`, `prompt`, `options` with `label`, `key`, `value`), `legal_options()`, `step(i)`, `over` / `winner` / `end_reason`, `copy()` / `fork()`, `players`, `battlefield`, `stack`, `perm()`, `power()` and the other rules queries, `log`, `actions`, `rng`. `view.observe`, `view.determinize`, `encode.state_features` and `rl.features.featurize` dispatch to the native implementations. The scripted bots and `SearchBot` run unchanged on it.
 
 ## Architecture
 
@@ -81,7 +82,7 @@ native/src/
 mtg_ml/engine/native.py   NativeGame: the Game API on top of py.rs
 ```
 
-**The generator, as a coroutine.** The Python engine is one generator: `ask()` yields a `Decision`, `step(i)` sends the choice back. The port runs the same code on a stackful coroutine (`corosensei`): `Eng::ask` stores the decision and suspends; `Game::step` resumes it with the index. So `engine.rs` reads line by line like `game.py` (same functions, same order of side effects), which is what makes exact parity tractable. A coroutine stack is 256 KiB of reserved (lazily committed) memory per live game. `fork()` replays the action list, as in Python (`NativeGame.fork` does the replay inside Rust).
+**The generator, as a coroutine.** The Python engine is one generator: `ask()` yields a `Decision`, `step(i)` sends the choice back. The port runs the same code on a stackful coroutine (`corosensei`): `Eng::ask` stores the decision and suspends; `Game::step` resumes it with the index. So `engine.rs` reads line by line like `game.py` (same functions, same order of side effects), which is what makes exact parity tractable. A coroutine stack is 256 KiB of reserved (lazily committed) memory per live game; finished games hand theirs to the next game on the thread (a pool of 64). Copies: see [Copying a game](#copying-a-game).
 
 **State and aliasing.** The state lives behind a raw pointer shared by the driver (which reads it between steps, and writes it for scenario setup and determinization) and the coroutine. Engine code never holds a `&mut State` across `ask()`: `Eng::s()` hands out a borrow tied to `&mut self`, and `ask()` takes `&mut self`, so the borrow checker enforces it. The split mirrors the code: `state.rs` (plain methods on `State`) never asks, `engine.rs` (`Eng`) does.
 
@@ -99,6 +100,26 @@ mtg_ml/engine/native.py   NativeGame: the Game API on top of py.rs
 **Python wrapper.** The hot path (`decision.kind/player`, option keys, `step`, `observe`, `featurize`, event hashes) is one native call each. Everything else (`players`, `battlefield`, `stack`, `Card` attributes, option `value`s) is served by proxies: one `NativeCard` per physical card for the whole game (stable identity, like Python objects), whose attributes are re-read after every step. `card.face` and `card.defn` are the Python `CardDef`s, so bots read static card data exactly as before. Scenario tests may mutate what they used to mutate on Python objects (`players[i].life`, `cards_drawn_this_turn`, `card.tapped`, `card.attached_to`, `card.temp.append(...)`, `g.active`, `g.pending.clear()`, `g.destroy()`, `g.sacrifice()`, `g._untap_step()`).
 
 **One card spec.** Both engines load `mtg_ml/engine/cards.toml`. The wrapper passes the file's text to `mtg_ml_native.load_cards()` at import, so a card that only uses existing ops needs no Rust rebuild; a test asserts both engines run the same spec. See [adding-cards.md](adding-cards.md).
+
+## Copying a game
+
+`g.copy()` (both engines; `fork()` now means `copy()`, `fork(replay=True)` is the old replay) returns an independent game in exactly the same state (object ids, RNG state, log, actions) that continues identically. It is the infrastructure for simulated option previews (representation plan, step 3; `docs/representation-plan.md` on its own branch).
+
+A literal clone is impossible: both engines are coroutines (a Python generator; a `corosensei` stack in Rust), and a suspended coroutine cannot be copied (the Rust stack holds heap pointers and pointers into itself). So copies restart the engine from a **snapshot taken at the start of the current step** and replay only the actions since. At a step start the coroutine holds nothing the data does not carry except which step it is and whether the draw is skipped, so `_main(resume=(step, skip_draw))` / `Eng::main(.., resume)` can continue the turn from there. The data copy is `State: Clone` in Rust (constructor args and the snapshot behind `Rc`) and a hand-written structured copy in Python (`game._copy_state`: each `Card` copied once and remapped, card definitions shared; ~20× faster than `copy.deepcopy`).
+
+- Snapshots cost something, so a game takes them only once it has been copied. Its first `copy()` replays the whole history once (and adopts the replay's snapshot); later ones are cheap. A copy shares its parent's snapshot until its next step begins and takes none of its own unless it is copied itself, so a preview or playout that is never copied pays nothing.
+- Edits outside `step()` (determinization, `add_card` after the start, `set_card_def`, setting the RNG state: every native `PyGame::mutate`, and `view.determinize` in Python) drop the snapshot. Until the next step begins, a copy of an edited game falls back to a replay, which, like the old `fork()`, does not carry the edits; from the next step on, copies carry them. Direct attribute writes on the Python engine are not tracked.
+- Checked by `tests/test_copy.py` (both engines: copy vs replay fork, state + features + log + RNG at every step of random continuations, independence, copies of copies, scenario setups, determinized games) and by the difftest fork check, which now also compares `copy()` with the replay in each engine.
+
+Benchmark (`python tools/bench_copy.py --engine {python,native} --games 40`): scripted-bot games, median time per copy at a decision index, Apple M3 laptop (16 GB) with seven other agent sessions running (load ~60), so absolute numbers are noisy:
+
+| decision | games | Python replay | Python `copy()` | speed-up | Rust replay | Rust `copy()` | speed-up |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 50 | 40 | 2.36 ms | 0.17 ms | 14× | 0.139 ms | 0.019 ms | 7× |
+| 200 | 27 | 8.78 ms | 0.24 ms | 37× | 0.458 ms | 0.022 ms | 21× |
+| 400 | 7 | 20.3 ms | 0.25 ms | 83× | 1.032 ms | 0.018 ms | 58× |
+
+Copy cost no longer grows with the game: it is the state copy plus the actions since the step began (median 1, max 33 in this run). A Rust copy is ~12 µs to build and ~5 µs to drop (unwinding the suspended coroutine). The price is a snapshot at every step start in a game that has been copied: per decision under random play, Rust 5.9 → 6.5 µs, Python 92 → 261 µs (random play crosses several steps per decision; the Python state copy is ~80 µs).
 
 ## Determinism: how the two engines stay identical
 
@@ -119,7 +140,7 @@ mtg_ml/engine/native.py   NativeGame: the Game API on top of py.rs
 - the full hidden state: libraries in order, every card's ids, zone, owner, controller, damage, counters, temporary effects and `known_to`, the stack with targets / sources / data, pending triggers, combat, the RNG position;
 - for scripted-bot seats, the bot's choice computed on each engine (the bots read the object model through the proxies).
 
-After the game: winner, end reason, turns, the action list, the full log and the full RNG state. Every 97 steps (`--fork-every`), `fork()` and `determinize()` for both viewers are compared too, plus one step on the re-dealt games. Agents: `random` (`RandomAgent`), `chaos` (uniform over everything, mulligans 30% of the time), `bot` (scripted bots).
+After the game: winner, end reason, turns, the action list, the full log and the full RNG state. Every 97 steps (`--fork-every`), `fork()` (plus one step on the copies), `copy()` against the replay fork within each engine, and `determinize()` for both viewers are compared too, plus one step on the re-dealt games. Agents: `random` (`RandomAgent`), `chaos` (uniform over everything, mulligans 30% of the time), `bot` (scripted bots).
 
 ```bash
 pytest tests/test_difftest.py                                     # fast subset (36 scenarios, ~30 s)
@@ -195,5 +216,5 @@ Follow-up work on the rest of the rollout pipeline is in [inference-server.md](i
 ## Limitations
 
 - The proxies are read-only except for the mutations listed above; changing other card attributes from Python does not reach the engine.
-- `NativeGame` is not picklable (like `Game`, games are rebuilt from constructor arguments + actions: `fork()`).
+- `NativeGame` is not picklable (like `Game`, games are rebuilt from constructor arguments + actions: `fork(replay=True)`).
 - Adding a card that needs a new op or a new rule means implementing it in both engines (see [adding-cards.md](adding-cards.md)); the differential suite is what keeps them equal.

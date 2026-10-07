@@ -67,8 +67,18 @@ MULLIGAN = "mulligan"  # keep or mulligan the opening hand (London mulligan)
 Effect = Callable[..., Any]  # (game, item) -> generator | None
 
 
+class _Immutable:
+    """Static definitions are never mutated during a game: `Game.copy()`
+    (a deep copy of the game state) shares them instead of copying."""
+
+    __slots__ = ()
+
+    def __deepcopy__(self, memo):
+        return self
+
+
 @dataclass(frozen=True)
-class TargetSpec:
+class TargetSpec(_Immutable):
     """kind is one of: creature, nonlegendary_creature, nonartifact_creature,
     creature_you_control, land, nonland_permanent, artifact, blue_permanent,
     red_permanent, spell, blue_spell, red_spell, instant_spell,
@@ -78,7 +88,7 @@ class TargetSpec:
 
 
 @dataclass(frozen=True)
-class SpellMode:
+class SpellMode(_Immutable):
     """One choice of a modal spell ("Choose one -"): chosen as the spell is cast."""
 
     name: str
@@ -87,7 +97,7 @@ class SpellMode:
 
 
 @dataclass
-class AbilityDef:
+class AbilityDef(_Immutable):
     name: str
     effect: Effect | None = None
     cost: ManaCost = field(default_factory=ManaCost)
@@ -106,7 +116,7 @@ class AbilityDef:
 
 
 @dataclass
-class TriggerDef:
+class TriggerDef(_Immutable):
     """event: etb | to_graveyard_from_battlefield | cast | you_sacrifice_another
     | your_upkeep | you_cast (another spell you cast, from the battlefield)
     | third_draw (you draw your third card in a turn, from the graveyard).
@@ -119,7 +129,7 @@ class TriggerDef:
 
 
 @dataclass
-class CardDef:
+class CardDef(_Immutable):
     name: str
     cost: ManaCost
     types: frozenset[str]
