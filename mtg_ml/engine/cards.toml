@@ -759,6 +759,14 @@ text = "Counter target artifact or enchantment spell."
 targets = ["artifact_or_enchantment_spell"]
 effect = [{ op = "counter_target" }]
 
+[[card]]
+name = "Envelop"
+cost = "{U}"
+types = "Instant"
+text = "Counter target sorcery spell."
+targets = ["sorcery_spell"]
+effect = [{ op = "counter_target" }]
+
 # {R/P}: cast normally for {R}, or in cast mode "phyrexian" for 2 life.
 [[card]]
 name = "Gut Shot"

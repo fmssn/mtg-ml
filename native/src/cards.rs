@@ -76,9 +76,10 @@ pub enum TK {
     /// A creature not already chosen as a target of the same spell.
     AnotherCreature,
     ArtifactOrEnchantmentYouDontControl,
+    SorcerySpell,
 }
 
-const TK_NAMES: [(&str, TK); 25] = [
+const TK_NAMES: [(&str, TK); 26] = [
     ("creature", TK::Creature),
     ("nonlegendary_creature", TK::NonlegendaryCreature),
     ("nonartifact_creature", TK::NonartifactCreature),
@@ -104,6 +105,7 @@ const TK_NAMES: [(&str, TK); 25] = [
     ("artifact_or_enchantment_spell", TK::ArtifactOrEnchantmentSpell),
     ("another_creature", TK::AnotherCreature),
     ("artifact_or_enchantment_you_dont_control", TK::ArtifactOrEnchantmentYouDontControl),
+    ("sorcery_spell", TK::SorcerySpell),
 ];
 
 impl TK {

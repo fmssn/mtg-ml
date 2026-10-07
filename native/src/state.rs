@@ -1336,6 +1336,7 @@ impl State {
             TK::BlueSpell => d.colors & crate::cards::color_bit(b'U') != 0,
             TK::RedSpell => d.colors & crate::cards::color_bit(b'R') != 0,
             TK::InstantSpell => d.is_type(T_INSTANT),
+            TK::SorcerySpell => d.is_type(T_SORCERY),
             TK::ArtifactSpell => d.is_type(T_ARTIFACT),
             TK::ArtifactOrEnchantmentSpell => d.is_type(T_ARTIFACT) || d.is_type(T_ENCHANTMENT),
             _ => false,
