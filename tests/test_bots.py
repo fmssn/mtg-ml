@@ -222,3 +222,20 @@ def test_jund_uses_faerie_macabre_and_breath_weapon():
     assert _label(g, JundBot(0)) == "Cast Breath Weapon"
     g = scenario(p0={"hand": ["Breath Weapon"], "battlefield": ["Mountain"] * 3 + ["Krark-Clan Shaman", "Gixian Infiltrator"]}, p1={"battlefield": ["Voldaren Epicure"]})
     assert _label(g, JundBot(0)) == "Pass priority"  # would kill more of ours
+
+
+def test_affinity_casts_black_mages_rod_and_re_equips_it():
+    bot = make_bot(0, "grixis_affinity")
+    g = scenario(p0={"hand": ["Black Mage's Rod"], "battlefield": ["Swamp", "Vault of Whispers"]})
+    assert _label(g, bot) == "Cast Black Mage's Rod"
+    g = scenario(p0={"hand": ["Black Mage's Rod"], "battlefield": ["Swamp"] * 5 + ["Krark-Clan Shaman"]}, p1={"hand": ["Lightning Bolt"], "battlefield": ["Mountain"]})
+    choose(g, "Cast Black Mage's Rod")
+    pay(g)
+    while g.stack:
+        pass_priority(g)
+    pass_priority(g)
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target Hero")
+    while g.stack:
+        pass_priority(g)
+    assert _label(g, bot) == "Black Mage's Rod: equip"

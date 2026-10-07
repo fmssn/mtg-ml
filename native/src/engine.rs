@@ -1218,9 +1218,23 @@ impl Eng {
                     self.s().cm(c).temp.push(TempEffect { keywords: *keywords, power: 0, toughness: 0 });
                 }
             }
-            Op::CreateToken { token, n } => {
+            Op::CreateToken { token, n, attach_source } => {
                 for _ in 0..*n {
-                    self.s().create_token(ctl, *token);
+                    let tok = self.s().create_token(ctl, *token);
+                    if *attach_source {
+                        let src = self.source_card(item);
+                        let st = self.s();
+                        let eq = st.live(&src);
+                        st.attach(eq, Some(tok));
+                    }
+                }
+            }
+            Op::AttachSourceToTarget => {
+                let src = self.source_card(item);
+                let st = self.s();
+                if let Some(Tgt::Card(host)) = st.target(item, 0) {
+                    let eq = st.live(&src);
+                    st.attach(eq, Some(host));
                 }
             }
             Op::GainLife { n, per_storm, sacrificed_mv } => {

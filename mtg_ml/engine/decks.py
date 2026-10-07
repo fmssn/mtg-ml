@@ -80,7 +80,6 @@ GRIXIS_AFFINITY = {
     "Refurbished Familiar": 4,
     "Utrom Monitor": 3,
     "Krark-Clan Shaman": 3,
-    "Kenku Artificer": 2,
     "Thoughtcast": 4,
     "Galvanic Blast": 4,
     "Reckoner's Bargain": 4,
@@ -90,13 +89,13 @@ GRIXIS_AFFINITY = {
     "Blood Fountain": 2,
     "Sewer-veillance Cam": 1,
     "Makeshift Munitions": 1,
+    "Black Mage's Rod": 2,
     "Mistvault Bridge": 4,
     "Drossforge Bridge": 4,
     "Vault of Whispers": 4,
-    "Seat of the Synod": 2,
+    "Seat of the Synod": 3,
     "Silverbluff Bridge": 2,
     "Great Furnace": 2,
-    "Mountain": 1,
 }
 
 # Sideboards: exactly 15 cards each, from the Q3 2026 typical lists (see the
@@ -130,12 +129,12 @@ RED_MADNESS_SIDEBOARD = {
 
 GRIXIS_AFFINITY_SIDEBOARD = {
     "Hydroblast": 4,
-    "Blue Elemental Blast": 2,
-    "Extract a Confession": 2,
     "Pyroblast": 4,
-    "Red Elemental Blast": 1,
+    "Envelop": 2,
+    "Extract a Confession": 2,
+    "Blue Elemental Blast": 1,
     "Krark-Clan Shaman": 1,
-    "Unexpected Fangs": 1,
+    "Nihil Spellbomb": 1,
 }
 
 DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS, "grixis_affinity": GRIXIS_AFFINITY}

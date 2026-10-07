@@ -8,27 +8,33 @@ in seat 1: `jund_affinity`, `blue_affinity`, `madness_affinity`
 
 ## Decklist (`engine/decks.py`)
 
-The modal count of each card over the 524 Grixis Affinity lists in the
-Q3 2026 Pauper-Research data (cards in at least half of the lists, then the
-most played to reach 60 / 15). Cards shared with Jund Wildfire (Refurbished
-Familiar, Krark-Clan Shaman, Ichor Wellspring, Nihil Spellbomb, Toxin
-Analysis, Makeshift Munitions, Drossforge Bridge, Vault of Whispers) reuse
-their existing specs.
+The typical lists of the most played builds in the Q3 2026 Pauper-Research
+data (2026-07-05 to 2026-10-02, all events, "Builds and decisions"): main
+"Stock list", 228 of 524 lists (44%); sideboard "Stock list", 174 of 524
+(33%). Card for card: nothing left out for missing rules (Black Mage's Rod
+and Envelop were implemented for them) and nothing trimmed. Cards shared
+with Jund Wildfire (Refurbished Familiar, Krark-Clan Shaman, Ichor
+Wellspring, Nihil Spellbomb, Toxin Analysis, Makeshift Munitions,
+Drossforge Bridge, Vault of Whispers) reuse their existing specs.
 
 | main | | sideboard | |
 |---|---|---|---|
-| 4 Myr Enforcer | 4 Ichor Wellspring | 4 Hydroblast | 1 Red Elemental Blast |
-| 4 Refurbished Familiar | 3 Nihil Spellbomb | 2 Blue Elemental Blast | 1 Krark-Clan Shaman |
-| 3 Utrom Monitor | 2 Blood Fountain | 2 Extract a Confession | 1 Unexpected Fangs |
-| 3 Krark-Clan Shaman | 1 Sewer-veillance Cam | 4 Pyroblast | |
-| 2 Kenku Artificer | 1 Makeshift Munitions | | |
-| 4 Thoughtcast | 4 Mistvault Bridge | | |
-| 4 Galvanic Blast | 4 Drossforge Bridge | | |
-| 4 Reckoner's Bargain | 4 Vault of Whispers | | |
-| 2 Toxin Analysis | 2 Seat of the Synod | | |
-| | 2 Silverbluff Bridge, 2 Great Furnace, 1 Mountain | | |
+| 4 Myr Enforcer | 4 Ichor Wellspring | 4 Hydroblast | 1 Blue Elemental Blast |
+| 4 Refurbished Familiar | 3 Nihil Spellbomb | 4 Pyroblast | 1 Krark-Clan Shaman |
+| 3 Utrom Monitor | 2 Blood Fountain | 2 Envelop | 1 Nihil Spellbomb |
+| 3 Krark-Clan Shaman | 2 Black Mage's Rod | 2 Extract a Confession | |
+| 4 Thoughtcast | 1 Sewer-veillance Cam | | |
+| 4 Galvanic Blast | 1 Makeshift Munitions | | |
+| 4 Reckoner's Bargain | 4 Mistvault Bridge, 4 Drossforge Bridge | | |
+| 2 Toxin Analysis | 4 Vault of Whispers, 3 Seat of the Synod | | |
+| | 2 Silverbluff Bridge, 2 Great Furnace | | |
 
-Left out: Black Mage's Rod (33% of lists) and Envelop (39% of sideboards).
+Until 2026-10-07 the list was the modal count of the most played cards
+(2 Kenku Artificer and 1 Mountain instead of 2 Black Mage's Rod and the
+third Seat; Red Elemental Blast, Unexpected Fangs and a second Blue
+Elemental Blast in the 15 instead of Envelop and Nihil Spellbomb). Kenku
+Artificer (43% of lists, the second build's card) and Unexpected Fangs stay
+in the card pool.
 
 ## Sideboard plans (games 2 and 3)
 
@@ -36,11 +42,11 @@ Rows in `engine/sideboard_plans.toml` (format: [sideboarding.md](sideboarding.md
 
 | deck vs opponent | in | out |
 |---|---|---|
-| Affinity vs Jund | 2 Hydroblast, 2 Extract a Confession, 1 Krark-Clan Shaman | 2 Kenku Artificer, 1 Sewer-veillance Cam, 1 Makeshift Munitions, 1 Toxin Analysis |
-| Jund vs Affinity | 2 Troublemaker Ouphe, 2 Breath Weapon, 1 Ancient Grudge, 2 Pyroblast | 2 Lembas, 2 Gixian Infiltrator, 2 Eviscerator's Insight, 1 Nyxborn Hydra |
-| Affinity vs Blue | 4 Pyroblast, 1 Red Elemental Blast | 2 Toxin Analysis, 2 Kenku Artificer, 1 Makeshift Munitions |
-| Blue vs Affinity | 4 Annul, 2 Steel Sabotage, 2 Gut Shot | 3 Force Spike, 2 Sleep of the Dead, 1 Plunder the Trollshaws, 2 Ponder |
-| Affinity vs Red | 4 Hydroblast, 2 Blue Elemental Blast, 1 Unexpected Fangs, 1 Krark-Clan Shaman | 2 Kenku Artificer, 3 Nihil Spellbomb, 1 Sewer-veillance Cam, 1 Makeshift Munitions, 1 Blood Fountain |
+| Affinity vs Jund | 2 Hydroblast, 2 Extract a Confession, 1 Krark-Clan Shaman | 2 Black Mage's Rod, 1 Sewer-veillance Cam, 1 Makeshift Munitions, 1 Toxin Analysis |
+| Jund vs Affinity | 2 Troublemaker Ouphe, 2 Breath Weapon, 2 Red Elemental Blast, 1 Terminate | 2 Lembas, 2 Gixian Infiltrator, 2 Eviscerator's Insight, 1 Nyxborn Hydra |
+| Affinity vs Blue | 4 Pyroblast | 2 Toxin Analysis, 1 Makeshift Munitions, 1 Sewer-veillance Cam |
+| Blue vs Affinity | 4 Annul, 1 Envelop, 3 Gut Shot | 3 Force Spike, 2 Sleep of the Dead, 1 Plunder the Trollshaws, 2 Ponder |
+| Affinity vs Red | 4 Hydroblast, 1 Blue Elemental Blast, 1 Krark-Clan Shaman | 2 Black Mage's Rod, 3 Nihil Spellbomb, 1 Sewer-veillance Cam |
 | Red vs Affinity | 2 End the Festivities, 2 Cast into the Fire, 2 Pyroblast | 2 Highway Robbery, 2 Grab the Prize, 2 Sneaky Snacker |
 
 Rows for Elves and Tron (both directions) are at the end of the file,
@@ -62,8 +68,14 @@ commented out until those decks are in `decks.DECKS`.
 | flash | keyword `flash` | casts a non-instant at instant speed (Sewer-veillance Cam) |
 | collect evidence | card key `collect_evidence = N`, cast mode `evidence`, decision `exile_from_graveyard` | Extract a Confession: offered only when the graveyard holds mana value N; exiles cards one at a time |
 | edict | `opponent_sacrifices {greatest_power_if_evidence}` | Extract a Confession |
+| Equipment | card keys `equipped_power`, `equipped_toughness`; op `attach_source_to_target` (equip ability, sorcery speed); `create_token.attach_source` (job select) | Black Mage's Rod. An attached permanent without bestow is Equipment: it adds its bonus instead of the bestow counters and keeps its own types; it falls off (stays on the battlefield) when the creature leaves or stops being a creature, or when it becomes a creature itself (Kenku, CR 301.5c) |
+| granted cast trigger | trigger condition `{ equipped = true, spell = ... }` | "Equipped creature has 'whenever you cast a noncreature spell ...'": the Rod's own `you_cast` trigger, live only while attached |
+| sorcery counter | target kind `sorcery_spell` (from #37) | Envelop |
 
-No `custom` effects. Simplifications, all invisible in this pool:
+No `custom` effects. Simplifications, all invisible in this pool: Black
+Mage's Rod deals its 1 damage as the source (the rules say the equipped
+creature does; nothing here tells them apart) and does not make the creature
+a Wizard;
 Blood Fountain chooses its two creature cards on resolution rather than
 targeting them (differs only if the graveyard changes in response), and Kenku
 Artificer's Homunculus subtype is not tracked.
@@ -77,6 +89,9 @@ these shape tokens (new ops and the `leaves_battlefield` event get their
 | field | tokens |
 |---|---|
 | card `collect_evidence` | `e:cost:collect_evidence` |
+| card `equipped_power` / `equipped_toughness` | `e:equipment_bonus` |
+| op flag `create_token.attach_source` | `<prefix>create_token:attach_source` |
+| trigger condition `equipped` | `e:trig:cond:equipped:true` |
 | trigger `up_to` | `e:trig:up_to` |
 | trigger `targets` (from #37) | `e:trig:target:<kind>`, `e:target:<kind>` |
 | card `bargain` (from #37) | `e:cost:bargain` |
@@ -90,8 +105,10 @@ Trigger conditions with non-string values (`{ bargained = true }`) render as
 
 `bots/affinity.py` (a `JundBot` subclass, which already knows the shared
 cards): artifact lands first, then the cheap artifacts, then the affinity
-threats and Thoughtcast once they are cheap; Kenku animates an indestructible
-Bridge; Galvanic Blast kills a creature worth it or goes to the face at 6
+threats and Thoughtcast once they are cheap; Black Mage's Rod is cast as a
+cheap artifact and re-equipped (evasive creature first, then the strongest)
+when it falls off and no threat is castable; Envelop counters an opponent's
+sorcery; Kenku animates an indestructible Bridge; Galvanic Blast kills a creature worth it or goes to the face at 6
 life or less; Reckoner's Bargain sacrifices spare artifacts.
 
 ## Bot games vs the Q3 data
@@ -105,9 +122,13 @@ Q3 2026 data (Jund Midrange stands in for Jund Wildfire).
 
 | matchup | Affinity wins, game 1 | game 2 | Q3 (matches) |
 |---|---|---|---|
-| vs Jund Wildfire | 59.0% | 63.5% | 37.7% vs Jund Midrange (n=102) |
-| vs Mono Blue Terror | 46.5% | 46.5% | 49.5% (n=103) |
-| vs Red Madness | 57.0% | 62.5% | 62.4% (n=178) |
+| vs Jund Wildfire | 55.0% (59.0% before) | 64.5% (63.5%) | 37.7% vs Jund Midrange (n=102) |
+| vs Mono Blue Terror | 49.0% (46.5%) | 43.5% (46.5%) | 49.5% (n=103) |
+| vs Red Madness | 56.0% (57.0%) | 71.0% (62.5%) | 62.4% (n=178) |
+
+The current numbers are with the most played builds (2026-10-07, Rust
+engine, the same seeds; starting player `seed % 2`), the ones in
+parentheses with the earlier modal list and sideboards.
 
 Blue and Red land close to the real data. Jund does about 20 points worse
 here than Jund Midrange does in the data. Seen in the traces: the Jund bot

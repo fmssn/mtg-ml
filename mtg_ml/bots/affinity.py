@@ -4,7 +4,9 @@ Plan: a land every turn (artifact lands first: every one makes the affinity
 spells cheaper), the cheap artifacts (Wellspring, Spellbomb, Blood Fountain,
 Sewer-veillance Cam) before the affinity cards, then Myr Enforcer, Utrom
 Monitor, Refurbished Familiar and Thoughtcast as soon as they cost little.
-Kenku Artificer animates an indestructible Bridge. Galvanic Blast kills a
+Black Mage's Rod makes a Hero and is re-equipped (best creature, evasion
+first) when it falls off. Kenku Artificer animates an indestructible
+Bridge. Envelop counters a sorcery worth it. Galvanic Blast kills a
 creature worth it or goes to the face once the opponent is in reach;
 Reckoner's Bargain turns spare artifacts into cards in the opponent's end
 step. Krark-Clan Shaman, Makeshift Munitions, Toxin Analysis, Nihil
@@ -22,7 +24,7 @@ from .jund import JundBot
 KEEP_LANDS = {7: (2, 4), 6: (1, 4)}
 KILL_VALUE = 2.5  # creature_value worth a Galvanic Blast
 FACE_LIFE = 6  # at or below this, Galvanic Blast goes to the face
-CHEAP_ARTIFACTS = {"Ichor Wellspring": 7.5, "Nihil Spellbomb": 7, "Blood Fountain": 7.2, "Sewer-veillance Cam": 6.5}
+CHEAP_ARTIFACTS = {"Ichor Wellspring": 7.5, "Nihil Spellbomb": 7, "Blood Fountain": 7.2, "Sewer-veillance Cam": 6.5, "Black Mage's Rod": 6.8}
 THREATS = {"Myr Enforcer": 9, "Utrom Monitor": 9.5, "Refurbished Familiar": 9.2, "Kenku Artificer": 6, "Krark-Clan Shaman": 5}
 ARTIFACT_LANDS = {"Mistvault Bridge", "Drossforge Bridge", "Silverbluff Bridge", "Vault of Whispers", "Seat of the Synod", "Great Furnace"}
 TAPPED_LANDS = {"Mistvault Bridge", "Drossforge Bridge", "Silverbluff Bridge"}
@@ -46,7 +48,9 @@ class AffinityBot(JundBot):
             "Refurbished Familiar": 4,
             "Reckoner's Bargain": 3.5,
             "Kenku Artificer": 2.5,
+            "Black Mage's Rod": 3,
             "Krark-Clan Shaman": 2.5,
+            "Envelop": 2.5,
             "Extract a Confession": 3.5,
             "Pyroblast": 4,
             "Red Elemental Blast": 4,
@@ -125,6 +129,10 @@ class AffinityBot(JundBot):
             return 2.5 if self.opp_end_step(g) and self.creatures(g, self.p) else NEG
         if n in ("Hydroblast", "Blue Elemental Blast", "Pyroblast", "Red Elemental Blast"):
             return NEG  # modal: see modal_score
+        if n == "Envelop":
+            top = self.stack_top(g)
+            ok = top is not None and top.kind == "spell" and top.controller == self.opp and top.card.face.is_type("Sorcery")
+            return 30.0 if ok else NEG
         if not main:
             return super().cast_score(g, card, mode) if n in ("Toxin Analysis", "Duress") else NEG
         if n in CHEAP_ARTIFACTS:
@@ -155,6 +163,13 @@ class AffinityBot(JundBot):
             if v > best_v:
                 best, best_v = c, v
         return best
+
+    def equip_target(self, g: Game) -> Card | None:
+        """Best creature for Black Mage's Rod: evasive first, then the strongest."""
+        mine = self.creatures(g, self.p)
+        if not mine:
+            return None
+        return max(mine, key=lambda c: (g.has(c, "flying"), self.creature_value(g, c), -c.oid))
 
     def blast_score(self, g: Game) -> float:
         dmg = self.blast_damage(g)
@@ -193,6 +208,11 @@ class AffinityBot(JundBot):
             return 4.0 if creatures and (self.opp_end_step(g) or (g.step_name == "main2" and len(self.hand(g)) <= 1)) else NEG
         if n == "Sewer-veillance Cam":
             return 3.5 if self.opp_end_step(g) else NEG
+        if n == "Black Mage's Rod":  # equip {3}, sorcery speed
+            if card.attached_to is not None or self.equip_target(g) is None:
+                return NEG
+            spare = self.mana_available(g) - 3
+            return 4.0 if spare >= 0 and not any(self.cost(g, c) <= self.mana_available(g) and c.name in THREATS for c in self.hand(g)) else NEG
         if n == "Blood":
             fodder = [c for c in self.hand(g) if self.card_value(g, c.name) <= 1.0]
             return 3.0 if fodder and (self.opp_end_step(g) or g.step_name == "main2") else NEG
@@ -230,6 +250,14 @@ class AffinityBot(JundBot):
                 return NEG
             k = self.kenku_target(g)
             return 5.0 if k is not None and c.oid == k.oid else 1.0
+        if name == "Black Mage's Rod":
+            if c is None or c.controller != self.p:
+                return NEG
+            t = self.equip_target(g)
+            return 5.0 if t is not None and c.oid == t.oid else self.creature_value(g, c)
+        if name == "Envelop":
+            it = self.ref_spell(g, o)
+            return 5.0 if it is not None and it.controller == self.opp else NEG
         if name == "Sewer-veillance Cam":
             if c is None:
                 return NEG

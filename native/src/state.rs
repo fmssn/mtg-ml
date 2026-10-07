@@ -734,8 +734,27 @@ impl State {
         self.stack.iter().position(|it| it.sid == sid)
     }
 
+    /// An Aura cast with bestow, attached (not a creature then). Other
+    /// attached permanents are Equipment.
     pub fn is_bestowed(&self, c: &Card) -> bool {
-        c.zone == Zone::Battlefield && c.attached_to.is_some()
+        c.zone == Zone::Battlefield && c.attached_to.is_some() && c.face().bestow.is_some()
+    }
+
+    /// game.py `attach`: attach Equipment `eq` to creature `host`. Nothing
+    /// happens if either is gone, the host is not a creature, or the
+    /// Equipment is itself a creature (CR 301.5c).
+    pub fn attach(&mut self, eq: Option<CIdx>, host: Option<CIdx>) {
+        let (Some(eq), Some(host)) = (eq, host) else { return };
+        let hoid = self.c(host).oid;
+        if self.perm(hoid).is_none() || !self.is_creature(self.c(host)) || self.is_creature(self.c(eq)) {
+            return;
+        }
+        self.cm(eq).attached_to = Some(hoid);
+        if self.logging {
+            let (e, h) = (self.c(eq), self.c(host));
+            let m = format!("{}#{} attached to {}#{}", e.name(), e.oid, h.name(), h.oid);
+            self.log.push(m);
+        }
     }
 
     pub fn types(&self, c: &Card) -> u16 {
@@ -764,11 +783,17 @@ impl State {
     }
 
     pub fn power(&self, c: &Card) -> i32 {
-        c.animated.map_or(c.face().power.unwrap_or(0), |a| a.0) + c.counters + c.temp.iter().map(|t| t.power).sum::<i32>() + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
+        c.animated.map_or(c.face().power.unwrap_or(0), |a| a.0)
+            + c.counters
+            + c.temp.iter().map(|t| t.power).sum::<i32>()
+            + self.auras_on(c.oid).map(|a| if a.face().bestow.is_some() { a.counters } else { a.face().equipped_power }).sum::<i32>()
     }
 
     pub fn toughness(&self, c: &Card) -> i32 {
-        c.animated.map_or(c.face().toughness.unwrap_or(0), |a| a.1) + c.counters + c.temp.iter().map(|t| t.toughness).sum::<i32>() + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
+        c.animated.map_or(c.face().toughness.unwrap_or(0), |a| a.1)
+            + c.counters
+            + c.temp.iter().map(|t| t.toughness).sum::<i32>()
+            + self.auras_on(c.oid).map(|a| if a.face().bestow.is_some() { a.counters } else { a.face().equipped_toughness }).sum::<i32>()
     }
 
     pub fn keywords(&self, c: &Card) -> u32 {
@@ -776,7 +801,7 @@ impl State {
         for t in &c.temp {
             k |= t.keywords;
         }
-        if self.auras_on(c.oid).next().is_some() {
+        if self.auras_on(c.oid).any(|a| a.face().bestow.is_some()) {
             let d = db();
             k |= d.kw("reach") | d.kw("trample");
         }
@@ -1182,7 +1207,7 @@ impl State {
                     Some(CastFilter::Noncreature) => !face.is_type(T_CREATURE),
                     Some(CastFilter::InstantOrSorcery) => is_instant_or_sorcery(face),
                 };
-                if t.event == Event::YouCast && ok {
+                if t.event == Event::YouCast && ok && (!t.equipped || pc.attached_to.is_some()) {
                     new.push(PendingTrigger { controller: pc.controller, source: Src::Live(perm), tdef: t, data: Data { spell_sid: Some(sid), ..Default::default() } });
                 }
             }
@@ -1239,7 +1264,7 @@ impl State {
                 let ok = match self.perm(a) {
                     Some(h) => self.is_creature(self.c(h)),
                     None => false,
-                };
+                } && !self.is_creature(self.c(ci));
                 if !ok {
                     self.cm(ci).attached_to = None;
                     changed = true;

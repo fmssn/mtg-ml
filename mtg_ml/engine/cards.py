@@ -119,8 +119,19 @@ def _op_grant_target(g, item, op):
 
 
 def _op_create_token(g, item, op):
+    """attach_source: then attach the source Equipment to the token (job
+    select: Black Mage's Rod)."""
     for _ in range(op.get("n", 1)):
-        g.create_token(item.controller, op["token"])
+        tok = g.create_token(item.controller, op["token"])
+        if op.get("attach_source"):
+            g.attach(g.live(item.source), tok)
+
+
+def _op_attach_source_to_target(g, item, op):
+    """Equip: attach the source Equipment to the target creature."""
+    t = g.target(item)
+    if t is not None:
+        g.attach(g.live(item.source), t)
 
 
 def _op_gain_life(g, item, op):
@@ -389,6 +400,7 @@ OPS = {
     "tap_target": _op_tap_target,
     "grant_target": _op_grant_target,
     "create_token": _op_create_token,
+    "attach_source_to_target": _op_attach_source_to_target,
     "gain_life": _op_gain_life,
     "lose_life": _op_lose_life,
     "counter_on_source": _op_counter_on_source,
@@ -610,6 +622,9 @@ def _condition(spec: dict | None):
     if set(spec) == {"spell"}:  # you_cast: the kind of spell cast
         flt = CAST_FILTERS[spec["spell"]]
         return lambda g, src, card: flt(card)
+    if set(spec) == {"spell", "equipped"} and spec["equipped"] is True:  # an Equipment's granted you_cast trigger
+        flt = CAST_FILTERS[spec["spell"]]
+        return lambda g, src, card: src.attached_to is not None and flt(card)
     if spec == {"bargained": True}:  # etb: the permanent was cast bargained
         return lambda g, src, method: method == "bargain"
     raise ValueError(f"unsupported trigger condition {spec!r}")
@@ -644,7 +659,7 @@ def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:
 SHAPE_CARD_FIELDS = frozenset({
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow",
     "plot", "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect",
-    "modes", "overload_effect", "abilities", "triggers", "bargain", "collect_evidence",
+    "modes", "overload_effect", "abilities", "triggers", "bargain", "collect_evidence", "equipped_power", "equipped_toughness",
 })  # fmt: skip
 # Shown on entities otherwise (name, printed types, keywords, P/T) or not at all.
 NON_SHAPE_CARD_FIELDS = frozenset({"name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"})
@@ -729,7 +744,7 @@ def op_names(ops) -> list[str]:
 
 SHAPE_N_STEPS = (1, 2, 3, 4)
 # Op parameters that change what the op does, each a token `{op}:{key}` when set.
-SHAPE_OP_FLAGS = ("n_metalcraft", "sacrificed_mv", "greatest_power_if_evidence")
+SHAPE_OP_FLAGS = ("n_metalcraft", "sacrificed_mv", "greatest_power_if_evidence", "attach_source")
 
 
 def _target_tokens(prefix: str, kinds) -> list[str]:
@@ -780,6 +795,8 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t.append("e:cost:bargain")
     if spec.get("collect_evidence"):
         t.append("e:cost:collect_evidence")
+    if spec.get("equipped_power") or spec.get("equipped_toughness"):
+        t.append("e:equipment_bonus")
     t += [f"e:cost:{k}" for k in SHAPE_COST_KEYS if k in spec]
     if "flashback_cost" in spec:
         t += ["e:cost:flashback", "e:cost:sac_lands"]
@@ -863,6 +880,8 @@ def card_def(spec: dict) -> CardDef:
         phyrexian_life=2 * phy.mana_value,
         bargain=spec.get("bargain", False),
         collect_evidence=spec.get("collect_evidence", 0),
+        equipped_power=spec.get("equipped_power", 0),
+        equipped_toughness=spec.get("equipped_toughness", 0),
         abilities=tuple(_ability(a) for a in spec.get("abilities", ())),
         triggers=tuple(_trigger(t) for t in spec.get("triggers", ())),
         enters_tapped=spec.get("enters_tapped", False),

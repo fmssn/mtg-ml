@@ -519,7 +519,7 @@ class NativeGame:
         return None
 
     def is_bestowed(self, c) -> bool:
-        return c.zone == "battlefield" and c.attached_to is not None
+        return c.zone == "battlefield" and c.attached_to is not None and c.face.bestow is not None
 
     # Live cards go to Rust; last-known-information snapshots (stack item and
     # trigger sources) are computed here from their stored characteristics,
@@ -552,12 +552,12 @@ class NativeGame:
     def power(self, c) -> int:
         if c.__class__ is NativeCard:
             return self._g.power(c._idx)
-        return (c.animated[0] if c.animated is not None else c.face.power or 0) + c.counters + sum(t.power for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        return (c.animated[0] if c.animated is not None else c.face.power or 0) + c.counters + sum(t.power for t in c.temp) + sum(a.counters if a.face.bestow is not None else a.face.equipped_power for a in self._auras_on(c))
 
     def toughness(self, c) -> int:
         if c.__class__ is NativeCard:
             return self._g.toughness(c._idx)
-        return (c.animated[1] if c.animated is not None else c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        return (c.animated[1] if c.animated is not None else c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp) + sum(a.counters if a.face.bestow is not None else a.face.equipped_toughness for a in self._auras_on(c))
 
     def keywords(self, c) -> set[str]:
         if c.__class__ is NativeCard:
@@ -565,7 +565,7 @@ class NativeGame:
         k = set(c.face.keywords) | c.granted
         for t in c.temp:
             k |= t.keywords
-        if self._auras_on(c):
+        if any(a.face.bestow is not None for a in self._auras_on(c)):
             k |= {"reach", "trample"}
         return k
 
