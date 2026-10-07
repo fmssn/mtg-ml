@@ -655,31 +655,35 @@ impl PyGame {
         Ok(o)
     }
 
-    /// `encode.state_features(game, viewer)`.
-    fn state_features(&self, viewer: u8) -> PyResult<Vec<String>> {
+    /// `encode.state_features(game, viewer, features)`.
+    #[pyo3(signature = (viewer, features = crate::features::FEATURES))]
+    fn state_features(&self, viewer: u8, features: u8) -> PyResult<Vec<String>> {
         Self::pidx(viewer as usize)?;
-        Ok(state_features(self.st(), viewer))
+        Ok(state_features(self.st(), viewer, fver(features)?))
     }
 
-    /// `encode.entity_features(game, viewer)`: (feature lists, {object id: entity index}).
-    fn entity_features(&self, viewer: u8) -> PyResult<(Vec<Vec<String>>, std::collections::HashMap<u32, usize>)> {
+    /// `encode.entity_features(game, viewer, features)`: (feature lists, {object id: entity index}).
+    #[pyo3(signature = (viewer, features = crate::features::FEATURES))]
+    fn entity_features(&self, viewer: u8, features: u8) -> PyResult<(Vec<Vec<String>>, std::collections::HashMap<u32, usize>)> {
         Self::pidx(viewer as usize)?;
         let mut o = crate::features::EntityStrings::default();
-        let ids = crate::features::entity_features_into(self.st(), viewer, &mut o);
+        let ids = crate::features::entity_features_into(self.st(), viewer, fver(features)?, &mut o);
         Ok((o.0, ids.into_iter().enumerate().map(|(k, id)| (id, k)).collect()))
     }
 
-    /// `rl.features.featurize(game, player, state_dim, option_dim)`.
-    fn featurize(&self, player: u8, state_dim: u32, option_dim: u32) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
+    /// `rl.features.featurize(game, player, state_dim, option_dim, features)`.
+    #[pyo3(signature = (player, state_dim, option_dim, features = crate::features::FEATURES))]
+    fn featurize(&self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
         Self::pidx(player as usize)?;
-        crate::features::featurize(self.st(), player, state_dim, option_dim).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
+        crate::features::featurize(self.st(), player, state_dim, option_dim, fver(features)?).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
     }
 
     /// `featurize` with the options flattened: (state, option lengths, all
     /// option tokens). Cheaper to pack into requests and samples.
-    fn featurize_flat(&self, player: u8, state_dim: u32, option_dim: u32) -> PyResult<(Vec<u32>, Vec<u32>, Vec<u32>)> {
+    #[pyo3(signature = (player, state_dim, option_dim, features = crate::features::FEATURES))]
+    fn featurize_flat(&self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<u32>, Vec<u32>)> {
         Self::pidx(player as usize)?;
-        let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
+        let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim, fver(features)?).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
         let lens = opts.iter().map(|o| o.len() as u32).collect();
         Ok((state, lens, opts.concat()))
     }
@@ -842,10 +846,14 @@ fn ref_exists(st: &State, r: Ref) -> bool {
 
 
 /// Port of `encode.state_features` (same features in the same order).
-pub fn state_features(st: &State, viewer: u8) -> Vec<String> {
+pub fn state_features(st: &State, viewer: u8, features: u8) -> Vec<String> {
     let mut o = crate::features::StringOut::default();
-    crate::features::state_features_into(st, viewer, &mut o);
+    crate::features::state_features_into(st, viewer, features, &mut o);
     o.finish()
+}
+
+fn fver(features: u8) -> PyResult<u8> {
+    crate::features::check_features(features).map_err(PyValueError::new_err)
 }
 
 #[pyfunction]

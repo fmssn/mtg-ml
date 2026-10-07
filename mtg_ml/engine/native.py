@@ -610,17 +610,17 @@ class NativeGame:
     def observe(self, viewer: int) -> dict:
         return self._g.observe(viewer)
 
-    def state_features(self, viewer: int) -> list[str]:
-        return self._g.state_features(viewer)
+    def state_features(self, viewer: int, features: int) -> list[str]:
+        return self._g.state_features(viewer, features)
 
-    def entity_features(self, viewer: int) -> tuple[list[list[str]], dict[int, int]]:
-        return self._g.entity_features(viewer)
+    def entity_features(self, viewer: int, features: int) -> tuple[list[list[str]], dict[int, int]]:
+        return self._g.entity_features(viewer, features)
 
-    def featurize(self, player: int, state_dim: int, option_dim: int):
-        return self._g.featurize(player, state_dim, option_dim)
+    def featurize(self, player: int, state_dim: int, option_dim: int, features: int):
+        return self._g.featurize(player, state_dim, option_dim, features)
 
-    def featurize_flat(self, player: int, state_dim: int, option_dim: int):
-        return self._g.featurize_flat(player, state_dim, option_dim)
+    def featurize_flat(self, player: int, state_dim: int, option_dim: int, features: int):
+        return self._g.featurize_flat(player, state_dim, option_dim, features)
 
     def option_preview(self, player: int, index: int) -> list[str]:
         return self._g.option_preview(player, index)

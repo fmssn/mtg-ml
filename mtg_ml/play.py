@@ -7,6 +7,7 @@
     python -m mtg_ml.play bench --games 200       # throughput and results
     python -m mtg_ml.play match --agents bot,bot --matches 200   # best-of-three with sideboards
     python -m mtg_ml.play bench --engine native   # any command: --engine python|native (or $MTG_ENGINE)
+    python -m mtg_ml.play watch --agents model:runs/x/final.pt,bot --features 2   # model agents in feature set 2
 """
 
 from __future__ import annotations
@@ -18,15 +19,17 @@ import time
 from .agents import HumanAgent, RandomAgent, play_game
 from .backend import engine_name
 from .bots import make_bot
+from .encode import FEATURE_VERSIONS
 from .match import matchup_decks, play_match
 
 
-def make_agent(kind: str, seat: int, seed: int, greedy: bool = False, deck: str | None = None):
-    """`deck`: the deck in `seat` (default: the seat's usual one), for the bot."""
+def make_agent(kind: str, seat: int, seed: int, greedy: bool = False, deck: str | None = None, features: int = 0):
+    """`deck`: the deck in `seat` (default: the seat's usual one), for the bot.
+    `features`: for a model, the feature-set version to featurize in (0: its checkpoint's)."""
     if kind.startswith("model:"):  # model:<checkpoint path>
         from .rl.agent import ModelAgent
 
-        return ModelAgent(kind[len("model:"):], seat, sample=not greedy, seed=seed)
+        return ModelAgent(kind[len("model:"):], seat, sample=not greedy, seed=seed, features=features)
     if kind == "bot":
         return make_bot(seat, deck)
     if kind.startswith("search"):  # search or search:<playouts>
@@ -59,15 +62,17 @@ def main(argv=None) -> None:
     m.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue or jund_madness")
     for p in (w, h, b, m):
         p.add_argument("--engine", default=None, help="python (reference) or native (Rust); default: $MTG_ENGINE, else python")
+        p.add_argument("--features", type=int, default=0, choices=FEATURE_VERSIONS, help="featurize model:<checkpoint> agents in this feature-set version instead of the one their config records (docs/features.md)")
     args = ap.parse_args(argv)
     engine = args.engine
+    feats = args.features
 
     if args.cmd == "watch":
         kinds = args.agents.split(",")
-        g = play_game([make_agent(k, i, args.seed) for i, k in enumerate(kinds)], seed=args.seed, log=True, engine=engine)
+        g = play_game([make_agent(k, i, args.seed, features=feats) for i, k in enumerate(kinds)], seed=args.seed, log=True, engine=engine)
         print("\n".join(g.log))
     elif args.cmd == "human":
-        agents = [make_agent(args.opponent, i, args.seed) for i in (0, 1)]
+        agents = [make_agent(args.opponent, i, args.seed, features=feats) for i in (0, 1)]
         agents[args.seat] = HumanAgent()
         g = play_game(agents, seed=args.seed, log=True, engine=engine)
         print(f"Game over: winner {g.winner} ({g.end_reason})")
@@ -77,7 +82,7 @@ def main(argv=None) -> None:
         results = collections.Counter()
         for s in range(args.games):
             kinds = args.agents.split(",")
-            g = play_game([make_agent(k, i, s * 10_000) for i, k in enumerate(kinds)], seed=s, engine=engine)
+            g = play_game([make_agent(k, i, s * 10_000, features=feats) for i, k in enumerate(kinds)], seed=s, engine=engine)
             decisions += len(g.actions)
             results[("Jund" if g.winner == 0 else "Blue" if g.winner == 1 else "draw", g.end_reason)] += 1
         dt = time.perf_counter() - t
@@ -91,7 +96,7 @@ def main(argv=None) -> None:
         matches, games = collections.Counter(), collections.Counter()
         for s in range(args.matches):
             decks = matchup_decks(args.matchup)
-            r = play_match([make_agent(k, i, s * 10_000, deck=decks[i]) for i, k in enumerate(kinds)], seed=s, log=args.log and s == 0, engine=engine, matchup=args.matchup)
+            r = play_match([make_agent(k, i, s * 10_000, deck=decks[i], features=feats) for i, k in enumerate(kinds)], seed=s, log=args.log and s == 0, engine=engine, matchup=args.matchup)
             matches[r.winner] += 1
             for n, (_, w, _) in enumerate(r.games, 1):
                 games[(n, w)] += 1

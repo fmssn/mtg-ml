@@ -42,6 +42,7 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import PackedSequence
 
+from ..encode import check_features
 from .features import OPTION_DIM, STATE_DIM
 from .samples import FIELDS, PackedSamples
 
@@ -743,7 +744,10 @@ class PolicyNet(nn.Module):
     only): self-attention layers over each sample's entity vectors, in every
     core, before they are pooled and before options point at them (4 heads,
     feed-forward 2 * width; 0: none, and the config and weights of the model
-    without them)."""
+    without them). features: the feature-set version the network reads
+    (`encode.FEATURE_VERSIONS`; no weights depend on it, the hashed inputs
+    do): 1, the default and what a config without the key means, or 2;
+    in `config` only when not 1, so older configs are unchanged."""
 
     def __init__(
         self,
@@ -756,8 +760,10 @@ class PolicyNet(nn.Module):
         value_hidden: int = 0,
         value_bound: str = "none",
         entity_attn: int = 0,
+        features: int = 1,
     ):
         super().__init__()
+        check_features(features)
         if memory not in MEMORY_KINDS or trunk not in TRUNKS or value_net not in VALUE_NETS or value_bound not in VALUE_BOUNDS:
             raise ValueError(f"memory in {MEMORY_KINDS}, trunk in {TRUNKS}, value_net in {VALUE_NETS}, value_bound in {VALUE_BOUNDS}")
         if entity_attn < 0 or (entity_attn and trunk != "entity"):
@@ -768,6 +774,9 @@ class PolicyNet(nn.Module):
             self.config["value_bound"] = value_bound
         if entity_attn:  # only then: checkpoints without attention stay readable by code that predates it
             self.config["entity_attn"] = entity_attn
+        if features != 1:
+            self.config["features"] = features
+        self.features = features
         self.value_bound = value_bound
         self.hidden = hidden
         self.memory = memory

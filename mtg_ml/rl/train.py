@@ -115,12 +115,13 @@ from dataclasses import asdict, dataclass, field, fields
 import torch
 
 from ..backend import ENV_VAR, engine_name
+from ..encode import FEATURE_VERSIONS, FEATURES
 from ..match import matchup_decks
 from .collect import PoolProcess, PoolThread, cpu_layout, release
 from .evaluate import DECK_KEYS, EVAL_BLOCKS, evaluate_policy
 from .model import PolicyNet, load_partial
 from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update, set_lr
-from .rollout import BOT, KIND_ID, LEARNER, GameSpec, Job, create_pool, play
+from .rollout import BOT, KIND_ID, LEARNER, GameSpec, Job, checkpoint_config, create_pool, play
 
 TRAIN_SEED_BASE = 1 << 40  # training game seeds start here: disjoint from the fixed evaluation/benchmark seeds (EVAL_SEED + s, and 4x that for best-of-three games)
 KEEP_POLICIES = 3  # the newest, the one a lagged rollout may still be loading, one spare (plus those pinned by evaluations)
@@ -156,6 +157,7 @@ class TrainConfig:
     value_bound: str = "none"  # "tanh": squash the value head into (-1, 1) (new runs and --init only; a resumed run keeps its checkpoint's)
     value_clamp: float = 1.0  # GAE bootstraps from values clamped to +-(this + shaping); 0 = raw values
     entity_attn: int = 0  # trunk "entity": self-attention layers over each decision's entities (4 heads, FFN 2x; 0 = none)
+    features: int = 0  # feature-set version the policy reads (encode.FEATURE_VERSIONS; docs/features.md). 0: a new run takes the latest, --init / --exploit the source's, a resumed run its checkpoint's; a version overrides it (and is written into the config)
     memory: str = "gru"  # "gru" (recurrent over the player's decisions) or "none"
     gamma: float = 0.995
     lam: float = 0.95
@@ -175,7 +177,7 @@ class TrainConfig:
     pool_sampling: str = "uniform"  # the other pool games: "uniform" over the pool, or "pfsp": weighted (1 - learner's win rate vs it) ** pfsp_power
     pfsp_power: float = 2.0
     pfsp_ema: float = 0.05  # per-game step of the running win rate vs each pool opponent (starts at 0.5)
-    init: str = ""  # a new run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, with --value-bound and --entity-attn on top (new attention layers start as the identity)
+    init: str = ""  # a new run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, with --value-bound, --entity-attn and --features on top (new attention layers start as the identity)
     exploit: str = ""  # exploiter mode: every training game is the learner on --exploit-deck vs this frozen policy file
     exploit_deck: str = "jund"  # the learner's deck: "jund", "blue" or "red", one of --matchup's (evaluate.DECK_KEYS)
     eval_every: int = 10  # evaluate every this many iterations (0 = only by eval_every_games)
@@ -268,13 +270,15 @@ class Trainer:
         if ck is not None:  # the architecture is the checkpoint's, whatever the flags say
             if cfg.entity_attn and cfg.entity_attn != ck["config"].get("entity_attn", 0):  # the Adam state would not fit
                 raise ValueError(f"{self.latest} holds a {ck['config']} network, not entity_attn={cfg.entity_attn}: resume without --entity-attn, or start a new --run with --init {self.latest}")
-            self.net = PolicyNet(**ck["config"])
+            self.net = PolicyNet(**{**ck["config"], **({"features": cfg.features} if cfg.features else {})})
         elif init:  # the source's architecture, with --value-bound and --entity-attn on top
             config = {k: v for k, v in torch.load(init, map_location="cpu", weights_only=False)["config"].items() if k != "value_bound"}
             config["entity_attn"] = cfg.entity_attn or config.get("entity_attn", 0)
+            if cfg.features:  # no weights depend on it: a fine-tune may move to a newer feature set
+                config["features"] = cfg.features
             self.net = PolicyNet(**config, value_bound=cfg.value_bound)
         else:
-            self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn)
+            self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn, features=cfg.features or FEATURES)
         self.net.to(cfg.device)
         # a tensor lr when annealing: the update's CUDA graphs read it, so a new value each iteration costs no recapture
         self.opt = make_optimizer(self.net.parameters(), cfg.ppo.lr, cfg.device, tensor_lr=cfg.lr_anneal_games > 0)
@@ -305,6 +309,8 @@ class Trainer:
         self._remove_partial_writes()
         pool_dir = os.path.join(cfg.run, "pool")
         self.pool: list[str] = sorted(os.path.join(pool_dir, f) for f in os.listdir(pool_dir) if f.startswith("iter_") and f.endswith(".pt"))
+        # a resumed run's snapshots that record no version are the run's own from before --features stamped it (docs/features.md): its version
+        self.pool_features = {p: self.net.features for p in self.pool if "features" not in checkpoint_config(p)} if ck is not None and self.net.features != 1 else {}
         weights = self._weights()
         self._publish(weights)
         if not self.pool:
@@ -331,8 +337,9 @@ class Trainer:
         ck = torch.load(path, map_location=self.cfg.device, weights_only=False)
         with torch.device("meta"):  # its config with today's defaults filled in
             config = PolicyNet(**ck["config"]).config
-        own = {k: v for k, v in self.net.config.items() if k not in ("entity_attn", "value_bound")}  # value_bound has no weights
-        theirs = {k: v for k, v in config.items() if k not in ("entity_attn", "value_bound")}
+        skip = ("entity_attn", "value_bound", "features")  # value_bound and features have no weights
+        own = {k: v for k, v in self.net.config.items() if k not in skip}
+        theirs = {k: v for k, v in config.items() if k not in skip}
         if own != theirs or config.get("entity_attn", 0) > self.net.config.get("entity_attn", 0):
             raise ValueError(f"--init {path}: its network {ck['config']} does not fit {self.net.config}")
         new = load_partial(self.net, ck["model"])
@@ -441,7 +448,8 @@ class Trainer:
         c, rng = self.cfg, self.rng.getstate()
         shaping = c.shaping * max(0.0, 1 - it / max(c.shaping_anneal_iters, 1))
         job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference,
-                  value_clamp=c.value_clamp, gamma_turn=c.gamma_turn, lam_turn=c.lam_turn, auto_mana=bool(c.auto_mana), auto_pass=bool(c.auto_pass))
+                  value_clamp=c.value_clamp, gamma_turn=c.gamma_turn, lam_turn=c.lam_turn, auto_mana=bool(c.auto_mana), auto_pass=bool(c.auto_pass),
+                  features=self.pool_features)
         specs = self._train_specs(it)
         return _Rollout(self.collector.call(play, specs, job, c.workers), shaping, it - self.iteration, rng)
 
@@ -515,7 +523,7 @@ class Trainer:
         c = self.cfg
         return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference,
                 self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass),
-                c.matchup, self.exploit_seat, os.path.abspath(c.exploit) if c.exploit else "")
+                c.matchup, self.exploit_seat, os.path.abspath(c.exploit) if c.exploit else "", self.pool_features)
 
     def _request_eval(self) -> dict:
         """Evaluate the newest policy file. Inline (`--eval-process 0`): on the
@@ -756,7 +764,7 @@ def _rate(games, seat: int) -> float:
     return sum(g[1] == seat for g in games) / len(games) if games else float("nan")
 
 
-CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "exploit_deck": tuple(DECK_KEYS.values()), "lr_schedule": ("linear", "cosine"), "value_bound": ("none", "tanh")}
+CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "exploit_deck": tuple(DECK_KEYS.values()), "lr_schedule": ("linear", "cosine"), "value_bound": ("none", "tanh"), "features": (0, *FEATURE_VERSIONS)}
 
 
 def exploit_seat(cfg: TrainConfig) -> int | None:

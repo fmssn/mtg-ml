@@ -177,3 +177,133 @@ def test_entity_trunk_scores_options_through_their_entities():
     assert torch.isfinite(values).all() and torch.isfinite(logits.max(-1).values).all()
     logits[torch.isfinite(logits)].sum().backward()
     assert net.pointer.weight.grad.abs().sum() > 0
+
+
+def _ckpt(tmp_path, name, **kw):
+    net = PolicyNet(hidden=16, **kw)
+    path = str(tmp_path / name)
+    torch.save({"config": net.config, "model": net.state_dict()}, path)
+    return net, path
+
+
+def test_feature_set_version_travels_with_the_model(tmp_path):
+    """`features` is in the config only when not 1, so configs written before
+    it existed are unchanged and mean feature set 1; it survives a save."""
+    from mtg_ml.encode import FEATURES
+    from mtg_ml.rl.rollout import checkpoint_config, load_net, policy_features
+
+    old, old_path = _ckpt(tmp_path, "old.pt")
+    new, new_path = _ckpt(tmp_path, "new.pt", features=2)
+    assert "features" not in old.config and old.features == 1 and new.config["features"] == 2
+    assert checkpoint_config(new_path) == new.config and checkpoint_config(old_path) == old.config
+    assert (policy_features(old_path), policy_features(new_path)) == (1, 2)
+    assert load_net(new_path).features == 2 and load_net(old_path).features == 1
+    assert FEATURES == 2 and TrainConfig().features == 0  # 0: new runs train on the latest set (--init / resume: the source's)
+    with pytest.raises(ValueError):
+        PolicyNet(hidden=16, features=3)
+
+
+def test_each_seat_is_featurized_with_its_own_policys_version(tmp_path, monkeypatch):
+    """A learner on feature set 2 against a pool snapshot on set 1: every
+    decision is featurized in the deciding seat's version, and what the
+    learner records is exactly that."""
+    from mtg_ml.rl import rollout
+
+    _, new_path = _ckpt(tmp_path, "new.pt", features=2)
+    _, old_path = _ckpt(tmp_path, "old.pt")
+    calls = []
+    real = rollout.featurize_flat
+
+    def spy(g, p, features):
+        calls.append((id(g), p, features))
+        return real(g, p, features=features)
+
+    monkeypatch.setattr(rollout, "featurize_flat", spy)
+    specs = [GameSpec(1, (LEARNER, old_path)), GameSpec(2, (old_path, LEARNER))]
+    res = run_job(Job(specs, new_path, 1, max_turns=10))
+    per_game: dict = {}
+    for gid, p, f in calls:
+        per_game.setdefault(gid, set()).add((p, f))
+    assert sorted(sorted(v) for v in per_game.values()) == [[(0, 1), (1, 2)], [(0, 2), (1, 1)]]
+    assert len(res.actions) == sum(1 for _, _, f in calls if f == 2)  # the learner records its own (set 2) decisions
+
+
+def test_model_agent_uses_its_networks_feature_set(tmp_path, monkeypatch):
+    from mtg_ml.rl import agent as agent_mod
+
+    _, old_path = _ckpt(tmp_path, "old.pt")
+    seen = []
+    real = agent_mod.featurize_flat
+    monkeypatch.setattr(agent_mod, "featurize_flat", lambda g, p, features: seen.append(features) or real(g, p, features=features))
+    g = Game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=3)
+    a = agent_mod.ModelAgent(old_path, seat=g.decision.player)
+    a.act(g)
+    assert seen == [1]
+
+
+def test_job_features_override_a_checkpoints_version(tmp_path, monkeypatch):
+    """`Job.features` (evaluate / ladder `--features`) featurizes a seat in a
+    given version whatever its checkpoint records; the others keep theirs."""
+    from mtg_ml.rl import rollout
+
+    _, a = _ckpt(tmp_path, "a.pt")
+    _, b = _ckpt(tmp_path, "b.pt")
+    calls = []
+    real = rollout.featurize_flat
+    monkeypatch.setattr(rollout, "featurize_flat", lambda g, p, features: calls.append((p, features)) or real(g, p, features=features))
+    run_job(Job([GameSpec(1, (LEARNER, b))], a, 1, record=False, max_turns=6, features={LEARNER: 2}))
+    assert {p: f for p, f in calls} == {0: 2, 1: 1}
+    calls.clear()
+    run_job(Job([GameSpec(1, (LEARNER, b))], a, 1, record=False, max_turns=6, features={b: 2}))
+    assert {p: f for p, f in calls} == {0: 1, 1: 2}
+
+
+def test_model_agent_features_override(tmp_path, monkeypatch):
+    from mtg_ml.rl import agent as agent_mod
+
+    _, old_path = _ckpt(tmp_path, "old.pt")
+    seen = []
+    real = agent_mod.featurize_flat
+    monkeypatch.setattr(agent_mod, "featurize_flat", lambda g, p, features: seen.append(features) or real(g, p, features=features))
+    g = Game((expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR)), seed=3)
+    agent_mod.ModelAgent(old_path, seat=g.decision.player, features=2).act(g)
+    assert seen == [2]
+
+
+def _stamp():
+    import importlib.util
+    import os
+
+    spec = importlib.util.spec_from_file_location("stamp_features", os.path.join(os.path.dirname(__file__), "..", "tools", "stamp_features.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_stamp_features_writes_a_copy(tmp_path):
+    """tools/stamp_features.py: a copy of a policy file or a full checkpoint
+    with `features` in its config, weights and everything else unchanged; the
+    source is never modified and an existing destination never overwritten."""
+    from mtg_ml.rl.rollout import checkpoint_config, load_net, policy_features
+
+    stamp = _stamp()
+    net, policy = _ckpt(tmp_path, "policy.pt")
+    full = str(tmp_path / "latest.pt")
+    torch.save({"config": net.config, "model": net.state_dict(), "optim": {"state": {}}, "iteration": 7}, full)
+    before = {p: open(p, "rb").read() for p in (policy, full)}
+    for src in (policy, full):
+        dst = src.replace(".pt", ".f2.pt")
+        assert stamp.stamp(src, dst, 2) == {**net.config, "features": 2}
+        assert checkpoint_config(dst) == {**net.config, "features": 2} and policy_features(dst) == 2
+        assert all(torch.equal(x, y) for x, y in zip(load_net(dst).state_dict().values(), net.state_dict().values()))
+        with pytest.raises(FileExistsError):
+            stamp.stamp(src, dst, 2)
+        with pytest.raises(FileExistsError):
+            stamp.stamp(src, src, 2)
+    assert torch.load(str(tmp_path / "latest.f2.pt"), weights_only=False)["iteration"] == 7
+    assert {p: open(p, "rb").read() for p in (policy, full)} == before
+    with pytest.raises(ValueError):  # it already records set 2
+        stamp.stamp(str(tmp_path / "policy.f2.pt"), str(tmp_path / "back.pt"), 1)
+    assert not (tmp_path / "back.pt").exists()
+    with pytest.raises(SystemExit):
+        stamp.main([policy, str(tmp_path / "policy.f2.pt"), "--features", "2"])

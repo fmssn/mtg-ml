@@ -99,9 +99,12 @@ def observe(g: Game, viewer: int) -> dict:
     return obs
 
 
+PLOTTED = " (plotted)"
+
+
 def _exiled(c) -> str:
     """An exiled card's name; plotted cards (castable later) are marked."""
-    return f"{c.name} (plotted)" if c.plotted_turn else c.name
+    return f"{c.name}{PLOTTED}" if c.plotted_turn else c.name
 
 
 def _ref_exists(g: Game, ref: tuple) -> bool:
