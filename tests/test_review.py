@@ -68,6 +68,7 @@ def test_life_tamper_and_score(game):
     hit = F.score([f], [{"cause": "engine_bug", "decision": d + 10}])
     miss = F.score([f], [{"cause": "undertraining", "decision": d}])
     assert hit[0]["caught"] and not miss[0]["caught"]
+    assert len(F.score([f], [{"cause": "engine_bug", "decision": d}, {"cause": "engine_bug", "decision": d + 50}])[0]["findings"]) == 2
 
 
 def test_rebuild_follows_the_record(game):

@@ -62,13 +62,19 @@ def review_file(path: pathlib.Path, backend: str, model: str | None = None, effo
         for part in chunks:
             text = user_prompt(transcript(rep, part if len(chunks) > 1 else None), part, len(chunks))
             reply, usage = llm.complete(backend, system, text, model=model, effort=effort)
-            got = parse_findings(reply)
+            try:
+                got = parse_findings(reply)
+            except ValueError:
+                bad = path.with_name(path.stem + f".unparsed-{model or backend}.txt")
+                bad.write_text(reply)
+                raise ValueError(f"no findings JSON in the reply (saved to {bad}; usage {usage})") from None
             result["summary"].append(got.get("summary", ""))
             result["findings"] += got["findings"]
             result["usage"].append(usage)
         result["summary"] = " / ".join(s for s in result["summary"] if s)
     result["game"] = path.name
-    out = _findings_path(path, backend)
+    # a non-default model gets its own file (--backend <model> to verify/report it)
+    out = _findings_path(path, model if model and model != llm.DEFAULTS.get(backend) else backend)
     out.write_text(json.dumps(result, indent=1))
     by = Counter(f["cause"] for f in result["findings"])
     print(f"{out}: {len(result['findings'])} findings {dict(by)}")
@@ -134,7 +140,7 @@ def calibration_report(paths: list[pathlib.Path], backend: str) -> str:
         rep = json.loads(p.read_text())
         found = json.loads(fp.read_text())["findings"]
         scored = F.score(rep["meta"]["review"]["faults"], found)
-        hits = {id(s["finding"]) for s in scored if s.get("finding")}
+        hits = {id(x) for s in scored for x in s["findings"]}
         noise += sum(1 for f in found if id(f) not in hits)
         for s in scored:
             if s["caught"] is None:
@@ -175,11 +181,11 @@ def main(argv=None) -> None:
     llm_args(v)
     ve = sub.add_parser("verify", help="counterfactual rollouts for findings that name a better option")
     ve.add_argument("games", nargs="+", type=pathlib.Path)
-    ve.add_argument("--backend", default="deepseek")
+    ve.add_argument("--backend", default="deepseek", help="which findings: the backend, or the --model a review ran with")
     ve.add_argument("--rollouts", type=int, default=32)
     rp = sub.add_parser("report", help="markdown roll-up of findings")
     rp.add_argument("games", nargs="+", type=pathlib.Path)
-    rp.add_argument("--backend", default="deepseek")
+    rp.add_argument("--backend", default="deepseek", help="which findings: the backend, or the --model a review ran with")
     rp.add_argument("--calibration", action="store_true", help="score findings against the seeded faults")
     c = sub.add_parser("calibrate", help="record games with seeded faults and review them")
     play_args(c)
@@ -191,7 +197,10 @@ def main(argv=None) -> None:
         _record(args, args.fault)
     elif args.cmd == "review":
         for p in args.games:
-            review_file(p, args.backend, args.model, args.effort)
+            try:
+                review_file(p, args.backend, args.model, args.effort)
+            except (ValueError, OSError) as e:
+                print(f"{p}: FAILED: {e}")
     elif args.cmd == "verify":
         for p in args.games:
             print(p)
@@ -211,7 +220,7 @@ def main(argv=None) -> None:
         for p in paths:
             review_file(p, args.backend, args.model, args.effort)
         if args.backend != "prompt":
-            print(calibration_report(paths, args.backend))
+            print(calibration_report(paths, args.model or args.backend))
 
 
 if __name__ == "__main__":

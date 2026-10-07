@@ -120,13 +120,14 @@ def tamper(rep: dict, f: dict) -> None:
 
 def score(faults: list[dict], findings: list[dict], window: int = 3) -> list[dict]:
     """Per fault: caught (a finding of the right cause near one of its
-    decisions; for mask faults, also one naming the hidden text)."""
+    decisions; for mask faults, also one naming the hidden text) and every
+    finding that matches it (`findings`; repeat sightings are not noise)."""
     out = []
     for f in faults:
         if not f["decisions"]:
-            out.append({**f, "caught": None})
+            out.append({**f, "caught": None, "findings": []})
             continue
-        hit = None
+        hits = []
         for x in findings:
             if x.get("cause") != f["cause"] or x.get("decision") is None:
                 continue
@@ -135,7 +136,6 @@ def score(faults: list[dict], findings: list[dict], window: int = 3) -> list[dic
             later = f["cause"] == "engine_bug" and x["decision"] >= f["decisions"][0]
             named = f["kind"] == "mask" and f["args"][0].lower() in (str(x.get("missing_play")) + str(x.get("what"))).lower()
             if near or later or named:
-                hit = x
-                break
-        out.append({**f, "caught": hit is not None, "finding": hit})
+                hits.append(x)
+        out.append({**f, "caught": bool(hits), "findings": hits})
     return out

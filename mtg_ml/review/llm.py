@@ -57,7 +57,8 @@ def _deepseek(system: str, user: str, model: str) -> tuple[str, dict]:
     body = {
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "max_tokens": 8192,
+        # the reasoner's chain of thought counts against max_tokens
+        "max_tokens": 32768 if model == "deepseek-reasoner" else 8192,
     }
     if model != "deepseek-reasoner":  # the reasoner rejects json mode and sampling settings
         body["response_format"] = {"type": "json_object"}
