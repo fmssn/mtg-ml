@@ -1,0 +1,2 @@
+# Append-only experiment ledger: parallel PRs each add lines, so keep both sides on merge.
+docs/experiments/ledger.jsonl merge=union

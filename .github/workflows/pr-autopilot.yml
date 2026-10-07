@@ -1,0 +1,266 @@
+name: PR autopilot
+
+# Review -> fix -> auto-merge loop for the owner's PRs. See docs/pr-autopilot.md.
+# A cheap model (DeepSeek through its Anthropic-compatible endpoint) reviews and fixes;
+# Opus (subscription OAuth token) only on escalation; CI decides the merge.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize, labeled]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  push:
+    # claude/lucid-euler-0tjz9h is the default branch until it is renamed to main
+    branches: [main, claude/lucid-euler-0tjz9h]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number
+        required: true
+      reason:
+        description: "review | ci-fix | conflict | escalate"
+        default: conflict
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    outputs:
+      pr: ${{ steps.plan.outputs.pr }}
+      mode: ${{ steps.plan.outputs.mode }}
+      round: ${{ steps.plan.outputs.round }}
+      head: ${{ steps.plan.outputs.head }}
+      base: ${{ steps.plan.outputs.base }}
+      ci_run: ${{ steps.plan.outputs.ci_run }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          SENDER_TYPE: ${{ github.event.sender.type }}
+          PR_EVENT: ${{ github.event.pull_request.number }}
+          PR_INPUT: ${{ inputs.pr }}
+          REASON: ${{ inputs.reason }}
+          RUN_PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          skip() { echo "skip: $1"; echo "mode=skip" >> "$GITHUB_OUTPUT"; exit 0; }
+          mode=review
+          case $EVENT in
+            pull_request)
+              pr=$PR_EVENT
+              if [[ $ACTION == labeled ]]; then
+                [[ $LABEL == needs-opus && $SENDER_TYPE != Bot ]] || skip "label $LABEL"
+                mode=escalate
+              elif [[ $ACTION == synchronize && $SENDER_TYPE == Bot ]]; then
+                skip "pushed by a bot (autopilot fix or branch update); CI decides"
+              fi ;;
+            workflow_run)
+              [[ $RUN_EVENT == pull_request && $RUN_CONCLUSION == failure ]] || skip "CI $RUN_CONCLUSION"
+              pr=$(jq -r '.[0].number // empty' <<< "$RUN_PRS")
+              [[ -n $pr ]] || pr=$(gh pr list --head "$RUN_BRANCH" --json number --jq '.[0].number // empty')
+              [[ -n $pr ]] || skip "no open PR for $RUN_BRANCH"
+              mode=ci-fix ;;
+            workflow_dispatch)
+              pr=$PR_INPUT
+              mode=${REASON:-conflict} ;;
+          esac
+
+          info=$(gh pr view "$pr" --json state,isDraft,author,headRepositoryOwner,headRefName,baseRefName,labels)
+          [[ $(jq -r .state <<< "$info") == OPEN ]] || skip "not open"
+          [[ $(jq -r .isDraft <<< "$info") == false ]] || skip "draft"
+          [[ $(jq -r .author.login <<< "$info") == "$OWNER" ]] || skip "not the owner's PR"
+          [[ $(jq -r .headRepositoryOwner.login <<< "$info") == "$OWNER" ]] || skip "from a fork"
+          labels=" $(jq -r '[.labels[].name] | join(" ")' <<< "$info") "
+
+          for l in needs-opus needs-human autopilot:opus-used autopilot:round-1 autopilot:round-2; do
+            gh label create "$l" --color ededed > /dev/null 2>&1 || true
+          done
+
+          # New work from the developer starts the loop over.
+          if [[ $mode == review ]]; then
+            for l in $labels; do
+              if [[ $l == autopilot:* || $l == needs-opus || $l == needs-human ]]; then
+                gh pr edit "$pr" --remove-label "$l" > /dev/null
+              fi
+            done
+            labels=" "
+          fi
+          [[ $labels != *" needs-human "* ]] || skip "waiting for the developer"
+          [[ $mode == escalate || $labels != *" needs-opus "* ]] || skip "already escalated"
+
+          round=$(( $(tr ' ' '\n' <<< "$labels" | grep -c '^autopilot:round-' || true) + 1 ))
+          if [[ $mode != escalate && $round -gt 2 ]]; then
+            mode=escalate   # round cap: two cheap review/fix rounds per PR
+          fi
+          if [[ $mode == escalate && $labels == *" autopilot:opus-used "* ]]; then
+            gh pr edit "$pr" --add-label needs-human > /dev/null
+            gh pr comment "$pr" --body "**Autopilot:** Opus already had a go at this PR and it still needs attention. Over to you."
+            skip "Opus already used on this PR"
+          fi
+
+          echo "PR #$pr: $mode (round $round)"
+          {
+            echo "pr=$pr"; echo "mode=$mode"; echo "round=$round"
+            echo "head=$(jq -r .headRefName <<< "$info")"
+            echo "base=$(jq -r .baseRefName <<< "$info")"
+            echo "ci_run=${RUN_ID:-}"
+          } >> "$GITHUB_OUTPUT"
+
+  autopilot:
+    needs: plan
+    if: needs.plan.outputs.mode != 'skip'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: autopilot-pr-${{ needs.plan.outputs.pr }}
+    permissions:
+      actions: read   # failed CI logs
+    env:
+      PR: ${{ needs.plan.outputs.pr }}
+      MODE: ${{ needs.plan.outputs.mode }}
+      ROUND: ${{ needs.plan.outputs.round }}
+      HEAD_REF: ${{ needs.plan.outputs.head }}
+      BASE_REF: ${{ needs.plan.outputs.base }}
+      AP: ${{ github.workspace }}/autopilot/.github/autopilot
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    steps:
+      # Pushes made with GITHUB_TOKEN don't trigger CI, so fixes go out as a GitHub App.
+      - id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AUTOPILOT_APP_ID }}
+          private-key: ${{ secrets.AUTOPILOT_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_REF }}
+          token: ${{ steps.app.outputs.token }}
+          fetch-depth: 0
+          path: pr
+      # Scripts and prompts always come from the default branch, never from the PR.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/autopilot
+          path: autopilot
+      - name: Git identity
+        working-directory: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          id=$(gh api "/users/${SLUG}%5Bbot%5D" --jq .id)
+          git config user.name "${SLUG}[bot]"
+          git config user.email "${id}+${SLUG}[bot]@users.noreply.github.com"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          activate-environment: true
+          enable-cache: true
+      - name: Install
+        working-directory: pr
+        run: |
+          uv pip install -e '.[dev]' numpy ruff && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+          npm install -g @anthropic-ai/claude-code
+
+      - name: "Fix: prepare"
+        if: env.MODE != 'escalate'
+        working-directory: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CI_RUN_ID: ${{ needs.plan.outputs.ci_run }}
+        run: bash "$AP/prepare.sh" "$MODE" "$PR" "$BASE_REF"
+      - name: "Fix: DeepSeek"
+        if: env.MODE != 'escalate'
+        working-directory: pr
+        env:
+          # Scoped to this step: a DeepSeek key, routed to DeepSeek. No Anthropic key exists in this workflow.
+          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        # "sonnet" is mapped to deepseek-flash by DeepSeek's endpoint.
+        run: bash "$AP/run-claude.sh" "$AP/fix.md" sonnet 3 25m
+      - name: "Fix: guard, push, decide"
+        id: fix
+        if: env.MODE != 'escalate'
+        working-directory: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: python "$AP/finish.py" fix "$PR" "$HEAD_REF" "$ROUND"
+
+      - name: "Escalate: prepare"
+        id: esc
+        if: env.MODE == 'escalate' || steps.fix.outputs.outcome == 'escalate'
+        working-directory: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          ESCALATION: ${{ steps.fix.outputs.reason || (env.MODE == 'escalate' && 'Round cap reached, or escalated by hand with the needs-opus label. Read the latest autopilot comments on the PR for findings.') }}
+        run: |
+          git merge --abort 2> /dev/null || true
+          git reset -q --hard "origin/$HEAD_REF" && git clean -fdq
+          gh pr edit "$PR" --add-label autopilot:opus-used > /dev/null
+          gh pr view "$PR" --comments --json comments --jq '[.comments[] | select(.body | startswith("**Autopilot"))] | .[-3:][] | .body' > "$RUNNER_TEMP/notes.md" || true
+          ESCALATION="$ESCALATION"$'\n\nRecent autopilot comments:\n'"$(cat "$RUNNER_TEMP/notes.md")" \
+            bash "$AP/prepare.sh" escalate "$PR" "$BASE_REF"
+      - name: "Escalate: Opus"
+        if: steps.esc.outcome == 'success'
+        working-directory: pr
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: bash "$AP/run-claude.sh" "$AP/escalate.md" opus 10 30m
+      - name: "Escalate: guard, push, decide"
+        if: steps.esc.outcome == 'success'
+        working-directory: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: python "$AP/finish.py" escalate "$PR" "$HEAD_REF" "$ROUND"
+
+  # Something landed on the default branch: bring every ready PR up to date so the
+  # required checks run against the new base. Conflicts go to the autopilot.
+  update-branches:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write   # gh workflow run
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AUTOPILOT_APP_ID }}
+          private-key: ${{ secrets.AUTOPILOT_APP_PRIVATE_KEY }}
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          DISPATCH_TOKEN: ${{ github.token }}
+        run: |
+          prs=$(gh pr list --state open --base "${GITHUB_REF_NAME}" --json number,isDraft,author,headRepositoryOwner,labels --jq '
+            .[] | select(.isDraft | not)
+                | select(.author.login == $ENV.OWNER and .headRepositoryOwner.login == $ENV.OWNER)
+                | select([.labels[].name] | index("needs-human") | not)
+                | .number')
+          for pr in $prs; do
+            # Pushed as the App, so CI runs on the updated branch.
+            if out=$(gh api -X PUT "repos/$GH_REPO/pulls/$pr/update-branch" 2>&1); then
+              echo "#$pr updated"
+            elif grep -qi conflict <<< "$out"; then
+              echo "#$pr conflicts, handing to the autopilot"
+              GH_TOKEN=$DISPATCH_TOKEN gh workflow run pr-autopilot.yml -f pr="$pr" -f reason=conflict
+            else
+              echo "#$pr: $out"
+            fi
+          done

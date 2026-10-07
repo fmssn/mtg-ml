@@ -46,10 +46,10 @@ New user-facing apps (replay viewer, dashboards) go under `apps/<name>/` and sho
 
 Every training run meant to answer a question is recorded in `docs/experiments/` (how: its README): an entry in `ledger.md` and `ledger.jsonl` with parent checkpoint, code ref, exact flags, benchmark (sampled and greedy) and ladder L1 Elo (`ladder.md` says how it is computed), and a verdict, failed ideas included. Finished runs are archived on h100-private with `~/mtg-ml-checkpoints/archive_run.sh`; that directory is append-only.
 
-## PR workflow (GitHub Copilot reviews every PR)
+## PR workflow (the PR autopilot reviews, fixes and merges)
 
-1. **Open a draft PR early**, as soon as the first meaningful commit is pushed: `gh pr create --draft`. This starts CI and Copilot's review while work continues.
-2. Keep pushing to the draft. Address Copilot and CI feedback as it comes in.
-3. **When the user confirms the work is ready:** `gh pr ready <n>`, then `gh pr edit <n> --add-reviewer @copilot` to request a fresh review of the final state.
-4. **Turn on Auto-fix** for the PR in the desktop app (or tell the user to), then wait for Copilot's review and CI instead of polling. On each event: fix, verify, push, reply in each review thread saying what changed, and resolve the thread.
-5. Don't merge until CI is green and Copilot's latest review has no open findings. Merging is the user's call.
+1. **Open a draft PR early**, as soon as the first meaningful commit is pushed: `gh pr create --draft`. CI runs on drafts; the autopilot ignores them.
+2. Keep pushing to the draft and fix CI failures yourself.
+3. **When the user confirms the work is ready:** `gh pr ready <n>`. From there the autopilot ([docs/pr-autopilot.md](docs/pr-autopilot.md)) reviews, pushes fixes, keeps the branch current and auto-merges once CI is green. Don't request Copilot reviews.
+4. Act on a PR again only when it gets `needs-human` (read the latest **Autopilot:** comment) or the user asks. Pushing to the PR restarts the autopilot.
+5. A PR whose test changes alter expected behaviour (assertions, golden digests) should say so in its description: green CI is the only merge gate.
