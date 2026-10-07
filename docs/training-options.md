@@ -34,4 +34,4 @@ python -m mtg_ml.rl.train --run runs/exploit-jund --exploit runs/main/policy/vNN
 python -m mtg_ml.rl.train --run runs/exploit-blue --exploit runs/main/policy/vNNNNN.pt --exploit-deck blue --iterations 150
 ```
 
-- `--init PATH` (any mode): a fresh run (no `latest.pt` yet) starts from the weights and architecture of a policy file or checkpoint. Flags such as `--hidden` are ignored, and `--value-bound` is applied on top. The optimizer state is not loaded.
+- `--init PATH` (any mode): a fresh run (no `latest.pt` yet) starts from the weights and architecture of a policy file or checkpoint. Flags such as `--hidden` are ignored, and `--value-bound` is applied on top. The optimizer state is not loaded. `--entity-attn N` (N > 0, trunk `entity`) also adds N entity self-attention layers to a source that has fewer or none: the new layers start as the identity (`model.load_partial`), so the first rollouts play like the source. A resumed run builds its network from `latest.pt`; an explicit `--entity-attn N` that differs from the checkpoint's is an error (the Adam state would not fit), so resume without it or start a new `--run` with `--init`.

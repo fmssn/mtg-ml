@@ -204,6 +204,7 @@ def _inputs(shapes: dict) -> list[tuple[str, str, int]]:
     out = [(name, "i", shapes[lvl]) for name, (lvl, _, _) in PAD_FIELDS.items()]
     out += [(f"t_{k}_{x}", "i", shapes[k] if x == "bag" else shapes[f"u_{k}"]) for k in keys for x in ("bag", "off", "uid")]
     out += [(name, "i", R) for name in ("pos_in", "pos_out", "action", "kind")] + [(name, "f", R) for name in ("old_logp", "adv", "ret", "weight")]
+    out += [("e_pos", "i", shapes["ent"])] if "entw" in shapes else []  # entity attention
     return out + [("n", "f", 1)] + ([("t_e_w", "f", shapes["e"])] if "e" in keys else [])
 
 
@@ -222,7 +223,7 @@ def _padded_losses(net, cfg, shapes, gru, ints, flts):
     its GRU batch of shape gru = (sequences, steps)."""
     v = {k: (ints if buf == "i" else flts).narrow(0, at, size) for k, (buf, at, size) in _layout(shapes).items()}
     seq = SequenceLayout(v["pos_in"], v["pos_out"], *gru)
-    return _losses(net, cfg, padded_batch(v), seq, shapes["width"], v["action"], v["old_logp"], v["adv"], v["ret"], v["weight"], v["n"][0], v["kind"])
+    return _losses(net, cfg, padded_batch(v, shapes.get("entw")), seq, shapes["width"], v["action"], v["old_logp"], v["adv"], v["ret"], v["weight"], v["n"][0], v["kind"])
 
 
 def _need(counts: dict, extra: dict) -> dict:
@@ -231,16 +232,17 @@ def _need(counts: dict, extra: dict) -> dict:
     return pad_sizes(counts) | {"width": extra["width"]}
 
 
-def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None, choose_gru=None, kinds=None):
+def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None, choose_gru=None, kinds=None, ent_width=False):
     """The minibatches of an epoch padded to one set of shapes, packed as
     (pieces, ·) int64 and float32 tensors in `_layout` order, and the GRU
     batch of each, (trajectories, longest), rounded to 4 sizes per octave:
     the GRU's time is ~linear in both. `choose(counts, extra)` picks the
     shapes (`_need` or a cached one they fit), `choose_gru(shapes, gru)`
-    may pick a bigger GRU batch; `transpose` goes to `pad_split`."""
+    may pick a bigger GRU batch; `transpose` and `ent_width` (entity
+    attention) go to `pad_split`."""
     dev = acts.device
     extra = {"width": int(width.max())}
-    fields, shapes, counts = pad_split(big, bounds, lambda counts: choose(counts, extra), transpose)
+    fields, shapes, counts = pad_split(big, bounds, lambda counts: choose(counts, extra), transpose, ent_width)
     M, R = len(chunks), shapes["row"]
     gru = [(bucket(len(c), 4), bucket(max(c), 4)) for c in chunks]
     if choose_gru:
@@ -481,7 +483,9 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
                 _step(net, opt, cfg, loss)
                 acc += stats
         else:
-            shapes, gru, ints, flts = _padded_epoch(big, bounds, chunks, acts, rec, width, graphs.choose if graphs else _need, transpose, graphs and graphs.choose_gru, knd)
+            shapes, gru, ints, flts = _padded_epoch(
+                big, bounds, chunks, acts, rec, width, graphs.choose if graphs else _need, transpose, graphs and graphs.choose_gru, knd, bool(net.config.get("entity_attn"))
+            )
             del big
             if graphs:
                 graphs.run(net, opt, cfg, shapes, gru, ints, flts)

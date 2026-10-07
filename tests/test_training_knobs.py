@@ -287,3 +287,24 @@ def test_init_starts_a_fresh_run_from_a_checkpoint(tmp_path, in_process):  # noq
     assert all(torch.equal(a, b) for a, b in zip(t.net.state_dict().values(), net.state_dict().values()))
     t.train()
 
+
+
+def test_init_adds_entity_attention_and_resume_keeps_it(tmp_path, in_process):  # noqa: F811
+    """--init from a network without entity attention, --entity-attn 1 and
+    --value-bound on top: the source's architecture and weights, the new
+    attention layers at their identity init. A resume builds the network
+    from latest.pt and refuses another explicit --entity-attn."""
+    src = tmp_path / "src.pt"
+    torch.manual_seed(5)
+    net = PolicyNet(hidden=16, trunk="entity")
+    torch.save({"config": net.config, "model": net.state_dict()}, src)
+    run = tmp_path / "run"
+    t = Trainer(_cfg(run, "--iterations", "1", "--init", str(src), "--entity-attn", "1", "--value-bound", "tanh", "--hidden", "32", *IN_PROCESS, *NO_EVAL))
+    assert t.net.config == {**net.config, "value_bound": "tanh", "entity_attn": 1}
+    own = t.net.state_dict()
+    assert all(torch.equal(own[k], v) for k, v in net.state_dict().items())
+    t.train()
+    with pytest.raises(ValueError):
+        Trainer(_cfg(run, "--iterations", "2", "--entity-attn", "2", *IN_PROCESS, *NO_EVAL))
+    again = Trainer(_cfg(run, "--iterations", "2", *IN_PROCESS, *NO_EVAL))  # flags 0/default: the checkpoint's architecture
+    assert again.net.config == t.net.config and again.iteration == 1

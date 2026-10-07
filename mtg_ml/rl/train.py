@@ -2,6 +2,7 @@
 
     python -m mtg_ml.rl.train --run runs/ppo1 --iterations 200
     python -m mtg_ml.rl.train --run runs/ppo1 --iterations 400   # resumes
+    python -m mtg_ml.rl.train --run runs/attn1 --trunk entity --entity-attn 1 --init runs/ppo1/latest.pt   # fine-tunes
 
 One deck-conditioned network plays both seats (the seat is a state feature).
 It has a GRU memory over each player's decisions in a game, fed with the
@@ -105,7 +106,7 @@ import torch
 from ..backend import ENV_VAR, engine_name
 from .collect import PoolProcess, PoolThread, cpu_layout, release
 from .evaluate import EVAL_BLOCKS, evaluate_policy
-from .model import PolicyNet
+from .model import PolicyNet, load_partial
 from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update, set_lr
 from .rollout import BOT, KIND_ID, LEARNER, GameSpec, Job, create_pool, play
 
@@ -142,6 +143,7 @@ class TrainConfig:
     value_hidden: int = 0  # width of a separate value net (0 = hidden)
     value_bound: str = "none"  # "tanh": squash the value head into (-1, 1) (new runs and --init only; a resumed run keeps its checkpoint's)
     value_clamp: float = 1.0  # GAE bootstraps from values clamped to +-(this + shaping); 0 = raw values
+    entity_attn: int = 0  # trunk "entity": self-attention layers over each decision's entities (4 heads, FFN 2x; 0 = none). With --init: > 0 adds layers (identity init) to the source's; a resumed run keeps its checkpoint's and refuses another N > 0
     memory: str = "gru"  # "gru" (recurrent over the player's decisions) or "none"
     gamma: float = 0.995
     lam: float = 0.95
@@ -161,7 +163,7 @@ class TrainConfig:
     pool_sampling: str = "uniform"  # the other pool games: "uniform" over the pool, or "pfsp": weighted (1 - learner's win rate vs it) ** pfsp_power
     pfsp_power: float = 2.0
     pfsp_ema: float = 0.05  # per-game step of the running win rate vs each pool opponent (starts at 0.5)
-    init: str = ""  # a fresh run starts from these weights (a policy file or checkpoint; its architecture, --value-bound on top)
+    init: str = ""  # a fresh run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, --value-bound on top, and --entity-attn N > 0 adding attention layers that start as the identity
     exploit: str = ""  # exploiter mode: every training game is the learner on --exploit-deck vs this frozen policy file
     exploit_deck: str = "jund"  # "jund" (learner seat 0) or "blue" (seat 1)
     eval_every: int = 10  # evaluate every this many iterations (0 = only by eval_every_games)
@@ -249,17 +251,18 @@ class Trainer:
         self.rng = random.Random(cfg.seed)
         ck = torch.load(self.latest, map_location=cfg.device, weights_only=False) if os.path.exists(self.latest) else None
         init = cfg.init or cfg.exploit  # an exploiter starts from the policy it exploits unless --init says otherwise
-        if ck is not None:  # the architecture is the checkpoint's, whatever the flags say
-            self.net = PolicyNet(**ck["config"])
-        elif init:
+        if ck is not None:  # the architecture is the checkpoint's, whatever the flags say (but an explicit other --entity-attn is an error)
+            have = ck["config"].get("entity_attn", 0)
+            if cfg.entity_attn and cfg.entity_attn != have:  # the Adam state would not fit either
+                raise ValueError(f"{self.latest} holds a {ck['config']} network, not one with entity_attn {cfg.entity_attn}: resume without --entity-attn, or start a new --run with --init {self.latest}")
+            self.net = PolicyNet(**ck["config"]).to(cfg.device)
+        elif init:  # the source's architecture with --value-bound, plus --entity-attn layers (identity init) when > 0
             src = torch.load(init, map_location="cpu", weights_only=False)
-            config = {k: v for k, v in src["config"].items() if k != "value_bound"}
-            self.net = PolicyNet(**config, value_bound=cfg.value_bound)
-            self.net.load_state_dict(src["model"])
-            print(f"initialised from {init}")
+            config = {k: v for k, v in src["config"].items() if k not in ("value_bound", "entity_attn")}
+            self.net = PolicyNet(**config, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn or src["config"].get("entity_attn", 0)).to(cfg.device)
+            self._init_from(init)
         else:
-            self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound)
-        self.net.to(cfg.device)
+            self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn).to(cfg.device)
         # a tensor lr when annealing: the update's CUDA graphs read it, so a new value each iteration costs no recapture
         self.opt = make_optimizer(self.net.parameters(), cfg.ppo.lr, cfg.device, tensor_lr=cfg.lr_anneal_games > 0)
         self.iteration = 0
@@ -306,6 +309,23 @@ class Trainer:
             self.eval_workers = cfg.eval_workers or (4 if self.layout.shared_eval else max(1, min(8, len(ev))))
             self.evaluator = PoolProcess(self.eval_workers, "local", worker_cpus=ev or None, cpus=ev or None, nice=10, name="evaluator")
         self.evals: list[_Eval] = []  # running first, then at most one waiting
+
+    def _init_from(self, path: str) -> None:
+        """Load the weights of checkpoint `path` (a policy file or latest.pt;
+        not its optimizer or counters) into `self.net`. Its network must have
+        this config except for `value_bound` (no weights) and layers that
+        start as the identity (`entity_attn`), which keep their
+        initialisation: the first rollouts play like the checkpoint (up to
+        the value bound)."""
+        ck = torch.load(path, map_location=self.cfg.device, weights_only=False)
+        with torch.device("meta"):  # its config with today's defaults filled in
+            config = PolicyNet(**ck["config"]).config
+        own = {k: v for k, v in self.net.config.items() if k not in ("entity_attn", "value_bound")}
+        theirs = {k: v for k, v in config.items() if k not in ("entity_attn", "value_bound")}
+        if own != theirs or config.get("entity_attn", 0) > self.net.config.get("entity_attn", 0):
+            raise ValueError(f"--init {path}: its network {ck['config']} does not fit {self.net.config}")
+        new = load_partial(self.net, ck["model"])
+        print(f"initialised from {path}" + (f"; new layers at their identity init: {', '.join(new)}" if new else ""), flush=True)
 
     def _collector(self):
         c, lay = self.cfg, self.layout
