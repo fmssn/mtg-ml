@@ -581,8 +581,8 @@ pub fn option_object_ids(st: &State, o: &Opt, kind: Kind, features: u8) -> Vec<u
     }
     match o.value {
         Val::Activate(c, _) | Val::Mana(c, _) => ids.push(st.c(c).oid),
-        // A hand card: an entity from set 5 on; other zones' cards are none.
-        Val::Cast(c, _, _) | Val::Land(c) | Val::Plot(c) => ids.push(st.c(c).oid),
+        // Set 5: the hand card (other zones' cards are no entities).
+        Val::Cast(c, _, _) | Val::Land(c) | Val::Plot(c) if features >= 5 => ids.push(st.c(c).oid),
         _ => {}
     }
     if features >= 4 && kind == Kind::ChooseX {

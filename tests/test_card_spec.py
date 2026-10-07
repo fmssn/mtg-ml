@@ -60,3 +60,13 @@ def test_an_unseen_card_gets_the_shape_of_the_cards_it_plays_like():
     trick = card_def({"name": "Unseen Trick", "cost": "{1}{B}", "types": "Instant", "targets": ["creature"], "effect": [{"op": "grant_target", "keywords": ["lifelink"]}]})
     assert set(CARDS["Toxin Analysis"].shape) - set(trick.shape) == {"e:spell:op:create_token", "e:spell:op:create_token:n>=1", "e:op:create_token", "e:op:create_token:n>=1"}
     assert set(trick.shape) - set(CARDS["Toxin Analysis"].shape) == {"e:mv>=2"}
+
+
+def test_an_unknown_spec_field_says_where_to_add_it_in_both_engines():
+    from mtg_ml.engine.cards import card_def
+
+    for spec in ({"name": "X", "types": "Instant", "storm": True}, {"name": "X", "types": "Artifact", "abilities": [{"name": "a", "crew": 1}]}):
+        with pytest.raises(ValueError, match="card_shape.*native/src/cards.rs"):
+            card_def(spec)
+    with pytest.raises(ValueError, match="OPS.*native/src/cards.rs"):
+        card_def({"name": "X", "types": "Instant", "effect": [{"op": "proliferate"}]})

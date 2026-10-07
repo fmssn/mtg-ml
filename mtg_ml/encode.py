@@ -428,8 +428,8 @@ def option_object_ids(option, game=None, kind: str = "", features: int = 1) -> l
     v = option.value
     if isinstance(v, tuple) and len(v) == 3 and v[0] in ("activate", "mana"):
         ids.append(v[1].oid)
-    elif isinstance(v, tuple) and len(v) >= 2 and v[0] in ("cast", "land", "plot"):
-        ids.append(v[1].oid)  # a hand card (an entity from set 5 on; other zones' cards are none)
+    elif features >= 5 and isinstance(v, tuple) and len(v) >= 2 and v[0] in ("cast", "land", "plot"):
+        ids.append(v[1].oid)  # the hand card (other zones' cards are no entities)
     if features >= 4 and kind == "choose_x" and game.stack:
         ids.append(game.stack[-1].sid)
     return ids
