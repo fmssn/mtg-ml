@@ -15,6 +15,8 @@ Wildfire). Jund: the "Stock list" build, 124 of 428 lists (29%); Mono Blue
 Terror: "Stock list", 261 of 666 (39%); Red Madness: one build, all 970
 lists. Each is that build's typical 15 card for card: nothing is left out
 for missing rules (Envelop was implemented for it) and nothing is trimmed.
+Grixis Affinity: main and sideboard are the "Stock list" builds (main 228
+of 524 lists, 44%; sideboard 174 of 524, 33%), see docs/grixis-affinity.md.
 """
 
 JUND_WILDFIRE = {
@@ -73,6 +75,29 @@ RED_MADNESS = {
     "Mountain": 18,
 }
 
+GRIXIS_AFFINITY = {
+    "Myr Enforcer": 4,
+    "Refurbished Familiar": 4,
+    "Utrom Monitor": 3,
+    "Krark-Clan Shaman": 3,
+    "Thoughtcast": 4,
+    "Galvanic Blast": 4,
+    "Reckoner's Bargain": 4,
+    "Toxin Analysis": 2,
+    "Ichor Wellspring": 4,
+    "Nihil Spellbomb": 3,
+    "Blood Fountain": 2,
+    "Sewer-veillance Cam": 1,
+    "Makeshift Munitions": 1,
+    "Black Mage's Rod": 2,
+    "Mistvault Bridge": 4,
+    "Drossforge Bridge": 4,
+    "Vault of Whispers": 4,
+    "Seat of the Synod": 3,
+    "Silverbluff Bridge": 2,
+    "Great Furnace": 2,
+}
+
 # Sideboards: exactly 15 cards each, from the Q3 2026 typical lists (see the
 # module docstring). The maindecks above are left as they were so the
 # benchmark stays comparable across PRs.
@@ -102,8 +127,23 @@ RED_MADNESS_SIDEBOARD = {
     "End the Festivities": 2,
 }
 
-DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS}
-SIDEBOARDS = {"jund_wildfire": JUND_WILDFIRE_SIDEBOARD, "mono_blue_terror": MONO_BLUE_TERROR_SIDEBOARD, "red_madness": RED_MADNESS_SIDEBOARD}
+GRIXIS_AFFINITY_SIDEBOARD = {
+    "Hydroblast": 4,
+    "Pyroblast": 4,
+    "Envelop": 2,
+    "Extract a Confession": 2,
+    "Blue Elemental Blast": 1,
+    "Krark-Clan Shaman": 1,
+    "Nihil Spellbomb": 1,
+}
+
+DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS, "grixis_affinity": GRIXIS_AFFINITY}
+SIDEBOARDS = {
+    "jund_wildfire": JUND_WILDFIRE_SIDEBOARD,
+    "mono_blue_terror": MONO_BLUE_TERROR_SIDEBOARD,
+    "red_madness": RED_MADNESS_SIDEBOARD,
+    "grixis_affinity": GRIXIS_AFFINITY_SIDEBOARD,
+}
 
 
 def expand(decklist: dict[str, int]) -> list[str]:

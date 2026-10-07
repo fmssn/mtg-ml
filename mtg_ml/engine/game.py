@@ -57,7 +57,7 @@ STEPS = (
 
 MAX_HAND = 7
 # Cast modes from the hand, in the order they are offered.
-HAND_MODES = ("normal", "bestow", "overload", "alternative", "phyrexian", "bargain")
+HAND_MODES = ("normal", "bestow", "overload", "alternative", "phyrexian", "bargain", "evidence")
 BARGAIN_SAC = "artifact_enchantment_or_token"  # bargain's sacrifice filter
 
 
@@ -740,12 +740,14 @@ class Game:
 
     def types(self, c: Card) -> set[str]:
         t = set(c.face.types)
+        if c.animated is not None:
+            t.add("Creature")
         if self.is_bestowed(c):
             t.discard("Creature")
         return t
 
     def is_creature(self, c: Card) -> bool:
-        return "Creature" in c.face.types and not self.is_bestowed(c)
+        return ("Creature" in c.face.types or c.animated is not None) and not self.is_bestowed(c)
 
     def is_artifact(self, c: Card) -> bool:
         return "Artifact" in c.face.types
@@ -757,17 +759,19 @@ class Game:
         return [a for a in self.battlefield if a.attached_to == c.oid]
 
     def power(self, c: Card) -> int:
-        v = (c.face.power or 0) + c.counters + sum(t.power for t in c.temp)
+        base = c.animated[0] if c.animated is not None else c.face.power or 0
+        v = base + c.counters + sum(t.power for t in c.temp)
         v += sum(a.counters for a in self._auras_on(c))
         return v
 
     def toughness(self, c: Card) -> int:
-        v = (c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp)
+        base = c.animated[1] if c.animated is not None else c.face.toughness or 0
+        v = base + c.counters + sum(t.toughness for t in c.temp)
         v += sum(a.counters for a in self._auras_on(c))
         return v
 
     def keywords(self, c: Card) -> set[str]:
-        k = set(c.face.keywords)
+        k = set(c.face.keywords) | c.granted
         for t in c.temp:
             k |= t.keywords
         for a in self._auras_on(c):
@@ -810,6 +814,8 @@ class Game:
             tuple((tuple(sorted(t.keywords)), t.power, t.toughness) for t in c.temp),
             c.oid in self.attackers,
             c.oid in self.blocked,
+            c.animated,
+            tuple(sorted(c.granted)),
         )
 
     def _dedupe_by_equiv(self, cards: Iterable[Card]) -> list[Card]:
@@ -914,6 +920,9 @@ class Game:
             for t in lki.face.triggers:
                 if t.event == "to_graveyard_from_battlefield":
                     self.pending.append(PendingTrigger(lki.controller, lki, t, {"card": new, "oid": new.oid}))
+        for t in lki.face.triggers:
+            if t.event == "leaves_battlefield":
+                self.pending.append(PendingTrigger(lki.controller, lki, t))
 
     def draw(self, p: int, n: int = 1, count: bool = True) -> None:
         pl = self.players[p]
@@ -1092,12 +1101,13 @@ class Game:
                 self.stack.append(item)
                 self._log(f"trigger -> stack: {item.name}")
                 if item.target_specs:
-                    # 603.3d: a triggered ability without legal targets is removed from the stack.
-                    if any(not self.target_candidates(spec, p, exclude_sid=item.sid, chosen=[]) for spec in item.target_specs):
+                    # 603.3d: a triggered ability without legal targets is removed from the stack
+                    # ("up to" targets can always be chosen: none).
+                    if not t.tdef.up_to and any(not self.target_candidates(spec, p, exclude_sid=item.sid, chosen=[]) for spec in item.target_specs):
                         self.stack.remove(item)
                         self._log(f"{item.name}: no legal targets")
                         continue
-                    yield from self._choose_targets(p, item)
+                    yield from self._choose_targets(p, item, up_to=t.tdef.up_to)
                     self._emit_targeted(item)
 
     # ------------------------------------------------------------------
@@ -1251,8 +1261,9 @@ class Game:
         rel = "self" if c.controller == viewer else "opponent"
         return f"{c.name}#{c.oid} ({rel})", ("perm", rel, c.name)
 
-    def _choose_targets(self, p: int, item: StackItem, allowed: Callable[[tuple], bool] | None = None):
-        """`allowed`: an extra filter on the candidates (targets the cost can be paid for)."""
+    def _choose_targets(self, p: int, item: StackItem, allowed: Callable[[tuple], bool] | None = None, up_to: bool = False):
+        """`allowed`: an extra filter on the candidates (targets the cost can be paid for).
+        `up_to`: "up to one target": choosing no target ends the choice."""
         for spec in item.target_specs:
             cands = self.target_candidates(spec, p, exclude_sid=item.sid, chosen=item.targets)
             if allowed is not None:
@@ -1271,7 +1282,11 @@ class Game:
                 seen.add(k)
                 label, key = self.describe_ref(ref, p)
                 options.append(Option(f"Target {label}", ("target", spec.kind) + key, ref))
+            if up_to:
+                options.insert(0, Option("No target", ("target", spec.kind, None), None))
             ref = yield from self.ask(p, O.TARGET, f"Choose target ({spec.kind}) for {item.name}", options)
+            if ref is None:
+                return
             item.targets.append(ref)
 
     # ------------------------------------------------------------------
@@ -1452,8 +1467,9 @@ class Game:
         options = [Option(f"Sacrifice {c.name}#{c.oid}", ("sacrifice", c.name), c) for c in cands]
         article = "an" if flt[0] in "aeiou" else "a"
         card = yield from self.ask(p, O.SACRIFICE, f"Sacrifice {article} {flt.replace('_', ' ')} for {what}", options)
+        mv = card.defn.mana_value
         self.sacrifice(card)
-        return card
+        return mv
 
     # ------------------------------------------------------------------
     # Casting spells
@@ -1481,6 +1497,8 @@ class Game:
             return d.phyrexian_cost
         if mode == "bargain":
             return d.cost if d.bargain else None
+        if mode == "evidence":
+            return d.cost if d.collect_evidence else None
         return None
 
     @staticmethod
@@ -1525,12 +1543,14 @@ class Game:
         if d.is_type("Land"):
             return False
         # Madness casts on resolution of its trigger, whatever the card type (702.35).
-        if mode != "madness" and not d.is_type("Instant") and not self.sorcery_timing(p):
+        if mode != "madness" and not d.is_type("Instant") and "flash" not in d.keywords and not self.sorcery_timing(p):
             return False
         for spec in self._mode_targets(card, mode, choice):
             if not self.target_candidates(spec, p):
                 return False
         if mode == "escape" and len(self.players[p].graveyard) - 1 < d.escape_exile:
+            return False
+        if mode == "evidence" and sum(c.face.mana_value for c in self.players[p].graveyard) < d.collect_evidence:
             return False
         if d.additional_discard and len(self.players[p].hand) - (card.zone == "hand") < 1:
             return False
@@ -1578,7 +1598,9 @@ class Game:
             self.players[p].life -= d.phyrexian_life
             self._log(f"p{p} pays {d.phyrexian_life} life for {card.name}")
         if add_sac:
-            yield from self._choose_sacrifice(p, add_sac, card.name)
+            mv = yield from self._choose_sacrifice(p, add_sac, card.name)
+            if d.additional_sac:
+                item.data["sacrificed_mv"] = mv
         if d.additional_discard:
             gone = yield from self.choose_discard(p, card.name)
             item.data["discarded_land"] = self.is_land(gone)
@@ -1587,6 +1609,8 @@ class Game:
             yield from self._choose_sacrifice(p, sac[0], card.name)
         if mode == "escape":
             yield from self._exile_from_graveyard(p, d.escape_exile, card.name)
+        if mode == "evidence":
+            yield from self._collect_evidence(p, d.collect_evidence, card.name)
         self._emit_cast(item)
         self._emit_targeted(item)
 
@@ -1597,6 +1621,16 @@ class Game:
         yield from self._pay_mana(p, RemainingCost.of(card.face.plot), what=f"plot {card.name}")
         new = self._move(card, "exile")
         new.plotted_turn = self.turn
+
+    def _collect_evidence(self, p: int, n: int, what: str):
+        """Collect evidence N (701.59): exile cards with total mana value N or
+        more from your graveyard, one at a time (casting checked the total)."""
+        total = 0
+        while total < n:
+            options = [Option(f"Exile {c.name}", ("exile_gy", c.name), c) for c in self._dedupe_by_name(self.players[p].graveyard)]
+            c = yield from self.ask(p, O.EXILE_FROM_GY, f"Collect evidence {n} for {what}: exile a card from your graveyard ({total}/{n})", options)
+            total += c.face.mana_value
+            self._move(c, "exile")
 
     def _exile_from_graveyard(self, p: int, n: int, what: str):
         gy = self.players[p].graveyard

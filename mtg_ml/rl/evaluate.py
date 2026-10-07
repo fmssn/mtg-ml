@@ -53,7 +53,7 @@ from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, create_pool, play
 EVAL_SEED = 10_000_000
 ELO = 400 / math.log(10)  # Elo points per natural-log unit of odds
 EVAL_BLOCKS = ("random", "bot", "pool0")
-DECK_KEYS = {"jund_wildfire": "jund", "mono_blue_terror": "blue", "red_madness": "red"}  # metric names
+DECK_KEYS = {"jund_wildfire": "jund", "mono_blue_terror": "blue", "red_madness": "red", "grixis_affinity": "affinity"}  # metric names
 
 
 def wilson(wins: float, n: int, z: float = 1.96) -> tuple[float, float]:

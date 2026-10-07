@@ -341,6 +341,7 @@ impl Eng {
                 let st = self.s();
                 let sid = st.new_id();
                 let name = format!("{}: {}", st.src(&t.source).name(), t.tdef.name);
+                let up_to = t.tdef.up_to;
                 st.push_log_lazy(|_| format!("trigger -> stack: {name}"));
                 st.stack.push(StackItem {
                     sid,
@@ -358,15 +359,16 @@ impl Eng {
                     data: t.data,
                 });
                 if !t.tdef.targets.is_empty() {
-                    // 603.3d: a triggered ability without legal targets is removed from the stack.
+                    // 603.3d: a triggered ability without legal targets is removed from the stack
+                    // ("up to" targets can always be chosen: none).
                     let st = self.s();
-                    if t.tdef.targets.iter().any(|&spec| st.target_candidates(spec, p, Some(sid), &[]).is_empty()) {
+                    if !up_to && t.tdef.targets.iter().any(|&spec| st.target_candidates(spec, p, Some(sid), &[]).is_empty()) {
                         let pos = st.stack_pos(sid).unwrap();
                         let item = st.stack.remove(pos);
                         st.push_log_lazy(|_| format!("{}: no legal targets", item.name));
                         continue;
                     }
-                    self.choose_targets(p, sid, None)?;
+                    self.choose_targets(p, sid, None, up_to)?;
                     self.s().emit_targeted(sid);
                 }
             }
@@ -379,7 +381,8 @@ impl Eng {
     // ------------------------------------------------------------------
 
     /// `allowed`: an extra filter on the candidates (targets the cost can be paid for).
-    fn choose_targets(&mut self, p: u8, sid: u32, allowed: Option<&dyn Fn(&State, Ref) -> bool>) -> R<()> {
+    /// `up_to`: "up to one target": choosing no target ends the choice.
+    fn choose_targets(&mut self, p: u8, sid: u32, allowed: Option<&dyn Fn(&State, Ref) -> bool>, up_to: bool) -> R<()> {
         let specs = {
             let st = self.s();
             st.stack[st.stack_pos(sid).unwrap()].target_specs.clone()
@@ -416,9 +419,13 @@ impl Eng {
                 full.extend(key);
                 options.push(opt(format!("Target {label}"), full, Val::Ref(r)));
             }
+            if up_to {
+                options.insert(0, opt("No target".into(), vec![s("target"), s(spec.name()), KI::N], Val::None));
+            }
             let item_name = st.stack[st.stack_pos(sid).unwrap()].name.clone();
             let r = match self.ask(p, Kind::Target, || format!("Choose target ({}) for {item_name}", spec.name()), options)? {
                 Val::Ref(r) => r,
+                Val::None => return Ok(()),
                 _ => unreachable!(),
             };
             let st = self.s();
@@ -535,7 +542,8 @@ impl Eng {
         Ok(Some(c))
     }
 
-    fn choose_sacrifice(&mut self, p: u8, flt: SacFilter, what: &str) -> R<()> {
+    /// Returns the sacrificed permanent's mana value.
+    fn choose_sacrifice(&mut self, p: u8, flt: SacFilter, what: &str) -> R<i32> {
         let st = self.s();
         let cands = st.dedupe_by_equiv(st.sac_candidates(p, flt, &[]));
         let options = cands
@@ -547,10 +555,15 @@ impl Eng {
             .collect();
         let fname = flt.name().replace('_', " ");
         let article = if fname.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
-        if let Val::Card(c) = self.ask(p, Kind::Sacrifice, || format!("Sacrifice {article} {fname} for {what}"), options)? {
-            self.s().sacrifice(c);
+        match self.ask(p, Kind::Sacrifice, || format!("Sacrifice {article} {fname} for {what}"), options)? {
+            Val::Card(c) => {
+                let st = self.s();
+                let mv = st.c(c).defn().mana_value();
+                st.sacrifice(c);
+                Ok(mv)
+            }
+            _ => unreachable!(),
         }
-        Ok(())
     }
 
     // ------------------------------------------------------------------
@@ -605,7 +618,7 @@ impl Eng {
             let pos = st.stack_pos(sid).unwrap();
             st.stack[pos].x = xv;
         }
-        self.choose_targets(p, sid, None)?;
+        self.choose_targets(p, sid, None, false)?;
         let st = self.s();
         let xv = st.stack[st.stack_pos(sid).unwrap()].x;
         let cost = base.with_x(xv).reduced(reduction);
@@ -617,7 +630,12 @@ impl Eng {
             st.push_log_lazy(|_| format!("p{p} pays {life} life for {cname}"));
         }
         if let Some(flt) = add_sac {
-            self.choose_sacrifice(p, flt, cname)?;
+            let mv = self.choose_sacrifice(p, flt, cname)?;
+            if d.additional_sac.is_some() {
+                let st = self.s();
+                let pos = st.stack_pos(sid).unwrap();
+                st.stack[pos].data.sacrificed_mv = Some(mv);
+            }
         }
         if d.additional_discard {
             let gone = self.choose_discard(p, cname)?.expect("casting checked the hand");
@@ -633,6 +651,9 @@ impl Eng {
         }
         if mode == Method::Escape {
             self.exile_from_graveyard(p, d.escape_exile, cname)?;
+        }
+        if mode == Method::Evidence {
+            self.collect_evidence(p, d.collect_evidence, cname)?;
         }
         self.s().emit_cast(sid);
         self.s().emit_targeted(sid);
@@ -650,6 +671,33 @@ impl Eng {
         let st = self.s();
         let new = st.mv(card, Zone::Exile).unwrap();
         st.cm(new).plotted_turn = st.turn;
+        Ok(())
+    }
+
+    /// Collect evidence N (701.59): exile cards with total mana value N or
+    /// more from your graveyard, one at a time (casting checked the total).
+    fn collect_evidence(&mut self, p: u8, n: i32, what: &str) -> R<()> {
+        let mut total = 0;
+        while total < n {
+            let st = self.s();
+            let options = st
+                .dedupe_by_name(st.players[p as usize].graveyard.iter().copied())
+                .into_iter()
+                .map(|c| {
+                    let nm = st.c(c).name();
+                    opt(format!("Exile {nm}"), vec![s("exile_gy"), s(nm)], Val::Card(c))
+                })
+                .collect();
+            let shown = total;
+            match self.ask(p, Kind::ExileFromGy, || format!("Collect evidence {n} for {what}: exile a card from your graveyard ({shown}/{n})"), options)? {
+                Val::Card(c) => {
+                    let st = self.s();
+                    total += st.c(c).face().mana_value();
+                    st.mv(c, Zone::Exile);
+                }
+                _ => unreachable!(),
+            }
+        }
         Ok(())
     }
 
@@ -707,7 +755,7 @@ impl Eng {
         let mut cost = ab.cost.clone();
         if ab.x_target_mv != 0 {
             let allowed = move |st: &State, r: Ref| st.x_target_affordable(p, card, index, r);
-            self.choose_targets(p, sid, Some(&allowed))?;
+            self.choose_targets(p, sid, Some(&allowed), false)?;
             let st = self.s();
             let pos = st.stack_pos(sid).unwrap();
             let t = st.stack[pos].targets[0];
@@ -718,7 +766,7 @@ impl Eng {
             };
             st.stack[pos].x = mv;
         } else {
-            self.choose_targets(p, sid, None)?;
+            self.choose_targets(p, sid, None, false)?;
         }
         let exclude: Vec<u32> = if ab.tap { vec![self.s().c(card).oid] } else { vec![] };
         self.pay_mana(p, Remaining::of(&cost), ab.sac_other, &exclude, &name)?;
@@ -1209,9 +1257,14 @@ impl Eng {
                     self.s().create_token(ctl, *token);
                 }
             }
-            Op::GainLife { n, per_storm } => {
-                let k = if *per_storm { item.data.storm.unwrap_or(0) } else { 1 };
-                self.s().players[ctl as usize].life += n * k;
+            Op::GainLife { n, per_storm, sacrificed_mv } => {
+                if *sacrificed_mv {
+                    let v = item.data.sacrificed_mv.unwrap_or(0);
+                    self.s().players[ctl as usize].life += v;
+                } else {
+                    let k = if *per_storm { item.data.storm.unwrap_or(0) } else { 1 };
+                    self.s().players[ctl as usize].life += n * k;
+                }
             }
             Op::LoseLife { who, n } => {
                 let st = self.s();
@@ -1239,15 +1292,21 @@ impl Eng {
                     st.cm(live).counters += 1;
                 }
             }
-            Op::DamageTarget { n, index, n_landfall } => {
+            Op::DamageTarget { n, index, n_landfall, n_metalcraft } => {
                 let i = *index;
                 if i < item.targets.len() && self.s().target_legal(item, i) {
                     let src = self.source_card(item);
                     let st = self.s();
-                    let amount = match n_landfall {
+                    let mut amount = match n_landfall {
                         Some(l) if st.players[ctl as usize].landfall_turn == st.turn => *l,
                         _ => *n,
                     };
+                    if let Some(m) = n_metalcraft {
+                        let artifacts = st.battlefield.iter().filter(|&&c| st.c(c).controller == ctl && st.is_artifact(st.c(c))).count();
+                        if artifacts >= 3 {
+                            amount = *m;
+                        }
+                    }
                     st.deal_damage(&src, item.targets[i], amount);
                 }
             }
@@ -1376,6 +1435,79 @@ impl Eng {
                     if !paid {
                         self.counter(sid);
                     }
+                }
+            }
+            Op::CountersOnTarget { n, keywords } => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    let card = self.s().cm(c);
+                    card.counters += n;
+                    card.granted |= keywords;
+                }
+            }
+            Op::AnimateTarget { power, toughness, keywords } => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    let card = self.s().cm(c);
+                    card.animated = Some((*power, *toughness));
+                    card.granted |= keywords;
+                }
+            }
+            Op::TapOrUntapTarget => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    let r = self.s().c(c).repr();
+                    let options = vec![
+                        opt("Leave it".into(), vec![s("tap_or_untap"), s("neither")], Val::None),
+                        opt(format!("Tap {r}"), vec![s("tap_or_untap"), s("tap")], Val::Bool(true)),
+                        opt(format!("Untap {r}"), vec![s("tap_or_untap"), s("untap")], Val::Bool(false)),
+                    ];
+                    let name = item.name.clone();
+                    if let Val::Bool(b) = self.ask(ctl, Kind::ChooseMode, || format!("{name}: tap or untap {r}?"), options)? {
+                        self.s().cm(c).tapped = b;
+                    }
+                }
+            }
+            Op::ReturnFromGraveyard { types, type_name, n } => {
+                for i in 0..*n {
+                    let st = self.s();
+                    let cands = st.dedupe_by_name(st.players[ctl as usize].graveyard.iter().copied().filter(|&c| st.c(c).face().types & types != 0));
+                    if cands.is_empty() {
+                        break;
+                    }
+                    let mut options = vec![opt("Stop".into(), vec![s("return_gy"), KI::N], Val::None)];
+                    for c in cands {
+                        let nm = st.c(c).name();
+                        options.push(opt(format!("Return {nm}"), vec![s("return_gy"), s(nm)], Val::Card(c)));
+                    }
+                    let name = item.name.clone();
+                    match self.ask(ctl, Kind::ChooseCard, || format!("{name}: return a {type_name} card from your graveyard to your hand ({}/{n})", i + 1), options)? {
+                        Val::Card(c) => {
+                            self.s().move_card(c, Zone::Hand, None, Pos::Top, Some(BOTH), false);
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            Op::OpponentSacrifices { greatest_power_if_evidence } => {
+                let st = self.s();
+                let opp = 1 - ctl;
+                let mut cands: Vec<CIdx> = st.battlefield.iter().copied().filter(|&c| st.c(c).controller == opp && st.is_creature(st.c(c))).collect();
+                if cands.is_empty() {
+                    return Ok(());
+                }
+                if *greatest_power_if_evidence && item.method == Method::Evidence {
+                    let top = cands.iter().map(|&c| st.power(st.c(c))).max().unwrap();
+                    cands.retain(|&c| st.power(st.c(c)) == top);
+                }
+                let options = st
+                    .dedupe_by_equiv(cands)
+                    .iter()
+                    .map(|&c| {
+                        let card = st.c(c);
+                        opt(format!("Sacrifice {}#{}", card.name(), card.oid), vec![s("sacrifice"), s(card.name())], Val::Card(c))
+                    })
+                    .collect();
+                let name = item.name.clone();
+                if let Val::Card(c) = self.ask(opp, Kind::Sacrifice, || format!("{name}: sacrifice a creature"), options)? {
+                    self.s().sacrifice(c);
                 }
             }
             Op::Custom(f) => self.custom(*f, item)?,

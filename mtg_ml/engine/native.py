@@ -52,6 +52,10 @@ class NativeCard(_n.CardView):
         return set(self._known)
 
     @property
+    def granted(self) -> frozenset[str]:
+        return frozenset(self._granted)
+
+    @property
     def face(self):
         return _ALL_DEFS[self.name]
 
@@ -65,7 +69,7 @@ class NativeCard(_n.CardView):
 
 _SNAP_FIELDS = (
     "uid", "oid", "name", "_defn_name", "owner", "controller", "zone", "is_token", "transformed", "tapped", "damage",
-    "deathtouch_damage", "counters", "sick", "attached_to", "skip_untap", "_temp", "_known",
+    "deathtouch_damage", "counters", "sick", "attached_to", "skip_untap", "_temp", "_known", "animated", "_granted",
 )  # fmt: skip
 
 
@@ -81,6 +85,7 @@ class NativeSnapshot:
 
     temp = property(lambda self: [TempEffect(keywords=frozenset(k), power=p, toughness=t) for k, p, t in self._temp])
     known_to = property(lambda self: set(self._known))
+    granted = property(lambda self: frozenset(self._granted))
     face = property(lambda self: _ALL_DEFS[self.name])
     defn = property(lambda self: _ALL_DEFS[self._defn_name])
 
@@ -557,6 +562,8 @@ class NativeGame:
         if c.__class__ is NativeCard:
             return set(self._g.types(c._idx))
         t = set(c.face.types)
+        if c.animated is not None:
+            t.add("Creature")
         if self.is_bestowed(c):
             t.discard("Creature")
         return t
@@ -564,7 +571,7 @@ class NativeGame:
     def is_creature(self, c) -> bool:
         if c.__class__ is NativeCard:
             return self._g.is_creature(c._idx)
-        return "Creature" in c.face.types and not self.is_bestowed(c)
+        return ("Creature" in c.face.types or c.animated is not None) and not self.is_bestowed(c)
 
     def is_artifact(self, c) -> bool:
         return "Artifact" in c.face.types
@@ -575,17 +582,17 @@ class NativeGame:
     def power(self, c) -> int:
         if c.__class__ is NativeCard:
             return self._g.power(c._idx)
-        return (c.face.power or 0) + c.counters + sum(t.power for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        return (c.animated[0] if c.animated is not None else c.face.power or 0) + c.counters + sum(t.power for t in c.temp) + sum(a.counters for a in self._auras_on(c))
 
     def toughness(self, c) -> int:
         if c.__class__ is NativeCard:
             return self._g.toughness(c._idx)
-        return (c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        return (c.animated[1] if c.animated is not None else c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp) + sum(a.counters for a in self._auras_on(c))
 
     def keywords(self, c) -> set[str]:
         if c.__class__ is NativeCard:
             return set(self._g.keywords(c._idx))
-        k = set(c.face.keywords)
+        k = set(c.face.keywords) | c.granted
         for t in c.temp:
             k |= t.keywords
         if self._auras_on(c):
@@ -628,6 +635,7 @@ class NativeGame:
             "alternative": FREE if d.alternative_sac is not None else None,
             "phyrexian": d.phyrexian_cost,
             "bargain": d.cost if d.bargain else None,
+            "evidence": d.cost if d.collect_evidence else None,
         }
         return modes.get(mode)
 

@@ -22,6 +22,7 @@ from .objects import (
     EXILE_FROM_GY,
     FREE,
     ORDER,
+    SACRIFICE,
     YES_NO,
     AbilityDef,
     CardDef,
@@ -124,7 +125,12 @@ def _op_create_token(g, item, op):
 
 def _op_gain_life(g, item, op):
     """per_storm: n for each spell cast before this one this turn (a storm
-    trigger standing in for the copies: Weather the Storm)."""
+    trigger standing in for the copies: Weather the Storm). sacrificed_mv:
+    instead of n, the mana value of the permanent sacrificed to cast it
+    (Reckoner's Bargain)."""
+    if op.get("sacrificed_mv"):
+        g.gain_life(item.controller, item.data.get("sacrificed_mv", 0))
+        return
     g.gain_life(item.controller, op["n"] * (item.data["storm"] if op.get("per_storm") else 1))
 
 
@@ -159,12 +165,22 @@ def _landfall(g, item) -> bool:
     return g.players[item.controller].landfall_turn == g.turn
 
 
+def _metalcraft(g, item) -> bool:
+    return _artifacts_you_control(g, item.controller) >= 3
+
+
 def _op_damage_target(g, item, op):
     """index: which target (default 0). n_landfall: the amount instead of n
-    if a land entered under the controller's control this turn."""
+    if a land entered under the controller's control this turn. n_metalcraft:
+    the amount instead of n if the controller controls three or more
+    artifacts as it resolves."""
     i = op.get("index", 0)
     if i < len(item.targets) and g.target_legal(item, i):
-        n = op["n_landfall"] if "n_landfall" in op and _landfall(g, item) else op["n"]
+        n = op["n"]
+        if "n_landfall" in op and _landfall(g, item):
+            n = op["n_landfall"]
+        if "n_metalcraft" in op and _metalcraft(g, item):
+            n = op["n_metalcraft"]
         g.deal_damage(_source(item), item.targets[i], n)
 
 
@@ -293,6 +309,72 @@ def _op_shuffle_into_library(g, item, op):
         g.shuffle(c.owner)
 
 
+def _op_counters_on_target(g, item, op):
+    """n +1/+1 counters on the target; keywords: keyword counters (a
+    lifelink counter), kept until it leaves the battlefield."""
+    t = g.target(item)
+    if t is not None:
+        t.counters += op.get("n", 0)
+        if op.get("keywords"):
+            t.granted = t.granted | frozenset(op["keywords"])
+
+
+def _op_animate_target(g, item, op):
+    """The target becomes a creature with base power / toughness and gains
+    keywords, until it leaves the battlefield (Kenku Artificer)."""
+    t = g.target(item)
+    if t is not None:
+        t.animated = (op["power"], op["toughness"])
+        t.granted = t.granted | frozenset(op.get("keywords", ()))
+
+
+def _op_tap_or_untap_target(g, item, op):
+    """You may tap or untap the target (Sewer-veillance Cam)."""
+    t = g.target(item)
+    if t is None:
+        return
+    options = [
+        Option("Leave it", ("tap_or_untap", "neither"), None),
+        Option(f"Tap {t.name}#{t.oid}", ("tap_or_untap", "tap"), True),
+        Option(f"Untap {t.name}#{t.oid}", ("tap_or_untap", "untap"), False),
+    ]
+    choice = yield from g.ask(item.controller, CHOOSE_MODE, f"{item.name}: tap or untap {t.name}#{t.oid}?", options)
+    if choice is not None:
+        t.tapped = choice
+
+
+def _op_return_from_graveyard(g, item, op):
+    """Return up to n cards of a type from the controller's graveyard to
+    their hand, chosen one at a time as it resolves (Blood Fountain)."""
+    p = item.controller
+    typ, n = op["type"], op["n"]
+    for i in range(n):
+        cands = g._dedupe_by_name(c for c in g.players[p].graveyard if typ in c.face.types)
+        if not cands:
+            return
+        options = [Option("Stop", ("return_gy", None), None)] + [Option(f"Return {c.name}", ("return_gy", c.name), c) for c in cands]
+        c = yield from g.ask(p, CHOOSE_CARD, f"{item.name}: return a {typ.lower()} card from your graveyard to your hand ({i + 1}/{n})", options)
+        if c is None:
+            return
+        g._move(c, "hand", known_to={0, 1})
+
+
+def _op_opponent_sacrifices(g, item, op):
+    """The opponent sacrifices a creature of their choice;
+    greatest_power_if_evidence: one with the greatest power among theirs
+    if evidence was collected (Extract a Confession)."""
+    opp = 1 - item.controller
+    cands = [c for c in g.battlefield if c.controller == opp and g.is_creature(c)]
+    if not cands:
+        return
+    if op.get("greatest_power_if_evidence") and item.method == "evidence":
+        top = max(g.power(c) for c in cands)
+        cands = [c for c in cands if g.power(c) == top]
+    options = [Option(f"Sacrifice {c.name}#{c.oid}", ("sacrifice", c.name), c) for c in g._dedupe_by_equiv(cands)]
+    c = yield from g.ask(opp, SACRIFICE, f"{item.name}: sacrifice a creature", options)
+    g.sacrifice(c)
+
+
 def _op_custom(g, item, op):
     return CUSTOM[op["fn"]](g, item)
 
@@ -325,6 +407,11 @@ OPS = {
     "scry": _op_scry,
     "explore_target": _op_explore_target,
     "shuffle_into_library": _op_shuffle_into_library,
+    "counters_on_target": _op_counters_on_target,
+    "animate_target": _op_animate_target,
+    "tap_or_untap_target": _op_tap_or_untap_target,
+    "return_from_graveyard": _op_return_from_graveyard,
+    "opponent_sacrifices": _op_opponent_sacrifices,
     "custom": _op_custom,
 }
 
@@ -557,7 +644,7 @@ def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:
 SHAPE_CARD_FIELDS = frozenset({
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow",
     "plot", "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect",
-    "modes", "overload_effect", "abilities", "triggers", "bargain",
+    "modes", "overload_effect", "abilities", "triggers", "bargain", "collect_evidence",
 })  # fmt: skip
 # Shown on entities otherwise (name, printed types, keywords, P/T) or not at all.
 NON_SHAPE_CARD_FIELDS = frozenset({"name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"})
@@ -566,7 +653,7 @@ SHAPE_ABILITY_FIELDS = frozenset({
     "sorcery_speed", "mana", "targets",
 })  # fmt: skip
 NON_SHAPE_ABILITY_FIELDS = frozenset({"name"})
-SHAPE_TRIGGER_FIELDS = frozenset({"event", "effect", "condition", "targets"})
+SHAPE_TRIGGER_FIELDS = frozenset({"event", "effect", "condition", "targets", "up_to"})
 NON_SHAPE_TRIGGER_FIELDS = frozenset({"name"})
 
 
@@ -604,7 +691,7 @@ def _ability(a: dict) -> AbilityDef:
 
 def _trigger(t: dict) -> TriggerDef:
     _check_fields(t, "trigger", SHAPE_TRIGGER_FIELDS, NON_SHAPE_TRIGGER_FIELDS, t.get("name", "?"))
-    return TriggerDef(t["name"], t["event"], make_effect(t["effect"]), _condition(t.get("condition")), _targets(t.get("targets")))
+    return TriggerDef(t["name"], t["event"], make_effect(t["effect"]), _condition(t.get("condition")), _targets(t.get("targets")), t.get("up_to", False))
 
 
 def colors_of(spec: dict) -> frozenset[str]:
@@ -641,6 +728,8 @@ def op_names(ops) -> list[str]:
 
 
 SHAPE_N_STEPS = (1, 2, 3, 4)
+# Op parameters that change what the op does, each a token `{op}:{key}` when set.
+SHAPE_OP_FLAGS = ("n_metalcraft", "sacrificed_mv", "greatest_power_if_evidence")
 
 
 def _target_tokens(prefix: str, kinds) -> list[str]:
@@ -659,6 +748,7 @@ def _op_tokens(prefix: str, ops) -> list[str]:
             out.append(p + op["op"])
             if isinstance(n, int) and not isinstance(n, bool):
                 out += [f"{p}{op['op']}:n>={k}" for k in SHAPE_N_STEPS if n >= k]
+            out += [f"{p}{op['op']}:{k}" for k in SHAPE_OP_FLAGS if op.get(k)]
         if op["op"] == "optional_payment":
             out += _op_tokens(prefix, op["then"])
     return out
@@ -688,6 +778,8 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t.append("e:cost:additional_discard")
     if spec.get("bargain"):
         t.append("e:cost:bargain")
+    if spec.get("collect_evidence"):
+        t.append("e:cost:collect_evidence")
     t += [f"e:cost:{k}" for k in SHAPE_COST_KEYS if k in spec]
     if "flashback_cost" in spec:
         t += ["e:cost:flashback", "e:cost:sac_lands"]
@@ -730,6 +822,8 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t.append(f"e:trig:{tr['event']}")
         t += [f"e:trig:cond:{k}:{v if isinstance(v, str) else str(v).lower()}" for k, v in tr.get("condition", {}).items()]
         t += _target_tokens("e:trig:target:", tr.get("targets", ()))
+        if tr.get("up_to"):
+            t.append("e:trig:up_to")
         t += _op_tokens("e:trig:op:", tr["effect"])
     return tuple(dict.fromkeys(t))
 
@@ -768,6 +862,7 @@ def card_def(spec: dict) -> CardDef:
         phyrexian_cost=M(spec.get("cost")).minus_colored(phy) if phy.colored else None,
         phyrexian_life=2 * phy.mana_value,
         bargain=spec.get("bargain", False),
+        collect_evidence=spec.get("collect_evidence", 0),
         abilities=tuple(_ability(a) for a in spec.get("abilities", ())),
         triggers=tuple(_trigger(t) for t in spec.get("triggers", ())),
         enters_tapped=spec.get("enters_tapped", False),

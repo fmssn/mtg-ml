@@ -29,7 +29,7 @@ from .match import DEFAULT_MATCHUP, game_args, matchup_decks
 FORMAT = 1
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VIEWER = ROOT / "viz" / "viewer.html"
-DECK_TITLES = {"jund_wildfire": "Jund Wildfire", "mono_blue_terror": "Mono Blue Terror", "red_madness": "Red Madness"}
+DECK_TITLES = {"jund_wildfire": "Jund Wildfire", "mono_blue_terror": "Mono Blue Terror", "red_madness": "Red Madness", "grixis_affinity": "Grixis Affinity"}
 
 
 def _card_info(face, token: bool) -> dict:

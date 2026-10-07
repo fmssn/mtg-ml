@@ -59,3 +59,79 @@ opponent = "mono_blue_terror"
 why = "Pyroblast and Red Elemental Blast answer every blue card, Relic of Progenitus starves Terror and Serpent; the slow card draw and Epicure out."
 in = { "Pyroblast" = 4, "Red Elemental Blast" = 2, "Relic of Progenitus" = 2 }
 out = { "Highway Robbery" = 4, "Grab the Prize" = 2, "Voldaren Epicure" = 2 }
+
+# Grixis Affinity (docs/grixis-affinity.md). Its rows against Elves and Tron
+# are at the end of the file, commented out until those decks are registered.
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "jund_wildfire"
+why = "Hydroblast for Krark-Clan Shaman and Wildfire, the edict for Chrysalis and Familiar, a fourth Shaman; the slow Kenkus and Cam go out."
+in = { "Hydroblast" = 2, "Extract a Confession" = 2, "Krark-Clan Shaman" = 1 }
+out = { "Kenku Artificer" = 2, "Sewer-veillance Cam" = 1, "Makeshift Munitions" = 1, "Toxin Analysis" = 1 }
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "grixis_affinity"
+why = "Artifact hate: Troublemaker Ouphe and Ancient Grudge for the threats and Spellbombs, Breath Weapon sweeps the 2-toughness creatures, Pyroblast for Thoughtcast and the blue creatures; the slow value cards and the Hydra go out."
+in = { "Troublemaker Ouphe" = 2, "Breath Weapon" = 2, "Ancient Grudge" = 1, "Pyroblast" = 2 }
+out = { "Lembas" = 2, "Gixian Infiltrator" = 2, "Eviscerator's Insight" = 2, "Nyxborn Hydra" = 1 }
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "mono_blue_terror"
+why = "Pyroblast and Red Elemental Blast fight Counterspell and kill Tolarian Terror; Toxin Analysis, Kenku and Munitions go out."
+in = { "Pyroblast" = 4, "Red Elemental Blast" = 1 }
+out = { "Toxin Analysis" = 2, "Kenku Artificer" = 2, "Makeshift Munitions" = 1 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "grixis_affinity"
+why = "Annul and Steel Sabotage for the artifact threats, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+in = { "Annul" = 4, "Steel Sabotage" = 2, "Gut Shot" = 2 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Plunder the Trollshaws" = 1, "Ponder" = 2 }
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "red_madness"
+why = "Hydroblast and Blue Elemental Blast answer burn and the red creatures, Unexpected Fangs gains life, a fourth Shaman sweeps the x/1s; Kenku, the Spellbombs (Red barely uses its graveyard) and Cam go out."
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 2, "Unexpected Fangs" = 1, "Krark-Clan Shaman" = 1 }
+out = { "Kenku Artificer" = 2, "Nihil Spellbomb" = 3, "Sewer-veillance Cam" = 1, "Makeshift Munitions" = 1, "Blood Fountain" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "grixis_affinity"
+why = "End the Festivities sweeps the x/1s, Cast into the Fire exiles an artifact threat or pings two, Pyroblast hits the blue cards; the slow card draw goes out."
+in = { "End the Festivities" = 2, "Cast into the Fire" = 2, "Pyroblast" = 2 }
+out = { "Highway Robbery" = 2, "Grab the Prize" = 2, "Sneaky Snacker" = 2 }
+
+# Rows for Elves (#39) and Tron, to uncomment once those decks are in
+# decks.DECKS (their sideboards as on claude/deck-elves and claude/deck-tron).
+#
+# [[plan]]
+# deck = "grixis_affinity"
+# opponent = "elves"
+# why = "A fourth Krark-Clan Shaman sweeps the x/1 mana elves; the slow Cam goes out (an edict is poor against a wide board)."
+# in = { "Krark-Clan Shaman" = 1 }
+# out = { "Sewer-veillance Cam" = 1 }
+#
+# [[plan]]
+# deck = "elves"
+# opponent = "grixis_affinity"
+# why = "Deglamer kills an artifact creature or a Bridge, Spinewoods Paladin gains life against Galvanic Blast; the slow Sagu Wildlings and Lead the Stampede go out."
+# in = { "Deglamer" = 2, "Spinewoods Paladin" = 3 }
+# out = { "Sagu Wildling" = 2, "Lead the Stampede" = 3 }
+#
+# [[plan]]
+# deck = "grixis_affinity"
+# opponent = "tron"
+# why = "A race: the edict answers a lone Golem or Colossus, Fangs pushes damage; Krark-Clan Shaman cannot touch Tron's big creatures."
+# in = { "Extract a Confession" = 2, "Unexpected Fangs" = 1 }
+# out = { "Krark-Clan Shaman" = 3 }
+#
+# [[plan]]
+# deck = "tron"
+# opponent = "grixis_affinity"
+# why = "Breath Weapon sweeps Affinity's 2-toughness creatures, Blue Elemental Blast counters Galvanic Blast and Shaman; the slow card draw goes out."
+# in = { "Breath Weapon" = 2, "Blue Elemental Blast" = 2 }
+# out = { "Unfathomable Truths" = 2, "Bonder's Ornament" = 2 }

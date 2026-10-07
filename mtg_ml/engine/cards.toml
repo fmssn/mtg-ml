@@ -83,6 +83,34 @@ text = "{T}: Add {B}."
 abilities = [{ name = "add B", tap = true, mana = ["B"] }]
 
 [[card]]
+name = "Mistvault Bridge"
+types = "Artifact Land"
+text = "Enters tapped. Indestructible. {T}: Add {U} or {B}."
+keywords = ["indestructible"]
+enters_tapped = true
+abilities = [{ name = "add U/B", tap = true, mana = ["U", "B"] }]
+
+[[card]]
+name = "Silverbluff Bridge"
+types = "Artifact Land"
+text = "Enters tapped. Indestructible. {T}: Add {U} or {R}."
+keywords = ["indestructible"]
+enters_tapped = true
+abilities = [{ name = "add U/R", tap = true, mana = ["U", "R"] }]
+
+[[card]]
+name = "Seat of the Synod"
+types = "Artifact Land"
+text = "{T}: Add {U}."
+abilities = [{ name = "add U", tap = true, mana = ["U"] }]
+
+[[card]]
+name = "Great Furnace"
+types = "Artifact Land"
+text = "{T}: Add {R}."
+abilities = [{ name = "add R", tap = true, mana = ["R"] }]
+
+[[card]]
 name = "Twisted Landscape"
 types = "Land"
 text = "{T}: Add {C}. {T}, Sacrifice: search for a basic Swamp, Mountain, or Forest, put it onto the battlefield tapped. Cycling {B}{R}{G}."
@@ -532,6 +560,113 @@ abilities = [
     { name = "target player exiles a card from their graveyard", tap = true, targets = ["player"], effect = [{ op = "custom", fn = "relic_exile_one" }] },
     { name = "exile all graveyards, draw a card", cost = "{1}", exile_self = true, effect = [{ op = "exile_all_graveyards" }, { op = "draw", n = 1 }] },
 ]
+
+# ---------------------------------------------------------------------------
+# Grixis Affinity (also: Refurbished Familiar, Krark-Clan Shaman, Ichor
+# Wellspring, Nihil Spellbomb, Toxin Analysis, Makeshift Munitions, the
+# Bridges and Vault of Whispers above)
+# ---------------------------------------------------------------------------
+
+[[card]]
+name = "Myr Enforcer"
+cost = "{7}"
+types = "Artifact Creature"
+subtypes = "Myr"
+text = "Affinity for artifacts."
+power = 4
+toughness = 4
+cost_reduction = "artifacts_you_control"
+
+[[card]]
+name = "Thoughtcast"
+cost = "{4}{U}"
+types = "Sorcery"
+text = "Affinity for artifacts. Draw two cards."
+cost_reduction = "artifacts_you_control"
+effect = [{ op = "draw", n = 2 }]
+
+[[card]]
+name = "Utrom Monitor"
+cost = "{4}{U}"
+types = "Artifact Creature"
+subtypes = "Utrom Scientist"
+text = "Affinity for artifacts. Flying."
+power = 3
+toughness = 3
+keywords = ["flying"]
+cost_reduction = "artifacts_you_control"
+
+[[card]]
+name = "Galvanic Blast"
+cost = "{R}"
+types = "Instant"
+text = "2 damage to any target. Metalcraft - 4 damage instead if you control three or more artifacts."
+targets = ["any"]
+effect = [{ op = "damage_target", n = 2, n_metalcraft = 4 }]
+
+[[card]]
+name = "Reckoner's Bargain"
+cost = "{1}{B}"
+types = "Instant"
+text = "As an additional cost, sacrifice an artifact or creature. You gain life equal to the sacrificed permanent's mana value. Draw two cards."
+additional_sac = "artifact_or_creature"
+effect = [{ op = "gain_life", sacrificed_mv = true }, { op = "draw", n = 2 }]
+
+# "Return up to two target creature cards": chosen on resolution rather than
+# targeted (the difference only shows if the graveyard changes in response).
+[[card]]
+name = "Blood Fountain"
+cost = "{B}"
+types = "Artifact"
+text = "When this enters, create a Blood token. {3}{B}, {T}, Sacrifice: return up to two creature cards from your graveyard to your hand."
+triggers = [{ name = "create a Blood token", event = "etb", effect = [{ op = "create_token", token = "Blood", n = 1 }] }]
+abilities = [{ name = "return up to two creature cards", cost = "{3}{B}", tap = true, sac_self = true, effect = [{ op = "return_from_graveyard", type = "Creature", n = 2 }] }]
+
+[[card]]
+name = "Sewer-veillance Cam"
+cost = "{U}"
+types = "Artifact"
+text = "Flash. When this enters or leaves the battlefield, you may tap or untap target creature. {3}{U}, Sacrifice: draw two cards."
+keywords = ["flash"]
+triggers = [
+    { name = "tap or untap target creature", event = "etb", targets = ["creature"], effect = [{ op = "tap_or_untap_target" }] },
+    { name = "tap or untap target creature", event = "leaves_battlefield", targets = ["creature"], effect = [{ op = "tap_or_untap_target" }] },
+]
+abilities = [{ name = "draw two cards", cost = "{3}{U}", sac_self = true, effect = [{ op = "draw", n = 2 }] }]
+
+# The Homunculus subtype is not tracked (nothing in the pool reads it).
+[[card]]
+name = "Kenku Artificer"
+cost = "{2}{U}"
+types = "Creature"
+subtypes = "Bird Artificer"
+text = "When this enters, put three +1/+1 counters on up to one target noncreature artifact. It becomes a 0/0 artifact creature with flying."
+power = 1
+toughness = 1
+triggers = [
+    { name = "animate a noncreature artifact", event = "etb", targets = ["noncreature_artifact"], up_to = true, effect = [
+        { op = "counters_on_target", n = 3 },
+        { op = "animate_target", power = 0, toughness = 0, keywords = ["flying"] },
+    ] },
+]
+
+# Grixis Affinity sideboard (the shared hate cards live with the other sideboards)
+
+[[card]]
+name = "Extract a Confession"
+cost = "{1}{B}"
+types = "Sorcery"
+text = "You may collect evidence 6. Each opponent sacrifices a creature; if evidence was collected, one with the greatest power among theirs."
+collect_evidence = 6
+effect = [{ op = "opponent_sacrifices", greatest_power_if_evidence = true }]
+
+[[card]]
+name = "Unexpected Fangs"
+cost = "{1}{B}"
+types = "Instant"
+text = "Put a +1/+1 counter and a lifelink counter on target creature."
+targets = ["creature"]
+effect = [{ op = "counters_on_target", n = 1, keywords = ["lifelink"] }]
 
 # ---------------------------------------------------------------------------
 # Sideboard cards (see decks.py; not all are in a current sideboard)
