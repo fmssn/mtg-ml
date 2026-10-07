@@ -296,6 +296,9 @@ def serve(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 8765, li
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        if live is not None:
+            live.close()  # native games must be freed on the worker thread, not this one
 
 
 def _agent_name(kind: str) -> str:
