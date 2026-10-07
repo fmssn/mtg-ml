@@ -155,6 +155,9 @@ class CardDef:
     etb_x_counters: bool = False
     back: "CardDef | None" = None
     modes: tuple[SpellMode, ...] = ()  # modal spells: one is chosen on cast
+    # What the card does, as entity tokens derived from its spec (cards.card_shape;
+    # feature set 5, docs/features.md). Computed once at load.
+    shape: tuple[str, ...] = ()
 
     def is_type(self, t: str) -> bool:
         return t in self.types

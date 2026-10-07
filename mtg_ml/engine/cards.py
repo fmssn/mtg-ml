@@ -553,6 +553,110 @@ def _land_sac(spec: dict | None) -> tuple[str, int] | None:
     return spec["sacrifice"], spec["n"]
 
 
+SHAPE_MV_STEPS = (1, 2, 3, 4, 5, 6, 7)
+SHAPE_AB_MV_CAP = 3
+SHAPE_COST_KEYS = ("flashback", "escape", "madness", "bestow", "plot", "overload")
+
+
+def op_names(ops) -> list[str]:
+    """Op names of an effect in order, the ops of an `optional_payment` after it."""
+    out = []
+    for op in ops or ():
+        out.append(op["op"])
+        if op["op"] == "optional_payment":
+            out += op_names(op["then"])
+    return out
+
+
+SHAPE_N_STEPS = (1, 2, 3, 4)
+
+
+def _target_tokens(prefix: str, kinds) -> list[str]:
+    """`{prefix}{kind}` and `e:target:{kind}` per target kind."""
+    return [f"{p}{k}" for k in kinds for p in (prefix, "e:target:")]
+
+
+def _op_tokens(prefix: str, ops) -> list[str]:
+    """`{prefix}{op}` per op in order, `{prefix}{op}:n>={k}` for its amount
+    `n` (damage, cards, life), the same under `e:op:` (a spell's, an
+    ability's or a trigger's op alike), then an `optional_payment`'s ops."""
+    out = []
+    for op in ops or ():
+        n = op.get("n")
+        for p in (prefix, "e:op:"):  # where it happens, and the op wherever it happens
+            out.append(p + op["op"])
+            if isinstance(n, int) and not isinstance(n, bool):
+                out += [f"{p}{op['op']}:n>={k}" for k in SHAPE_N_STEPS if n >= k]
+        if op["op"] == "optional_payment":
+            out += _op_tokens(prefix, op["then"])
+    return out
+
+
+def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
+    """What a card (face or token) does, as entity tokens read from its spec
+    rather than its name, so a card the network never saw shares tokens with
+    cards that work alike (feature set 5, docs/features.md): mana value and
+    colours, cost shapes, the spell's target kinds and ops, each ability's
+    zone / costs / mana / targets / ops (`e:ab:`), each trigger's event,
+    condition and ops (`e:trig:`), each op with its amount `n` as a
+    thermometer (`e:spell:op:damage_target:n>=3`). Deduplicated, first
+    occurrence first.
+    native/src/cards.rs `card_shape` builds the same list."""
+    t = [f"e:mv>={k}" for k in SHAPE_MV_STEPS if d.cost.mana_value >= k]
+    if "{X}" in spec.get("cost", ""):
+        t.append("e:cost:x")
+    t += [f"e:color:{c}" for c in "WUBRG" if c in d.colors]
+    if "cost_reduction" in spec:
+        t.append(f"e:cost:reduction:{spec['cost_reduction']}")
+    if "additional_sac" in spec:
+        t += ["e:cost:additional_sac", f"e:cost:additional_sac:{spec['additional_sac']}"]
+    if spec.get("additional_discard"):
+        t.append("e:cost:additional_discard")
+    t += [f"e:cost:{k}" for k in SHAPE_COST_KEYS if k in spec]
+    if "flashback_cost" in spec:
+        t += ["e:cost:flashback", "e:cost:sac_lands"]
+    if "alternative_cost" in spec:
+        t += ["e:cost:alternative", "e:cost:sac_lands"]
+    if spec.get("ward"):
+        t.append("e:ward")
+    for k in ("enters_tapped", "etb_x_counters"):
+        if spec.get(k):
+            t.append(f"e:{k}")
+    if "back" in spec:
+        t.append("e:transforms")
+    t += _target_tokens("e:spell:target:", spec.get("targets", ()))
+    t += _op_tokens("e:spell:op:", spec.get("effect"))
+    if spec.get("modes"):
+        t.append("e:spell:modal")
+    for m in spec.get("modes", ()):
+        t += _target_tokens("e:spell:target:", m.get("targets", ()))
+        t += _op_tokens("e:spell:op:", m["effect"])
+    t += _op_tokens("e:spell:op:", spec.get("overload_effect"))
+    for a in spec.get("abilities", ()):
+        t.append(f"e:ab:zone:{a.get('zone', 'battlefield')}")
+        if "mana" in a:
+            t += ["e:ab:mana"] + [f"e:ab:mana:{c}" for c in a["mana"]]
+        mv = M(a.get("cost")).mana_value
+        if mv > 0:
+            t.append(f"e:ab:mv:{min(mv, SHAPE_AB_MV_CAP)}")
+        for k in ("tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self"):
+            if a.get(k):
+                t.append(f"e:ab:{k}")
+        if "sac_other" in a:
+            t.append(f"e:ab:sac_other:{a['sac_other']}")
+        if a.get("x_target_mv") or "x_reveal" in a:
+            t.append("e:ab:x")
+        if a.get("sorcery_speed"):
+            t.append("e:ab:sorcery_speed")
+        t += _target_tokens("e:ab:target:", a.get("targets", ()))
+        t += _op_tokens("e:ab:op:", a.get("effect"))
+    for tr in spec.get("triggers", ()):
+        t.append(f"e:trig:{tr['event']}")
+        t += [f"e:trig:cond:{k}:{v}" for k, v in tr.get("condition", {}).items()]
+        t += _op_tokens("e:trig:op:", tr["effect"])
+    return tuple(dict.fromkeys(t))
+
+
 def card_def(spec: dict) -> CardDef:
     known = {
         "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward",
@@ -564,7 +668,7 @@ def card_def(spec: dict) -> CardDef:
     if unknown:
         raise ValueError(f"{spec.get('name')}: unknown fields {sorted(unknown)}")
     cr = spec.get("cost_reduction")
-    return CardDef(
+    d = CardDef(
         name=spec["name"],
         cost=M(spec.get("cost")),
         types=frozenset(spec["types"].split()),
@@ -598,6 +702,8 @@ def card_def(spec: dict) -> CardDef:
         back=FACES[spec["back"]] if "back" in spec else None,
         modes=tuple(SpellMode(m["name"], _targets(m.get("targets")), make_effect(m["effect"])) for m in spec.get("modes", ())),
     )
+    d.shape = card_shape(spec, d)
+    return d
 
 
 def load(path: str = SPEC_PATH) -> None:
