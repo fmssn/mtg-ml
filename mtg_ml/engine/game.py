@@ -1206,6 +1206,8 @@ class Game:
             return "R" in d.colors
         if k == "instant_spell":
             return d.is_type("Instant")
+        if k == "sorcery_spell":
+            return d.is_type("Sorcery")
         if k == "artifact_spell":
             return d.is_type("Artifact")
         if k == "artifact_or_enchantment_spell":

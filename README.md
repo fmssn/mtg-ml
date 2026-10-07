@@ -84,7 +84,7 @@ Architecture, determinism, the differential suite and all benchmarks: [`docs/nat
 
 - **Mulligan** (`Game(mulligans=True)`, the default): London mulligan (CR 103.5) with no free mulligan. Each decision is a `mulligan` decision ("Keep" / "Mulligan"), starting with the starting player. Once a player keeps, they put one card per mulligan on the bottom of their library: one `choose_card` decision per card, private to that player. Mulligan counts are public (`observe()["self"/"opponent"]["mulligans"]`). `RandomAgent` always keeps. The bots keep 7 with 2–5 lands (Jund) or 2–4 lands (Blue; one land is fine with two cantrips), and always keep 5.
 - **Sideboards** (`mtg_ml/engine/decks.py`): each deck's typical 15 from the Q3 2026 tournament data. What comes in and out against each opponent is a table, `mtg_ml/engine/sideboard_plans.toml` (one row per deck pair, with the reason); [docs/sideboarding.md](docs/sideboarding.md) has the format and the policy interface.
-  - Jund vs Blue brings in 3 Duress, 2 Pyroblast, 1 Faerie Macabre and 1 Terminate for 2 Lembas, 2 Cleansing Wildfire, 1 Makeshift Munitions, 1 Nyxborn Hydra and 1 Toxin Analysis.
+  - Jund vs Blue brings in 3 Duress, 2 Red Elemental Blast, 1 Faerie Macabre, 1 Nihil Spellbomb and 1 Terminate for 2 Lembas, 3 Cleansing Wildfire, 1 Makeshift Munitions, 1 Nyxborn Hydra and 1 Toxin Analysis.
   - Blue vs Jund brings in 4 Annul and 2 Hydroblast for 3 Force Spike, 2 Sleep of the Dead and 1 Deem Inferior.
   - Modal spells ("choose one") are cast as separate options, for example `Cast Red Elemental Blast (counter)` with key `(..., "normal", "counter")`.
 - **Matches** (`mtg_ml/match.py`):
@@ -94,7 +94,7 @@ Architecture, determinism, the differential suite and all benchmarks: [`docs/nat
   - `Game.match_game` and the `postboard:` state feature tell agents which decks are in play.
 - **Training:** `--postboard-frac` (default 0.5) sets the share of training games played with sideboarded decks. Each evaluation includes `--eval-bo3-matches` best-of-three matches against the bots. `python -m mtg_ml.rl.evaluate CKPT bot --bo3` runs that evaluation on its own.
 
-Bot vs bot, 200 matches each (2026-10-07, 8-core dev Mac, native engine): Jund wins 30.0% of game 1 and 35.5% of games 2/3 against Blue (22.5% of games 2/3 without sideboarding); Blue beats Red in 63.5% of games 2/3 (35.0% of game 1). The Q3 2026 match data puts Jund at 46% against Blue, so the bots still underplay Jund; the card rules themselves have been audited.
+Bot vs bot, 200 matches each (2026-10-07, 8-core dev Mac, native engine; re-run after the sideboard fidelity fix): Jund wins 30.0% of game 1 and 34.8% of games 2/3 against Blue (22.5% of games 2/3 without sideboarding); Blue beats Red in 63.8% of games 2/3 (35.0% of game 1). The Q3 2026 match data puts Jund at 46% against Blue, so the bots still underplay Jund; the card rules themselves have been audited.
 
 ## Scripted bots
 

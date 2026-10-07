@@ -21,9 +21,9 @@
 [[plan]]
 deck = "jund_wildfire"
 opponent = "mono_blue_terror"
-why = "Duress and Pyroblast fight counters and card draw, Faerie Macabre shrinks Terror's discount, Terminate is extra removal; lifegain, Wildfire against basics and the slow Hydra out."
-in = { "Duress" = 3, "Pyroblast" = 2, "Faerie Macabre" = 1, "Terminate" = 1 }
-out = { "Lembas" = 2, "Cleansing Wildfire" = 2, "Makeshift Munitions" = 1, "Nyxborn Hydra" = 1, "Toxin Analysis" = 1 }
+why = "Duress and Red Elemental Blast fight counters and card draw, Faerie Macabre and the fourth Nihil Spellbomb shrink Terror's and Serpent's discount, Terminate is extra removal; lifegain, Wildfire against basics and the slow Hydra out."
+in = { "Duress" = 3, "Red Elemental Blast" = 2, "Faerie Macabre" = 1, "Nihil Spellbomb" = 1, "Terminate" = 1 }
+out = { "Lembas" = 2, "Cleansing Wildfire" = 3, "Makeshift Munitions" = 1, "Nyxborn Hydra" = 1, "Toxin Analysis" = 1 }
 
 [[plan]]
 deck = "mono_blue_terror"
@@ -50,8 +50,8 @@ out = { "Voldaren Epicure" = 2, "Highway Robbery" = 2, "Guttersnipe" = 1, "Sneak
 deck = "mono_blue_terror"
 opponent = "red_madness"
 why = "Hydroblast and Blue Elemental Blast counter burn and kill red creatures, Gut Shot kills the x/1s for free; Force Spike, the slow removal and a Ponder out."
-in = { "Hydroblast" = 4, "Blue Elemental Blast" = 2, "Gut Shot" = 2 }
-out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Deem Inferior" = 2, "Ponder" = 1 }
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 3, "Gut Shot" = 2 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Deem Inferior" = 3, "Ponder" = 1 }
 
 [[plan]]
 deck = "red_madness"

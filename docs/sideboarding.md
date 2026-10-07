@@ -18,7 +18,7 @@ A row of the plan table:
 deck = "jund_wildfire"            # key of decks.DECKS
 opponent = "mono_blue_terror"     # key of decks.DECKS
 why = "one line: what the swap is for"
-in = { "Duress" = 3, "Pyroblast" = 2 }               # from SIDEBOARDS[deck]
+in = { "Duress" = 3, "Red Elemental Blast" = 2 }     # from SIDEBOARDS[deck]
 out = { "Lembas" = 3, "Nyxborn Hydra" = 1, "Toxin Analysis" = 1 }   # from DECKS[deck]
 ```
 
