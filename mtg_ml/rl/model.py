@@ -3,7 +3,9 @@
     state indices  --EmbeddingBag(sum)--> MLP --> s                (B, H)
                    (trunk="entity": global features summed, plus each
                     entity's features summed -> MLP -> entity vector,
-                    entity vectors summed; then the MLP)
+                    entity_attn > 0: N pre-norm self-attention layers
+                    over each sample's entity vectors; entity vectors
+                    summed; then the MLP)
     event indices  --EmbeddingBag(mean)------> e                  (B, H)
     memory         z, h' = GRU([s, e], h)       (memory="gru")
                    z     = MLP([s, e])          (memory="none")
@@ -75,9 +77,15 @@ class Batch:
     # (`_bag`): (bag of each sorted token, segment offsets, index of each
     # segment, mean weights or None).
     bag_t: dict | None = None
+    # For entity self-attention (`EntityAttention`): the position of each
+    # entity within its sample (-1: a padded entity), and an upper bound of the
+    # entities per sample (`structure`: the epoch's maximum; padded pieces: the
+    # padded shape's), which fixes the attention's (samples, width) layout.
+    e_pos: torch.Tensor | None = None  # (E,)
+    ent_width: int | None = None
 
     def to(self, device) -> "Batch":
-        return Batch(*(None if x is None else x.to(device) for x in (getattr(self, f) for f in self.__dataclass_fields__)))
+        return Batch(*(x.to(device) if torch.is_tensor(x) else x for x in (getattr(self, f) for f in self.__dataclass_fields__)))
 
 
 def collate(samples) -> Batch:
@@ -177,8 +185,8 @@ def structure(b: Batch, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM
     keep = sep == 0
     g_bag = torch.arange(B, device=dev) + _excl(n_ent)  # bags in token order: a sample's global features, then its entities
     bag = (g_bag[rows] + seg)[keep]
-    E = int(n_ent.sum())
-    e_row = torch.repeat_interleave(torch.arange(B, device=dev), n_ent)
+    E, width = torch.stack([n_ent.sum(), n_ent.max()]).tolist() if B else (0, 0)  # one wait for both
+    e_row = torch.repeat_interleave(torch.arange(B, device=dev), n_ent, output_size=E)
     ptr = o_idx >= option_dim
     opt = torch.repeat_interleave(torch.arange(N, device=dev), _lengths(b.o_off, o_idx.shape[0]))
     p_opt = opt[ptr]
@@ -194,6 +202,8 @@ def structure(b: Batch, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM
         ot_off=_excl(torch.zeros(N, dtype=torch.long, device=dev).index_add_(0, opt, (~ptr).long())),
         p_opt=p_opt,
         p_ent=_excl(n_ent)[b.o_row[p_opt]] + o_idx[ptr] - option_dim,
+        e_pos=torch.arange(E, device=dev) - _excl(n_ent)[e_row],
+        ent_width=width,
     )
 
 
@@ -204,7 +214,7 @@ _FIELD_LEVELS = {
     "s_idx": ("s", None), "s_off": ("row", "s"), "e_idx": ("e", None), "e_off": ("row", "e"),
     "o_idx": ("o", None), "o_off": ("opt", "o"), "o_row": ("opt", "row"), "o_pos": ("opt", None), "n_opts": ("row", None),
     "st_idx": ("st", None), "st_off": ("row", "st"), "bag_off": ("bag", "st"), "g_bag": ("row", "bag"), "e_bag": ("ent", "bag"), "e_row": ("ent", "row"),
-    "ot_idx": ("ot", None), "ot_off": ("opt", "ot"), "p_opt": ("ptr", "opt"), "p_ent": ("ptr", "ent"),
+    "ot_idx": ("ot", None), "ot_off": ("opt", "ot"), "p_opt": ("ptr", "opt"), "p_ent": ("ptr", "ent"), "e_pos": ("ent", None),
 }  # fmt: skip
 
 
@@ -233,7 +243,8 @@ def split(b: Batch, bounds: list[int]) -> list[Batch]:
     """The decisions [bounds[k], bounds[k + 1]) (all of them) of a
     `structure`d batch as batches of their own: slices, with positions
     re-based to start at 0 (one subtraction per field for all pieces). Waits
-    for the device here, for the sizes; using the pieces never does."""
+    for the device here, for the sizes; using the pieces never does (each
+    keeps the whole batch's `ent_width`, a bound for every piece)."""
     level, at = _piece_starts(b, bounds)
     n = at[:, 1:] - at[:, :-1]
     counts = n.tolist()
@@ -243,7 +254,7 @@ def split(b: Batch, bounds: list[int]) -> list[Batch]:
         if ref is not None:
             x = x - torch.repeat_interleave(at[level[ref], :-1], n[level[lvl]], output_size=x.shape[0])
         fields[name] = x.split(counts[level[lvl]])
-    return [Batch(**{name: parts[k] for name, parts in fields.items()}) for k in range(len(bounds) - 1)]
+    return [Batch(**{name: parts[k] for name, parts in fields.items()}, ent_width=b.ent_width) for k in range(len(bounds) - 1)]
 
 
 # -- padded pieces, for a training step captured in a CUDA graph -----------------
@@ -282,7 +293,8 @@ def pad_sizes(counts: dict[str, list[int]]) -> dict[str, int]:
     entity and bag, and an option for every padded row."""
     row, ent = bucket(max(counts["row"]) + 1), bucket(max(counts["ent"]) + 1)
     opt = bucket(max(o + row - r for o, r in zip(counts["opt"], counts["row"])))
-    return {"row": row, "ent": ent, "bag": row + ent, "opt": opt, **{k: bucket(max(counts[k]) + 1) for k in counts if k in ("st", "e", "ot", "ptr") or k.startswith("u_")}}
+    entw = {"entw": bucket(max(max(counts["entw"]), 1), 4)} if "entw" in counts else {}  # entity attention: entities per sample
+    return {"row": row, "ent": ent, "bag": row + ent, "opt": opt, **entw, **{k: bucket(max(counts[k]) + 1) for k in counts if k in ("st", "e", "ot", "ptr") or k.startswith("u_")}}
 
 
 def pad_fits(sizes: dict[str, int], counts: dict[str, list[int]]) -> bool:
@@ -291,10 +303,11 @@ def pad_fits(sizes: dict[str, int], counts: dict[str, list[int]]) -> bool:
         sizes["bag"] == sizes["row"] + sizes["ent"]
         and all(sizes.get(k, 0) > max(counts[k]) for k in counts if k in ("row", "ent", "st", "e", "ot", "ptr") or k.startswith("u_"))
         and sizes["opt"] >= max(o + sizes["row"] - r for o, r in zip(counts["opt"], counts["row"]))
+        and ("entw" not in counts or sizes.get("entw", 0) >= max(counts["entw"]))
     )
 
 
-def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | None = None) -> tuple[dict, dict, dict]:
+def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | None = None, ent_width: bool = False) -> tuple[dict, dict, dict]:
     """The pieces of `split(b, bounds)`, padded to `sizes(counts)` (counts:
     level -> items per piece): {field: (pieces, size of its level)} for the
     fields of PAD_FIELDS, positions re-based to each piece. Also returns the
@@ -305,7 +318,11 @@ def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | No
     "st" (bag_off or st_off), "e" (e_off), "ot" (ot_off): also the inputs of
     `_TransposedBag` for these lists, fields t_<list>_bag (level of the
     tokens), t_<list>_off and t_<list>_uid (level u_<list>: chunks of one
-    index per piece, counted in counts), and t_e_w (float, mean weights)."""
+    index per piece, counted in counts), and t_e_w (float, mean weights).
+
+    ent_width (entity attention): also field e_pos (level ent; -1 at padded
+    entities) and counts["entw"], the most entities of a sample per piece,
+    which `sizes` turns into sizes["entw"]."""
     level, at = _piece_starts(b, bounds)
     M, dev = len(bounds) - 1, at.device
     piece = torch.arange(M, device=dev)
@@ -335,6 +352,10 @@ def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | No
         lists[key] = (tok_lvl, bag_lvl, vocab, sbag - start[bag_lvl][own], (torch.arange(T, device=dev) - start[tok_lvl][own])[new], idx[perm][new])
         if off_name == "e_off":
             extra[f"t_{key}_w"] = 1.0 / lens[sbag].float()
+    if ent_width:  # the most entities of one sample, per piece
+        per_row = torch.zeros(b.n_opts.shape[0], dtype=torch.long, device=dev).index_add_(0, b.e_row, torch.ones_like(b.e_row))
+        row_piece = torch.repeat_interleave(piece, cnt["row"], output_size=per_row.shape[0])
+        cnt["entw"] = torch.zeros(M, dtype=torch.long, device=dev).scatter_reduce_(0, row_piece, per_row, "amax")
     keys = list(cnt)
     counts = dict(zip(keys, torch.stack([cnt[k] for k in keys]).tolist()))
     sizes = sizes(counts)
@@ -371,14 +392,20 @@ def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | No
         out[f"t_{key}_uid"] = place(uid, f"u_{key}", str(vocab))  # padded segments: the scratch row
     for name, w in extra.items():
         out[name] = place(w, "e", "zero")
+    if ent_width:
+        out["e_pos"] = place(b.e_pos.long(), "ent", "-1")
     return out, sizes, counts
 
 
-def padded_batch(f: dict) -> Batch:
+def padded_batch(f: dict, ent_width: int | None = None) -> Batch:
     """A Batch of one padded piece ({field: 1-D tensor} of `pad_split`); the
-    fields the structured forward does not read are None."""
+    fields the structured forward does not read are None. ent_width: the
+    padded shape's entities per sample (entity attention, with f["e_pos"])."""
     bag_t = {k: (f[f"t_{k}_bag"], f[f"t_{k}_off"], f[f"t_{k}_uid"], f.get(f"t_{k}_w")) for k in ("st", "e", "ot") if f"t_{k}_bag" in f}
-    return Batch(None, None, f["e_idx"], f["e_off"], None, None, f["o_row"], f["o_pos"], None, **{k: f[k] for k in PAD_FIELDS if k not in ("e_idx", "e_off", "o_row", "o_pos")}, bag_t=bag_t or None)
+    return Batch(
+        None, None, f["e_idx"], f["e_off"], None, None, f["o_row"], f["o_pos"], None, **{k: f[k] for k in PAD_FIELDS if k not in ("e_idx", "e_off", "o_row", "o_pos")},
+        bag_t=bag_t or None, e_pos=f.get("e_pos"), ent_width=ent_width,
+    )  # fmt: skip
 
 
 class SequenceLayout(NamedTuple):
@@ -460,19 +487,88 @@ def _bag(b: Batch, key: str, weight: torch.Tensor, idx: torch.Tensor, off: torch
     return _TransposedBag.apply(weight, idx, off, mean, *t)
 
 
+ENTITY_ATTN_HEADS = 4
+ENTITY_ATTN_FFN = 2  # feed-forward width, times hidden
+
+
+class _AttentionBlock(nn.Module):
+    """A pre-norm transformer encoder layer (no dropout) whose residual
+    branches end in zero-initialised linears, so the block starts as the
+    identity: bit-exactly, since x + 0 == x. A model with new blocks then
+    computes what the model without them did (fine-tuning from a checkpoint
+    without attention, `load_partial`), and a fresh model starts as the
+    deep-sets encoder it extends."""
+
+    def __init__(self, hidden: int, heads: int, ffn: int):
+        super().__init__()
+        if hidden % heads:
+            raise ValueError(f"hidden {hidden} is not divisible by {heads} heads")
+        self.heads = heads
+        self.norm1 = nn.LayerNorm(hidden)
+        self.qkv = nn.Linear(hidden, 3 * hidden)
+        self.out = nn.Linear(hidden, hidden)
+        self.norm2 = nn.LayerNorm(hidden)
+        self.ff = nn.Sequential(nn.Linear(hidden, ffn), nn.ReLU(), nn.Linear(ffn, hidden))
+        for last in (self.out, self.ff[2]):
+            nn.init.zeros_(last.weight)
+            nn.init.zeros_(last.bias)
+
+    def forward(self, x: torch.Tensor, slot: torch.Tensor, keep: torch.Tensor, rows: int, width: int) -> torch.Tensor:
+        """x (E, H): flat entity vectors; slot (E,) their places in the
+        (rows, width) layout (rows * width: none); keep (rows, 1, 1, width)
+        bool: the keys each place attends to. Only the attention itself runs
+        on the layout: the norms, projections and feed-forward run on the
+        entities (~2.5x fewer rows than places at width = the most entities)."""
+        E, H = x.shape
+        qkv = self.qkv(self.norm1(x))
+        q, k, v = qkv.new_zeros(rows * width + 1, 3 * H).index_copy(0, slot, qkv)[:-1].view(rows, width, 3, self.heads, H // self.heads).permute(2, 0, 3, 1, 4)
+        a = nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=keep).transpose(1, 2).reshape(rows * width, H)
+        x = x + self.out(torch.cat([a, a.new_zeros(1, H)]).index_select(0, slot))
+        return x + self.ff(self.norm2(x))
+
+
+class EntityAttention(nn.Module):
+    """`layers` self-attention blocks over the entity vectors of each sample
+    (permanents and stack items see each other; samples never mix). For the
+    attention the flat (E, H) entity vectors go to a (samples, width) layout
+    with a key padding mask, and back; the layout's shape comes from the
+    batch's sizes (`Batch.ent_width`), never from its values, so a padded
+    batch keeps its static shapes (CUDA graphs). Padded entities (position
+    -1) attend to nothing and are attended to by nothing."""
+
+    def __init__(self, hidden: int, layers: int, heads: int = ENTITY_ATTN_HEADS, ffn: int = ENTITY_ATTN_FFN):
+        super().__init__()
+        self.layers = nn.ModuleList(_AttentionBlock(hidden, heads, ffn * hidden) for _ in range(layers))
+
+    def forward(self, ents: torch.Tensor, e_row: torch.Tensor, e_pos: torch.Tensor, rows: int, width: int) -> torch.Tensor:
+        if ents.shape[0] == 0:
+            return ents
+        W = max(int(width), 1)
+        slot = torch.where(e_pos >= 0, e_row * W + e_pos, rows * W)  # padded entities: one junk place past the layout
+        keep = torch.zeros(rows * W + 1, dtype=torch.bool, device=ents.device).index_fill(0, slot, True)[:-1].view(rows, W)
+        keep = keep | (torch.arange(W, device=ents.device) == 0)  # a sample without entities attends to one zero place (all keys masked would be NaN); nothing reads it
+        keep = keep[:, None, None, :]
+        for blk in self.layers:
+            ents = blk(ents, slot, keep, rows, W)
+        return ents
+
+
 class EntityEncoder(nn.Module):
     """State = global features, then entity segments each opened by the
     separator `dim` (rl/features.py). Global features are summed; each
-    entity's features are summed and passed through an MLP; entity vectors
-    are summed into the state (a deep-sets encoder, so counts survive) and
-    kept so options can point at them."""
+    entity's features are summed and passed through an MLP; with
+    `attn_layers`, self-attention over each sample's entities
+    (`EntityAttention`); entity vectors are summed into the state (a
+    deep-sets encoder, so counts survive) and kept so options can point at
+    them."""
 
-    def __init__(self, dim: int, hidden: int):
+    def __init__(self, dim: int, hidden: int, attn_layers: int = 0):
         super().__init__()
         self.sep = dim
         self.emb = nn.Embedding(dim, hidden)
         nn.init.normal_(self.emb.weight, std=0.05)
         self.ent = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
+        self.attn = EntityAttention(hidden, attn_layers) if attn_layers else None
 
     def forward(self, b: Batch):
         """Returns (state sum (B, H), entity vectors (E, H), first entity row
@@ -480,6 +576,14 @@ class EntityEncoder(nn.Module):
         if b.bag_off is not None:  # one bag per sample's globals and per entity, no masks
             bags = _bag(b, "st", self.emb.weight, b.st_idx, b.bag_off)
             ents = self.ent(bags.index_select(0, b.e_bag))
+            if self.attn is not None:
+                B = b.g_bag.shape[0]
+                e_pos, width = b.e_pos, b.ent_width
+                if e_pos is None or width is None:  # a structure without them: derive (waits for the device)
+                    n_ent = torch.zeros(B, dtype=torch.long, device=ents.device).index_add_(0, b.e_row, torch.ones_like(b.e_row))
+                    e_pos = torch.arange(ents.shape[0], device=ents.device) - _excl(n_ent)[b.e_row] if e_pos is None else e_pos
+                    width = int(n_ent.max()) if B else 0
+                ents = self.attn(ents, b.e_row, e_pos, B, width)
             return bags.index_select(0, b.g_bag).index_add(0, b.e_row, ents), ents, None
         idx, off = b.s_idx, b.s_off
         B, dev = off.shape[0], idx.device
@@ -500,7 +604,11 @@ class EntityEncoder(nn.Module):
         e_n = torch.zeros(E, dtype=torch.long, device=dev).index_add_(0, ent_of, ones(ent_of))
         ents = self.ent(nn.functional.embedding_bag(idx[inent], self.emb.weight, _excl(e_n), mode="sum"))
         owner = torch.repeat_interleave(torch.arange(B, device=dev), n_ent)
+        if self.attn is not None:
+            ents = self.attn(ents, owner, torch.arange(E, device=dev) - base[owner], B, int(n_ent.max()) if B else 0)
         return g.index_add(0, owner, ents), ents, base
+
+
 VALUE_NETS = ("shared", "separate")
 
 
@@ -534,7 +642,7 @@ class TokenEncoder(nn.Module):
 class _Core(nn.Module):
     """State + events -> c, with optional recurrent memory over a player's decisions."""
 
-    def __init__(self, hidden: int, memory: str, trunk: str, state_dim: int, option_dim: int):
+    def __init__(self, hidden: int, memory: str, trunk: str, state_dim: int, option_dim: int, entity_attn: int = 0):
         super().__init__()
         self.hidden = hidden
         self.memory = memory
@@ -543,7 +651,7 @@ class _Core(nn.Module):
         if trunk == "transformer":
             self.state = TokenEncoder(state_dim, hidden)
         elif trunk == "entity":
-            self.state = EntityEncoder(state_dim, hidden)
+            self.state = EntityEncoder(state_dim, hidden, entity_attn)
             self.trunk = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
         else:
             emb = nn.EmbeddingBag(state_dim, hidden, mode="sum")
@@ -627,7 +735,11 @@ class PolicyNet(nn.Module):
     embeddings, trunk and memory of width value_hidden, no shared gradients;
     Andrychowicz et al. 2020 found separate, wider value networks better).
     The recurrent state of a separate value net is appended to the policy's,
-    so `state_size` = hidden (+ value_hidden)."""
+    so `state_size` = hidden (+ value_hidden). entity_attn (trunk "entity"
+    only): self-attention layers over each sample's entity vectors, in every
+    core, before they are pooled and before options point at them (4 heads,
+    feed-forward 2 * width; 0: none, and the config and weights of the model
+    without them)."""
 
     def __init__(
         self,
@@ -638,16 +750,21 @@ class PolicyNet(nn.Module):
         trunk: str = "mlp",
         value_net: str = "shared",
         value_hidden: int = 0,
+        entity_attn: int = 0,
     ):
         super().__init__()
         if memory not in MEMORY_KINDS or trunk not in TRUNKS or value_net not in VALUE_NETS:
             raise ValueError(f"memory in {MEMORY_KINDS}, trunk in {TRUNKS}, value_net in {VALUE_NETS}")
+        if entity_attn < 0 or (entity_attn and trunk != "entity"):
+            raise ValueError(f"entity_attn ({entity_attn}) needs trunk 'entity' and must be >= 0")
         value_hidden = value_hidden or hidden
         self.config = {"hidden": hidden, "memory": memory, "state_dim": state_dim, "option_dim": option_dim, "trunk": trunk, "value_net": value_net, "value_hidden": value_hidden}
+        if entity_attn:  # only then: checkpoints without attention stay readable by code that predates it
+            self.config["entity_attn"] = entity_attn
         self.hidden = hidden
         self.memory = memory
         self.value_net = value_net
-        self.policy_core = _Core(hidden, memory, trunk, state_dim, option_dim)
+        self.policy_core = _Core(hidden, memory, trunk, state_dim, option_dim, entity_attn)
         self.option_emb = nn.EmbeddingBag(option_dim, hidden, mode="sum")
         nn.init.normal_(self.option_emb.weight, std=0.05)
         self.option_mlp = nn.Sequential(nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
@@ -655,7 +772,7 @@ class PolicyNet(nn.Module):
         self.pointer = nn.Linear(hidden, hidden, bias=False) if trunk == "entity" else None
         self.scorer = nn.Sequential(nn.Linear(3 * hidden, hidden), nn.ReLU(), nn.Linear(hidden, 1))
         if value_net == "separate":
-            self.value_core = _Core(value_hidden, memory, trunk, state_dim, option_dim)
+            self.value_core = _Core(value_hidden, memory, trunk, state_dim, option_dim, entity_attn)
             self.value_head = nn.Sequential(nn.Linear(value_hidden, value_hidden), nn.ReLU(), nn.Linear(value_hidden, 1))
             last = self.value_head[-1]
         else:
@@ -717,6 +834,22 @@ class PolicyNet(nn.Module):
         if any(k.startswith(old) for k in state_dict):
             state_dict = {("policy_core." + k if k.startswith(old) else k): v for k, v in state_dict.items()}
         return super().load_state_dict(state_dict, strict=strict, assign=assign)
+
+
+NEW_LAYER_KEYS = (".state.attn.",)  # weights a checkpoint may lack: `load_partial` leaves them at their (identity) init
+
+
+def load_partial(net: PolicyNet, state_dict: dict) -> list[str]:
+    """Load a checkpoint's weights into `net` when `net` only adds layers
+    that start as the identity (entity attention): every weight of the
+    checkpoint must fit, and the weights it lacks must all be such layers.
+    Returns the names of those weights, which keep their initialisation, so
+    `net` computes what the checkpoint's model did."""
+    missing, unexpected = net.load_state_dict(state_dict, strict=False)
+    bad = [k for k in missing if not any(s in k for s in NEW_LAYER_KEYS)]
+    if bad or unexpected:
+        raise ValueError(f"checkpoint does not fit the model: missing {bad}, unexpected {list(unexpected)}")
+    return list(missing)
 
 
 def masked_entropy(logits: torch.Tensor) -> torch.Tensor:

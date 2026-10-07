@@ -2,6 +2,7 @@
 
     python -m mtg_ml.rl.train --run runs/ppo1 --iterations 200
     python -m mtg_ml.rl.train --run runs/ppo1 --iterations 400   # resumes
+    python -m mtg_ml.rl.train --run runs/attn1 --trunk entity --entity-attn 1 --init runs/ppo1/latest.pt   # fine-tunes
 
 One deck-conditioned network plays both seats (the seat is a state feature).
 It has a GRU memory over each player's decisions in a game, fed with the
@@ -90,7 +91,7 @@ import torch
 from ..backend import ENV_VAR, engine_name
 from .collect import PoolProcess, PoolThread, cpu_layout, release
 from .evaluate import evaluate_policy
-from .model import PolicyNet
+from .model import PolicyNet, load_partial
 from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update
 from .rollout import BOT, LEARNER, GameSpec, Job, create_pool, play
 
@@ -112,6 +113,8 @@ class TrainConfig:
     trunk: str = "mlp"  # "mlp" or "transformer" (2 layers over the active state features)
     value_net: str = "separate"  # "separate": own embeddings, trunk and memory; "shared": linear head on the policy core
     value_hidden: int = 0  # width of a separate value net (0 = hidden)
+    entity_attn: int = 0  # trunk "entity": self-attention layers over each decision's entities (4 heads, FFN 2x; 0 = none)
+    init: str = ""  # a new run starts from this checkpoint's weights (fresh optimizer); it may lack layers this model adds (--entity-attn), which start as the identity
     memory: str = "gru"  # "gru" (recurrent over the player's decisions) or "none"
     gamma: float = 0.995
     lam: float = 0.95
@@ -185,7 +188,7 @@ class Trainer:
         self.metrics = os.path.join(cfg.run, "metrics.jsonl")
         torch.manual_seed(cfg.seed)
         self.rng = random.Random(cfg.seed)
-        self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden).to(cfg.device)
+        self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, entity_attn=cfg.entity_attn).to(cfg.device)
         self.opt = make_optimizer(self.net.parameters(), cfg.ppo.lr, cfg.device)
         self.iteration = 0
         self.games_total = 0
@@ -195,6 +198,8 @@ class Trainer:
         self.pinned: dict[str, int] = {}  # policy files an evaluation still needs
         if os.path.exists(self.latest):
             ck = torch.load(self.latest, map_location=cfg.device, weights_only=False)
+            if ck["config"].get("entity_attn", 0) != self.net.config.get("entity_attn", 0):  # the Adam state would not fit either
+                raise ValueError(f"{self.latest} holds a {ck['config']} network, not {self.net.config}: resume with its flags, or start a new --run with --init {self.latest}")
             self.net.load_state_dict(ck["model"])
             load_optimizer_state(self.opt, ck["optim"])
             self.iteration = self.checkpointed = ck["iteration"]
@@ -206,6 +211,8 @@ class Trainer:
                     torch.cuda.set_rng_state_all(ck["cuda_rng"])
             self._drop_lost_iterations()
             print(f"resumed {self.latest} at iteration {self.iteration}")
+        elif cfg.init:
+            self._init_from(cfg.init)
         self._remove_partial_writes()
         pool_dir = os.path.join(cfg.run, "pool")
         self.pool: list[str] = sorted(os.path.join(pool_dir, f) for f in os.listdir(pool_dir) if f.startswith("iter_") and f.endswith(".pt"))
@@ -225,6 +232,22 @@ class Trainer:
             self.eval_workers = cfg.eval_workers or (4 if self.layout.shared_eval else max(1, min(8, len(ev))))
             self.evaluator = PoolProcess(self.eval_workers, "local", worker_cpus=ev or None, cpus=ev or None, nice=10, name="evaluator")
         self.evals: list[_Eval] = []  # running first, then at most one waiting
+
+    def _init_from(self, path: str) -> None:
+        """Start from the weights of checkpoint `path` (a policy file or
+        latest.pt; not its optimizer or counters). Its network must have this
+        config except for layers that start as the identity (`entity_attn`),
+        which keep their initialisation: the first rollouts play like the
+        checkpoint."""
+        ck = torch.load(path, map_location=self.cfg.device, weights_only=False)
+        with torch.device("meta"):  # its config with today's defaults filled in
+            config = PolicyNet(**ck["config"]).config
+        own = {k: v for k, v in self.net.config.items() if k != "entity_attn"}
+        theirs = {k: v for k, v in config.items() if k != "entity_attn"}
+        if own != theirs or config.get("entity_attn", 0) > self.net.config.get("entity_attn", 0):
+            raise ValueError(f"--init {path}: its network {ck['config']} does not fit {self.net.config}")
+        new = load_partial(self.net, ck["model"])
+        print(f"initialised from {path}" + (f"; new layers at their identity init: {', '.join(new)}" if new else ""), flush=True)
 
     def _collector(self):
         c, lay = self.cfg, self.layout
