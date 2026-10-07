@@ -460,6 +460,42 @@ def test_generous_ent_forestcycling_finds_a_forest():
     assert g.players[0].hand[0].known_to == {0, 1}  # revealed
 
 
+def test_land_grant_free_by_revealing_a_hand_without_lands():
+    g = scenario(p0={"hand": ["Land Grant", "Llanowar Elves", "Winding Way"], "library": ["Swamp", "Forest", "Swamp"]}, p1={"hand": ["Lightning Bolt"]})
+    assert "Cast Land Grant (alternative)" in labels(g) and "Cast Land Grant" not in labels(g)  # no mana for the normal cost
+    choose(g, "Cast Land Grant (alternative)")
+    assert all(c.known_to == {0, 1} for c in g.players[0].hand)  # the hand is revealed as the cost
+    assert g.players[1].hand[0].known_to == {1}
+    resolve_stack(g)
+    assert labels(g) == ["Find nothing", "Find Forest"]
+    choose(g, "Find Forest")
+    assert sorted(names(g.players[0].hand)) == ["Forest", "Llanowar Elves", "Winding Way"]
+    assert names(g.players[0].graveyard) == ["Land Grant"] and "Forest" not in names(g.players[0].library)
+
+
+def test_land_grant_with_a_land_in_hand_costs_mana():
+    g = scenario(p0={"hand": ["Land Grant", "Forest"], "battlefield": FORESTS(2), "library": ["Forest"]})
+    assert "Cast Land Grant" in labels(g) and "Cast Land Grant (alternative)" not in labels(g)
+    choose(g, "Cast Land Grant")
+    pay(g)
+    assert g.players[0].hand[0].known_to == {0}  # not revealed when paid for
+    resolve_stack(g)
+    choose(g, "Find Forest")
+    assert names(g.players[0].hand) == ["Forest", "Forest"]
+
+
+def test_land_grant_is_a_sorcery_even_when_free():
+    g = scenario(p0={"hand": ["Lightning Bolt"], "battlefield": ["Mountain"]}, p1={"hand": ["Land Grant"]})
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target player 1")
+    assert not any(lab.startswith("Cast Land Grant") for lab in labels(g))
+
+
+def test_elves_bot_casts_land_grant_for_free_when_short_of_lands():
+    g = scenario(p0={"hand": ["Land Grant", "Llanowar Elves"], "battlefield": FORESTS(1), "library": ["Forest"] * 3})
+    assert g.legal_options()[make_bot(0, "elves").act(g)].label == "Cast Land Grant (alternative)"
+
+
 def test_generous_ent_makes_food_and_food_gains_three():
     g = scenario(p0={"hand": ["Generous Ent"], "battlefield": FORESTS(8)})
     choose(g, "Cast Generous Ent")

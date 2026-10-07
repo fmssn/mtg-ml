@@ -697,13 +697,14 @@ def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:
 SHAPE_CARD_FIELDS = frozenset({
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow",
     "plot", "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect",
-    "modes", "overload_effect", "abilities", "triggers", "bargain",
+    "modes", "overload_effect", "abilities", "triggers", "bargain", "omen", "enters_tapped_unless_forests", "additional_power",
+    "collect_evidence",
 })  # fmt: skip
 # Shown on entities otherwise (name, printed types, keywords, P/T) or not at all.
 NON_SHAPE_CARD_FIELDS = frozenset({"name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"})
 SHAPE_ABILITY_FIELDS = frozenset({
     "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone",
-    "sorcery_speed", "mana", "targets",
+    "sorcery_speed", "mana", "targets", "mana_amount", "return_land", "once_per_turn",
 })  # fmt: skip
 NON_SHAPE_ABILITY_FIELDS = frozenset({"name"})
 SHAPE_TRIGGER_FIELDS = frozenset({"event", "effect", "condition", "targets"})
@@ -761,7 +762,7 @@ def colors_of(spec: dict) -> frozenset[str]:
 
 def _land_sac(spec: dict | None) -> tuple[str, int] | None:
     """{ sacrifice = "mountain", n = 2 }: a cost of sacrificing lands instead of mana."""
-    if spec is None:
+    if spec is None or spec == {"reveal_hand": True}:
         return None
     if set(spec) != {"sacrifice", "n"} or spec["sacrifice"] != "mountain":
         raise ValueError(f"unsupported land sacrifice cost {spec!r}")
@@ -831,14 +832,20 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t.append("e:cost:additional_discard")
     if spec.get("bargain"):
         t.append("e:cost:bargain")
+    if spec.get("collect_evidence"):
+        t.append("e:cost:collect_evidence")
+    if spec.get("additional_power"):
+        t.append("e:cost:additional_power")
+    if spec.get("omen"):
+        t.append("e:cost:omen")
     t += [f"e:cost:{k}" for k in SHAPE_COST_KEYS if k in spec]
     if "flashback_cost" in spec:
         t += ["e:cost:flashback", "e:cost:sac_lands"]
     if "alternative_cost" in spec:
-        t += ["e:cost:alternative", "e:cost:sac_lands"]
+        t += ["e:cost:alternative", "e:cost:reveal_hand" if spec["alternative_cost"] == {"reveal_hand": True} else "e:cost:sac_lands"]
     if spec.get("ward"):
         t.append("e:ward")
-    for k in ("enters_tapped", "etb_x_counters"):
+    for k in ("enters_tapped", "etb_x_counters", "enters_tapped_unless_forests"):
         if spec.get(k):
             t.append(f"e:{k}")
     if "back" in spec:
@@ -855,6 +862,8 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t.append(f"e:ab:zone:{a.get('zone', 'battlefield')}")
         if "mana" in a:
             t += ["e:ab:mana"] + [f"e:ab:mana:{c}" for c in a["mana"]]
+        if "mana_amount" in a:
+            t.append(f"e:ab:mana_amount:{a['mana_amount']}")
         mv = M(a.get("cost")).mana_value
         if mv > 0:
             t.append(f"e:ab:mv:{min(mv, SHAPE_AB_MV_CAP)}")
@@ -863,6 +872,10 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
                 t.append(f"e:ab:{k}")
         if "sac_other" in a:
             t.append(f"e:ab:sac_other:{a['sac_other']}")
+        if "return_land" in a:
+            t.append(f"e:ab:return_land:{a['return_land']}")
+        if a.get("once_per_turn"):
+            t.append("e:ab:once_per_turn")
         if a.get("x_target_mv") or "x_reveal" in a:
             t.append("e:ab:x")
         if a.get("sorcery_speed"):
@@ -907,6 +920,7 @@ def card_def(spec: dict) -> CardDef:
         overload_effect=make_effect(spec.get("overload_effect")),
         additional_discard=spec.get("additional_discard", False),
         alternative_sac=_land_sac(spec.get("alternative_cost")),
+        alternative_reveal=spec.get("alternative_cost") == {"reveal_hand": True},
         flashback_sac=_land_sac(spec.get("flashback_cost")),
         phyrexian_cost=M(spec.get("cost")).minus_colored(phy) if phy.colored else None,
         phyrexian_life=2 * phy.mana_value,

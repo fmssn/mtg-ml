@@ -1536,7 +1536,7 @@ class Game:
         if mode == "plot":
             return O.FREE if d.plot is not None else None
         if mode == "alternative":
-            return O.FREE if d.alternative_sac is not None else None
+            return O.FREE if d.alternative_sac is not None or d.alternative_reveal else None
         if mode == "phyrexian":
             return d.phyrexian_cost
         if mode == "bargain":
@@ -1604,6 +1604,8 @@ class Game:
         if mode == "phyrexian" and self.players[p].life < d.phyrexian_life:
             return False
         if mode == "evidence" and sum(c.face.mana_value for c in self.players[p].graveyard) < d.collect_evidence:
+            return False
+        if mode == "alternative" and d.alternative_reveal and any(c.face.is_type("Land") for c in self.players[p].hand if c is not card):
             return False
         if d.additional_power and not self._power_sources(p, card):
             return False
@@ -1696,6 +1698,10 @@ class Game:
         sac = self._mode_sac(card, mode)
         for _ in range(sac[1] if sac else 0):
             yield from self._choose_sacrifice(p, sac[0], card.name)
+        if mode == "alternative" and d.alternative_reveal:
+            for c in self.players[p].hand:
+                c.known_to = {0, 1}
+            self._log(f"p{p} reveals their hand for {card.name}: {', '.join(c.name for c in self.players[p].hand) or 'empty'}")
         if mode == "escape":
             yield from self._exile_from_graveyard(p, d.escape_exile, card.name)
         self._emit_cast(item)

@@ -537,6 +537,17 @@ abilities = [
 # Elves
 # ---------------------------------------------------------------------------
 
+# Cast mode "alternative": reveal the hand instead of paying {1}{G}, offered
+# only with no land cards in hand. The revealed cards become known to both
+# players.
+[[card]]
+name = "Land Grant"
+cost = "{1}{G}"
+types = "Sorcery"
+text = "If you have no land cards in hand, you may reveal your hand rather than pay this spell's mana cost. Search your library for a Forest card, reveal that card, put it into your hand, then shuffle."
+alternative_cost = { reveal_hand = true }
+effect = [{ op = "search_library", subtypes_any = ["Forest"], dest = "hand", reveal = true, what = "a Forest card" }]
+
 # Also played by Tron.
 [[card]]
 name = "Generous Ent"

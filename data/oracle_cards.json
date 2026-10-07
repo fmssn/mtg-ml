@@ -804,6 +804,16 @@
   "cmc": 2.0
  },
  {
+  "name": "Land Grant",
+  "mana_cost": "{1}{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "If you have no land cards in hand, you may reveal your hand rather than pay this spell's mana cost.\nSearch your library for a Forest card, reveal that card, put it into your hand, then shuffle.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
   "name": "Generous Ent",
   "mana_cost": "{5}{G}",
   "type_line": "Creature \u2014 Treefolk",

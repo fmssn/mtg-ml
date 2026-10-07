@@ -14,7 +14,7 @@ from mtg_ml.engine.view import determinize
 from mtg_ml.match import matchup_decks
 from mtg_ml.engine.decks import DECKS, expand
 
-MATCHUPS = ("jund_blue", "jund_madness", "blue_madness")
+MATCHUPS = ("jund_blue", "jund_madness", "blue_madness", "jund_elves", "blue_elves", "madness_elves")
 
 
 def decks(matchup: str):

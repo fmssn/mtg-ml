@@ -302,7 +302,16 @@ impl Op {
             Op::ExploreTarget => "explore_target",
             Op::ShuffleIntoLibrary => "shuffle_into_library",
             Op::Custom(_) => "custom",
-            Op::Ward | Op::Madness => return None,
+            Op::DamageChosenPower => "damage_chosen_power",
+            Op::UntapTarget => "untap_target",
+            Op::PumpTarget { .. } => "pump_target",
+            Op::CountersTarget { .. } => "counters_target",
+            Op::ShuffleTargetIntoLibrary => "shuffle_target_into_library",
+            Op::Dig { .. } => "dig",
+            Op::MayExileFromGraveyard { .. } => "may_exile_from_graveyard",
+            Op::TakeInitiative => "take_initiative",
+            Op::RevealToBattlefield { .. } => "reveal_to_battlefield",
+            Op::Ward | Op::Madness | Op::Venture => return None,
         })
     }
 }
@@ -391,6 +400,9 @@ pub struct CardDef {
     pub additional_discard: bool,
     /// Lands sacrificed instead of mana: (filter, count).
     pub alternative_sac: Option<(SacFilter, i32)>,
+    /// Cast mode "alternative": reveal your hand instead of paying the mana
+    /// cost, only with no land cards in it (Land Grant).
+    pub alternative_reveal: bool,
     pub flashback_sac: Option<(SacFilter, i32)>,
     /// Cast mode "phyrexian": this cost (without the phyrexian symbols) and life.
     pub phyrexian_cost: Option<ManaCost>,
@@ -637,11 +649,12 @@ fn check_keys(t: &Table, allowed: &[&str], what: &str) -> Result<(), String> {
 pub const SHAPE_CARD_FIELDS: &[&str] = &[
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow", "plot",
     "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect", "modes",
-    "overload_effect", "abilities", "triggers", "bargain",
+    "overload_effect", "abilities", "triggers", "bargain", "omen", "enters_tapped_unless_forests", "additional_power", "collect_evidence",
 ];
 pub const NON_SHAPE_CARD_FIELDS: &[&str] = &["name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"];
 pub const SHAPE_ABILITY_FIELDS: &[&str] =
-    &["effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone", "sorcery_speed", "mana", "targets"];
+    &["effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone", "sorcery_speed", "mana", "targets",
+    "mana_amount", "return_land", "once_per_turn"];
 pub const NON_SHAPE_ABILITY_FIELDS: &[&str] = &["name"];
 pub const SHAPE_TRIGGER_FIELDS: &[&str] = &["event", "effect", "condition", "targets"];
 pub const NON_SHAPE_TRIGGER_FIELDS: &[&str] = &["name"];
@@ -863,12 +876,20 @@ fn if_color(t: &Table) -> Result<u8, String> {
 }
 
 /// `{ sacrifice = "mountain", n = N }`: lands sacrificed instead of mana.
+/// `{ reveal_hand = true }`: reveal your hand instead of paying (Land Grant).
+fn reveal_hand(t: &Table, k: &str) -> bool {
+    matches!(t.get(k), Some(Value::Table(v)) if v.len() == 1 && v.get("reveal_hand") == Some(&Value::Boolean(true)))
+}
+
 fn land_sac(t: &Table, k: &str) -> Result<Option<(SacFilter, i32)>, String> {
     let v = match t.get(k) {
         None => return Ok(None),
         Some(Value::Table(v)) => v,
         Some(_) => return Err(format!("{k} must be a table")),
     };
+    if reveal_hand(t, k) {
+        return Ok(None);
+    }
     if v.len() != 2 || req_str(v, "sacrifice")? != "mountain" {
         return Err(format!("unsupported land sacrifice cost {v}"));
     }
@@ -1035,6 +1056,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         overload_effect: parse_ops(t.get("overload_effect"), db, tokens)?,
         additional_discard: get_bool(t, "additional_discard")?,
         alternative_sac: land_sac(t, "alternative_cost")?,
+        alternative_reveal: reveal_hand(t, "alternative_cost"),
         flashback_sac: land_sac(t, "flashback_cost")?,
         abilities,
         triggers,
@@ -1124,6 +1146,11 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
     if truthy(t, "bargain") {
         v.push("e:cost:bargain".into());
     }
+    for (k, tok) in [("collect_evidence", "e:cost:collect_evidence"), ("additional_power", "e:cost:additional_power"), ("omen", "e:cost:omen")] {
+        if truthy(t, k) {
+            v.push(tok.into());
+        }
+    }
     for k in SHAPE_COST_KEYS {
         if t.contains_key(k) {
             v.push(format!("e:cost:{k}"));
@@ -1135,12 +1162,12 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
     }
     if t.contains_key("alternative_cost") {
         v.push("e:cost:alternative".into());
-        v.push("e:cost:sac_lands".into());
+        v.push(if reveal_hand(t, "alternative_cost") { "e:cost:reveal_hand" } else { "e:cost:sac_lands" }.into());
     }
     if truthy(t, "ward") {
         v.push("e:ward".into());
     }
-    for k in ["enters_tapped", "etb_x_counters"] {
+    for k in ["enters_tapped", "etb_x_counters", "enters_tapped_unless_forests"] {
         if truthy(t, k) {
             v.push(format!("e:{k}"));
         }
@@ -1175,6 +1202,9 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
                 v.push(format!("e:ab:mana:{c}"));
             }
         }
+        if let Some(m) = get_str(a, "mana_amount")? {
+            v.push(format!("e:ab:mana_amount:{m}"));
+        }
         let mv = ManaCost::parse(get_str(a, "cost")?)?.mana_value();
         if mv > 0 {
             v.push(format!("e:ab:mv:{}", mv.min(SHAPE_AB_MV_CAP)));
@@ -1186,6 +1216,12 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
         }
         if let Some(s) = get_str(a, "sac_other")? {
             v.push(format!("e:ab:sac_other:{s}"));
+        }
+        if let Some(r) = get_str(a, "return_land")? {
+            v.push(format!("e:ab:return_land:{r}"));
+        }
+        if truthy(a, "once_per_turn") {
+            v.push("e:ab:once_per_turn".into());
         }
         if truthy(a, "x_target_mv") || a.contains_key("x_reveal") {
             v.push("e:ab:x".into());
@@ -1274,6 +1310,7 @@ fn parse_dungeon(id: DefId, t: &Table, db: &CardDb, tokens: &HashMap<String, Def
         overload_effect: None,
         additional_discard: false,
         alternative_sac: None,
+        alternative_reveal: false,
         flashback_sac: None,
         abilities: vec![],
         triggers,
@@ -1306,7 +1343,7 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 88);
+        assert_eq!(db.cards.len(), 90);
         assert!(db.undercity.is_some() && db.room_next[0] == vec![1, 2]);
         let gut = db.def(db.cards["Gut Shot"]);
         assert_eq!((gut.colors, gut.phyrexian_life, gut.cost.mana_value()), (color_bit(b'R'), 2, 1));

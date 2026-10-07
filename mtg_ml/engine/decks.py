@@ -15,6 +15,8 @@ Wildfire). Jund: the "Stock list" build, 124 of 428 lists (29%); Mono Blue
 Terror: "Stock list", 261 of 666 (39%); Red Madness: one build, all 970
 lists. Each is that build's typical 15 card for card: nothing is left out
 for missing rules (Envelop was implemented for it) and nothing is trimmed.
+Elves: main and sideboard are the "Stock list" builds (main 123 of 399
+lists, 31%; sideboard 200 of 399, 50%), see docs/elves.md.
 """
 
 JUND_WILDFIRE = {
@@ -102,12 +104,13 @@ RED_MADNESS_SIDEBOARD = {
     "End the Festivities": 2,
 }
 
-# Modal counts of the cards in >= 50% of Q3 2026 lists sum to 61; Sagu
-# Wildling (mean 1.85 copies) goes from 3 to 2. Land Grant (40%) is out.
+# Elves: the most played Q3 2026 builds card for card (see the module
+# docstring): main "Stock list", 123 of 399 lists (31%); sideboard "Stock
+# list", 200 of 399 (50%).
 ELVES = {
-    "Forest": 12,
+    "Forest": 10,
     "Gingerbread Cabin": 1,
-    "Llanowar Elves": 4,
+    "Llanowar Elves": 3,
     "Fyndhorn Elves": 3,
     "Elvish Mystic": 2,
     "Priest of Titania": 4,
@@ -117,20 +120,18 @@ ELVES = {
     "Nyxborn Hydra": 4,
     "Avenging Hunter": 4,
     "Generous Ent": 4,
-    "Sagu Wildling": 2,
+    "Sagu Wildling": 3,
     "Winding Way": 4,
     "Lead the Stampede": 4,
+    "Land Grant": 2,
 }
 
-# Elves: the Q3 2026 modal sideboard (cards in >= 50% of lists): 4 Monstrous
-# Emergence, 3 Faerie Macabre, 3 Vitu-Ghazi Inspector, 3 Spinewoods Paladin,
-# then 2 Deglamer (the most played card below 50%) for 15.
 ELVES_SIDEBOARD = {
     "Monstrous Emergence": 4,
+    "Spinewoods Paladin": 4,
     "Faerie Macabre": 3,
     "Vitu-Ghazi Inspector": 3,
-    "Spinewoods Paladin": 3,
-    "Deglamer": 2,
+    "Deglamer": 1,
 }
 
 DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS, "elves": ELVES}

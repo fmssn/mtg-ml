@@ -165,6 +165,9 @@ class CardDef(_Immutable):
     additional_discard: bool = False  # discard a card as an additional cost
     # Costs of sacrificing lands instead of mana: (sacrifice filter, count).
     alternative_sac: tuple[str, int] | None = None  # cast mode "alternative" (Fireblast)
+    # Cast mode "alternative": reveal your hand instead of paying the mana
+    # cost, only with no land cards in it (Land Grant).
+    alternative_reveal: bool = False
     flashback_sac: tuple[str, int] | None = None  # flashback cost (Lava Dart)
     # Phyrexian mana ({R/P}): cast mode "phyrexian" pays `phyrexian_cost` (the
     # cost without those symbols) and 2 life per symbol (Gut Shot).

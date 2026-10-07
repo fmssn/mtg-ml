@@ -8,22 +8,23 @@ both engines. Elves sits in seat 1 of three matchups (`match.MATCHUPS`):
 ## Decklist (`engine/decks.py`)
 
 Source: the project owner's Pauper-Research data for Q3 2026 (2026-07-05 to
-2026-10-02, 399 Elves lists, deck win rate 53.1%). The main 60 are the modal
-counts of every card in at least 50% of lists; those sum to 61, so Sagu
-Wildling (mean 1.85 copies, mode 3) goes to 2. Land Grant (40% of lists) is
-out. The sideboard is the modal 13 of the cards in at least half of the
-sideboards plus the next most played card, Deglamer (21%), at its mode of 2.
+2026-10-02, all events, 399 Elves lists, deck win rate 53.1%; dashboard
+"Builds and decisions"). Main and sideboard are the typical lists of the
+most played builds, card for card: main "Stock list" (123 of 399 lists,
+31%), sideboard "Stock list" (200 of 399, 50%). Nothing is left out for
+missing rules (Land Grant was implemented for it) and nothing is trimmed;
+Deglamer is in the typical sideboard itself, not a fill.
 
 | main | | sideboard | |
 |---|---|---|---|
-| 12 Forest | 4 Masked Vandal | 4 Monstrous Emergence | 3 Spinewoods Paladin |
-| 1 Gingerbread Cabin | 4 Nyxborn Hydra | 3 Faerie Macabre | 2 Deglamer |
-| 4 Llanowar Elves | 4 Avenging Hunter | 3 Vitu-Ghazi Inspector | |
+| 10 Forest | 4 Masked Vandal | 4 Monstrous Emergence | 3 Vitu-Ghazi Inspector |
+| 1 Gingerbread Cabin | 4 Nyxborn Hydra | 4 Spinewoods Paladin | 1 Deglamer |
+| 3 Llanowar Elves | 4 Avenging Hunter | 3 Faerie Macabre | |
 | 3 Fyndhorn Elves | 4 Generous Ent | | |
-| 2 Elvish Mystic | 2 Sagu Wildling | | |
+| 2 Elvish Mystic | 3 Sagu Wildling | | |
 | 4 Priest of Titania | 4 Winding Way | | |
 | 4 Quirion Ranger | 4 Lead the Stampede | | |
-| 4 Timberwatch Elf | | | |
+| 4 Timberwatch Elf | 2 Land Grant | | |
 
 Faerie Macabre ({1}{B}{B}) is never cast: Elves has no black mana. It is a
 free graveyard-hate discard (shared card from the sideboard branch).
@@ -32,12 +33,12 @@ free graveyard-hate discard (shared card from the sideboard branch).
 
 | deck vs opponent | in | out | why |
 |---|---|---|---|
-| Elves vs Jund | 3 Vitu-Ghazi Inspector, 2 Deglamer | 2 Elvish Mystic, 1 Fyndhorn Elves, 2 Sagu Wildling | Krark-Clan Shaman sweeps x/1 Elves; Inspector (1/3 reach) survives it, Deglamer removes a Bridge or Wellspring for good |
-| Jund vs Elves | 2 Go for the Throat | 2 Cleansing Wildfire | Throat kills any Elf; Wildfire on a basic Forest only cycles |
+| Elves vs Jund | 3 Vitu-Ghazi Inspector, 1 Deglamer | 2 Elvish Mystic, 1 Fyndhorn Elves, 1 Sagu Wildling | Krark-Clan Shaman sweeps x/1 Elves; Inspector (1/3 reach) survives it, Deglamer removes a Bridge or Wellspring for good |
+| Jund vs Elves | 2 Breath Weapon, 1 Terminate | 3 Cleansing Wildfire | Breath Weapon sweeps x/1 and x/2 Elves, Terminate kills any; Wildfire on a basic Forest only cycles |
 | Elves vs Blue | 3 Faerie Macabre, 1 Monstrous Emergence | 4 Masked Vandal | Macabre shrinks Terror / Serpent and stops Sleep of the Dead's escape; no targets for Vandal |
-| Blue vs Elves | 1 Steel Sabotage | 1 Force Spike | little in Blue's six helps (placeholder until Blue's real 15) |
-| Elves vs Red | 3 Spinewoods Paladin, 3 Vitu-Ghazi Inspector | 3 Masked Vandal, 2 Elvish Mystic, 1 Fyndhorn Elves | life and toughness against burn |
-| Red vs Elves | 2 Electrickery, 2 Martyr of Ashes, 2 Searing Blaze | 4 Highway Robbery, 2 Grab the Prize | sweepers for a board of x/1s |
+| Blue vs Elves | 3 Gut Shot, 1 Envelop | 3 Force Spike, 1 Deem Inferior | Gut Shot kills a mana Elf for free, Envelop counters Lead the Stampede, Winding Way or Land Grant |
+| Elves vs Red | 4 Spinewoods Paladin, 3 Vitu-Ghazi Inspector | 4 Masked Vandal, 2 Elvish Mystic, 1 Fyndhorn Elves | life and toughness against burn |
+| Red vs Elves | 2 End the Festivities, 2 Cast into the Fire, 2 Searing Blaze | 4 Highway Robbery, 2 Grab the Prize | sweepers and two-for-ones for a board of x/1s |
 
 ## Rules added (both engines)
 
@@ -57,6 +58,7 @@ free graveyard-hate discard (shared card from the sideboard branch).
 | hexproof until your next turn | `Card.hexproof` | Throne of the Dead Three; cleared in its controller's untap step; opponents' targets skip it |
 | menace | keyword `menace` | Skeleton token. Blocking a menace creature is offered only while a second blocker is possible; a lone block left at the end is undone |
 | Treasure | `[[token]]` | a self-sacrificing mana source of any colour. Payment feasibility with an additional sacrifice tries subsets of non-{C} sacrifice sources. It is not offered as a priority mana ability (floating it only matters for sacrifice triggers) |
+| reveal-hand alternative cost | `alternative_cost = { reveal_hand = true }` | Land Grant: cast mode `alternative` for free, offered only with no other land card in hand; the hand becomes known to both players |
 
 New ops: `untap_target`, `pump_target`, `counters_target`, `shuffle_target_into_library`, `dig`,
 `may_exile_from_graveyard`, `damage_chosen_power`, `take_initiative`, `reveal_to_battlefield`;

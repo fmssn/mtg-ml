@@ -250,25 +250,30 @@ every shape token.
 |---|---|
 | `e:mv>=k` (k = 1..7) | mana value of the mana cost (X counts 0) |
 | `e:cost:x` | `{X}` in the mana cost |
+| `e:cost:phyrexian` | a Phyrexian symbol (`{R/P}`) in the mana cost |
 | `e:color:{C}` | each colour (WUBRG) of the face |
 | `e:cost:reduction:{kind}` | `cost_reduction` (affinity, spells in the graveyard, cards drawn) |
 | `e:cost:additional_sac`, `e:cost:additional_sac:{filter}` | `additional_sac` |
 | `e:cost:additional_discard` | `additional_discard` |
+| `e:cost:{bargain,collect_evidence,additional_power,omen}` | `bargain`, `collect_evidence`, `additional_power` (Monstrous Emergence), `omen` (Sagu Wildling) |
 | `e:cost:{flashback,escape,madness,bestow,plot,overload}` | that alternative way to cast |
 | `e:cost:flashback` + `e:cost:sac_lands` | `flashback_cost` (sacrifice lands) |
 | `e:cost:alternative` + `e:cost:sac_lands` | `alternative_cost` (Fireblast) |
-| `e:ward`, `e:enters_tapped`, `e:etb_x_counters`, `e:transforms` | `ward`, `enters_tapped`, `etb_x_counters`, `back` |
+| `e:cost:alternative` + `e:cost:reveal_hand` | `alternative_cost = { reveal_hand = true }` (Land Grant) |
+| `e:ward`, `e:enters_tapped`, `e:etb_x_counters`, `e:enters_tapped_unless_forests`, `e:transforms` | `ward`, `enters_tapped`, `etb_x_counters`, `enters_tapped_unless_forests`, `back` |
 | `e:spell:target:{kind}` | the spell's target kinds, every mode's too |
 | `e:spell:op:{op}` | the spell's ops, every mode's and the overload effect's |
 | `e:spell:modal` | `modes` |
 | `e:ab:zone:{battlefield,hand}` | per ability: where it is activated |
 | `e:ab:mana`, `e:ab:mana:{C}` | a mana ability and each colour it makes (C for colourless) |
+| `e:ab:mana_amount:{amount}` | `mana_amount` (`elves`: Priest of Titania) |
 | `e:ab:mv:{1..3}` | the activation's mana value, capped at 3 |
-| `e:ab:{tap,sac_self,sac_other,discard_self,discard_other,exile_self}`, `e:ab:sac_other:{filter}` | the activation's other costs |
+| `e:ab:{tap,sac_self,sac_other,discard_self,discard_other,exile_self}`, `e:ab:sac_other:{filter}`, `e:ab:return_land:{land}`, `e:ab:once_per_turn` | the activation's other costs and limits |
 | `e:ab:x`, `e:ab:sorcery_speed` | `x_target_mv` / `x_reveal`, `sorcery_speed` |
 | `e:ab:target:{kind}`, `e:ab:op:{op}` | the ability's targets and ops |
 | `e:trig:{event}` | per trigger: its event (`etb`, `cast`, `you_cast`, ...) |
-| `e:trig:cond:{key}:{value}` | its condition (`spell:noncreature`, `sacrificed_subtype:Eldrazi`) |
+| `e:trig:cond:{key}:{value}` | its condition (`spell:noncreature`, `sacrificed_subtype:Eldrazi`; booleans lowercased, `bargained:true`) |
+| `e:trig:target:{kind}` | its target kinds |
 | `e:trig:op:{op}` | its ops |
 
 Every op token `{prefix}{op}` is followed by `{prefix}{op}:n>=k` (k = 1..4)

@@ -1615,7 +1615,7 @@ impl State {
             Method::Madness => d.madness.as_ref(),
             Method::Overload => d.overload.as_ref(),
             Method::Plot => d.plot.as_ref().map(|_| &db().free),
-            Method::Alternative => d.alternative_sac.map(|_| &db().free),
+            Method::Alternative => (d.alternative_sac.is_some() || d.alternative_reveal).then(|| &db().free),
             Method::Phyrexian => d.phyrexian_cost.as_ref(),
             Method::Bargain => d.bargain.then_some(&d.cost),
             Method::Omen => {
@@ -1721,6 +1721,9 @@ impl State {
             return false;
         }
         if mode == Method::Evidence && self.players[p as usize].graveyard.iter().map(|&g| self.c(g).face().mana_value()).sum::<i32>() < d.collect_evidence {
+            return false;
+        }
+        if mode == Method::Alternative && d.alternative_reveal && self.players[p as usize].hand.iter().any(|&h| h != ci && self.c(h).face().is_type(T_LAND)) {
             return false;
         }
         if d.additional_power && self.power_sources(p, ci).is_empty() {

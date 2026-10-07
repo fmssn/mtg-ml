@@ -187,7 +187,7 @@ All fields are optional unless marked. Unknown fields are an error in both engin
 | `flashback`, `escape` + `escape_exile`, `bestow` | alternative costs |
 | `madness`, `plot` | madness cost (a discarded card goes to exile, and a trigger lets its owner cast it for this cost at any speed); plot cost (a sorcery-speed special action exiles it; cast free as a sorcery on a later turn, option "Cast X (plotted)") |
 | `overload` + `overload_effect` | cast mode "overload": this cost, no targets, `overload_effect` instead of `effect` |
-| `alternative_cost`, `flashback_cost` | `{ sacrifice = "mountain", n = N }`: sacrifice lands instead of paying mana (cast mode "alternative" from hand; flashback with only `flashback_cost` is free apart from the sacrifice) |
+| `alternative_cost`, `flashback_cost` | `{ sacrifice = "mountain", n = N }`: sacrifice lands instead of paying mana (cast mode "alternative" from hand; flashback with only `flashback_cost` is free apart from the sacrifice). `alternative_cost = { reveal_hand = true }`: reveal your hand instead of paying, offered only with no other land card in hand; the hand becomes known to both players (Land Grant) |
 | `bargain` | `true`: cast mode "bargain", sacrificing an artifact, enchantment or token as an additional cost; an `etb` trigger with `condition = { bargained = true }` only triggers then (Troublemaker Ouphe) |
 | `enters_tapped`, `etb_x_counters`, `back` | `back` names a `[[face]]` (transform) |
 | `enters_tapped_unless_forests` | `N`: enters tapped unless its controller controls N other Forests (Gingerbread Cabin) |

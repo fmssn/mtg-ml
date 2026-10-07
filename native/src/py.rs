@@ -955,7 +955,8 @@ fn loaded_spec() -> String {
 /// {name: cards.py `card_shape`} for every card, face and token (tests).
 #[pyfunction]
 fn card_shapes() -> std::collections::HashMap<String, Vec<String>> {
-    db().defs.iter().map(|d| (d.name.clone(), d.shape.clone())).collect()
+    // Dungeons (cards.py DUNGEONS) are no cards, faces or tokens.
+    db().defs.iter().filter(|d| Some(d.id) != db().undercity).map(|d| (d.name.clone(), d.shape.clone())).collect()
 }
 
 /// {level: (shape fields, non-shape fields)} of the card spec (tests).
