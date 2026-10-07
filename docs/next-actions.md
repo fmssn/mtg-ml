@@ -16,8 +16,8 @@ Source: the overnight A/B (entity h128, self-play + pool vs. + 10% bot games, ~8
 2. **Unbounded value head — confirmed.** `model.py:662` is `nn.Linear(hidden, 1)`; values reach +1.41 / −1.12 in reviewed games, which biases the terminal advantages (winning looks slightly worse, losing slightly better).
    - Change: clamp `traj.values` to [−1, 1] before the deltas in `rollout.py` `_finish` (keep raw values for logging); optionally bound the head.
 3. **Sleep of the Dead untap skips stack — confirmed.** `cards.py:101` and `native/src/engine.rs:1004` use `skip_untap +=`; per the rules all such effects point at the same next untap step. Decided s103; the policy exploits it.
-   - Change: `max(current, n)` in both engines, regression test. (A spawn-task chip for this exists.)
-4. **Infra fixes from the run** (already in draft PR fmssn/mtg-ml#12): `--server-request-ints`, `--server-policy-slots`, fresh graph pool on stack growth, PPO graph-shape margin 1.25. Make request sizing automatic before merging.
+   - Done on main (PR fmssn/mtg-ml#13, non-stacking skip_untap).
+4. **Infra fixes from the run** (already in draft PR fmssn/mtg-ml#12): `--server-request-ints`, `--server-policy-slots`, fresh graph pool on stack growth, PPO graph-shape margin 1.25. Request sizing is now automatic (`--server-request-ints 0`, from games per request).
 
 ## 2. Measurement (needed before any A/B is meaningful)
 
