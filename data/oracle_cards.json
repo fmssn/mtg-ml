@@ -688,6 +688,16 @@
   "cmc": 1.0
  },
  {
+  "name": "Envelop",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Counter target sorcery spell.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
   "name": "Annul",
   "mana_cost": "{U}",
   "type_line": "Instant",

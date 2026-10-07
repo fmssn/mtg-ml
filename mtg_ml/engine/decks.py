@@ -7,14 +7,14 @@ Maindecks: MTGGoldfish archetype pages for Pauper "Jund Wildfire" and
 "Blue Terror", fetched 2026-10-05; Red Madness: the 60 given by the project
 owner on 2026-10-07 (a 2026 Pauper Challenge style list).
 
-Sideboards (since 2026-10-07): the typical Q3 2026 sideboards of the
-Pauper-Research project (fmssn, `reports/2026-Q3`, `prototypes/deck_decisions/
-data.js`; "Jund Midrange" there is Jund Wildfire): the modal count of every
-card played in at least about half of the archetype's lists (970 Red Madness,
-666 Mono Blue Terror, 428 Jund lists), filled to exactly 15 with the next
-most played cards. Jund: 12 cards at >= 57%, + Faerie Macabre 1 (50%),
-Terminate 1 (46%), Ancient Grudge 1 (35%). Mono Blue Terror: 13 at >= 84%,
-+ Steel Sabotage 2 (50%). Red Madness: exactly 15 at >= 57%.
+Sideboards (since 2026-10-07): the typical list of the most played
+sideboard build in the Q3 2026 data of the Pauper-Research project (fmssn,
+2026-07-05 to 2026-10-02, all events; dashboard "Builds and decisions",
+`prototypes/deck_decisions/data.js`; "Jund Midrange" there is Jund
+Wildfire). Jund: the "Stock list" build, 124 of 428 lists (29%); Mono Blue
+Terror: "Stock list", 261 of 666 (39%); Red Madness: one build, all 970
+lists. Each is that build's typical 15 card for card: nothing is left out
+for missing rules (Envelop was implemented for it) and nothing is trimmed.
 """
 
 JUND_WILDFIRE = {
@@ -81,17 +81,17 @@ JUND_WILDFIRE_SIDEBOARD = {
     "Duress": 3,
     "Troublemaker Ouphe": 2,
     "Breath Weapon": 2,
-    "Pyroblast": 2,
+    "Red Elemental Blast": 2,
     "Faerie Macabre": 1,
+    "Nihil Spellbomb": 1,
     "Terminate": 1,
-    "Ancient Grudge": 1,
 }
 MONO_BLUE_TERROR_SIDEBOARD = {
     "Hydroblast": 4,
     "Annul": 4,
+    "Blue Elemental Blast": 3,
     "Gut Shot": 3,
-    "Blue Elemental Blast": 2,
-    "Steel Sabotage": 2,
+    "Envelop": 1,
 }
 RED_MADNESS_SIDEBOARD = {
     "Pyroblast": 4,

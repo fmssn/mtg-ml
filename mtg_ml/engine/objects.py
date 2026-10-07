@@ -72,7 +72,7 @@ class TargetSpec:
     """kind is one of: creature, nonlegendary_creature, nonartifact_creature,
     creature_you_control, land, nonland_permanent, artifact, blue_permanent,
     red_permanent, spell, blue_spell, red_spell, instant_spell,
-    artifact_spell, player, opponent, any (creature or player)."""
+    sorcery_spell, artifact_spell, player, opponent, any (creature or player)."""
 
     kind: str
 

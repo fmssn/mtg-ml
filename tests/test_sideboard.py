@@ -63,6 +63,21 @@ def test_annul_counters_artifact_and_enchantment_spells_only():
     assert not has(g, "Cast Annul")
 
 
+def test_envelop_counters_sorcery_spells_only():
+    g = scenario(p0={"hand": ["Faithless Looting", "Lightning Bolt"], "battlefield": MOUNTAINS(2)}, p1={"hand": ["Envelop"], "battlefield": ISLANDS(1)})
+    choose(g, "Cast Faithless Looting")
+    pass_priority(g)
+    choose(g, "Cast Envelop")
+    resolve_stack(g)
+    assert "Faithless Looting" in names(g.players[0].graveyard) and "Envelop" in names(g.players[1].graveyard)
+    assert sorted(names(g.players[0].hand)) == ["Lightning Bolt"]  # countered: no draw, no discard
+    g = scenario(p0={"hand": ["Lightning Bolt"], "battlefield": MOUNTAINS(1)}, p1={"hand": ["Envelop"], "battlefield": ISLANDS(1)})
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target player 1")
+    pass_priority(g)
+    assert not has(g, "Cast Envelop")  # an instant is not a legal target
+
+
 def test_gut_shot_for_red_mana_or_two_life():
     g = scenario(p0={"battlefield": ["Delver of Secrets"]}, p1={"hand": ["Gut Shot"], "battlefield": ISLANDS(2)}, active=1)
     assert has(g, "Cast Gut Shot (phyrexian)") and not any(x == "Cast Gut Shot" for x in labels(g))  # no red mana

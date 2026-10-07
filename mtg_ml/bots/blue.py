@@ -17,7 +17,7 @@ from .base import NEG, Bot
 KEEP_LANDS = {7: (2, 4), 6: (2, 4)}  # land counts to keep; 1 land is fine with 2+ cantrips
 COUNTER_MIN_VALUE = 2.5  # spell value worth a Counterspell
 BLAST_MIN_VALUE = 1.0  # a red spell worth a Blue Elemental Blast / Hydroblast (any but the cheapest)
-ANNUL_MIN_VALUE = 1.0  # an artifact / enchantment spell worth an Annul
+ANNUL_MIN_VALUE = 1.0  # an artifact / enchantment spell worth an Annul (a sorcery worth an Envelop)
 GUT_SHOT_MIN_LIFE = 8  # pay 2 life for Gut Shot only above this
 FORCE_SPIKE_MIN_VALUE = 1.5
 HOLD_UP_COUNTER = True  # on our turn keep UU open for Jund's turn when we have a threat out
@@ -56,6 +56,7 @@ class BlueBot(Bot):
             "Blue Elemental Blast": 3,
             "Hydroblast": 3,
             "Annul": 3,
+            "Envelop": 2.5,
             "Gut Shot": 2.5,
             "Steel Sabotage": 3,
             "Tolarian Terror": 4.5,
@@ -144,6 +145,9 @@ class BlueBot(Bot):
             return 35.0 if it is not None and jund_mana == 0 and self.spell_value(g, it) >= FORCE_SPIKE_MIN_VALUE else NEG
         if n == "Annul":
             it = self.counter_target(g, lambda x: x.card.face.is_type("Artifact") or x.card.face.is_type("Enchantment"))
+            return 36.0 if it is not None and self.spell_value(g, it) >= ANNUL_MIN_VALUE else NEG
+        if n == "Envelop":
+            it = self.counter_target(g, lambda x: x.card.face.is_type("Sorcery"))
             return 36.0 if it is not None and self.spell_value(g, it) >= ANNUL_MIN_VALUE else NEG
         if n == "Gut Shot":
             if mode == "phyrexian" and self.me(g).life < GUT_SHOT_MIN_LIFE:
@@ -234,7 +238,7 @@ class BlueBot(Bot):
         spell = self.building(g, d)
         c = self.ref_card(g, o)
         v = o.value
-        if spell in ("Counterspell", "Force Spike", "Dispel", "Blue Elemental Blast", "Hydroblast", "Steel Sabotage", "Annul"):
+        if spell in ("Counterspell", "Force Spike", "Dispel", "Blue Elemental Blast", "Hydroblast", "Steel Sabotage", "Annul", "Envelop"):
             it = self.ref_spell(g, o)
             if it is not None:
                 if spell == "Hydroblast" and "R" not in it.card.face.colors:

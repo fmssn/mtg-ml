@@ -202,6 +202,18 @@ def test_blue_hydroblasts_a_burn_spell_and_gut_shots_an_x1():
     assert _label(g, RedBot(0)) == "Cast End the Festivities"
 
 
+def test_blue_envelops_a_sorcery_but_not_an_instant():
+    g = scenario(p0={"hand": ["Faithless Looting"], "battlefield": ["Mountain"]}, p1={"hand": ["Envelop"], "battlefield": ["Island"]})
+    choose(g, "Cast Faithless Looting")
+    pass_priority(g)
+    assert _label(g, BlueBot(1)) == "Cast Envelop"
+    g = scenario(p0={"hand": ["Lightning Bolt"], "battlefield": ["Mountain"]}, p1={"hand": ["Envelop"], "battlefield": ["Island", "Delver of Secrets"]})
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target Delver of Secrets")
+    pass_priority(g)
+    assert _label(g, BlueBot(1)) == "Pass priority"
+
+
 def test_jund_uses_faerie_macabre_and_breath_weapon():
     g = scenario(p0={"hand": ["Faerie Macabre"]}, p1={"graveyard": ["Brainstorm", "Ponder", "Counterspell", "Mental Note"]}, active=1)
     pass_priority(g)
