@@ -26,6 +26,29 @@ Feature set 3 (`opp:deck:`) lives in PR fmssn/mtg-ml#28 (`claude/multi-matchup`)
 
 ## The gaps, by priority
 
+### P0. A distinguishability test (write it first; it guards P1 to P4 and future feature sets)
+
+Every gap above has the same shape: two options that lead to clearly different games get the same input tokens. So the policy *cannot* choose between them, whatever it learns. Nothing tests for this today. Write the test before the features, watch it fail on set 3, then make it pass on set 4.
+
+**Definition.** At a decision, options `a` and `b` *collide* when `featurize(game, player, features=F)` gives them identical option token lists (hashes plus entity pointers, after resolving each pointer to its entity's token set). Options that point to two entities with identical token sets count as identical, which is exactly the Terror case.
+
+A collision is a **defect** when the two options lead to different outcomes. To check, fork the game, step `a` in one copy and `b` in the other, and compare a *canonical outcome*. The canonical outcome is the omniscient state with object ids removed:
+- per player: life, hand names, graveyard names, library size, mana pool;
+- the multiset of per-permanent tuples: name, controller, tapped, damage, counters, attacking, P/T, and the sorted names of the creatures blocking it or the name of the attacker it blocks;
+- the stack as (name, controller, x, target names).
+
+Identical canonical outcomes mean the engine merged two equivalent choices correctly (`equiv_key`). That's fine and not a defect. Hidden information is not a concern, because `featurize` only sees the decider's view.
+
+**Two parts:**
+1. **`tools/feature_collisions.py`** (a measurement tool, not imported by the package). Play N games (bots, or a checkpoint via `--agents`) on either engine, check every decision with two or more options, and print a table per decision kind: decisions, colliding decisions, defect decisions, with an example label pair for each. Use it to show the set-3 vs set-4 table in the PR description.
+2. **A test in an `ENGINE_MODULES` module**, so it runs on both engines:
+   - The fixture decisions from P1 to P3, stored small in `tests/data/feature_fixtures.json`: game constructor args plus the action prefix, enough to rebuild the game by stepping. Don't store the 50 MB replay files.
+   - For each fixture: on set 3, the named option pair collides (`xfail`/expected, documenting the old gap); on set 4, it must not collide.
+   - Plus a sweep over about 20 fixed-seed bot games: no defect collisions on set 4, except an explicit, commented allow-list (for example decision kinds whose difference only shows up later, if any turn up).
+   - Mark the sweep `@pytest.mark.slow` if it takes more than a few seconds.
+
+Expect the set-3 table to light up `declare_blocker` (same-name attackers) and possibly `pay_mana` (identical land names with different untapped partners). Not every gap shows up as a collision: X values, basic-land searches and Delver's reveal have distinct option keys, so they don't collide, but their tokens carry no meaning the network can generalise from (no order for X, no colour for a basic, no type for the revealed card). Cover those with P3's own tests, asserting the preview tokens are present. Report the set-3 numbers in the PR: they are the baseline for every later feature set. Add the tool to the `game-review` skill's checklist once it exists.
+
 ### P1. Combat relations (verdict: confirmed; seen in 12 of 50 games, often lethal)
 
 What the policy cannot see today:
@@ -102,8 +125,9 @@ The pattern: `option_preview` handles only priority cast/activate and target. Ev
 ## Done when
 
 1. Set 1 to 3 digests are unchanged, set-4 tokens are present and identical on both engines, and `make test` / `make difftest` / `make lint` pass.
-2. At the P1 fixtures the two block options have different token sets, and at the P2 fixtures `incoming_lethal` is set.
-3. `docs/features.md` documents set 4.
-4. Follow-up, after merge: fine-tune `r4-control` or its successor with `--features 4` (new rows start untrained). Then re-run the `game-review` skill on the new checkpoint; the 0.50/0.50 block ties and the X=0 Hydras should be gone. Record the run in `docs/experiments/`.
+2. `tools/feature_collisions.py` shows no defect collisions on set 4 over the sweep (set-3 baseline table in the PR description), and the fixture test passes on both engines.
+3. At the P1 fixtures the two block options have different token sets, and at the P2 fixtures `incoming_lethal` is set.
+4. `docs/features.md` documents set 4.
+5. Follow-up, after merge: fine-tune `r4-control` or its successor with `--features 4` (new rows start untrained). Then re-run the `game-review` skill on the new checkpoint; the 0.50/0.50 block ties and the X=0 Hydras should be gone. Record the run in `docs/experiments/`.
 
 Consider entity attention (`entity_attn >= 1`) for the next fresh run. On its own it can't fix P1, because the relation is missing from the inputs, but with P1's pointer in place it can use it.
