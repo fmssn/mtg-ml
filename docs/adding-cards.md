@@ -188,14 +188,17 @@ All fields are optional unless marked. Unknown fields are an error in both engin
 | `madness`, `plot` | madness cost (a discarded card goes to exile, and a trigger lets its owner cast it for this cost at any speed); plot cost (a sorcery-speed special action exiles it; cast free as a sorcery on a later turn, option "Cast X (plotted)") |
 | `overload` + `overload_effect` | cast mode "overload": this cost, no targets, `overload_effect` instead of `effect` |
 | `alternative_cost`, `flashback_cost` | `{ sacrifice = "mountain", n = N }`: sacrifice lands instead of paying mana (cast mode "alternative" from hand; flashback with only `flashback_cost` is free apart from the sacrifice) |
+| `prototype` + `prototype_face` | cast mode "prototype" for this cost; the permanent (and spell) uses the named `[[face]]` (Boulderbranch Golem) |
+| `station` | `{ n = 7, keywords = ["flying"] }`: a Spacecraft, a creature with these keywords at `n` charge counters (an ability with `tap_other = "creature"` and op `station` adds them) |
+| `additional_choose_creature` | `true`: choose a creature you control or reveal a creature card from hand as the spell is cast (op `damage_target_from` with `from = "chosen_power"`) |
 | `bargain` | `true`: cast mode "bargain", sacrificing an artifact, enchantment or token as an additional cost; an `etb` trigger with `condition = { bargained = true }` only triggers then (Troublemaker Ouphe) |
 | `enters_tapped`, `etb_x_counters`, `back` | `back` names a `[[face]]` (transform) |
-| `abilities` | `[{ name (required), cost, tap, sac_self, sac_other, discard_self, discard_other, exile_self, x_target_mv, x_reveal, zone = "battlefield" \| "hand", sorcery_speed, mana = ["B", "R"], targets, effect }]`; `mana` makes it a mana ability; `discard_other` / `exile_self`: discard a card / exile this permanent as a cost; `x_target_mv = 2`: the cost has {X}{X}, X = the (single) target's mana value, only affordable targets are offered (Gorilla Shaman); `x_reveal = "red"`: choose X, then reveal X red cards from hand as a cost (Martyr of Ashes) |
-| `triggers` | `[{ name (required), event, effect, condition, targets }]`; `targets` are chosen as the trigger goes on the stack, and a trigger without legal targets is removed (603.3d), events: `etb`, `to_graveyard_from_battlefield`, `cast`, `you_sacrifice_another`, `your_upkeep`, `you_cast` (another spell its controller casts, from the battlefield), `third_draw` (its owner draws their third card in a turn, from the graveyard); condition: `{ sacrificed_subtype = "Eldrazi" }`, `{ spell = "noncreature" \| "instant_or_sorcery" }` (for `you_cast`), `{ bargained = true }` (for `etb`) |
+| `abilities` | `[{ name (required), cost, tap, sac_self, sac_other, discard_self, discard_other, exile_self, x_target_mv, x_reveal, zone = "battlefield" \| "hand", sorcery_speed, mana = ["B", "R"], targets, effect }]`; `mana` makes it a mana ability; `discard_other` / `exile_self`: discard a card / exile this permanent as a cost; `x_target_mv = 2`: the cost has {X}{X}, X = the (single) target's mana value, only affordable targets are offered (Gorilla Shaman); `x_reveal = "red"`: choose X, then reveal X red cards from hand as a cost (Martyr of Ashes); `zone = "graveyard"`: activated from its owner's graveyard (with `exile_self`: Bramble Wurm); `mana_amount = { n, if_control = [subtypes] }`: a mana ability making `n` units while its controller controls each subtype (Urza's lands; extra units float); a mana ability with a `cost` (exactly `{1}`) is a **filter**, offered only while paying ("Activate X for U"), `once_per_turn` limits it (Barrels of Blasting Jelly); `tap_other = "creature"`: tap another untapped creature you control as a cost (station) |
+| `triggers` | `[{ name (required), event, effect, condition, targets }]`; `targets` are chosen as the trigger goes on the stack, and a trigger without legal targets is removed (603.3d), events: `etb`, `to_graveyard_from_battlefield`, `cast`, `you_sacrifice_another`, `your_upkeep`, `you_cast` (another spell its controller casts, from the battlefield), `third_draw` (its owner draws their third card in a turn, from the graveyard); condition: `{ sacrificed_subtype = "Eldrazi" }`, `{ spell = "noncreature" \| "instant_or_sorcery" }` (for `you_cast`), `{ bargained = true }` (for `etb`); `optional_targets = true`: "up to one target", a "No target" option comes first and the trigger is never removed |
 
 Target kinds: `creature`, `nonlegendary_creature`, `nonartifact_creature`, `creature_you_control`, `creature_you_dont_control`, `land`, `nonland_permanent`, `permanent`, `artifact`, `noncreature_artifact`, `blue_permanent`, `red_permanent`, `spell`, `blue_spell`, `red_spell`, `instant_spell`, `artifact_spell`, `player`, `opponent`, `player_with_creature`, `creature_of_target_player` (a creature controlled by the player chosen as the previous target: Searing Blaze), `another_creature` (a creature not already chosen as a target of the same spell: Cast into the Fire), `artifact_or_enchantment_spell`, `artifact_or_enchantment_you_dont_control`, `any`.
 
-Sacrifice filters (`additional_sac`, `sac_other`, land-sacrifice costs): `artifact`, `artifact_or_creature`, `mountain`, `artifact_enchantment_or_token` (bargain).
+Sacrifice filters (`additional_sac`, `sac_other`, land-sacrifice costs): `artifact`, `artifact_or_creature`, `mountain`, `artifact_enchantment_or_token` (bargain), `land` (Crop Rotation).
 
 Where the vocabulary lives, for when it needs to grow:
 
@@ -212,7 +215,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 
 | op | parameters | effect |
 |---|---|---|
-| `draw` | `n`, `n_cast_from_graveyard` | the controller draws `n` (or `n_cast_from_graveyard` when the spell was cast from a graveyard) |
+| `draw` | `n`, `n_cast_from_graveyard`, `each_controlling` | the controller draws `n` (or `n_cast_from_graveyard` when the spell was cast from a graveyard); `each_controlling`: instead each player who controls a permanent with that name (Bonder's Ornament) |
 | `mill` | `who` = `you` \| `target_player`, `n` | mill `n` |
 | `counter_target` | `if_color` | counter the targeted spell (only if it has colour `if_color`, e.g. `"U"`) |
 | `counter_target_unless_paid` | `cost` | its controller may pay `cost`; otherwise counter it (Force Spike) |
@@ -221,7 +224,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 | `tap_target` | `skip_untap` | tap it; it skips that many of its controller's untap steps |
 | `grant_target` | `keywords` | it gains the keywords until end of turn |
 | `create_token` | `token`, `n` | the controller creates `n` tokens (a `[[token]]` name) |
-| `gain_life` | `n` | the controller gains `n` life |
+| `gain_life` | `n`, `per_storm`, `n_from = "source_power"` | the controller gains `n` life (or life equal to the source's power: Boulderbranch Golem) |
 | `lose_life` | `who` = `you` \| `opponent` \| `target_player` \| `target_controller`, `n` | that player loses `n` life |
 | `counter_on_source` | | a +1/+1 counter on the source, if it is still on the battlefield |
 | `damage_target` | `n`, `index`, `n_landfall` | the source (the spell itself, or the ability's source) deals `n` damage to target `index` (default 0; creature or player); `n_landfall` instead if a land entered under the controller's control this turn |
@@ -234,9 +237,16 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 | `exile_all_graveyards` | | exile both graveyards |
 | `exile_target` | | exile the targeted permanent |
 | `exile_from_graveyards` | `n` | the controller exiles up to `n` cards from any graveyards, chosen one at a time on resolution (Faerie Macabre; the engine has no graveyard targets) |
-| `search_library` | `supertype`, `type`, `subtypes_any`, `dest` = `battlefield` \| `hand`, `tapped`, `reveal`, `what` | search for a matching card (finding nothing is allowed), put it there, shuffle |
+| `search_library` | `supertype`, `type`, `subtypes_any`, `colorless`, `dest` = `battlefield` \| `hand`, `tapped`, `reveal`, `what` | search for a matching card (finding nothing is allowed), put it there, shuffle |
 | `optional_payment` | `cost`, `prompt`, `then` | the controller may pay; if paid, run the `then` ops |
-| `scry` | `n` (only 1) | scry 1 |
+| `scry` | `n` | scry 1 (top or bottom), or scry N > 1 as one ORDER decision over every top/bottom split in every order |
+| `surveil` | `n` (only 1) | surveil 1 |
+| `dig` | `n`, `type`, `colorless`, `what` | look at the top `n`, may put a matching card into your hand (revealed), the rest on the bottom (Ancient Stirrings) |
+| `cascade` | | on a `cast` trigger: cascade below the spell's mana value (Maelstrom Colossus) |
+| `station` | | charge counters on the source equal to the power of the creature tapped for `tap_other` |
+| `damage_target_from` | `from` = `x` \| `chosen_power`, `index` | damage equal to X, or to the power of the creature chosen as the spell was cast |
+| `return_random_from_graveyard` | `type` | a card of that type at random from your graveyard to your hand (Haunted Fengraf) |
+| `return_from_graveyard` | `types`, `n`, `each_type`, `whose` = `you` \| `any` | up to `n` cards of those types to their owners' hands, chosen on resolution (`each_type`: one per type: Call Damage Control) |
 | `explore_target` | | the targeted creature explores |
 | `shuffle_into_library` | | dies trigger: shuffle this card from the graveyard into its owner's library |
 | `custom` | `fn` | `delver_reveal`, `brainstorm`, `ponder`, `deem_inferior`, `opponent_discards_else_draw`, `wildfire`, `duress`, `highway_robbery`, `relic_exile_one` |
