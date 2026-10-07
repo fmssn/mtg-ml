@@ -19,9 +19,11 @@ stream=$RUNNER_TEMP/claude.jsonl
 export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
 export BASH_DEFAULT_TIMEOUT_MS=180000 BASH_MAX_TIMEOUT_MS=300000
 
-timeout "$4" claude -p "Work on the PR below, following your instructions." \
+# PRs branched before the turn cap existed run their own (older) workflow file, which
+# passes only four arguments: default the timeout and turn cap instead of aborting.
+timeout "${4:-15m}" claude -p "Work on the PR below, following your instructions." \
   --model "$2" --output-format stream-json --verbose \
-  --max-budget-usd "$3" --max-turns "$5" \
+  --max-budget-usd "$3" --max-turns "${5:-30}" \
   --permission-mode dontAsk --permission-prompts none \
   --settings '{"sandbox":{"enabled":false}}' \
   --append-system-prompt "$(cat "$1")" \
