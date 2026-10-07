@@ -7,6 +7,7 @@
     python -m mtg_ml.rl.evaluate runs/a/latest.pt bot --jund  # the benchmark: learner Jund vs the blue bot
     python -m mtg_ml.rl.evaluate runs/a/latest.pt bot --jund --greedy   # ... with argmax play
     python -m mtg_ml.rl.evaluate ladder a.pt b.pt c.pt --games 200 --out ladder.json   # rate a reference ladder
+    python -m mtg_ml.rl.evaluate runs/a/final.pt bot --jund --features 2   # featurize it in set 2 whatever its checkpoint says
     python -m mtg_ml.rl.evaluate runs/red/latest.pt runs/jund.pt --matchup jund_madness --seat 1   # Red Madness learner vs a Jund checkpoint
 
 Every seed is played twice with the seats swapped, so both sides see the
@@ -45,6 +46,7 @@ import math
 import os
 
 from ..backend import ENV_VAR, engine_name
+from ..encode import FEATURE_VERSIONS
 from ..match import DEFAULT_MATCHUP, MatchResult, game_seed, matchup_decks
 from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, create_pool, play
 
@@ -99,13 +101,13 @@ def score(games: list, matchup: str = DEFAULT_MATCHUP) -> dict:
 
 
 def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
-                 seat: int | None = None, matchup: str = DEFAULT_MATCHUP) -> dict:  # fmt: skip
+                 seat: int | None = None, matchup: str = DEFAULT_MATCHUP, features: dict | None = None) -> dict:  # fmt: skip
     specs = paired_specs(opponent, games, jund_only=jund_only, seat=seat, matchup=matchup)
-    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass), n_jobs).games, matchup)
+    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass, features=features or {}), n_jobs).games, matchup)
 
 
 def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
-                     seat: int | None = None, matchup: str = DEFAULT_MATCHUP) -> dict:  # fmt: skip
+                     seat: int | None = None, matchup: str = DEFAULT_MATCHUP, features: dict | None = None) -> dict:  # fmt: skip
     """Best-of-three matches on paired seeds (`seat`, `jund_only`: seat 0: one
     match per seed, the learner in that seat). Each round plays the next game
     of every unfinished match as one batch. Returns match scores like `score`."""
@@ -122,7 +124,7 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
                 todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n, matchup=matchup))
         if not todo:
             break
-        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass)
+        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass, features=features or {})
         for seats, winner, reason, _, _, seed in play(procs, [sp for _, sp in todo.values()], job, n_jobs).games:
             res, spec = todo[(seed, seats)]
             res.games.append((spec.starting_player, winner, reason))
@@ -154,7 +156,7 @@ def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: in
 def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, eval_games: int, eval_bo3_matches: int, bench_games: int, bench_bo3_matches: int,
                     max_turns: int = 100, inference: str = "local", blocks: tuple = EVAL_BLOCKS, bench_greedy_games: int = 0,
                     ladder: tuple = (), ladder_games: int = 200, ladder_ratings: str = "", ladder_greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
-                    matchup: str = DEFAULT_MATCHUP, seat: int | None = None, opponent: str = "") -> dict:
+                    matchup: str = DEFAULT_MATCHUP, seat: int | None = None, opponent: str = "", features: dict | None = None) -> dict:
     """The trainer's evaluation of a policy file: learner vs the opponents of
     `blocks` (the random agent, the scripted bots, the oldest pool snapshot
     `pool0`) on paired seeds (game 1 decks), best-of-three matches against
@@ -165,12 +167,13 @@ def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, e
     fixed training `opponent` checkpoint, the pool0 block plays it instead
     (`eval/opponent/<deck>`); `seat`: the learner only plays that seat
     (its deck in `matchup`). Runs on any pool (`rl.collect` calls it as
-    `fn(pool, *args)`)."""
+    `fn(pool, *args)`). `features`: `Job.features` overrides for pool
+    snapshots."""
     out = {}
     opponents = {"random": RANDOM, "bot": BOT, "pool0": opponent or pool0}
     decks = [DECK_KEYS[d] for d in matchup_decks(matchup)]
     decks = decks if seat is None else [decks[seat]]
-    kw = dict(auto_mana=auto_mana, auto_pass=auto_pass, seat=seat, matchup=matchup)
+    kw = dict(auto_mana=auto_mana, auto_pass=auto_pass, seat=seat, matchup=matchup, features=features)
     if ladder and matchup != DEFAULT_MATCHUP:
         _warn_ladder_skipped(matchup)
         ladder = ()  # pool0 is played instead, as without a ladder
@@ -264,17 +267,20 @@ def rung_names(paths: list[str]) -> list[str]:
     return [f"{k}_{s}" if stems.count(s) > 1 else s for k, s in enumerate(stems)]
 
 
-def rate_ladder(procs, paths: list[str], games: int, n_jobs: int, max_turns: int = 100, inference: str = "local", greedy: bool = False) -> dict:
+def rate_ladder(procs, paths: list[str], games: int, n_jobs: int, max_turns: int = 100, inference: str = "local", greedy: bool = False, features: int = 0) -> dict:
     """Round robin of the checkpoints `paths` on paired seeds, `games` per
     pair. Returns the ratings JSON: {"ratings": {path: Elo}, "games",
-    "greedy", "results": [[i, j, score of i, games], ...]}."""
+    "greedy", "results": [[i, j, score of i, games], ...]}. `features` > 0:
+    every rung plays in that feature-set version, whatever its checkpoint
+    says (`Job.features`)."""
     results = []
     for i in range(len(paths)):
         for j in range(i + 1, len(paths)):
-            s, _, n = head_to_head(procs, paths[i], paths[j], games, n_jobs, 0, max_turns, inference, greedy=greedy)["all"]
+            over = {LEARNER: features, paths[j]: features} if features else None
+            s, _, n = head_to_head(procs, paths[i], paths[j], games, n_jobs, 0, max_turns, inference, greedy=greedy, features=over)["all"]
             results.append([i, j, s, n])
     elo = fit_ratings(len(paths), results)
-    return {"ratings": {p: round(r, 1) for p, r in zip(paths, elo)}, "games": games, "greedy": greedy, "results": results}
+    return {"ratings": {p: round(r, 1) for p, r in zip(paths, elo)}, "games": games, "greedy": greedy, "results": results} | ({"features": features} if features else {})
 
 
 def load_or_rate_ladder(procs, paths: list[str], path: str, games: int, n_jobs: int, max_turns: int = 100, inference: str = "local", greedy: bool = False) -> dict:
@@ -318,13 +324,14 @@ def ladder_main(argv) -> None:
     ap.add_argument("--greedy", action="store_true", help="argmax play instead of sampling")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")
+    ap.add_argument("--features", type=int, default=0, choices=FEATURE_VERSIONS, help="featurize every checkpoint in this feature-set version instead of the one its config records (docs/features.md)")
     args = ap.parse_args(argv)
     if len(args.checkpoints) < 2:
         ap.error("a ladder needs at least two checkpoints")
     if args.engine:
         os.environ[ENV_VAR] = engine_name(args.engine)
     with create_pool(args.workers) as procs:
-        res = rate_ladder(procs, args.checkpoints, args.games, args.workers, greedy=args.greedy)
+        res = rate_ladder(procs, args.checkpoints, args.games, args.workers, greedy=args.greedy, features=args.features)
     tmp = args.out + ".tmp"
     with open(tmp, "w") as f:
         json.dump(res, f, indent=1)
@@ -353,12 +360,19 @@ def main(argv=None) -> None:
     ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")
     ap.add_argument("--auto-mana", action="store_true", help="games with Game(auto_mana=True), for policies trained with it")
     ap.add_argument("--auto-pass", action="store_true", help="games with Game(auto_pass=True), for policies trained with it")
+    ap.add_argument("--features", type=int, default=0, choices=FEATURE_VERSIONS, help="featurize the checkpoint in this feature-set version instead of the one its config records (docs/features.md)")
+    ap.add_argument("--opponent-features", type=int, default=0, choices=FEATURE_VERSIONS, help="the same for the opponent checkpoint")
     args = ap.parse_args(argv)
+    if args.opponent_features and args.opponent in (RANDOM, BOT):
+        ap.error("--opponent-features needs a checkpoint opponent")
     if args.engine:
         os.environ[ENV_VAR] = engine_name(args.engine)
     with create_pool(args.workers) as procs:
         fn = head_to_head_bo3 if args.bo3 else head_to_head
-        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund, greedy=args.greedy, auto_mana=args.auto_mana, auto_pass=args.auto_pass, seat=args.seat, matchup=args.matchup)
+        over = {LEARNER: args.features} if args.features else {}
+        if args.opponent_features:
+            over[args.opponent] = args.opponent_features
+        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund, greedy=args.greedy, auto_mana=args.auto_mana, auto_pass=args.auto_pass, seat=args.seat, matchup=args.matchup, features=over)
     for k, (s, ci, n) in res.items():
         print(f"{k:5s} {s:.3f}  95% CI {ci}  ({n} games)")
 

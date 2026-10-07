@@ -243,6 +243,7 @@ def test_failed_job_collects_requests_in_flight(monkeypatch):
 
     monkeypatch.setattr(rollout, "_ServerEvaluator", FakeEvaluator)
     monkeypatch.setattr(rollout, "_step", failing_step)
+    monkeypatch.setattr(rollout, "policy_features", lambda path, version=0: 1)  # no checkpoint behind the fake server
     specs = [GameSpec(seed=s, seats=(LEARNER, LEARNER)) for s in range(8)]
     with pytest.raises(RuntimeError, match="boom"):
         run_job(Job(specs, "unused.pt", 1, max_turns=20, engine=ENGINE, inference="server", groups=4))
