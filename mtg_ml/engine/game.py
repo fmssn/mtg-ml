@@ -1586,7 +1586,7 @@ class Game:
         if mode == "plot":
             return O.FREE if d.plot is not None else None
         if mode == "alternative":
-            return O.FREE if d.alternative_sac is not None else None
+            return O.FREE if d.alternative_sac is not None or d.alternative_reveal else None
         if mode == "phyrexian":
             return d.phyrexian_cost
         if mode == "bargain":
@@ -1654,6 +1654,8 @@ class Game:
         if d.additional_discard and len(self.players[p].hand) - (card.zone == "hand") < 1:
             return False
         if mode == "phyrexian" and self.players[p].life < d.phyrexian_life:
+            return False
+        if mode == "alternative" and d.alternative_reveal and any(c.face.is_type("Land") for c in self.players[p].hand if c is not card):
             return False
         if d.additional_power and not self._power_sources(p, card):
             return False
@@ -1736,6 +1738,10 @@ class Game:
         sac = self._mode_sac(card, mode)
         for _ in range(sac[1] if sac else 0):
             yield from self._choose_sacrifice(p, sac[0], card.name)
+        if mode == "alternative" and d.alternative_reveal:
+            for c in self.players[p].hand:
+                c.known_to = {0, 1}
+            self._log(f"p{p} reveals their hand for {card.name}: {', '.join(c.name for c in self.players[p].hand) or 'empty'}")
         if mode == "escape":
             yield from self._exile_from_graveyard(p, d.escape_exile, card.name)
         if mode == "evidence":
@@ -2236,8 +2242,7 @@ def _take_initiative_effect(g: Game, item: StackItem):
     yield from g.take_initiative(item.controller)
 
 
-# Its op, as on a card spec (encode `e:res:op:` tokens; native: Op::TakeInitiative).
-_take_initiative_effect.ops = ({"op": "take_initiative"},)
+_take_initiative_effect.ops = ({"op": "take_initiative"},)  # read by encode.option_preview, as Rust's Op::TakeInitiative
 
 
 # The initiative's inherent triggers (725.2), with the Undercity as their source.

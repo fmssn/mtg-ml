@@ -649,7 +649,7 @@ class NativeGame:
             "madness": d.madness,
             "overload": d.overload,
             "plot": FREE if d.plot is not None else None,
-            "alternative": FREE if d.alternative_sac is not None else None,
+            "alternative": FREE if d.alternative_sac is not None or d.alternative_reveal else None,
             "phyrexian": d.phyrexian_cost,
             "bargain": d.cost if d.bargain else None,
             "omen": card.defn.back.cost if card.defn.omen else None,

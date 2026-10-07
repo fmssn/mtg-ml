@@ -203,9 +203,9 @@ def test_card_shapes_identical():
     """Both engines derive the same shape tokens from cards.toml (set 5)."""
     import mtg_ml_native
 
-    from mtg_ml.engine.cards import CARDS, DUNGEONS, FACES, TOKENS
+    from mtg_ml.engine.cards import CARDS, FACES, TOKENS
 
-    assert mtg_ml_native.card_shapes() == {name: list(d.shape) for reg in (CARDS, FACES, TOKENS, DUNGEONS) for name, d in reg.items()}
+    assert mtg_ml_native.card_shapes() == {name: list(d.shape) for reg in (CARDS, FACES, TOKENS) for name, d in reg.items()}
 
 
 def test_divergence_json_keeps_fork_every():

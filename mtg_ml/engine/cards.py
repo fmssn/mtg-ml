@@ -864,7 +864,7 @@ def colors_of(spec: dict) -> frozenset[str]:
 
 def _land_sac(spec: dict | None) -> tuple[str, int] | None:
     """{ sacrifice = "mountain", n = 2 }: a cost of sacrificing lands instead of mana."""
-    if spec is None:
+    if spec is None or spec == {"reveal_hand": True}:
         return None
     if set(spec) != {"sacrifice", "n"} or spec["sacrifice"] != "mountain":
         raise ValueError(f"unsupported land sacrifice cost {spec!r}")
@@ -949,7 +949,7 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
     if "flashback_cost" in spec:
         t += ["e:cost:flashback", "e:cost:sac_lands"]
     if "alternative_cost" in spec:
-        t += ["e:cost:alternative", "e:cost:sac_lands"]
+        t += ["e:cost:alternative", "e:cost:reveal_hand" if spec["alternative_cost"] == {"reveal_hand": True} else "e:cost:sac_lands"]
     if spec.get("ward"):
         t.append("e:ward")
     for k in ("enters_tapped", "etb_x_counters", "enters_tapped_unless_forests"):
@@ -969,16 +969,20 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t.append(f"e:ab:zone:{a.get('zone', 'battlefield')}")
         if "mana" in a:
             t += ["e:ab:mana"] + [f"e:ab:mana:{c}" for c in a["mana"]]
-            if a.get("mana_amount"):
-                t.append("e:ab:mana_amount")
+        if "mana_amount" in a:
+            t.append(f"e:ab:mana_amount:{a['mana_amount']}")
         mv = M(a.get("cost")).mana_value
         if mv > 0:
             t.append(f"e:ab:mv:{min(mv, SHAPE_AB_MV_CAP)}")
-        for k in ("tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "return_land", "once_per_turn"):
+        for k in ("tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self"):
             if a.get(k):
                 t.append(f"e:ab:{k}")
         if "sac_other" in a:
             t.append(f"e:ab:sac_other:{a['sac_other']}")
+        if "return_land" in a:
+            t.append(f"e:ab:return_land:{a['return_land']}")
+        if a.get("once_per_turn"):
+            t.append("e:ab:once_per_turn")
         if a.get("x_target_mv") or "x_reveal" in a:
             t.append("e:ab:x")
         if a.get("sorcery_speed"):
@@ -1025,6 +1029,7 @@ def card_def(spec: dict) -> CardDef:
         overload_effect=make_effect(spec.get("overload_effect")),
         additional_discard=spec.get("additional_discard", False),
         alternative_sac=_land_sac(spec.get("alternative_cost")),
+        alternative_reveal=spec.get("alternative_cost") == {"reveal_hand": True},
         flashback_sac=_land_sac(spec.get("flashback_cost")),
         phyrexian_cost=M(spec.get("cost")).minus_colored(phy) if phy.colored else None,
         phyrexian_life=2 * phy.mana_value,

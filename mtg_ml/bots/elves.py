@@ -63,6 +63,7 @@ class ElvesBot(Bot):
             "Vitu-Ghazi Inspector": 2.5,
             "Deglamer": 2,
             "Faerie Macabre": 2,
+            "Land Grant": 3.5 if self.land_need(g) > 0 else 1.5,
         }.get(name, 1.0)
 
     def land_need(self, g: Game) -> float:
@@ -74,7 +75,7 @@ class ElvesBot(Bot):
         if size <= 5:
             return True
         hand = self.hand(g)
-        lands = sum(1 for c in hand if c.face.is_type("Land"))
+        lands = sum(1 for c in hand if c.face.is_type("Land") or c.name == "Land Grant")  # Land Grant finds a Forest
         dorks = sum(1 for c in hand if c.name in MANA_ELVES or c.name == "Priest of Titania")
         lo, hi = KEEP_LANDS[size]
         return lo <= lands <= hi and lands + dorks >= 2
@@ -143,6 +144,11 @@ class ElvesBot(Bot):
             return NEG
         if n == "Sagu Wildling" and mode == "omen":
             return 6.5 if self.land_need(g) > 0 else NEG
+        if n == "Land Grant":
+            # Free (revealing a land-free hand) before the land drop; for mana only when short of lands.
+            if self.land_need(g) <= 0:
+                return NEG
+            return 9.8 if mode == "alternative" else 5.0
         if n in ("Winding Way", "Lead the Stampede"):
             return 7.0 if len(self.hand(g)) <= 5 else 3.0
         if n == "Monstrous Emergence":

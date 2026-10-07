@@ -668,6 +668,17 @@ impl Eng {
                 self.choose_sacrifice(p, flt, cname)?;
             }
         }
+        if mode == Method::Alternative && d.alternative_reveal {
+            let st = self.s();
+            for i in 0..st.players[p as usize].hand.len() {
+                let h = st.players[p as usize].hand[i];
+                st.cm(h).known_to = BOTH;
+            }
+            st.push_log_lazy(|s| {
+                let names: Vec<&str> = s.players[p as usize].hand.iter().map(|&h| s.c(h).name()).collect();
+                format!("p{p} reveals their hand for {cname}: {}", if names.is_empty() { "empty".to_string() } else { names.join(", ") })
+            });
+        }
         if mode == Method::Escape {
             self.exile_from_graveyard(p, d.escape_exile, cname)?;
         }
