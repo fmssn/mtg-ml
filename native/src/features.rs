@@ -418,7 +418,7 @@ fn mana_preview(st: &State, player: u8, cost: &ManaCost, sac: Option<SacFilter>,
     out(format_args!("pv:mana_left_after:{}", (avail - cost.mana_value()).clamp(0, MANA_LEFT_CAP)));
     // Colours nothing can make are never left (skips the feasibility search).
     let mut makes = pl.pool.iter().filter(|(_, n)| *n > 0).fold(0u8, |m, (c, _)| m | bit(*c));
-    for &(ci, ai) in &sources {
+    for &(ci, ai) in sources.iter().chain(st.mana_filters(player, exclude).iter()) {
         makes |= st.c(ci).face().abilities[ai].mana.as_ref().map_or(0, |v| v.iter().fold(0, |m, c| m | bit(*c)));
     }
     for col in PREVIEW_COLORS {

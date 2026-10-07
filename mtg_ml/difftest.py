@@ -46,14 +46,15 @@ def _card(c) -> tuple:
     return (
         c.uid, c.oid, c.name, c.defn.name, c.owner, c.controller, c.zone, c.is_token, c.transformed, c.tapped, c.damage,
         c.deathtouch_damage, c.counters, c.sick, c.attached_to, c.skip_untap,
-        [(sorted(t.keywords), t.power, t.toughness) for t in c.temp], sorted(c.known_to),
+        [(sorted(t.keywords), t.power, t.toughness) for t in c.temp], sorted(c.known_to), c.prototyped, c.charge,
+        c.mana_used_turn,
     )  # fmt: skip
 
 
 def _data(d: dict) -> list:
     out = []
     for k, v in sorted(d.items()):
-        out.append((k, _card(v) if k in ("card", "sacrificed") else v))
+        out.append((k, _card(v) if k in ("card", "sacrificed", "chosen") else v))
     return out
 
 

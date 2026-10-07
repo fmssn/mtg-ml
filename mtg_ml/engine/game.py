@@ -25,6 +25,7 @@ and action history.
 from __future__ import annotations
 
 import inspect
+import itertools
 import random
 from typing import Callable, Iterable
 
@@ -49,8 +50,9 @@ STEPS = (
 
 MAX_HAND = 7
 # Cast modes from the hand, in the order they are offered.
-HAND_MODES = ("normal", "bestow", "overload", "alternative", "phyrexian", "bargain")
+HAND_MODES = ("normal", "bestow", "overload", "alternative", "phyrexian", "bargain", "prototype")
 BARGAIN_SAC = "artifact_enchantment_or_token"  # bargain's sacrifice filter
+FILTER_HURT = 1 << 20  # auto_mana: a mana filter is the payment of last resort
 
 
 class GameOver(Exception):
@@ -472,6 +474,10 @@ class Game:
             for i, ab in enumerate(card.face.abilities):
                 if ab.zone == "hand" and self._can_activate(p, card, ab):
                     opts.append(Option(f"{card.name}: {ab.name}", ("activate", card.name, ab.name), ("activate", card, i)))
+        for card in self._dedupe_by_name(pl.graveyard):
+            for i, ab in enumerate(card.face.abilities):
+                if ab.zone == "graveyard" and self._can_activate(p, card, ab):
+                    opts.append(Option(f"{card.name}: {ab.name}", ("activate", card.name, ab.name), ("activate", card, i)))
         for card in self._dedupe_by_equiv(c for c in self.battlefield if c.controller == p):
             for i, ab in enumerate(card.face.abilities):
                 if ab.zone != "battlefield":
@@ -530,14 +536,21 @@ class Game:
     def is_bestowed(self, c: Card) -> bool:
         return c.zone == "battlefield" and c.attached_to is not None
 
+    @staticmethod
+    def is_stationed(c: Card) -> bool:
+        """A Spacecraft with enough charge counters is an artifact creature (702.184)."""
+        return c.face.station > 0 and c.charge >= c.face.station
+
     def types(self, c: Card) -> set[str]:
         t = set(c.face.types)
         if self.is_bestowed(c):
             t.discard("Creature")
+        if self.is_stationed(c):
+            t.add("Creature")
         return t
 
     def is_creature(self, c: Card) -> bool:
-        return "Creature" in c.face.types and not self.is_bestowed(c)
+        return ("Creature" in c.face.types and not self.is_bestowed(c)) or self.is_stationed(c)
 
     def is_artifact(self, c: Card) -> bool:
         return "Artifact" in c.face.types
@@ -560,6 +573,8 @@ class Game:
 
     def keywords(self, c: Card) -> set[str]:
         k = set(c.face.keywords)
+        if self.is_stationed(c):
+            k |= c.face.station_keywords
         for t in c.temp:
             k |= t.keywords
         for a in self._auras_on(c):
@@ -602,6 +617,8 @@ class Game:
             tuple((tuple(sorted(t.keywords)), t.power, t.toughness) for t in c.temp),
             c.oid in self.attackers,
             c.oid in self.blocked,
+            c.charge,
+            c.mana_used_turn == self.turn,
         )
 
     def _dedupe_by_equiv(self, cards: Iterable[Card]) -> list[Card]:
@@ -883,12 +900,14 @@ class Game:
                 self.stack.append(item)
                 self._log(f"trigger -> stack: {item.name}")
                 if item.target_specs:
-                    # 603.3d: a triggered ability without legal targets is removed from the stack.
-                    if any(not self.target_candidates(spec, p, exclude_sid=item.sid, chosen=[]) for spec in item.target_specs):
+                    # 603.3d: a triggered ability without legal targets is removed
+                    # from the stack ('up to one target' never is).
+                    optional = t.tdef.optional_targets
+                    if not optional and any(not self.target_candidates(spec, p, exclude_sid=item.sid, chosen=[]) for spec in item.target_specs):
                         self.stack.remove(item)
                         self._log(f"{item.name}: no legal targets")
                         continue
-                    yield from self._choose_targets(p, item)
+                    yield from self._choose_targets(p, item, optional=optional)
                     self._emit_targeted(item)
 
     # ------------------------------------------------------------------
@@ -1040,8 +1059,9 @@ class Game:
         rel = "self" if c.controller == viewer else "opponent"
         return f"{c.name}#{c.oid} ({rel})", ("perm", rel, c.name)
 
-    def _choose_targets(self, p: int, item: StackItem, allowed: Callable[[tuple], bool] | None = None):
-        """`allowed`: an extra filter on the candidates (targets the cost can be paid for)."""
+    def _choose_targets(self, p: int, item: StackItem, allowed: Callable[[tuple], bool] | None = None, optional: bool = False):
+        """`allowed`: an extra filter on the candidates (targets the cost can be
+        paid for). `optional`: "up to one target", choosing none is offered first."""
         for spec in item.target_specs:
             cands = self.target_candidates(spec, p, exclude_sid=item.sid, chosen=item.targets)
             if allowed is not None:
@@ -1060,7 +1080,11 @@ class Game:
                 seen.add(k)
                 label, key = self.describe_ref(ref, p)
                 options.append(Option(f"Target {label}", ("target", spec.kind) + key, ref))
+            if optional:
+                options.insert(0, Option("No target", ("target", spec.kind, "none"), None))
             ref = yield from self.ask(p, O.TARGET, f"Choose target ({spec.kind}) for {item.name}", options)
+            if ref is None:
+                return
             item.targets.append(ref)
 
     # ------------------------------------------------------------------
@@ -1073,13 +1097,66 @@ class Game:
             if c.controller != p or c.oid in exclude:
                 continue
             for ab in c.face.abilities:
-                if ab.mana is None:
+                if ab.mana is None or ab.is_filter:
                     continue
                 if ab.tap and (c.tapped or (self.is_creature(c) and c.sick)):
                     continue
                 out.append((c, ab))
-                break  # every supported permanent has at most one mana ability
+                break  # every supported permanent has at most one plain mana ability
         return out
+
+    @staticmethod
+    def mana_ability(card: Card) -> O.AbilityDef:
+        """A permanent's plain mana ability (not a filter)."""
+        return next(a for a in card.face.abilities if a.mana is not None and not a.is_filter)
+
+    def mana_amount(self, card: Card, ab: O.AbilityDef) -> int:
+        """Units one activation makes: Urza's Tower makes three with Mine and Power-Plant."""
+        if ab.mana_amount is None:
+            return 1
+        n, subtypes = ab.mana_amount
+        mine = [c for c in self.battlefield if c.controller == card.controller]
+        if all(any(s in c.face.subtypes for c in mine) for s in subtypes):
+            return n
+        return 1
+
+    def mana_filters(self, p: int, exclude: set[int] = frozenset()) -> list[tuple[Card, O.AbilityDef]]:
+        """Usable mana filters ("{1}: add one mana of any color"), at most one per permanent."""
+        out = []
+        for c in self.battlefield:
+            if c.controller != p or c.oid in exclude:
+                continue
+            for ab in c.face.abilities:
+                if not ab.is_filter:
+                    continue
+                if ab.tap and (c.tapped or (self.is_creature(c) and c.sick)):
+                    continue
+                if ab.once_per_turn and c.mana_used_turn == self.turn:
+                    continue
+                out.append((c, ab))
+                break
+        return out
+
+    @staticmethod
+    def _can_pay_filtered(rem: RemainingCost, units: list, filters: list[tuple[Card, O.AbilityDef]], unit_of: dict[int, tuple[int, int]]) -> bool:
+        """can_pay with mana filters: each filter turns a coloured symbol into
+        generic; a filter that taps a permanent which is also a plain source
+        (Conduit Pylons) loses that source's units (`unit_of`: oid -> (index
+        of its first unit in `units`, number of units))."""
+        if not filters or not any(c != "C" and n > 0 for c, n in rem.colored.items()):
+            return can_pay(rem, units)
+        free = [c for c, ab in filters if c.oid not in unit_of]
+        costly = [c for c, ab in filters if c.oid in unit_of]
+        for mask in range(1 << len(costly)):
+            drop = set()
+            for i, c in enumerate(costly):
+                if mask >> i & 1:
+                    start, n = unit_of[c.oid]
+                    drop.update(range(start, start + n))
+            us = [u for j, u in enumerate(units) if j not in drop]
+            if can_pay(rem, us, len(free) + bin(mask).count("1")):
+                return True
+        return False
 
     def sac_candidates(self, p: int, flt: str, exclude: set[int] = frozenset()) -> list[Card]:
         out = []
@@ -1093,6 +1170,8 @@ class Game:
             elif flt == "mountain" and self.is_land(c) and "Mountain" in c.face.subtypes:
                 out.append(c)
             elif flt == BARGAIN_SAC and (c.is_token or self.types(c) & {"Artifact", "Enchantment"}):
+                out.append(c)
+            elif flt == "land" and self.is_land(c):
                 out.append(c)
         return out
 
@@ -1110,11 +1189,18 @@ class Game:
         `gone` are permanents a hypothetical payment already sacrificed."""
         pool = self.players[p].pool if pool is None else pool
         sources = self.mana_sources(p, set(exclude) | set(gone))
-        normal = [ab.mana for c, ab in sources if not ab.sac_self]
+        base = pool_units(pool)
+        unit_of: dict[int, tuple[int, int]] = {}
+        for c, ab in sources:
+            if not ab.sac_self:
+                n = self.mana_amount(c, ab)
+                unit_of[c.oid] = (len(base), n)
+                base += [ab.mana] * n
         selfsac = [(c, ab) for c, ab in sources if ab.sac_self]
-        base = pool_units(pool) + normal
+        filters = self.mana_filters(p, set(exclude) | set(gone))
+        unit_of = {o: i for o, i in unit_of.items() if any(c.oid == o and ab.tap for c, ab in filters)}
         if sac_filter is None:
-            return can_pay(rem, base + [ab.mana for _, ab in selfsac])
+            return self._can_pay_filtered(rem, base + [ab.mana for _, ab in selfsac], filters, unit_of)
         cands = {c.oid for c in self.sac_candidates(p, sac_filter, gone)}
         if not cands:
             return False
@@ -1124,7 +1210,7 @@ class Game:
         ordered = [c for c, _ in selfsac if c.oid not in cands] + [c for c, _ in selfsac if c.oid in cands]
         for k in range(len(ordered) + 1):
             used = {c.oid for c in ordered[:k]}
-            if len(cands - used) >= 1 and can_pay(rem, base + [("C",)] * k):
+            if len(cands - used) >= 1 and self._can_pay_filtered(rem, base + [("C",)] * k, filters, unit_of):
                 return True
         return False
 
@@ -1149,17 +1235,32 @@ class Game:
                 if self._cost_feasible(p, r2, sac_filter, exclude, pool2):
                     options.append(Option(f"Pay with floating {color}", ("pay", "pool", color), ("pool", color)))
             for card in self._dedupe_by_equiv(c for c, _ in self.mana_sources(p, exclude)):
-                ab = next(a for a in card.face.abilities if a.mana is not None)
+                ab = self.mana_ability(card)
+                n = self.mana_amount(card, ab)
                 for color in ab.mana:
                     if not rem.useful(color):
                         continue
                     r2 = rem.copy()
                     r2.apply(color)
                     gone = {card.oid} if ab.sac_self else set()
-                    if self._cost_feasible(p, r2, sac_filter, exclude | {card.oid}, gone=gone):
+                    pool2 = None
+                    if n > 1:  # the extra units float
+                        pool2 = dict(pl.pool)
+                        pool2[color] = pool2.get(color, 0) + n - 1
+                    if self._cost_feasible(p, r2, sac_filter, exclude | {card.oid}, pool2, gone=gone):
                         verb = "Sacrifice" if ab.sac_self else "Tap"
                         options.append(
                             Option(f"{verb} {card.name}#{card.oid} for {color}", ("pay", "source", card.name, color), ("source", card, color))
+                        )
+            for card in self._dedupe_by_equiv(c for c, _ in self.mana_filters(p, exclude)):
+                ab = next(a for a in card.face.abilities if a.is_filter)
+                for color in ab.mana:
+                    if rem.colored.get(color, 0) <= 0:
+                        continue
+                    r2 = self._filtered(rem, color, ab)
+                    if self._cost_feasible(p, r2, sac_filter, exclude | {card.oid}):
+                        options.append(
+                            Option(f"Activate {card.name}#{card.oid} for {color}", ("pay", "filter", card.name, color), ("filter", card, color))
                         )
             auto = self._auto_pay_index(p, rem, options) if self.auto_mana else None
             if auto is not None:
@@ -1173,12 +1274,34 @@ class Game:
                 if pl.pool[choice[1]] == 0:
                     del pl.pool[choice[1]]
                 rem.apply(choice[1])
+            elif choice[0] == "filter":
+                card, color = choice[1], choice[2]
+                ab = next(a for a in card.face.abilities if a.is_filter)
+                if ab.tap:
+                    card.tapped = True
+                if ab.once_per_turn:
+                    card.mana_used_turn = self.turn
+                self._log(f"p{p} activates {card.name}#{card.oid} for {color}")
+                rem = self._filtered(rem, color, ab)
             else:
                 card, color = choice[1], choice[2]
-                ab = next(a for a in card.face.abilities if a.mana is not None)
+                ab = self.mana_ability(card)
+                n = self.mana_amount(card, ab)
                 self._activate_mana_ability(card, ab)
                 if not rem.apply(color):
                     raise RulesError("mana unit could not be applied")
+                if n > 1:
+                    pl.pool[color] = pl.pool.get(color, 0) + n - 1
+
+    @staticmethod
+    def _filtered(rem: RemainingCost, color: str, ab: O.AbilityDef) -> RemainingCost:
+        """A filter pays a coloured symbol; its own cost (generic) is added instead."""
+        r2 = rem.copy()
+        r2.colored[color] -= 1
+        if r2.colored[color] == 0:
+            del r2.colored[color]
+        r2.generic += ab.cost.generic
+        return r2
 
     def _colour_needs(self, p: int) -> dict[str, int]:
         """Coloured pips the non-land cards in `p`'s hand ask for; instants
@@ -1209,7 +1332,12 @@ class Game:
             if o.value[0] == "pool":
                 return i
             card, color = o.value[1], o.value[2]
-            ab = next(a for a in card.face.abilities if a.mana is not None)
+            if o.value[0] == "filter":  # only when nothing else pays
+                key = (FILTER_HURT, 0, 0, 0)
+                if best_key is None or key < best_key:
+                    best, best_key = i, key
+                continue
+            ab = self.mana_ability(card)
             if ab.sac_self:
                 return None
             if need is None:
@@ -1268,6 +1396,10 @@ class Game:
             return d.phyrexian_cost
         if mode == "bargain":
             return d.cost if d.bargain else None
+        if mode == "prototype":
+            return card.defn.prototype  # the prototype face itself has none
+        if mode == "cascade":
+            return O.FREE
         return None
 
     @staticmethod
@@ -1305,14 +1437,14 @@ class Game:
             return False
         if mode in ("flashback", "escape") and card.zone != "graveyard":
             return False
-        if mode in ("madness", "plot") and card.zone != "exile":
+        if mode in ("madness", "plot", "cascade") and card.zone != "exile":
             return False
         if mode == "plot" and not 0 < card.plotted_turn < self.turn:
             return False
         if d.is_type("Land"):
             return False
-        # Madness casts on resolution of its trigger, whatever the card type (702.35).
-        if mode != "madness" and not d.is_type("Instant") and not self.sorcery_timing(p):
+        # Madness and cascade cast while a trigger resolves, whatever the card type (702.35, 702.85).
+        if mode not in ("madness", "cascade") and not d.is_type("Instant") and not self.sorcery_timing(p):
             return False
         for spec in self._mode_targets(card, mode, choice):
             if not self.target_candidates(spec, p):
@@ -1322,6 +1454,8 @@ class Game:
         if d.additional_discard and len(self.players[p].hand) - (card.zone == "hand") < 1:
             return False
         if mode == "phyrexian" and self.players[p].life < d.phyrexian_life:
+            return False
+        if d.additional_choose_creature and not self._creature_choices(p, card):
             return False
         sac = self._mode_sac(card, mode)
         if sac is not None and len(self.sac_candidates(p, sac[0])) < sac[1]:
@@ -1345,6 +1479,9 @@ class Game:
             cast_from=from_zone,
         )
         self._move(card, "stack", controller=p)
+        if mode == "prototype":
+            card.prototyped = True
+            item.name = card.name
         item.sid = card.oid
         self.stack.append(item)
         self._log(f"p{p} casts {card.name} ({mode}) from {from_zone}")
@@ -1369,6 +1506,12 @@ class Game:
         if d.additional_discard:
             gone = yield from self.choose_discard(p, card.name)
             item.data["discarded_land"] = self.is_land(gone)
+        if d.additional_choose_creature:
+            options = self._creature_choices(p, card)
+            chosen = yield from self.ask(p, O.CHOOSE_CARD, f"{card.name}: choose a creature you control or reveal a creature card", options)
+            if chosen.zone == "hand":
+                chosen.known_to = {0, 1}
+            item.data["chosen"] = chosen.snapshot()
         sac = self._mode_sac(card, mode)
         for _ in range(sac[1] if sac else 0):
             yield from self._choose_sacrifice(p, sac[0], card.name)
@@ -1376,6 +1519,19 @@ class Game:
             yield from self._exile_from_graveyard(p, d.escape_exile, card.name)
         self._emit_cast(item)
         self._emit_targeted(item)
+
+    def _creature_choices(self, p: int, spell: Card) -> list[Option]:
+        """Monstrous Emergence's additional cost: a creature you control, or a
+        creature card revealed from your hand."""
+        opts = [
+            Option(f"Choose {c.name}#{c.oid}", ("choose_creature", "battlefield", c.name), c)
+            for c in self._dedupe_by_equiv(c for c in self.battlefield if c.controller == p and self.is_creature(c))
+        ]
+        opts += [
+            Option(f"Reveal {c.name}", ("choose_creature", "hand", c.name), c)
+            for c in self._dedupe_by_name(c for c in self.players[p].hand if c is not spell and c.face.is_type("Creature"))
+        ]
+        return opts
 
     def _plot(self, p: int, card: Card):
         """Plot (702.170): a special action. Pay the plot cost, exile the card
@@ -1397,8 +1553,8 @@ class Game:
     # ------------------------------------------------------------------
 
     def _can_activate(self, p: int, card: Card, ab: O.AbilityDef) -> bool:
-        if ab.zone == "hand":
-            if card.zone != "hand":
+        if ab.zone in ("hand", "graveyard"):
+            if card.zone != ab.zone:
                 return False
         elif card.zone != "battlefield" or card.controller != p:
             return False
@@ -1410,6 +1566,8 @@ class Game:
             return True
         if ab.discard_other and not self.players[p].hand:
             return False
+        if ab.tap_other and not self._tap_other_candidates(p, card):
+            return False
         exclude = {card.oid} if ab.tap else set()
         if ab.x_target_mv:
             return any(self._x_target_affordable(p, card, ab, ref) for ref in self.target_candidates(ab.targets[0], p))
@@ -1417,6 +1575,10 @@ class Game:
             if not self.target_candidates(spec, p):
                 return False
         return self._cost_feasible(p, RemainingCost.of(ab.cost), ab.sac_other, exclude)
+
+    def _tap_other_candidates(self, p: int, card: Card) -> list[Card]:
+        """Station's cost: another untapped creature you control (summoning sickness does not matter)."""
+        return [c for c in self.battlefield if c.controller == p and c is not card and self.is_creature(c) and not c.tapped]
 
     def _x_target_cost(self, ab: O.AbilityDef, ref: tuple) -> ManaCost:
         """Cost of an ability whose X is the target's mana value (Gorilla Shaman)."""
@@ -1461,6 +1623,12 @@ class Game:
             yield from self._choose_sacrifice(p, ab.sac_other, item.name)
         if ab.discard_other:
             yield from self.choose_discard(p, item.name)
+        if ab.tap_other:
+            cands = self._dedupe_by_equiv(self._tap_other_candidates(p, card))
+            options = [Option(f"Tap {c.name}#{c.oid}", ("tap_cost", c.name), c) for c in cands]
+            tapped = yield from self.ask(p, O.CHOOSE_CARD, f"Tap another untapped creature you control for {item.name}", options)
+            tapped.tapped = True
+            item.data["tapped_power"] = self.power(tapped)
         if ab.x_reveal:
             yield from self._reveal_red(p, item.x, item.name)
         item.source = card.snapshot()
@@ -1468,7 +1636,7 @@ class Game:
             self.discard(card)
         if ab.sac_self and card.zone == "battlefield":
             self.sacrifice(card)
-        if ab.exile_self and card.zone == "battlefield":
+        if ab.exile_self and card.zone in ("battlefield", "graveyard"):
             self._move(card, "exile")
         self._emit_targeted(item)
 
@@ -1531,6 +1699,8 @@ class Game:
         if item.method == "bestow":
             host = self.target(item, 0)
         new = self._move(card, "battlefield", controller=item.controller)
+        if item.method == "prototype":
+            new.prototyped = True
         if card.face.etb_x_counters:
             new.counters = item.x
         if host is not None:
@@ -1570,8 +1740,9 @@ class Game:
         top = lib[:n]
         for c in top:
             c.known_to.add(p)
-        # Scry 1 is all the pool needs; general scry N would be ORDER decisions.
-        assert n == 1
+        if len(top) > 1:
+            yield from self._scry_many(p, top)
+            return
         if not top:
             return
         c = top[0]
@@ -1584,6 +1755,93 @@ class Game:
         if where == "bottom":
             lib.remove(c)
             lib.append(c)
+
+    def _scry_many(self, p: int, top: list[Card]):
+        """Scry N > 1 as one ORDER decision: every split of the cards into a
+        top and a bottom group, each in every order (Candy Trail: scry 2)."""
+        n = len(top)
+        options = []
+        seen = set()
+        for mask in range(1 << n):
+            ups = [c for i, c in enumerate(top) if not mask >> i & 1]
+            downs = [c for i, c in enumerate(top) if mask >> i & 1]
+            for pu in itertools.permutations(ups):
+                for pd in itertools.permutations(downs):
+                    tn, bn = tuple(c.name for c in pu), tuple(c.name for c in pd)
+                    if (tn, bn) in seen:
+                        continue
+                    seen.add((tn, bn))
+                    label = f"Scry: top {', '.join(tn) or '-'}; bottom {', '.join(bn) or '-'}"
+                    options.append(Option(label, ("scry", "top") + tn + ("bottom",) + bn, (pu, pd)))
+        pu, pd = yield from self.ask(p, O.ORDER, f"Scry {n}: top (first = top card) and bottom (last = bottom card)", options)
+        lib = self.players[p].library
+        del lib[:n]
+        lib[:0] = list(pu)
+        lib.extend(pd)
+
+    def surveil(self, p: int):
+        """Surveil 1: the top card stays or goes to the graveyard."""
+        lib = self.players[p].library
+        if not lib:
+            return
+        c = lib[0]
+        c.known_to.add(p)
+        where = yield from self.ask(
+            p,
+            O.CHOOSE_MODE,
+            f"Surveil 1: {c.name}",
+            [Option(f"Keep {c.name} on top", ("surveil", "top"), "top"), Option(f"Put {c.name} into your graveyard", ("surveil", "graveyard"), "graveyard")],
+        )
+        if where == "graveyard":
+            self._move(c, "graveyard")
+
+    def dig(self, p: int, n: int, predicate: Callable[[Card], bool], what: str, name: str):
+        """Look at the top n cards, you may reveal a matching one and put it
+        into your hand, the rest go on the bottom (Ancient Stirrings). The
+        rest keep their order: no card in the pool looks at the bottom."""
+        lib = self.players[p].library
+        top = lib[:n]
+        for c in top:
+            c.known_to.add(p)
+        options = [Option("Take nothing", ("dig", None), None)]
+        options += [Option(f"Take {c.name}", ("dig", c.name), c) for c in self._dedupe_by_name(c for c in top if predicate(c))]
+        found = yield from self.ask(p, O.CHOOSE_CARD, f"{name}: reveal {what} and put it into your hand", options)
+        if found is not None:
+            self._move(found, "hand", known_to={0, 1})
+        for c in top:
+            if c is not found:
+                self._move(c, "library", position="bottom", known_to={p})
+
+    def cascade(self, p: int, mv: int):
+        """Cascade (702.85): exile cards from the top until a nonland card
+        with lesser mana value; it may be cast without paying its mana cost;
+        the other exiled cards go on the bottom in a random order."""
+        lib = self.players[p].library
+        exiled: list[Card] = []
+        hit = None
+        while lib:
+            c = self._move(lib[0], "exile")
+            exiled.append(c)
+            if not self.is_land(c) and c.face.mana_value < mv:
+                hit = c
+                break
+        self._log(f"p{p} cascades into {hit.name if hit else 'nothing'}, exiling {[c.name for c in exiled]}")
+        cast = None
+        if hit is not None:
+            options = [Option(f"Don't cast {hit.name}", ("cascade", "no"), None)]
+            if hit.face.modes:
+                for i, sm in enumerate(hit.face.modes):
+                    if self._can_cast(p, hit, "cascade", i):
+                        options.append(Option(f"Cast {hit.name} ({sm.name})", ("cascade", "cast", sm.name), ("cast", hit, "cascade", i)))
+            elif self._can_cast(p, hit, "cascade"):
+                options.append(Option(f"Cast {hit.name}", ("cascade", "cast"), ("cast", hit, "cascade")))
+            cast = yield from self.ask(p, O.YES_NO, f"Cascade: cast {hit.name} without paying its mana cost?", options)
+        rest = [c for c in exiled if not (cast is not None and c is hit)]
+        self.rng.shuffle(rest)
+        for c in rest:
+            self._move(c, "library", position="bottom")
+        if cast is not None:
+            yield from self._cast(p, hit, "cascade", cast[3] if len(cast) > 3 else None)
 
     def explore(self, creature: Card):
         p = creature.controller

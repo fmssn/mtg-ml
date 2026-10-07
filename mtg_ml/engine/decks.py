@@ -5,7 +5,8 @@ Sideboard plans (what comes in and out against each opponent) are data:
 
 Sources: MTGGoldfish archetype pages for Pauper "Jund Wildfire" and
 "Blue Terror", fetched 2026-10-05; Red Madness: the 60 + 15 given by the
-project owner on 2026-10-07 (a 2026 Pauper Challenge style list).
+project owner on 2026-10-07 (a 2026 Pauper Challenge style list); Tron: the
+modal counts of 443 Q3 2026 lists (docs/tron.md).
 """
 
 JUND_WILDFIRE = {
@@ -64,6 +65,31 @@ RED_MADNESS = {
     "Mountain": 18,
 }
 
+# Tron (Q3 2026, the green artifact-ramp build): every card played in at
+# least half of the lists at its modal count sums to 64; the four Giant's
+# Boulder (51%, the least played) are cut.
+TRON = {
+    "Urza's Mine": 4,
+    "Urza's Power Plant": 4,
+    "Urza's Tower": 4,
+    "Forest": 2,
+    "Bojuka Bog": 1,
+    "Conduit Pylons": 1,
+    "Haunted Fengraf": 1,
+    "Expedition Map": 4,
+    "Ancient Stirrings": 4,
+    "Crop Rotation": 3,
+    "Barrels of Blasting Jelly": 4,
+    "Bonder's Ornament": 2,
+    "Candy Trail": 4,
+    "Unfathomable Truths": 4,
+    "Bramble Wurm": 4,
+    "Generous Ent": 2,
+    "Boulderbranch Golem": 4,
+    "Pinnacle Kill-Ship": 4,
+    "Maelstrom Colossus": 4,
+}
+
 # Sideboards: Jund and Blue are lean and matchup-relevant only (6 cards each),
 # built from public sideboard guides for their matchup rather than a specific
 # 15-card list. Red Madness has its full 15.
@@ -78,6 +104,18 @@ MONO_BLUE_TERROR_SIDEBOARD = {
     "Dispel": 2,
     "Steel Sabotage": 2,
 }
+# Tron: the five cards in at least half of the sideboards (2 Breath Weapon,
+# 3 Relic of Progenitus) and then the next most played (docs/tron.md).
+TRON_SIDEBOARD = {
+    "Breath Weapon": 2,
+    "Relic of Progenitus": 3,
+    "Call Damage Control": 2,
+    "Scour from Existence": 2,
+    "Kaervek's Torch": 1,
+    "Pulse of Murasa": 1,
+    "Monstrous Emergence": 2,
+    "Blue Elemental Blast": 2,
+}
 RED_MADNESS_SIDEBOARD = {
     "Gorilla Shaman": 2,
     "Martyr of Ashes": 2,
@@ -87,8 +125,13 @@ RED_MADNESS_SIDEBOARD = {
     "Relic of Progenitus": 3,
 }
 
-DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS}
-SIDEBOARDS = {"jund_wildfire": JUND_WILDFIRE_SIDEBOARD, "mono_blue_terror": MONO_BLUE_TERROR_SIDEBOARD, "red_madness": RED_MADNESS_SIDEBOARD}
+DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS, "tron": TRON}
+SIDEBOARDS = {
+    "jund_wildfire": JUND_WILDFIRE_SIDEBOARD,
+    "mono_blue_terror": MONO_BLUE_TERROR_SIDEBOARD,
+    "red_madness": RED_MADNESS_SIDEBOARD,
+    "tron": TRON_SIDEBOARD,
+}
 
 
 def expand(decklist: dict[str, int]) -> list[str]:

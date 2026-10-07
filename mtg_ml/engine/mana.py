@@ -1,8 +1,8 @@
 """Mana costs, mana pools and payment feasibility.
 
 A mana *unit* is one mana of one color ('W', 'U', 'B', 'R', 'G' or 'C' for
-colorless). Every mana source in the supported card pool produces exactly one
-unit per activation, which keeps feasibility checks a small bipartite matching.
+colorless). A source produces one unit per activation, or several of one
+colour (Urza's Tower with Tron); feasibility stays a small bipartite matching.
 """
 
 from __future__ import annotations
@@ -136,15 +136,24 @@ class RemainingCost:
         return str(ManaCost(self.generic, tuple(sorted(self.colored.items()))))
 
 
-def can_pay(remaining: RemainingCost, units: list[tuple[str, ...]]) -> bool:
+def can_pay(remaining: RemainingCost, units: list[tuple[str, ...]], wild: int = 0) -> bool:
     """Can `remaining` be paid using `units`?
 
     `units` is a list of alternatives, one entry per available mana unit: a
     floating unit in the pool is ('U',), a dual land is ('B', 'R').
     Feasible iff every colored symbol can be matched to a distinct unit able to
     produce it and the total number of units covers all symbols.
+
+    `wild`: up to this many coloured (WUBRG) symbols may be paid as generic
+    instead. A mana filter ("{1}: add one mana of any color") turns one
+    coloured requirement into one generic requirement (its {1}), so with `k`
+    filters the cost is payable iff a maximum matching leaves at most `k`
+    coloured symbols unmatched (Kuhn's algorithm, {C} symbols first: they
+    must be matched, and augmenting never unmatches a symbol).
     """
-    symbols = [c for c, n in remaining.colored.items() for _ in range(n)]
+    symbols = [c for c, n in remaining.colored.items() if c == "C" for _ in range(n)]
+    n_c = len(symbols)
+    symbols += [c for c, n in remaining.colored.items() if c != "C" for _ in range(n)]
     if len(units) < len(symbols) + remaining.generic:
         return False
     if not symbols:
@@ -161,9 +170,14 @@ def can_pay(remaining: RemainingCost, units: list[tuple[str, ...]]) -> bool:
                     return True
         return False
 
+    unmatched = 0
     for si in range(len(symbols)):
         if not augment(si, [False] * len(units)):
-            return False
+            if si < n_c:
+                return False
+            unmatched += 1
+            if unmatched > wild:
+                return False
     return True
 
 

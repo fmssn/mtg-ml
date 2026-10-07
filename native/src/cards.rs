@@ -125,6 +125,7 @@ pub enum SacFilter {
     Mountain,
     /// Bargain: an artifact, enchantment or token.
     ArtifactEnchantmentOrToken,
+    Land,
 }
 
 impl SacFilter {
@@ -134,6 +135,7 @@ impl SacFilter {
             "artifact_or_creature" => Ok(SacFilter::ArtifactOrCreature),
             "mountain" => Ok(SacFilter::Mountain),
             "artifact_enchantment_or_token" => Ok(SacFilter::ArtifactEnchantmentOrToken),
+            "land" => Ok(SacFilter::Land),
             _ => Err(format!("unknown sacrifice filter {s:?}")),
         }
     }
@@ -143,6 +145,7 @@ impl SacFilter {
             SacFilter::ArtifactOrCreature => "artifact_or_creature",
             SacFilter::Mountain => "mountain",
             SacFilter::ArtifactEnchantmentOrToken => "artifact_enchantment_or_token",
+            SacFilter::Land => "land",
         }
     }
 }
@@ -204,11 +207,13 @@ pub struct SearchFilter {
     pub supertype: Option<String>,
     pub types: u16,
     pub subtypes_any: Vec<String>,
+    pub colorless: bool,
 }
 
 #[derive(Clone, Debug)]
 pub enum Op {
-    Draw { n: i32, n_cast_from_graveyard: Option<i32> },
+    /// each_controlling: each player who controls a permanent with this name draws instead.
+    Draw { n: i32, n_cast_from_graveyard: Option<i32>, each_controlling: Option<String> },
     Mill { target_player: bool, n: i32 },
     /// if_color: colour bit the target spell must have (0 = any).
     CounterTarget { if_color: u8 },
@@ -219,12 +224,16 @@ pub enum Op {
     GrantTarget { keywords: u32 },
     CreateToken { token: DefId, n: i32 },
     /// per_storm: n for each spell cast before this one this turn (Weather the Storm's storm trigger).
-    GainLife { n: i32, per_storm: bool },
+    /// source_power: n_from = "source_power" (life equal to the source's power).
+    GainLife { n: i32, per_storm: bool, source_power: bool },
     LoseLife { who: Who, n: i32 },
     CounterOnSource,
     DamageTarget { n: i32, index: usize, n_landfall: Option<i32> },
     /// To the controller of the targeted permanent.
     DamageTargetController { n: i32 },
+    /// damage_target_from: X damage (from = "x") or the power of the creature
+    /// chosen as the spell was cast (from = "chosen_power", Monstrous Emergence).
+    DamageTargetFrom { index: usize, chosen_power: bool },
     DamageEachOpponent { n: i32, if_discarded_nonland: bool },
     /// x: the amount is the item's X (n unused); opponent_only: whose = "opponent".
     DamageEachCreature { n: i32, x: bool, without: u32, opponent_only: bool },
@@ -238,6 +247,13 @@ pub enum Op {
     SearchLibrary { filter: SearchFilter, to_battlefield: bool, tapped: bool, reveal: bool, what: String },
     OptionalPayment { cost: ManaCost, prompt: String, then: Vec<Op> },
     Scry { n: i32 },
+    Surveil,
+    Dig { filter: SearchFilter, n: i32, what: String },
+    Cascade,
+    Station,
+    ReturnRandomFromGraveyard { types: u16 },
+    /// types: (type bit, type name) in spec order; any: from either graveyard.
+    ReturnFromGraveyard { types: Vec<(u16, &'static str)>, n: i32, each_type: bool, any: bool },
     ExploreTarget,
     ShuffleIntoLibrary,
     Custom(Custom),
@@ -263,9 +279,25 @@ pub struct AbilityDef {
     /// X = number of red cards revealed from hand.
     pub x_reveal: bool,
     pub zone_hand: bool,
+    pub zone_graveyard: bool,
     pub sorcery_speed: bool,
     pub mana: Option<Vec<u8>>,
     pub targets: Vec<TK>,
+    /// (n, subtypes): n units while its controller controls each subtype (Urza's Tower).
+    pub mana_amount: Option<(i32, Vec<String>)>,
+    pub once_per_turn: bool,
+    /// Tap another untapped creature you control as a cost (station).
+    pub tap_other: bool,
+}
+
+impl AbilityDef {
+    /// A mana ability with a mana cost ({1}: add one mana of any color).
+    pub fn is_filter(&self) -> bool {
+        self.mana.is_some() && !self.cost.is_zero()
+    }
+    pub fn on_battlefield(&self) -> bool {
+        !self.zone_hand && !self.zone_graveyard
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -279,6 +311,7 @@ pub struct TriggerDef {
     pub bargained: bool,
     /// Chosen as the trigger is put on the stack.
     pub targets: Vec<TK>,
+    pub optional_targets: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -327,6 +360,12 @@ pub struct CardDef {
     pub etb_x_counters: bool,
     pub back: Option<DefId>,
     pub modes: Vec<SpellMode>,
+    pub prototype: Option<ManaCost>,
+    pub prototype_face: Option<DefId>,
+    /// Spacecraft: a creature with this many charge counters, with these keywords.
+    pub station: i32,
+    pub station_keywords: u32,
+    pub additional_choose_creature: bool,
 }
 
 impl CardDef {
@@ -429,8 +468,8 @@ impl CardDb {
             cards: HashMap::new(),
             tokens: HashMap::new(),
             keyword_names: kws,
-            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![] },
-            madness: TriggerDef { name: "madness".into(), event: Event::Discarded, effect: vec![Op::Madness], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![] },
+            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![], optional_targets: false },
+            madness: TriggerDef { name: "madness".into(), event: Event::Discarded, effect: vec![Op::Madness], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![], optional_targets: false },
             free: ManaCost::default(),
             spec_text: text.to_string(),
         };
@@ -552,15 +591,19 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
         let t = v.as_table().ok_or("ops must be tables")?;
         let op = req_str(t, "op")?;
         let keys: &[&str] = match op {
-            "draw" => &["op", "n", "n_cast_from_graveyard"],
+            "draw" => &["op", "n", "n_cast_from_graveyard", "each_controlling"],
             "mill" => &["op", "who", "n"],
             "counter_target_unless_paid" => &["op", "cost"],
             "tap_target" => &["op", "skip_untap"],
             "grant_target" => &["op", "keywords"],
             "create_token" => &["op", "token", "n"],
-            "gain_life" => &["op", "n", "per_storm"],
-            "scry" | "discard" | "exile_from_graveyards" | "damage_target_controller" => &["op", "n"],
+            "gain_life" => &["op", "n", "per_storm", "n_from"],
+            "scry" | "discard" | "exile_from_graveyards" | "damage_target_controller" | "surveil" => &["op", "n"],
             "damage_target" => &["op", "n", "index", "n_landfall"],
+            "damage_target_from" => &["op", "from", "index"],
+            "dig" => &["op", "n", "colorless", "type", "what"],
+            "return_random_from_graveyard" => &["op", "type"],
+            "return_from_graveyard" => &["op", "types", "n", "each_type", "whose"],
             "damage_each_opponent" => &["op", "n", "if_discarded_nonland"],
             "counter_target" => &["op", "if_color"],
             "destroy_target" => &["op", "if_color", "mv_is_x"],
@@ -575,7 +618,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
         check_keys(t, keys, &format!("op {op:?}"))?;
         let n = || get_int(t, "n")?.ok_or_else(|| format!("op {op:?} needs n"));
         ops.push(match op {
-            "draw" => Op::Draw { n: n()?, n_cast_from_graveyard: get_int(t, "n_cast_from_graveyard")? },
+            "draw" => Op::Draw { n: n()?, n_cast_from_graveyard: get_int(t, "n_cast_from_graveyard")?, each_controlling: get_str(t, "each_controlling")?.map(|s| s.to_string()) },
             "mill" => Op::Mill {
                 target_player: match req_str(t, "who")? {
                     "you" => false,
@@ -594,7 +637,14 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 let name = req_str(t, "token")?;
                 Op::CreateToken { token: *tokens.get(name).ok_or_else(|| format!("unknown token {name:?}"))?, n: get_int(t, "n")?.unwrap_or(1) }
             }
-            "gain_life" => Op::GainLife { n: n()?, per_storm: get_bool(t, "per_storm")? },
+            "gain_life" => {
+                let source_power = match get_str(t, "n_from")? {
+                    None => false,
+                    Some("source_power") => true,
+                    Some(f) => return Err(format!("gain_life: unknown n_from {f:?}")),
+                };
+                Op::GainLife { n: if source_power { 0 } else { n()? }, per_storm: get_bool(t, "per_storm")?, source_power }
+            }
             "lose_life" => Op::LoseLife {
                 who: match req_str(t, "who")? {
                     "you" => Who::You,
@@ -612,6 +662,14 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 n_landfall: get_int(t, "n_landfall")?,
             },
             "damage_target_controller" => Op::DamageTargetController { n: n()? },
+            "damage_target_from" => Op::DamageTargetFrom {
+                index: get_int(t, "index")?.unwrap_or(0).max(0) as usize,
+                chosen_power: match req_str(t, "from")? {
+                    "x" => false,
+                    "chosen_power" => true,
+                    f => return Err(format!("damage_target_from: unknown from {f:?}")),
+                },
+            },
             "damage_each_opponent" => Op::DamageEachOpponent { n: n()?, if_discarded_nonland: get_bool(t, "if_discarded_nonland")? },
             "damage_each_creature" => {
                 let x = get_bool(t, "x")?;
@@ -640,6 +698,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                         None => 0,
                     },
                     subtypes_any: get_str_list(t, "subtypes_any")?,
+                    colorless: false,
                 },
                 to_battlefield: match req_str(t, "dest")? {
                     "battlefield" => true,
@@ -655,12 +714,45 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 prompt: req_str(t, "prompt")?.to_string(),
                 then: parse_ops(t.get("then"), db, tokens)?.unwrap_or_default(),
             },
-            "scry" => {
+            "scry" => Op::Scry { n: n()? },
+            "surveil" => {
                 if n()? != 1 {
-                    return Err("scry: only n = 1 is supported".into());
+                    return Err("surveil: only n = 1 is supported".into());
                 }
-                Op::Scry { n: 1 }
+                Op::Surveil
             }
+            "dig" => Op::Dig {
+                filter: SearchFilter {
+                    supertype: None,
+                    types: match get_str(t, "type")? {
+                        Some(s) => type_bit(s)?,
+                        None => 0,
+                    },
+                    subtypes_any: vec![],
+                    colorless: get_bool(t, "colorless")?,
+                },
+                n: n()?,
+                what: req_str(t, "what")?.to_string(),
+            },
+            "cascade" => Op::Cascade,
+            "station" => Op::Station,
+            "return_random_from_graveyard" => Op::ReturnRandomFromGraveyard { types: type_bit(req_str(t, "type")?)? },
+            "return_from_graveyard" => Op::ReturnFromGraveyard {
+                types: get_str_list(t, "types")?
+                    .iter()
+                    .map(|s| -> Result<(u16, &'static str), String> {
+                        let b = type_bit(s)?;
+                        Ok((b, TYPE_NAMES[b.trailing_zeros() as usize]))
+                    })
+                    .collect::<Result<_, _>>()?,
+                n: n()?,
+                each_type: get_bool(t, "each_type")?,
+                any: match req_str(t, "whose")? {
+                    "you" => false,
+                    "any" => true,
+                    w => return Err(format!("return_from_graveyard: unknown whose {w:?}")),
+                },
+            },
             "explore_target" => Op::ExploreTarget,
             "shuffle_into_library" => Op::ShuffleIntoLibrary,
             "custom" => Op::Custom(match req_str(t, "fn")? {
@@ -711,6 +803,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
             "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward", "targets", "effect",
             "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped", "etb_x_counters", "back", "modes",
             "abilities", "triggers", "madness", "plot", "overload", "overload_effect", "additional_discard", "alternative_cost", "flashback_cost", "bargain",
+            "prototype", "prototype_face", "station", "additional_choose_creature",
         ],
         "card",
     )?;
@@ -733,9 +826,20 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
             let a = a.as_table().ok_or("abilities must be tables")?;
             check_keys(
                 a,
-                &["name", "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone", "sorcery_speed", "mana", "targets"],
+                &[
+                    "name", "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone",
+                    "sorcery_speed", "mana", "targets", "mana_amount", "once_per_turn", "tap_other",
+                ],
                 "ability",
             )?;
+            if a.contains_key("mana") && a.contains_key("cost") && mana(a, "cost")?.unwrap_or_default() != ManaCost::generic(1) {
+                return Err(format!("{}: a mana filter must cost exactly {{1}}", req_str(a, "name")?));
+            }
+            let mana_amount = match a.get("mana_amount") {
+                None => None,
+                Some(Value::Table(m)) if m.len() == 2 => Some((get_int(m, "n")?.ok_or("mana_amount needs n")?, get_str_list(m, "if_control")?)),
+                Some(m) => return Err(format!("unsupported mana_amount {m}")),
+            };
             let x_target_mv = get_int(a, "x_target_mv")?.unwrap_or(0);
             if x_target_mv != 0 && targets(a)?.len() != 1 {
                 return Err("x_target_mv needs exactly one target".into());
@@ -757,13 +861,21 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
                     Some(r) => return Err(format!("unknown x_reveal {r:?}")),
                 },
                 zone_hand: match get_str(a, "zone")?.unwrap_or("battlefield") {
-                    "battlefield" => false,
+                    "battlefield" | "graveyard" => false,
                     "hand" => true,
                     z => return Err(format!("unknown ability zone {z:?}")),
                 },
+                zone_graveyard: get_str(a, "zone")? == Some("graveyard"),
                 sorcery_speed: get_bool(a, "sorcery_speed")?,
                 mana: if a.contains_key("mana") { Some(get_str_list(a, "mana")?.iter().map(|s| s.as_bytes()[0]).collect()) } else { None },
                 targets: targets(a)?,
+                mana_amount,
+                once_per_turn: get_bool(a, "once_per_turn")?,
+                tap_other: match get_str(a, "tap_other")? {
+                    None => false,
+                    Some("creature") => true,
+                    Some(o) => return Err(format!("unknown tap_other {o:?}")),
+                },
             });
         }
     }
@@ -771,7 +883,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
     if let Some(v) = t.get("triggers") {
         for tr in v.as_array().ok_or("triggers must be a list")? {
             let tr = tr.as_table().ok_or("triggers must be tables")?;
-            check_keys(tr, &["name", "event", "effect", "condition", "targets"], "trigger")?;
+            check_keys(tr, &["name", "event", "effect", "condition", "targets", "optional_targets"], "trigger")?;
             let (mut sacrificed_subtype, mut cast_filter, mut bargained) = (None, None, false);
             match tr.get("condition") {
                 None => {}
@@ -803,6 +915,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
                 cast_filter,
                 bargained,
                 targets: targets(tr)?,
+                optional_targets: get_bool(tr, "optional_targets")?,
             });
         }
     }
@@ -869,6 +982,24 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
             Some(b) => Some(*faces.get(b).ok_or_else(|| format!("unknown back face {b:?}"))?),
         },
         modes,
+        prototype: mana(t, "prototype")?,
+        prototype_face: match get_str(t, "prototype_face")? {
+            None => None,
+            Some(b) => Some(*faces.get(b).ok_or_else(|| format!("unknown prototype face {b:?}"))?),
+        },
+        station: match t.get("station") {
+            None => 0,
+            Some(Value::Table(st)) => {
+                check_keys(st, &["n", "keywords"], "station")?;
+                get_int(st, "n")?.ok_or("station needs n")?
+            }
+            Some(_) => return Err("station must be a table".into()),
+        },
+        station_keywords: match t.get("station") {
+            Some(Value::Table(st)) => get_str_list(st, "keywords")?.iter().fold(0, |m, k| m | db.kw(k)),
+            _ => 0,
+        },
+        additional_choose_creature: get_bool(t, "additional_choose_creature")?,
     })
 }
 
@@ -885,7 +1016,7 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 72);
+        assert_eq!(db.cards.len(), 94);
         let gut = db.def(db.cards["Gut Shot"]);
         assert_eq!((gut.colors, gut.phyrexian_life, gut.cost.mana_value()), (color_bit(b'R'), 2, 1));
         assert!(gut.phyrexian_cost.as_ref().unwrap().is_zero());

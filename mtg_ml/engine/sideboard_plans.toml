@@ -54,3 +54,48 @@ opponent = "mono_blue_terror"
 why = "Pyroblast for every blue card, Electrickery for Delver; the slow card draw goes out."
 in = { "Pyroblast" = 4, "Electrickery" = 2 }
 out = { "Highway Robbery" = 4, "Grab the Prize" = 2 }
+
+# Tron (docs/tron.md). The rows against Affinity and Elves (not in this tree
+# yet) are in docs/tron.md, ready to add with those decks.
+
+[[plan]]
+deck = "tron"
+opponent = "jund_wildfire"
+why = "Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; the slow card draw goes out."
+in = { "Breath Weapon" = 2, "Call Damage Control" = 2 }
+out = { "Candy Trail" = 2, "Unfathomable Truths" = 2 }
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "tron"
+why = "Duress takes Stirrings, Map, Crop Rotation and Truths; the incidental artifacts go out."
+in = { "Duress" = 2 }
+out = { "Makeshift Munitions" = 1, "Lembas" = 1 }
+
+[[plan]]
+deck = "tron"
+opponent = "mono_blue_terror"
+why = "Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent; Candy Trail and the Golem's life gain matter little against Blue."
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2 }
+out = { "Candy Trail" = 2, "Boulderbranch Golem" = 2 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "tron"
+why = "Dispel counters Crop Rotation and Unfathomable Truths; Sleep of the Dead does little against seven-drops."
+in = { "Dispel" = 2 }
+out = { "Sleep of the Dead" = 2 }
+
+[[plan]]
+deck = "tron"
+opponent = "red_madness"
+why = "Blue Elemental Blast counters burn and kills Guttersnipe, Breath Weapon sweeps the small creatures, Pulse of Murasa gains 6; the slowest cards go out."
+in = { "Blue Elemental Blast" = 2, "Breath Weapon" = 2, "Pulse of Murasa" = 1 }
+out = { "Unfathomable Truths" = 2, "Maelstrom Colossus" = 2, "Bonder's Ornament" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "tron"
+why = "Gorilla Shaman eats Maps, Barrels, Candy Trails and Ornaments; Voldaren Epicure's ping does nothing to seven-drops."
+in = { "Gorilla Shaman" = 2 }
+out = { "Voldaren Epicure" = 2 }

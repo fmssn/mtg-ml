@@ -55,7 +55,14 @@ def _is_basic(c) -> bool:
 
 
 def _op_draw(g, item, op):
+    """each_controlling: instead each player who controls a permanent with
+    this name draws (Bonder's Ornament), the controller first."""
     n = op.get("n_cast_from_graveyard", op["n"]) if item.cast_from == "graveyard" else op["n"]
+    if "each_controlling" in op:
+        for q in (item.controller, 1 - item.controller):
+            if any(c.controller == q and c.name == op["each_controlling"] for c in g.battlefield):
+                g.draw(q, n)
+        return
     g.draw(item.controller, n)
 
 
@@ -122,9 +129,19 @@ def _op_create_token(g, item, op):
         g.create_token(item.controller, op["token"])
 
 
+def _source_power(g, item) -> int:
+    """The power of the source: the live permanent, or its last known information."""
+    src = _source(item)
+    return g.power(g.live(src) or src)
+
+
 def _op_gain_life(g, item, op):
     """per_storm: n for each spell cast before this one this turn (a storm
-    trigger standing in for the copies: Weather the Storm)."""
+    trigger standing in for the copies: Weather the Storm). n_from =
+    "source_power": life equal to the source's power (Boulderbranch Golem)."""
+    if op.get("n_from") == "source_power":
+        g.gain_life(item.controller, _source_power(g, item))
+        return
     g.gain_life(item.controller, op["n"] * (item.data["storm"] if op.get("per_storm") else 1))
 
 
@@ -173,6 +190,20 @@ def _op_damage_target_controller(g, item, op):
     t = g.target(item)
     if t is not None:
         g.deal_damage(_source(item), ("player", t.controller), op["n"])
+
+
+def _op_damage_target_from(g, item, op):
+    """Damage to target `index` equal to X (from = "x") or to the power of
+    the creature chosen or revealed as the spell was cast (from =
+    "chosen_power": Monstrous Emergence; last known information if it left)."""
+    i = op.get("index", 0)
+    if i < len(item.targets) and g.target_legal(item, i):
+        if op["from"] == "chosen_power":
+            chosen = item.data["chosen"]
+            n = g.power(g.live(chosen) or chosen)
+        else:
+            n = item.x
+        g.deal_damage(_source(item), item.targets[i], n)
 
 
 def _op_damage_each_opponent(g, item, op):
@@ -246,8 +277,8 @@ def _op_exile_graveyard(g, item, op):
 
 
 def search_filter(op):
-    """Library search predicate from an op's supertype / type / subtypes_any."""
-    sup, typ, subs = op.get("supertype"), op.get("type"), op.get("subtypes_any")
+    """Library search predicate from an op's supertype / type / subtypes_any / colorless."""
+    sup, typ, subs, colorless = op.get("supertype"), op.get("type"), op.get("subtypes_any"), op.get("colorless", False)
 
     def pred(c) -> bool:
         f = c.face
@@ -256,6 +287,8 @@ def search_filter(op):
         if typ and typ not in f.types:
             return False
         if subs and not (f.subtypes & set(subs)):
+            return False
+        if colorless and f.colors:
             return False
         return True
 
@@ -276,6 +309,64 @@ def _op_optional_payment(g, item, op):
 
 def _op_scry(g, item, op):
     yield from g.scry(item.controller, op["n"])
+
+
+def _op_surveil(g, item, op):
+    yield from g.surveil(item.controller)
+
+
+def _op_dig(g, item, op):
+    """Look at the top n, you may put a matching card into your hand (revealed), the rest on the bottom."""
+    yield from g.dig(item.controller, op["n"], search_filter(op), op["what"], item.name)
+
+
+def _op_cascade(g, item, op):
+    """Cast trigger: cascade, below the spell's mana value."""
+    yield from g.cascade(item.controller, item.source.face.mana_value)
+
+
+def _op_station(g, item, op):
+    """Charge counters on the source equal to the power of the creature tapped to pay the cost."""
+    live = g.live(item.source)
+    if live is not None:
+        live.charge += item.data["tapped_power"]
+
+
+def _op_return_random_from_graveyard(g, item, op):
+    """Return a card of this type at random from your graveyard to your hand (Haunted Fengraf)."""
+    p = item.controller
+    cands = [c for c in g.players[p].graveyard if op["type"] in c.face.types]
+    if not cands:
+        return
+    c = cands[g.rng.randrange(len(cands))]
+    g._log(f"p{p} returns {c.name} at random")
+    g._move(c, "hand")
+
+
+def _op_return_from_graveyard(g, item, op):
+    """Choose up to n cards of the given types in a graveyard ("you" or
+    "any") and return them to their owners' hands. each_type: at most one per
+    type (Call Damage Control's modes). Chosen on resolution: targeting in
+    graveyards is not modelled."""
+    p = item.controller
+    types, n, each_type = op["types"], op["n"], op.get("each_type", False)
+    owners = (p,) if op["whose"] == "you" else (p, 1 - p)
+    used: list[str] = []
+    for _ in range(n):
+        options = [Option("Return nothing more", ("return_gy", None), None)]
+        for q in owners:
+            rel = "self" if q == p else "opponent"
+            whose = "your" if q == p else "the opponent's"
+            for typ in types:
+                if each_type and typ in used:
+                    continue
+                for c in g._dedupe_by_name(c for c in g.players[q].graveyard if typ in c.face.types):
+                    options.append(Option(f"Return {c.name} ({typ.lower()}) from {whose} graveyard", ("return_gy", rel, typ.lower(), c.name), (typ, c)))
+        choice = yield from g.ask(p, CHOOSE_CARD, f"{item.name}: return a card from a graveyard to its owner's hand", options)
+        if choice is None:
+            return
+        used.append(choice[0])
+        g._move(choice[1], "hand")
 
 
 def _op_explore_target(g, item, op):
@@ -312,6 +403,7 @@ OPS = {
     "counter_on_source": _op_counter_on_source,
     "damage_target": _op_damage_target,
     "damage_target_controller": _op_damage_target_controller,
+    "damage_target_from": _op_damage_target_from,
     "damage_each_opponent": _op_damage_each_opponent,
     "damage_each_creature": _op_damage_each_creature,
     "discard": _op_discard,
@@ -323,6 +415,12 @@ OPS = {
     "search_library": _op_search_library,
     "optional_payment": _op_optional_payment,
     "scry": _op_scry,
+    "surveil": _op_surveil,
+    "dig": _op_dig,
+    "cascade": _op_cascade,
+    "station": _op_station,
+    "return_random_from_graveyard": _op_return_random_from_graveyard,
+    "return_from_graveyard": _op_return_from_graveyard,
     "explore_target": _op_explore_target,
     "shuffle_into_library": _op_shuffle_into_library,
     "custom": _op_custom,
@@ -547,7 +645,28 @@ def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:
     return tuple(TargetSpec(k) for k in kinds or ())
 
 
+def _mana_amount(spec: dict | None):
+    """{ n = 3, if_control = ["Mine", "Power-Plant"] }."""
+    if spec is None:
+        return None
+    if set(spec) != {"n", "if_control"}:
+        raise ValueError(f"unsupported mana_amount {spec!r}")
+    return spec["n"], tuple(spec["if_control"])
+
+
 def _ability(a: dict) -> AbilityDef:
+    known = {
+        "name", "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv",
+        "x_reveal", "zone", "sorcery_speed", "mana", "targets", "mana_amount", "once_per_turn", "tap_other",
+    }  # fmt: skip
+    if set(a) - known:
+        raise ValueError(f"{a.get('name')}: unknown ability fields {sorted(set(a) - known)}")
+    if "mana" in a and "cost" in a and M(a["cost"]) != M("{1}"):
+        raise ValueError(f"{a['name']}: a mana filter must cost exactly {{1}}")
+    if a.get("zone", "battlefield") not in ("battlefield", "hand", "graveyard"):
+        raise ValueError(f"{a['name']}: unknown ability zone {a['zone']!r}")
+    if a.get("tap_other") not in (None, "creature"):
+        raise ValueError(f"{a['name']}: unknown tap_other {a['tap_other']!r}")
     return AbilityDef(
         name=a["name"],
         effect=make_effect(a.get("effect")),
@@ -564,14 +683,19 @@ def _ability(a: dict) -> AbilityDef:
         sorcery_speed=a.get("sorcery_speed", False),
         mana=tuple(a["mana"]) if "mana" in a else None,
         targets=_targets(a.get("targets")),
+        mana_amount=_mana_amount(a.get("mana_amount")),
+        once_per_turn=a.get("once_per_turn", False),
+        tap_other=a.get("tap_other"),
     )
 
 
 def _trigger(t: dict) -> TriggerDef:
-    unknown = set(t) - {"name", "event", "effect", "condition", "targets"}
+    unknown = set(t) - {"name", "event", "effect", "condition", "targets", "optional_targets"}
     if unknown:
         raise ValueError(f"trigger {t.get('name')}: unknown fields {sorted(unknown)}")
-    return TriggerDef(t["name"], t["event"], make_effect(t["effect"]), _condition(t.get("condition")), _targets(t.get("targets")))
+    return TriggerDef(
+        t["name"], t["event"], make_effect(t["effect"]), _condition(t.get("condition")), _targets(t.get("targets")), t.get("optional_targets", False)
+    )
 
 
 def colors_of(spec: dict) -> frozenset[str]:
@@ -597,7 +721,8 @@ def card_def(spec: dict) -> CardDef:
         "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward",
         "targets", "effect", "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped",
         "etb_x_counters", "back", "modes", "abilities", "triggers", "madness", "plot", "overload", "overload_effect",
-        "additional_discard", "alternative_cost", "flashback_cost", "bargain",
+        "additional_discard", "alternative_cost", "flashback_cost", "bargain", "prototype", "prototype_face", "station",
+        "additional_choose_creature",
     }  # fmt: skip
     unknown = set(spec) - known
     if unknown:
@@ -640,6 +765,11 @@ def card_def(spec: dict) -> CardDef:
         etb_x_counters=spec.get("etb_x_counters", False),
         back=FACES[spec["back"]] if "back" in spec else None,
         modes=tuple(SpellMode(m["name"], _targets(m.get("targets")), make_effect(m["effect"])) for m in spec.get("modes", ())),
+        prototype=M(spec["prototype"]) if "prototype" in spec else None,
+        prototype_face=FACES[spec["prototype_face"]] if "prototype_face" in spec else None,
+        station=spec["station"]["n"] if "station" in spec else 0,
+        station_keywords=frozenset(spec["station"].get("keywords", ())) if "station" in spec else frozenset(),
+        additional_choose_creature=spec.get("additional_choose_creature", False),
     )
 
 

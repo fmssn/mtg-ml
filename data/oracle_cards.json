@@ -809,5 +809,240 @@
    "Cycling"
   ],
   "cmc": 6.0
+ },
+ {
+  "name": "Urza's Mine",
+  "mana_cost": "",
+  "type_line": "Land \u2014 Urza's Mine",
+  "oracle_text": "{T}: Add {C}. If you control an Urza's Power-Plant and an Urza's Tower, add {C}{C} instead.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Urza's Power Plant",
+  "mana_cost": "",
+  "type_line": "Land \u2014 Urza's Power-Plant",
+  "oracle_text": "{T}: Add {C}. If you control an Urza's Mine and an Urza's Tower, add {C}{C} instead.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Urza's Tower",
+  "mana_cost": "",
+  "type_line": "Land \u2014 Urza's Tower",
+  "oracle_text": "{T}: Add {C}. If you control an Urza's Mine and an Urza's Power-Plant, add {C}{C}{C} instead.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Expedition Map",
+  "mana_cost": "{1}",
+  "type_line": "Artifact",
+  "oracle_text": "{2}, {T}, Sacrifice this artifact: Search your library for a land card, reveal it, put it into your hand, then shuffle.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Bramble Wurm",
+  "mana_cost": "{6}{G}",
+  "type_line": "Creature \u2014 Wurm",
+  "oracle_text": "Reach, trample\nWhen this creature enters, you gain 5 life.\n{2}{G}, Exile this card from your graveyard: You gain 5 life.",
+  "power": "7",
+  "toughness": "6",
+  "keywords": [
+   "Reach",
+   "Trample"
+  ],
+  "cmc": 7.0
+ },
+ {
+  "name": "Ancient Stirrings",
+  "mana_cost": "{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "Look at the top five cards of your library. You may reveal a colorless card from among them and put it into your hand. Then put the rest on the bottom of your library in any order.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Crop Rotation",
+  "mana_cost": "{G}",
+  "type_line": "Instant",
+  "oracle_text": "As an additional cost to cast this spell, sacrifice a land.\nSearch your library for a land card, put that card onto the battlefield, then shuffle.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Barrels of Blasting Jelly",
+  "mana_cost": "{1}",
+  "type_line": "Artifact",
+  "oracle_text": "{1}: Add one mana of any color. Activate only once each turn.\n{5}, {T}, Sacrifice this artifact: It deals 5 damage to target creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Pinnacle Kill-Ship",
+  "mana_cost": "{7}",
+  "type_line": "Artifact \u2014 Spacecraft",
+  "oracle_text": "When this Spacecraft enters, it deals 10 damage to up to one target creature.\nStation (Tap another creature you control: Put charge counters equal to its power on this Spacecraft. Station only as a sorcery. It's an artifact creature at 7+.)\n7+ | Flying",
+  "power": "7",
+  "toughness": "7",
+  "keywords": [
+   "Station"
+  ],
+  "cmc": 7.0
+ },
+ {
+  "name": "Bonder's Ornament",
+  "mana_cost": "{3}",
+  "type_line": "Artifact",
+  "oracle_text": "{T}: Add one mana of any color.\n{4}, {T}: Each player who controls a permanent named Bonder's Ornament draws a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 3.0
+ },
+ {
+  "name": "Maelstrom Colossus",
+  "mana_cost": "{8}",
+  "type_line": "Artifact Creature \u2014 Golem",
+  "oracle_text": "Cascade (When you cast this spell, exile cards from the top of your library until you exile a nonland card that costs less. You may cast it without paying its mana cost. Put the exiled cards on the bottom in a random order.)",
+  "power": "7",
+  "toughness": "7",
+  "keywords": [
+   "Cascade"
+  ],
+  "cmc": 8.0
+ },
+ {
+  "name": "Boulderbranch Golem",
+  "mana_cost": "{7}",
+  "type_line": "Artifact Creature \u2014 Golem",
+  "oracle_text": "Prototype {3}{G} \u2014 3/3 (You may cast this spell with different mana cost, color, and size. It keeps its abilities and types.)\nWhen this creature enters, you gain life equal to its power.",
+  "power": "6",
+  "toughness": "5",
+  "keywords": [
+   "Prototype"
+  ],
+  "cmc": 7.0
+ },
+ {
+  "name": "Unfathomable Truths",
+  "mana_cost": "{4}{U}",
+  "type_line": "Instant",
+  "oracle_text": "Devoid (This card has no color.)\nDraw three cards and create a 0/1 colorless Eldrazi Spawn creature token with \"Sacrifice this token: Add {C}.\"",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Devoid"
+  ],
+  "cmc": 5.0
+ },
+ {
+  "name": "Candy Trail",
+  "mana_cost": "{1}",
+  "type_line": "Artifact \u2014 Food Clue",
+  "oracle_text": "When this artifact enters, scry 2.\n{2}, {T}, Sacrifice this artifact: You gain 3 life and draw a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Scry"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Conduit Pylons",
+  "mana_cost": "",
+  "type_line": "Land \u2014 Desert",
+  "oracle_text": "When this land enters, surveil 1. (Look at the top card of your library. You may put it into your graveyard.)\n{T}: Add {C}.\n{1}, {T}: Add one mana of any color.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Surveil"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Bojuka Bog",
+  "mana_cost": "",
+  "type_line": "Land",
+  "oracle_text": "This land enters tapped.\nWhen this land enters, exile target player's graveyard.\n{T}: Add {B}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Haunted Fengraf",
+  "mana_cost": "",
+  "type_line": "Land",
+  "oracle_text": "{T}: Add {C}.\n{3}, {T}, Sacrifice this land: Return a creature card at random from your graveyard to your hand.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Call Damage Control",
+  "mana_cost": "{1}{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "Choose up to two. Return those cards from your graveyard to your hand.\n\u2022 Target artifact card.\n\u2022 Target creature card.\n\u2022 Target enchantment card.\n\u2022 Target land card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Scour from Existence",
+  "mana_cost": "{7}",
+  "type_line": "Instant",
+  "oracle_text": "Exile target permanent.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 7.0
+ },
+ {
+  "name": "Kaervek's Torch",
+  "mana_cost": "{X}{R}",
+  "type_line": "Sorcery",
+  "oracle_text": "As long as Kaervek's Torch is on the stack, spells that target it cost {2} more to cast.\nKaervek's Torch deals X damage to any target.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Pulse of Murasa",
+  "mana_cost": "{2}{G}",
+  "type_line": "Instant",
+  "oracle_text": "Return target creature or land card from a graveyard to its owner's hand. You gain 6 life.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 3.0
+ },
+ {
+  "name": "Monstrous Emergence",
+  "mana_cost": "{1}{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "As an additional cost to cast this spell, choose a creature you control or reveal a creature card from your hand.\nMonstrous Emergence deals damage equal to the power of the creature you chose or the card you revealed to target creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
  }
 ]
