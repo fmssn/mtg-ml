@@ -106,6 +106,9 @@ summed blocker power and similar aggregates, so they need no hand-written token.
 | 3. `Clone` in Rust, simulated previews (set 5) | step 2 to measure it | blind-spot rate down across all decision kinds; benchmark and ladder Elo not worse |
 | 4. card-shape tokens, hand entities (set 5 or 6) | none | a held-out deck (cards not seen in training) plays better from step 0 than with names only |
 | 5. relation table + entity attention | 1, 4 | fresh run with `entity_attn >= 1` beats the set-4 run at equal steps |
+| 6. fresh set-6 six-deck run | 3, 4 (set 6), all six decks and sideboards in both engines | benchmark and ladder Elo not worse than the best set-4/5 run on the matchups they share |
+| 7. trust test | 6 | most pairings inside Pauper-Research's 95% interval, no per-deck bias, not exploitable by the frozen pool (see the milestone below) |
+| 8. first card-choice experiment (Tron with vs without Giant's Boulder) | 7 passed | delta reported with its interval and cross-checked against Pauper-Research's with/without-card numbers |
 
 Each step is its own PR and its own ledger entry in `docs/experiments/`. Steps 3 to 5 change the
 model's inputs enough that a fresh run is likely cheaper than stacking fine-tunes; decide per step
@@ -127,3 +130,70 @@ from the ledger.
 - **Multi-turn combos.** The Shaman + Toxin sweep needs a plan over several decisions. Simulated
   previews show one step ahead; the exploration problem (the policy plays the sweep with
   p ≈ 1e-7, and search distillation in PR #10 did not fix it) stays.
+
+## Next milestone: a model you can trust for card choices
+
+### Goal
+
+The purpose behind this work is the user's Pauper-Research project
+([github.com/fmssn/Pauper-Research](https://github.com/fmssn/Pauper-Research)): use a strong model to
+evaluate card choices and sideboard changes where tournament data is too thin to answer them. A card
+swap moves a deck's win rate by about 1 to 3 points, which is smaller than most of the model's
+current errors. So the model has to be strong, consistent across decks (a deck it plays worse gets
+worse-looking cards), and validated against real results before any card conclusion is drawn from it.
+
+### Trust test
+
+The gate before any card conclusion (step 7 below):
+
+1. Train one deck-conditioned model on feature set 6 with all six decks (Jund Wildfire, Mono Blue
+   Terror, Red Madness, Grixis Affinity, Elves, Tron) and their real sideboards.
+2. Play the full 6x6 matchup matrix as best-of-three with sideboarding, both seats, with enough
+   matches for ±2 points per pairing (about 2,400 matches per pairing at 95%).
+3. Compare with Pauper-Research's Q3 2026 combined matchup matrix
+   (`reports/2026-Q3/combined/matchups.csv`, which carries Wilson intervals).
+4. Play the final model against a frozen pool of its own past versions to check how exploitable it is.
+
+| check | pass |
+|---|---|
+| per pairing | most pairings inside the real data's 95% interval |
+| per deck | no systematic bias: no deck that over- or under-performs the real data across most of its pairings |
+| exploitability | no past version in the frozen pool beats the final model by a clear margin in any matchup |
+
+The per-deck check matters most. A deck that consistently under-performs means the model plays it
+worse than people do, and every card conclusion about that deck would carry that bias. Real matchup
+samples are small (±17 points at 30 matches), so the test catches bias and gross errors, not exact
+values.
+
+### Card-choice protocol
+
+Variant decks differ from the base list by a few cards. For each variant:
+
+1. Fine-tune from the base model for a fixed budget, the same for every variant, so the model learns
+   the new card instead of playing it with untrained rows.
+2. Play about 10k games per matchup against each opposing deck, both seats, best-of-three.
+3. Report the win-rate delta against the base list per matchup with its confidence interval (10k
+   games is about ±1 point per side, so a 1-point effect needs more games or a paired design), and
+   one "against the field" number weighted by Pauper-Research meta shares.
+4. Cross-check with Pauper-Research's with/without-card statistics
+   (`python -m pauper_research cards <archetype>`). Agreement in sign is the minimum; a disagreement
+   is a finding to look into, not a result to publish.
+
+First experiment: Tron with vs without Giant's Boulder (step 8).
+
+### Known risks and what addresses them
+
+| risk | what addresses it |
+|---|---|
+| self-play exploitability: the model beats itself but has holes a different player finds | league training against a population (partly in place through pool snapshots); the trust test's frozen-pool check |
+| hidden information: the model does not reason about the opponent's hand | opponent-hand modelling, starting with the opponent-action head from the MageZero borrow plan |
+| multi-turn combos never explored (Krark-Clan Shaman + Toxin Analysis) | open: search distillation failed in PR #10, so this needs a new idea; card conclusions about combo pieces stay unreliable until then |
+| skill bias per deck | the trust test detects it; fix by deck-specific training budget before drawing conclusions about that deck |
+
+### What limits the pace
+
+Not implementation work: agents implement decks, cards and features quickly. The limits are H100 box
+time and the number of research iterations. At today's speed one run produces about 1.3M games per
+hour, so a six-deck run of 50 to 100M games takes 1 to 3 days of box time. Each failed trust test
+costs at least one more such run. Estimates for this milestone are therefore in box hours and
+iterations (runs until the trust test passes), not calendar months.
