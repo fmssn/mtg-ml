@@ -1,0 +1,56 @@
+# Sideboard plans: what each deck boards in and out for games 2 and 3 of a
+# match, by opponent. One [[plan]] per ordered (deck, opponent) pair; every
+# pair of decks in decks.DECKS needs one in each direction.
+#
+#   deck, opponent   keys of decks.DECKS
+#   why              one line: what the swap is for
+#   in               cards from decks.SIDEBOARDS[deck] -> maindeck
+#   out              maindeck cards -> sideboard (same total as `in`)
+#
+# Counts are relative to the registered maindeck, never to a previous game's
+# deck. mtg_ml/engine/sideboard.py validates every row at import (counts
+# available, 60 / 15, at most 4 copies). The scripted PlanMatrixPolicy
+# (mtg_ml/match.py) plays exactly this table; docs/sideboarding.md explains
+# how a learned policy replaces it.
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "mono_blue_terror"
+why = "Counter-magic and fliers: blasts and discard in, the slow artifacts and the Hydra out."
+in = { "Red Elemental Blast" = 2, "Go for the Throat" = 2, "Duress" = 2 }
+out = { "Lembas" = 2, "Toxin Analysis" = 2, "Makeshift Munitions" = 1, "Nyxborn Hydra" = 1 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "jund_wildfire"
+why = "Blue Elemental Blast and Dispel for Jund's red spells and removal, Steel Sabotage for its artifacts."
+in = { "Blue Elemental Blast" = 2, "Dispel" = 2, "Steel Sabotage" = 2 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Deem Inferior" = 1 }
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "red_madness"
+why = "Weather the Storm gains life against burn; Cleansing Wildfire is a slow cantrip against basic Mountains."
+in = { "Weather the Storm" = 3 }
+out = { "Cleansing Wildfire" = 2, "Nyxborn Hydra" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "jund_wildfire"
+why = "Electrickery sweeps the x/1s, Searing Blaze kills Chrysalis, Gorilla Shaman eats artifacts; the x/1 threats go out."
+in = { "Electrickery" = 2, "Searing Blaze" = 2, "Gorilla Shaman" = 2 }
+out = { "Voldaren Epicure" = 2, "Highway Robbery" = 2, "Guttersnipe" = 1, "Sneaky Snacker" = 1 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "red_madness"
+why = "Blue Elemental Blast and Dispel answer burn; the slow removal goes out."
+in = { "Blue Elemental Blast" = 2, "Dispel" = 2 }
+out = { "Sleep of the Dead" = 2, "Deem Inferior" = 2 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "mono_blue_terror"
+why = "Pyroblast for every blue card, Electrickery for Delver; the slow card draw goes out."
+in = { "Pyroblast" = 4, "Electrickery" = 2 }
+out = { "Highway Robbery" = 4, "Grab the Prize" = 2 }

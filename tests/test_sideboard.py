@@ -5,7 +5,7 @@ from helpers import bf, choose, find, has, labels, names, pass_priority, pay, re
 
 from mtg_ml.agents import RandomAgent
 from mtg_ml.bots import make_bot
-from mtg_ml.engine import DECKS, SIDEBOARD_PLANS, SIDEBOARDS, postboard
+from mtg_ml.engine import DECKS, SIDEBOARD_PLANS, SIDEBOARDS, expand, postboard
 from mtg_ml.engine import objects as O
 from mtg_ml.encode import state_features
 from mtg_ml.match import MATCHUPS, MatchResult, deck_names, game_args, match_decks, next_starting_player, parse_matchups, play_match
@@ -188,3 +188,88 @@ def test_play_match_runs_with_bots_and_random():
         assert r.over and 2 <= len(r.games) <= 3
         for (st, w, _), (st2, _, _) in zip(r.games, r.games[1:]):
             assert st2 == (st if w is None else 1 - w)
+
+
+# ---------------------------------------------------------------------------
+# Plan table (engine/sideboard_plans.toml) and the sideboarding decision step
+# ---------------------------------------------------------------------------
+
+
+def test_every_pair_of_decks_has_a_valid_plan():
+    from mtg_ml.engine import PLANS
+    from mtg_ml.engine.sideboard import validate_plan
+
+    for d in DECKS:
+        for o in DECKS:
+            if d != o:
+                assert (d, o) in PLANS, f"no sideboard plan for {d} vs {o}"
+    for (d, o), plan in PLANS.items():
+        validate_plan(plan)
+        assert plan.why and plan.swaps > 0
+        assert sum(postboard(d, o).values()) == 60
+
+
+def test_plan_validation_rejects_bad_rows():
+    from mtg_ml.engine.sideboard import parse_plans
+
+    row = '[[plan]]\ndeck = "jund_wildfire"\nopponent = "red_madness"\nwhy = "x"\n'
+    assert parse_plans(row + 'in = { "Weather the Storm" = 3 }\nout = { "Cleansing Wildfire" = 3 }\n')
+    bad = [
+        'in = { "Weather the Storm" = 3 }\nout = { "Cleansing Wildfire" = 2 }\n',  # 3 in, 2 out
+        'in = { "Weather the Storm" = 9 }\nout = { "Cleansing Wildfire" = 4, "Cast Down" = 4, "Lembas" = 1 }\n',  # more than the sideboard has
+        'in = { "Lightning Bolt" = 1 }\nout = { "Cast Down" = 1 }\n',  # not in the sideboard
+        'in = { "Weather the Storm" = 1 }\nout = { "Lightning Bolt" = 1 }\n',  # not in the maindeck
+        'in = { "Weather the Storm" = 1 }\nout = { "Cast Down" = 1 }\ncolour = "red"\n',  # unknown field
+    ]
+    for b in bad:
+        with pytest.raises(ValueError):
+            parse_plans(row + b)
+    with pytest.raises(ValueError):
+        parse_plans(row.replace("red_madness", "no_such_deck") + "in = {}\nout = {}\n")
+    with pytest.raises(ValueError):
+        parse_plans((row + "in = {}\nout = {}\n") * 2)  # duplicate pair
+
+
+def test_plan_matrix_policy_reproduces_the_plan_table(engine):
+    """play_match with the default policy plays exactly game_args' decks:
+    maindecks in game 1, the table's plan in games 2 and 3."""
+    from mtg_ml.engine import plan_for
+    from mtg_ml.match import PlanMatrixPolicy, matchup_decks
+
+    for m in MATCHUPS:
+        a, b = matchup_decks(m)
+        res = play_match([make_bot(0, a), make_bot(1, b)], seed=11, engine=engine, matchup=m)
+        assert len(res.plans) == len(res.games) == len(res.seen)
+        for n, plans in enumerate(res.plans, 1):
+            assert tuple(expand(p.apply()) for p in plans) == match_decks(n, m)
+            if n > 1:
+                assert plans == (plan_for(a, b), plan_for(b, a))
+        h = res.history(0)
+        assert [x.game_no for x in h] == list(range(1, len(res.games) + 1))
+        assert PlanMatrixPolicy().choose(a, b, 2, h) == plan_for(a, b)
+        assert all(x.result in ("win", "loss", "draw") for x in h)
+        assert any(x.opponent_seen for x in h)
+
+
+def test_custom_policy_sees_history_and_is_validated(engine):
+    from mtg_ml.engine import SideboardPlan
+    from mtg_ml.match import NoSideboardPolicy
+
+    calls = []
+
+    class Recorder:
+        def choose(self, deck, opponent, game_no, history):
+            calls.append((deck, opponent, game_no, history))
+            return SideboardPlan.none(deck, opponent)
+
+    res = play_match([make_bot(0), make_bot(1)], seed=2, engine=engine, policies=(Recorder(), NoSideboardPolicy()))
+    assert [c[2] for c in calls] == list(range(2, len(res.games) + 1))
+    assert all(len(c[3]) == c[2] - 1 for c in calls)
+    assert all(p.swaps == 0 for ps in res.plans for p in ps)
+
+    class Cheater:
+        def choose(self, deck, opponent, game_no, history):
+            return SideboardPlan(deck, opponent, {"Lightning Bolt": 4}, {"Cast Down": 4}, "illegal")
+
+    with pytest.raises(ValueError):
+        play_match([make_bot(0), make_bot(1)], seed=2, engine=engine, policies=(Cheater(), Cheater()))
