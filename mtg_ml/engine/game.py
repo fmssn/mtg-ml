@@ -125,6 +125,9 @@ class Game:
         self.attackers: list[int] = []
         self.blocked: set[int] = set()
         self.blocks: dict[int, int] = {}  # blocker oid -> attacker oid
+        # (remaining cost, sacrifice filter, excluded sources) of a pending
+        # pay_mana decision; read only by encode's payment preview
+        self.paying: tuple | None = None
         self.winner: int | None = None
         self.over = False
         self.end_reason = ""
@@ -1141,7 +1144,9 @@ class Game:
                     self._log(f"  p{p} {O.PAY_MANA}: {options[auto].label} (auto)")
                 choice = options[auto].value
             else:
+                self.paying = (rem, sac_filter, exclude)
                 choice = yield from self.ask(p, O.PAY_MANA, f"Pay {rem} for {what}", options)
+                self.paying = None
             if choice[0] == "pool":
                 pl.pool[choice[1]] -= 1
                 if pl.pool[choice[1]] == 0:

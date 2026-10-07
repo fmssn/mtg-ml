@@ -83,22 +83,70 @@ def test_search_bot_identical_on_both_engines():
     assert picks["python"] == picks["native"]
 
 
+# Set-4 strings that `test_entity_and_preview_strings_identical` must see at
+# least once, so the comparison covers every new code path.
+SET4_TOKENS = (
+    "attacking_power>=",
+    "unblocked_power>=",
+    ":incoming_lethal",
+    ":life_after_unblocked>=",
+    "self:sources:",
+    "self:hand_needs:",
+    "self:hand_missing:",
+    "e:produces:",
+    "e:attack_slot:",
+    "e:blocked",
+    "e:unblocked",
+    "e:blockers>=",
+    "e:block_power>=",
+    "e:block_lethal",
+    "e:blocking:slot:",
+    "e:blocking:name:",
+    "e:blocking:power>=",
+    "e:blocking:kills",
+    "e:blocking:dies",
+    "pv:attacker_already_blocked",
+    "pv:attacker_dies",
+    "pv:blocker_dies",
+    "pv:unblocked_damage_left>=",
+    "pv:lethal_left",
+    "pv:x>=",
+    "pv:x_is_max",
+    "pv:enters_power>=",
+    "pv:adds_color:",
+    "pv:adds_missing_color",
+    "pv:colors_left:",
+)
+
+
 def test_entity_and_preview_strings_identical():
     """`featurize` hashes are compared in lockstep; this compares the strings
-    behind them (entities, option previews) so a mismatch is readable."""
-    from mtg_ml.encode import entity_features, option_preview
+    behind them (state, entities, option previews) so a mismatch is
+    readable, in set 3 and the latest set, over all three matchups."""
+    from mtg_ml.encode import FEATURES, entity_features, option_preview, state_features
+    from mtg_ml.match import MATCHUPS, game_args
 
-    for seed in range(6):
-        py, nat = (game_class(e)(match_decks(1 + seed % 2), seed=seed, max_turns=30) for e in ("python", "native"))
+    seen = set()
+    for seed in range(12):
+        matchup = sorted(MATCHUPS)[seed % 3]
+        args = game_args(1 + seed // 3 % 2, matchup)
+        py, nat = (game_class(e)(seed=seed, max_turns=30, **args) for e in ("python", "native"))
         r = random.Random(seed)
         while not py.over:
             p = py.decision.player
-            assert entity_features(py, p) == entity_features(nat, p)
-            for i in range(len(py.legal_options())):
-                assert option_preview(py, p, i) == option_preview(nat, p, i), py.legal_options()[i].label
+            for f in (3, FEATURES):
+                for v in (0, 1):
+                    assert state_features(py, v, f) == state_features(nat, v, f)
+                assert entity_features(py, p, f) == entity_features(nat, p, f)
+                for i in range(len(py.legal_options())):
+                    assert option_preview(py, p, i, f) == option_preview(nat, p, i, f), py.legal_options()[i].label
+            strings = state_features(py, p) + [t for e in entity_features(py, p)[0] for t in e]
+            strings += [t for i in range(len(py.legal_options())) for t in option_preview(py, p, i)]
+            seen |= {k for k in SET4_TOKENS if any(k in t for t in strings)}
             a = r.randrange(len(py.legal_options()))
             py.step(a)
             nat.step(a)
+    assert seen == set(SET4_TOKENS), sorted(set(SET4_TOKENS) - seen)
 
 
 def test_divergence_json_keeps_fork_every():
