@@ -174,7 +174,7 @@ All fields are optional unless marked. Unknown fields are an error in both engin
 | field | meaning |
 |---|---|
 | `name` (required) | the engine's name for the card (front face; accents folded: "Lorien Revealed") |
-| `cost` | mana cost, `"{X}{G}{G}"`; omitted = no cost. Colours are derived from it |
+| `cost` | mana cost, `"{X}{G}{G}"`; omitted = no cost. Colours are derived from it. Phyrexian symbols (`"{R/P}"`) count as their colour; the card also gets the cast mode "phyrexian": the rest of the cost plus 2 life per symbol (Gut Shot) |
 | `types` (required), `subtypes`, `supertypes` | space separated, e.g. `"Artifact Creature"`, `"Zombie Rat"`, `"Basic"` |
 | `colors` | override, e.g. `"U"` for a colour indicator; `devoid = true` makes the card colourless |
 | `power`, `toughness`, `keywords`, `ward` | `keywords = ["flying"]`; `ward = 2` is ward {2} |
@@ -188,13 +188,14 @@ All fields are optional unless marked. Unknown fields are an error in both engin
 | `madness`, `plot` | madness cost (a discarded card goes to exile, and a trigger lets its owner cast it for this cost at any speed); plot cost (a sorcery-speed special action exiles it; cast free as a sorcery on a later turn, option "Cast X (plotted)") |
 | `overload` + `overload_effect` | cast mode "overload": this cost, no targets, `overload_effect` instead of `effect` |
 | `alternative_cost`, `flashback_cost` | `{ sacrifice = "mountain", n = N }`: sacrifice lands instead of paying mana (cast mode "alternative" from hand; flashback with only `flashback_cost` is free apart from the sacrifice) |
+| `bargain` | `true`: cast mode "bargain", sacrificing an artifact, enchantment or token as an additional cost; an `etb` trigger with `condition = { bargained = true }` only triggers then (Troublemaker Ouphe) |
 | `enters_tapped`, `etb_x_counters`, `back` | `back` names a `[[face]]` (transform) |
 | `abilities` | `[{ name (required), cost, tap, sac_self, sac_other, discard_self, discard_other, exile_self, x_target_mv, x_reveal, zone = "battlefield" \| "hand", sorcery_speed, mana = ["B", "R"], targets, effect }]`; `mana` makes it a mana ability; `discard_other` / `exile_self`: discard a card / exile this permanent as a cost; `x_target_mv = 2`: the cost has {X}{X}, X = the (single) target's mana value, only affordable targets are offered (Gorilla Shaman); `x_reveal = "red"`: choose X, then reveal X red cards from hand as a cost (Martyr of Ashes) |
-| `triggers` | `[{ name (required), event, effect, condition }]`, events: `etb`, `to_graveyard_from_battlefield`, `cast`, `you_sacrifice_another`, `your_upkeep`, `you_cast` (another spell its controller casts, from the battlefield), `third_draw` (its owner draws their third card in a turn, from the graveyard); condition: `{ sacrificed_subtype = "Eldrazi" }`, `{ spell = "noncreature" \| "instant_or_sorcery" }` (for `you_cast`) |
+| `triggers` | `[{ name (required), event, effect, condition, targets }]`; `targets` are chosen as the trigger goes on the stack, and a trigger without legal targets is removed (603.3d), events: `etb`, `to_graveyard_from_battlefield`, `cast`, `you_sacrifice_another`, `your_upkeep`, `you_cast` (another spell its controller casts, from the battlefield), `third_draw` (its owner draws their third card in a turn, from the graveyard); condition: `{ sacrificed_subtype = "Eldrazi" }`, `{ spell = "noncreature" \| "instant_or_sorcery" }` (for `you_cast`), `{ bargained = true }` (for `etb`) |
 
-Target kinds: `creature`, `nonlegendary_creature`, `nonartifact_creature`, `creature_you_control`, `creature_you_dont_control`, `land`, `nonland_permanent`, `permanent`, `artifact`, `noncreature_artifact`, `blue_permanent`, `red_permanent`, `spell`, `blue_spell`, `red_spell`, `instant_spell`, `artifact_spell`, `player`, `opponent`, `player_with_creature`, `creature_of_target_player` (a creature controlled by the player chosen as the previous target: Searing Blaze), `any`.
+Target kinds: `creature`, `nonlegendary_creature`, `nonartifact_creature`, `creature_you_control`, `creature_you_dont_control`, `land`, `nonland_permanent`, `permanent`, `artifact`, `noncreature_artifact`, `blue_permanent`, `red_permanent`, `spell`, `blue_spell`, `red_spell`, `instant_spell`, `artifact_spell`, `player`, `opponent`, `player_with_creature`, `creature_of_target_player` (a creature controlled by the player chosen as the previous target: Searing Blaze), `another_creature` (a creature not already chosen as a target of the same spell: Cast into the Fire), `artifact_or_enchantment_spell`, `artifact_or_enchantment_you_dont_control`, `any`.
 
-Sacrifice filters (`additional_sac`, `sac_other`, land-sacrifice costs): `artifact`, `artifact_or_creature`, `mountain`.
+Sacrifice filters (`additional_sac`, `sac_other`, land-sacrifice costs): `artifact`, `artifact_or_creature`, `mountain`, `artifact_enchantment_or_token` (bargain).
 
 Where the vocabulary lives, for when it needs to grow:
 
@@ -224,12 +225,15 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 | `lose_life` | `who` = `you` \| `opponent` \| `target_player` \| `target_controller`, `n` | that player loses `n` life |
 | `counter_on_source` | | a +1/+1 counter on the source, if it is still on the battlefield |
 | `damage_target` | `n`, `index`, `n_landfall` | the source (the spell itself, or the ability's source) deals `n` damage to target `index` (default 0; creature or player); `n_landfall` instead if a land entered under the controller's control this turn |
+| `damage_target_controller` | `n` | the source deals `n` damage to the controller of the targeted permanent (Smash to Smithereens; list it before the op that removes the permanent) |
 | `damage_each_opponent` | `n`, `if_discarded_nonland` | the source deals `n` damage to each opponent (only if the card discarded as the additional cost was not a land) |
 | `damage_each_creature` | `n` or `x = true`, `without`, `whose = "opponent"` | the source deals `n` (or X) damage to each creature (without the keyword; only the opponent's) |
 | `discard` | `n` | the controller discards `n` cards of their choice |
 | `return_to_battlefield` | `tapped` | graveyard trigger: this card returns to the battlefield, if it is still that object in the graveyard |
 | `exile_graveyard` | | exile the target player's graveyard |
 | `exile_all_graveyards` | | exile both graveyards |
+| `exile_target` | | exile the targeted permanent |
+| `exile_from_graveyards` | `n` | the controller exiles up to `n` cards from any graveyards, chosen one at a time on resolution (Faerie Macabre; the engine has no graveyard targets) |
 | `search_library` | `supertype`, `type`, `subtypes_any`, `dest` = `battlefield` \| `hand`, `tapped`, `reveal`, `what` | search for a matching card (finding nothing is allowed), put it there, shuffle |
 | `optional_payment` | `cost`, `prompt`, `then` | the controller may pay; if paid, run the `then` ops |
 | `scry` | `n` (only 1) | scry 1 |

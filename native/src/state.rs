@@ -3,7 +3,7 @@
 //! Mirrors the non-generator methods of mtg_ml/engine/game.py one to one;
 //! the method names are kept so the two files can be read side by side.
 
-use crate::cards::{color_bit, db, CardDef, CastFilter, CostRed, DefId, Event, Op, SacFilter, TriggerDef, T_ARTIFACT, T_CREATURE, T_INSTANT, T_LAND, T_SORCERY, TK};
+use crate::cards::{T_ENCHANTMENT, color_bit, db, CardDef, CastFilter, CostRed, DefId, Event, Op, SacFilter, TriggerDef, T_ARTIFACT, T_CREATURE, T_INSTANT, T_LAND, T_SORCERY, TK};
 use crate::mana::{bit, can_pay, ManaCost, Remaining};
 use crate::rng::PyRandom;
 
@@ -183,7 +183,12 @@ pub enum Method {
     Plot,
     Overload,
     Alternative,
+    Phyrexian,
+    Bargain,
 }
+
+/// Cast modes from the hand, in the order they are offered (game.HAND_MODES).
+pub const HAND_MODES: [Method; 6] = [Method::Normal, Method::Bestow, Method::Overload, Method::Alternative, Method::Phyrexian, Method::Bargain];
 
 impl Method {
     pub fn name(self) -> &'static str {
@@ -196,6 +201,8 @@ impl Method {
             Method::Plot => "plot",
             Method::Overload => "overload",
             Method::Alternative => "alternative",
+            Method::Phyrexian => "phyrexian",
+            Method::Bargain => "bargain",
         }
     }
 }
@@ -1019,13 +1026,13 @@ impl State {
             let m = format!("enters: {}#{} (p{p})", card.name(), card.oid);
             self.log.push(m);
         }
-        self.emit_etb(c);
+        self.emit_etb(c, None);
         c
     }
 
     pub fn put_onto_battlefield(&mut self, ci: CIdx, controller: u8, tapped: bool) -> CIdx {
         let new = self.move_card(ci, Zone::Battlefield, Some(controller), Pos::Top, None, tapped).expect("token cannot be put onto the battlefield from elsewhere");
-        self.emit_etb(new);
+        self.emit_etb(new, None);
         new
     }
 
@@ -1064,11 +1071,12 @@ impl State {
     // Events and triggers
     // ------------------------------------------------------------------
 
-    pub fn emit_etb(&mut self, ci: CIdx) {
+    /// method: how the permanent was cast, if it resolved as a spell.
+    pub fn emit_etb(&mut self, ci: CIdx, method: Option<Method>) {
         let c = self.c(ci);
         let controller = c.controller;
         for t in &c.face().triggers {
-            if t.event == Event::Etb {
+            if t.event == Event::Etb && (!t.bargained || method == Some(Method::Bargain)) {
                 self.pending.push(PendingTrigger { controller, source: Src::Live(ci), tdef: t, data: Data::default() });
             }
         }
@@ -1237,6 +1245,14 @@ impl State {
                 let q = ref_index(chosen[chosen.len() - 1]);
                 return self.battlefield.iter().map(|&c| self.c(c)).filter(|c| self.is_creature(c) && c.controller as u32 == q).map(|c| Ref::Perm(c.oid)).collect();
             }
+            TK::AnotherCreature => {
+                // With nothing chosen yet (casting checks) it needs a second creature.
+                let creatures: Vec<Ref> = self.battlefield.iter().map(|&c| self.c(c)).filter(|c| self.is_creature(c)).map(|c| Ref::Perm(c.oid)).collect();
+                if chosen.is_empty() {
+                    return if creatures.len() >= 2 { creatures } else { vec![] };
+                }
+                return creatures.into_iter().filter(|r| !chosen.contains(r)).collect();
+            }
             _ => {}
         }
         if spec.is_spell() {
@@ -1252,7 +1268,8 @@ impl State {
 
     pub fn perm_matches(&self, spec: TK, c: &Card, controller: u8) -> bool {
         match spec {
-            TK::Creature | TK::Any | TK::CreatureOfTargetPlayer => self.is_creature(c),
+            TK::Creature | TK::Any | TK::CreatureOfTargetPlayer | TK::AnotherCreature => self.is_creature(c),
+            TK::ArtifactOrEnchantmentYouDontControl => c.controller != controller && self.types(c) & (T_ARTIFACT | T_ENCHANTMENT) != 0,
             TK::CreatureYouDontControl => self.is_creature(c) && c.controller != controller,
             TK::Permanent => true,
             TK::NoncreatureArtifact => self.is_artifact(c) && !self.is_creature(c),
@@ -1276,6 +1293,7 @@ impl State {
             TK::RedSpell => d.colors & crate::cards::color_bit(b'R') != 0,
             TK::InstantSpell => d.is_type(T_INSTANT),
             TK::ArtifactSpell => d.is_type(T_ARTIFACT),
+            TK::ArtifactOrEnchantmentSpell => d.is_type(T_ARTIFACT) || d.is_type(T_ENCHANTMENT),
             _ => false,
         }
     }
@@ -1367,6 +1385,7 @@ impl State {
                     SacFilter::Artifact => self.is_artifact(c),
                     SacFilter::ArtifactOrCreature => self.is_artifact(c) || self.is_creature(c),
                     SacFilter::Mountain => self.is_land(c) && c.face().has_subtype("Mountain"),
+                    SacFilter::ArtifactEnchantmentOrToken => c.is_token || self.types(c) & (T_ARTIFACT | T_ENCHANTMENT) != 0,
                 }
             })
             .collect()
@@ -1458,7 +1477,14 @@ impl State {
             Method::Overload => d.overload.as_ref(),
             Method::Plot => d.plot.as_ref().map(|_| &db().free),
             Method::Alternative => d.alternative_sac.map(|_| &db().free),
+            Method::Phyrexian => d.phyrexian_cost.as_ref(),
+            Method::Bargain => d.bargain.then_some(&d.cost),
         }
+    }
+
+    /// `Game._mode_additional_sac`: the card's own additional sacrifice, or bargain's.
+    pub fn mode_additional_sac(&self, ci: CIdx, mode: Method) -> Option<SacFilter> {
+        if mode == Method::Bargain { Some(SacFilter::ArtifactEnchantmentOrToken) } else { self.c(ci).face().additional_sac }
     }
 
     /// `Game._mode_sac`: lands sacrificed instead of (part of) the cost.
@@ -1503,7 +1529,7 @@ impl State {
             Some(b) => b,
             None => return false,
         };
-        if matches!(mode, Method::Normal | Method::Bestow | Method::Overload | Method::Alternative) && c.zone != Zone::Hand {
+        if HAND_MODES.contains(&mode) && c.zone != Zone::Hand {
             return false;
         }
         if matches!(mode, Method::Flashback | Method::Escape) && c.zone != Zone::Graveyard {
@@ -1533,13 +1559,16 @@ impl State {
         if d.additional_discard && (self.players[p as usize].hand.len() as i32 - (c.zone == Zone::Hand) as i32) < 1 {
             return false;
         }
+        if mode == Method::Phyrexian && self.players[p as usize].life < d.phyrexian_life {
+            return false;
+        }
         if let Some((flt, n)) = self.mode_sac(ci, mode) {
             if (self.sac_candidates(p, flt, &[]).len() as i32) < n {
                 return false;
             }
         }
         let cost = base.with_x(0).reduced(self.cost_reduction(p, ci));
-        self.cost_feasible(p, &Remaining::of(&cost), d.additional_sac, &[], None, &[])
+        self.cost_feasible(p, &Remaining::of(&cost), self.mode_additional_sac(ci, mode), &[], None, &[])
     }
 
     pub fn can_activate(&self, p: u8, ci: CIdx, ai: usize) -> bool {
@@ -1698,7 +1727,7 @@ impl State {
             if !face.modes.is_empty() {
                 continue;
             }
-            for mode in [Method::Normal, Method::Bestow, Method::Overload, Method::Alternative] {
+            for mode in HAND_MODES {
                 if self.can_cast(p, card, mode, None) {
                     let label = if mode == Method::Normal { format!("Cast {n}") } else { format!("Cast {n} ({})", mode.name()) };
                     opts.push(Opt { label, key: vec![KI::S("cast"), KI::S(n), KI::S("hand"), KI::S(mode.name())], value: Val::Cast(card, mode, None) });
