@@ -136,6 +136,7 @@ class TrainConfig:
     server_device: str = ""  # device of the inference server ("" = --device, or cuda when --device is cpu and a GPU exists)
     server_max_rows: int = 16384  # largest batch the server builds from queued requests
     server_request_ints: int = 1 << 18  # int32 words per worker request slot; raise it with few workers (more games, so bigger requests, per worker)
+    server_policy_slots: int = 32  # policies the server's stack holds before it grows (pool snapshots + learner versions; each ~68 MB for h128 entity)
     trainer_cpus: str = ""  # CPUs of the trainer process, e.g. "32" or "32-35" ("": see the CPU layout)
     worker_cpus: str = ""  # CPUs of the rollout workers, one worker per CPU round robin
     eval_cpus: str = ""  # CPUs of the evaluation workers
@@ -227,7 +228,7 @@ class Trainer:
             from .inference import ServerConfig, default_device
 
             dev = c.server_device or (c.device if c.device != "cpu" else default_device())
-            server_cfg = ServerConfig(device=dev, max_rows=c.server_max_rows, request_ints=c.server_request_ints, cpus=lay.server or None)
+            server_cfg = ServerConfig(device=dev, max_rows=c.server_max_rows, request_ints=c.server_request_ints, policy_slots=c.server_policy_slots, cpus=lay.server or None)
         if c.collector == "process":  # merging as jobs end, off the trainer's NUMA node if it can
             return PoolProcess(c.workers, c.inference, server_cfg, lay.workers or None, lay.collector or None)
         if c.collector != "thread":
