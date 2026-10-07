@@ -236,6 +236,13 @@ class Game:
         # (remaining cost, sacrifice filter, excluded sources) of a pending
         # pay_mana decision; read only by encode's payment preview
         self.paying: tuple | None = None
+        # Simulated option previews (encode, feature set 6): on a throwaway
+        # copy, the player whose option is simulated. Every decision of the
+        # other player is then asked even with one option (and its priority is
+        # never auto-passed): whether it has a choice can depend on its hidden
+        # hand. Never set on a game that is played.
+        self.sim_viewer: int | None = None
+        self.shuffles = 0  # library shuffles so far (the simulation stops at hidden information)
         self.winner: int | None = None
         self.over = False
         self.end_reason = ""
@@ -402,7 +409,7 @@ class Game:
         """Yield a decision (generator). Returns the chosen option's value."""
         if not options:
             raise RulesError(f"decision {kind!r} ({prompt}) has no options")
-        if self.auto_single and len(options) == 1:
+        if self.auto_single and len(options) == 1 and self.sim_viewer in (None, player):
             if self.logging and kind != O.PRIORITY:
                 self._log(f"  p{player} {kind}: {options[0].label} (only option)")
             return options[0].value
@@ -571,7 +578,7 @@ class Game:
         while True:
             yield from self._sba_and_triggers()
             options = self._priority_options(p)
-            if self.auto_pass and self._uneventful_priority(p, options):
+            if self.auto_pass and self.sim_viewer in (None, p) and self._uneventful_priority(p, options):
                 act = options[0].value  # pass
             else:
                 act = yield from self.ask(p, O.PRIORITY, f"Priority ({self.step_name})", options)
@@ -931,6 +938,7 @@ class Game:
 
     def shuffle(self, p: int) -> None:
         lib = self.players[p].library
+        self.shuffles += 1
         self.rng.shuffle(lib)
         for c in lib:
             c.known_to = set()

@@ -131,6 +131,23 @@ impl PyGame {
     fn card(&self, c: CIdx) -> PyResult<&Card> {
         self.st().cards.get(c as usize).ok_or_else(|| PyIndexError::new_err("bad card index"))
     }
+    /// Set 6: each option's simulated previews, hashed (None before set 6).
+    fn sim_hashes(&mut self, player: u8, option_dim: u32, features: u8) -> PyResult<Option<Vec<Vec<u32>>>> {
+        if features < 6 || self.st().decision.is_none() {
+            return Ok(None);
+        }
+        let n = self.st().decision.as_ref().map_or(0, |d| d.options.len());
+        let mut sims = vec![Vec::new(); n];
+        let mut buf = String::with_capacity(48);
+        crate::sim::sim_previews(&mut self.g, player, |i, a| {
+            use std::fmt::Write;
+            buf.clear();
+            let _ = buf.write_fmt(a);
+            sims[i].push(crc32fast::hash(buf.as_bytes()) % option_dim);
+        })
+        .map_err(Self::step_err)?;
+        Ok(Some(sims))
+    }
     fn step_err(e: StepError) -> PyErr {
         match e {
             StepError::Over => NativeRulesError::new_err("game is over"),
@@ -234,6 +251,12 @@ impl PyGame {
         if !st.edited {
             st.snap = snap;
         }
+    }
+
+    /// `Game._edited`: edited outside `step()` since the latest snapshot.
+    #[getter]
+    fn edited(&self) -> bool {
+        self.st().edited
     }
 
     #[getter]
@@ -703,27 +726,48 @@ impl PyGame {
 
     /// `rl.features.featurize(game, player, state_dim, option_dim, features)`.
     #[pyo3(signature = (player, state_dim, option_dim, features = crate::features::FEATURES))]
-    fn featurize(&self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
+    fn featurize(&mut self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
         Self::pidx(player as usize)?;
-        crate::features::featurize(self.st(), player, state_dim, option_dim, fver(features)?).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
+        let features = fver(features)?;
+        let sims = self.sim_hashes(player, option_dim, features)?;
+        crate::features::featurize(self.st(), player, state_dim, option_dim, features, sims.as_deref()).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
     }
 
     /// `featurize` with the options flattened: (state, option lengths, all
     /// option tokens). Cheaper to pack into requests and samples.
     #[pyo3(signature = (player, state_dim, option_dim, features = crate::features::FEATURES))]
-    fn featurize_flat(&self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<u32>, Vec<u32>)> {
+    fn featurize_flat(&mut self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<u32>, Vec<u32>)> {
         Self::pidx(player as usize)?;
-        let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim, fver(features)?).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
+        let features = fver(features)?;
+        let sims = self.sim_hashes(player, option_dim, features)?;
+        let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim, features, sims.as_deref()).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
         let lens = opts.iter().map(|o| o.len() as u32).collect();
         Ok((state, lens, opts.concat()))
     }
 
     /// `encode.option_preview(game, player, i, features)`.
     #[pyo3(signature = (player, i, features = crate::features::FEATURES))]
-    fn option_preview(&self, player: u8, i: usize, features: u8) -> PyResult<Vec<String>> {
+    fn option_preview(&mut self, player: u8, i: usize, features: u8) -> PyResult<Vec<String>> {
         Self::pidx(player as usize)?;
         fver(features)?;
-        crate::features::option_preview_strings(self.st(), player, i, features).ok_or_else(|| PyIndexError::new_err("no such option"))
+        let mut v = crate::features::option_preview_strings(self.st(), player, i, features).ok_or_else(|| PyIndexError::new_err("no such option"))?;
+        if features >= 6 {
+            crate::sim::sim_preview(&mut self.g, player, i, &mut |a| v.push(a.to_string())).map_err(Self::step_err)?;
+        }
+        Ok(v)
+    }
+
+    /// `encode.option_previews(game, player, features)`: every option's previews.
+    #[pyo3(signature = (player, features = crate::features::FEATURES))]
+    fn option_previews(&mut self, player: u8, features: u8) -> PyResult<Vec<Vec<String>>> {
+        Self::pidx(player as usize)?;
+        fver(features)?;
+        let n = self.decision()?.options.len();
+        let mut out: Vec<Vec<String>> = (0..n).map(|i| crate::features::option_preview_strings(self.st(), player, i, features).unwrap_or_default()).collect();
+        if features >= 6 {
+            crate::sim::sim_previews(&mut self.g, player, |i, a| out[i].push(a.to_string())).map_err(Self::step_err)?;
+        }
+        Ok(out)
     }
 
     /// Hashed `event_tokens` of option i for (decider, opponent).

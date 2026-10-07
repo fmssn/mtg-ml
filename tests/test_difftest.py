@@ -117,14 +117,43 @@ SET4_TOKENS = (
     "pv:adds_missing_color",
     "pv:colors_left:",
 )
+# Set 6: simulated previews, the stop reasons (game_over: tests/test_sim_previews.py) and the common deltas.
+SET6_TOKENS = (
+    "pv:sim:skipped",
+    "pv:sim:stop:own_decision",
+    "pv:sim:stop:opponent_decision",
+    "pv:sim:stop:hidden_info",
+    "pv:sim:next:self:",
+    "pv:sim:next:opponent:",
+    "pv:sim:new_turn",
+    "pv:sim:step:",
+    "pv:sim:self:life-",
+    "pv:sim:opponent:life-",
+    "pv:sim:self:creatures_lost>=",
+    "pv:sim:opponent:creatures_lost>=",
+    "lost_power_tier:",
+    "pv:sim:self:perms_gained>=",
+    "pv:sim:self:tapped>=",
+    "pv:sim:opponent:untapped>=",
+    "pv:sim:self:hand-",
+    "pv:sim:self:graveyard+",
+    "pv:sim:self:exile+",
+    "pv:sim:stack+",
+    "pv:sim:stack-",
+    "pv:sim:mana_left>=",
+    "pv:sim:color:",
+    "pv:sim:gained:",
+    "pv:sim:lost:",
+)
 
 
 def test_entity_and_preview_strings_identical():
     """`featurize` hashes are compared in lockstep; this compares the strings
     behind them (state, entities, option previews) so a mismatch is
     readable, in sets 3 and up, over all three matchups. Entities of both
-    seats (set 5 adds the viewer's own hand) and the ids options point at."""
-    from mtg_ml.encode import FEATURE_VERSIONS, entity_features, option_object_ids, option_preview, state_features
+    seats (set 5 adds the viewer's own hand), the ids options point at, and
+    the simulated previews of set 6 (`option_previews` too)."""
+    from mtg_ml.encode import FEATURE_VERSIONS, entity_features, option_object_ids, option_preview, option_previews, state_features
     from mtg_ml.match import MATCHUPS, game_args
 
     seen = set()
@@ -142,13 +171,14 @@ def test_entity_and_preview_strings_identical():
                 for i, (o, no) in enumerate(zip(py.legal_options(), nat.legal_options())):
                     assert option_preview(py, p, i, f) == option_preview(nat, p, i, f), o.label
                     assert option_object_ids(o, py, py.decision.kind, f) == option_object_ids(no, nat, nat.decision.kind, f), o.label
+                assert option_previews(py, p, f) == option_previews(nat, p, f) == [option_preview(py, p, i, f) for i in range(len(py.legal_options()))]
             strings = state_features(py, p) + [t for e in entity_features(py, p)[0] for t in e]
             strings += [t for i in range(len(py.legal_options())) for t in option_preview(py, p, i)]
-            seen |= {k for k in SET4_TOKENS if any(k in t for t in strings)}
+            seen |= {k for k in SET4_TOKENS + SET6_TOKENS if any(k in t for t in strings)}
             a = r.randrange(len(py.legal_options()))
             py.step(a)
             nat.step(a)
-    assert seen == set(SET4_TOKENS), sorted(set(SET4_TOKENS) - seen)
+    assert seen == set(SET4_TOKENS + SET6_TOKENS), sorted(set(SET4_TOKENS + SET6_TOKENS) - seen)
 
 
 def test_spec_field_sets_identical():
@@ -211,17 +241,26 @@ def test_identical_errors_in_both_engines_are_reported(monkeypatch):
 
     real = dt._new_pair
 
+    # Patched on the classes for these two games only: an instance attribute
+    # would be carried into the games' copies (set 6 simulates on copies),
+    # whose steps would then step the original.
+    targets = set()
+
     def pair(sc):
         games = real(sc)
         for g in games:
-            step = g.step
+            targets.add(id(g))
+            cls = type(g)
+            if "_unpatched_step" not in cls.__dict__:
+                step = cls.step
 
-            def boom(a, g=g, step=step):
-                if len(g.actions) >= 5:
-                    raise ValueError("reference bug")
-                return step(a)
+                def boom(self, a, step=step):
+                    if id(self) in targets and len(self.actions) >= 5:
+                        raise ValueError("reference bug")
+                    return step(self, a)
 
-            g.step = boom
+                monkeypatch.setattr(cls, "_unpatched_step", step, raising=False)
+                monkeypatch.setattr(cls, "step", boom)
         return games
 
     monkeypatch.setattr(dt, "_new_pair", pair)

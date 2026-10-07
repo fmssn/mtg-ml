@@ -5,7 +5,7 @@ use corosensei::{Coroutine, CoroutineResult};
 use std::cell::RefCell;
 
 use crate::engine::Eng;
-use crate::state::{Args, State, Stop, R};
+use crate::state::{Args, State, Stop, ABORT, R};
 
 const STACK_SIZE: usize = 256 * 1024;
 /// Finished games hand their coroutine stack to the next game on the same
@@ -128,6 +128,7 @@ impl Game {
                 self.release_co();
                 Ok(())
             }
+            CoroutineResult::Return(Err(Stop::Abort)) => unreachable!("aborted outside release_co"),
             CoroutineResult::Return(Err(Stop::Rules(m))) => {
                 self.state_mut().decision = None;
                 self.broken = Some(m.clone());
@@ -142,7 +143,10 @@ impl Game {
     fn release_co(&mut self) {
         if let Some(mut co) = self.co.take() {
             if co.started() && !co.done() {
-                co.force_unwind();
+                // Suspended in `ask`: let it return Stop::Abort up to `main`.
+                if let CoroutineResult::Yield(()) = co.resume(ABORT) {
+                    co.force_unwind();
+                }
             }
             let stack = co.into_stack();
             STACKS.with(|p| {

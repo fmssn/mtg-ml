@@ -40,7 +40,7 @@ impl Eng {
             return rules(format!("decision '{}' ({}) has no options", kind.name(), prompt()));
         }
         let st = self.s();
-        if st.auto_single && options.len() == 1 {
+        if st.auto_single && options.len() == 1 && st.sim_viewer.map_or(true, |v| v == player) {
             if st.logging && kind != Kind::Priority {
                 let m = format!("  p{player} {}: {} (only option)", kind.name(), options[0].label);
                 st.log.push(m);
@@ -49,6 +49,9 @@ impl Eng {
         }
         st.decision = Some(Decision { player, kind, prompt: prompt(), options });
         let idx = unsafe { (*self.y).suspend(()) };
+        if idx == ABORT {
+            return Err(Stop::Abort);
+        }
         let d = self.s().decision.take().expect("resumed without a decision");
         Ok(d.options.into_iter().nth(idx).expect("option index").value)
     }
@@ -231,7 +234,7 @@ impl Eng {
             self.sba_and_triggers()?;
             let options = self.s().priority_options(p);
             let step = self.s().step_name;
-            let act = if self.s().auto_pass && self.s().uneventful_priority(p, &options) {
+            let act = if self.s().auto_pass && self.s().sim_viewer.map_or(true, |v| v == p) && self.s().uneventful_priority(p, &options) {
                 Val::Pass
             } else {
                 self.ask(p, Kind::Priority, || format!("Priority ({step})"), options)?

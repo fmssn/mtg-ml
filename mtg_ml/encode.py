@@ -38,8 +38,11 @@ DEFAULT_DIM = 1 << 16
 #   5: + cards described by what they do: shape tokens from the card spec on
 #      permanents and stack items, the decider's own hand cards as entities,
 #      cast / play / plot options pointing at them (docs/features.md)
-FEATURES = 5  # the latest; what new runs train on
-FEATURE_VERSIONS = (1, 2, 3, 4, 5)
+#   6: + simulated option previews: each option is applied to a copy of the
+#      game, advanced while that needs no hidden information and no choice
+#      of the opponent, and the observable change is featurized (`pv:sim:`)
+FEATURES = 6  # the latest; what new runs train on
+FEATURE_VERSIONS = (1, 2, 3, 4, 5, 6)
 
 
 def check_features(features: int) -> int:
@@ -653,6 +656,28 @@ def option_preview(game, player: int, i: int, features: int = FEATURES) -> list[
         return []
     if getattr(game, "NATIVE", False):
         return game.option_preview(player, i, features)
+    f = _static_preview(game, player, i, features)
+    if features >= 6:
+        f += sim_preview(game, player, i)
+    return f
+
+
+def option_previews(game, player: int, features: int = FEATURES) -> list[list[str]]:
+    """`option_preview` of every option of the current decision (the
+    simulation's starting summary is computed once)."""
+    if check_features(features) < 2:
+        return [[] for _ in game.legal_options()]
+    if getattr(game, "NATIVE", False):
+        return game.option_previews(player, features)
+    out = [_static_preview(game, player, i, features) for i in range(len(game.legal_options()))]
+    if features >= 6:
+        for f, sim in zip(out, sim_previews(game, player)):
+            f += sim
+    return out
+
+
+def _static_preview(game, player: int, i: int, features: int) -> list[str]:
+    """The set 2-5 previews, read from the current state."""
     if features >= 4:
         f = _preview_v4(game, player, i)
         if f is not None:
@@ -680,6 +705,181 @@ def option_preview(game, player: int, i: int, features: int = FEATURES) -> list[
     effect = d.overload_effect if mode == "overload" else d.effect if choice is None else d.modes[choice].effect
     cost = base.with_x(0).reduced(game._cost_reduction(player, card))
     return _kills_preview(game, player, _ops(effect), card) + _mana_preview(game, player, cost, d.additional_sac, set())
+
+
+# ---------------------------------------------------------------------------
+# Simulated option previews (feature set 6)
+# ---------------------------------------------------------------------------
+
+SIM_MAX_OPTIONS = 32  # decisions with more options get `pv:sim:skipped` on every option
+SIM_MAX_STEPS = 64  # engine steps per option: the option itself plus forced opponent steps
+# Opponent decisions a simulation takes when they have exactly one option:
+# their options depend only on public information (the board, the stack,
+# mana), so having no choice reveals nothing. Every other opponent decision
+# (priority, cards from hand or library, yes / no, modes, mulligans) stops it.
+SIM_FORCED_KINDS = frozenset(
+    {"target", "pay_mana", "sacrifice", "exile_from_graveyard", "order_triggers", "declare_attacker", "declare_blocker", "assign_damage", "choose_x"}
+)
+SIM_FLAGS = (
+    "self:lethal_on_board",
+    "self:evasive_lethal_on_board",
+    "opponent:lethal_on_board",
+    "opponent:evasive_lethal_on_board",
+    "self:incoming_lethal",
+    "opponent:incoming_lethal",
+)
+SIM_TIER_CAP = 5  # lost-creature power tiers 0..5 (5 = 5 or more)
+
+
+def _sim_summary(game, v: int) -> dict:
+    """What a simulation compares, from `v`'s point of view, all of it
+    observable by `v`: permanents (id, side, creature, power, tapped,
+    damage), life and zone sizes per side (self first), the stack size, the
+    lethal flags of `_board_features` / `_combat_features`, and `v`'s
+    available mana (untapped sources + pool) and the colours it can make."""
+    perms = []
+    for c in game.battlefield:
+        cr = game.is_creature(c)
+        perms.append((c.oid, c.controller == v, cr, max(game.power(c), 0) if cr else 0, c.tapped, c.damage))
+    sides = (game.players[v], game.players[1 - v])
+    flags = {t for t in _board_features(observe(game, v), v, game) + _combat_features(game, v) if t in SIM_FLAGS}
+    sources = game.mana_sources(v)
+    pool = game.players[v].pool
+    colors = set()
+    for c, _ in sources:
+        colors.update(_mana_colors(c.face))
+    colors.update(col for col, n in pool.items() if n > 0 and col in PREVIEW_COLORS)
+    return {
+        "perms": perms,
+        "life": [p.life for p in sides],
+        "zones": [[len(p.hand), len(p.graveyard), len(p.exile), len(p.library)] for p in sides],
+        "stack": len(game.stack),
+        "flags": flags,
+        "mana": len(sources) + sum(pool.values()),
+        "colors": colors,
+        "turn": game.turn,
+        "step": game.step_name,
+    }
+
+
+def _hidden_touched(a, b) -> bool:
+    """Did `b` (a simulation of `a`) touch hidden information: a library
+    shuffled, a card leaving or entering a library, a library card looked at
+    or revealed (any change of its `known_to`)? Libraries are the only hidden
+    zone the engine reads without asking the owner (a hand is read only by
+    its owner's decisions, which stop the simulation)."""
+    if a.shuffles != b.shuffles:
+        return True
+    for pa, pb in zip(a.players, b.players):
+        la, lb = pa.library, pb.library
+        if len(la) != len(lb) or any(x.oid != y.oid or x.known_to != y.known_to for x, y in zip(la, lb)):
+            return True
+    return False
+
+
+def _sim_ready(game) -> bool:
+    """A simulation copies the game from its step-start snapshot. The first
+    copy of a game replays it once and keeps the replay's snapshot; a game
+    edited outside `step()` since its step began, or still in the mulligan
+    phase (no step has begun), has none, and is not simulated."""
+    if game._snap is None and not game._edited:
+        game.copy()
+    return game._snap is not None
+
+
+def _signed(name: str, d: int, steps: tuple = COUNT_STEPS) -> list[str]:
+    """A change as a signed thermometer: `name+>=k` up, `name->=k` down."""
+    return _thermo(f"{name}+", d, steps) if d > 0 else _thermo(f"{name}-", -d, steps)
+
+
+def sim_previews(game, player: int) -> list[list[str]]:
+    """`sim_preview` of every option of the current decision."""
+    n = len(game.legal_options())
+    if n > SIM_MAX_OPTIONS or not _sim_ready(game):
+        return [["pv:sim:skipped"] for _ in range(n)]
+    before = _sim_summary(game, player)
+    return [_simulate(game, player, i, before) for i in range(n)]
+
+
+def sim_preview(game, player: int, i: int) -> list[str]:
+    """Feature set 6: what taking option `i` changes, simulated on a copy of
+    the game (docs/features.md, "Simulated option previews")."""
+    if len(game.legal_options()) > SIM_MAX_OPTIONS or not _sim_ready(game):
+        return ["pv:sim:skipped"]
+    return _simulate(game, player, i, _sim_summary(game, player))
+
+
+def _simulate(game, player: int, i: int, before: dict) -> list[str]:
+    """Step a copy with option `i`, take the opponent's forced decisions
+    (one option, `SIM_FORCED_KINDS`), and stop at the decider's next
+    decision, any other opponent decision, the end of the game, hidden
+    information (`_hidden_touched`: then only the stop is featurized) or
+    `SIM_MAX_STEPS`. Featurize the change between the two `_sim_summary`s."""
+    g = game.copy()
+    g.sim_viewer = player
+    g.step(i)
+    steps = 1
+    while True:
+        if _hidden_touched(game, g):
+            return ["pv:sim:stop:hidden_info"]
+        if g.over:
+            stop = "game_over"
+            break
+        d = g.decision
+        if d.player == player:
+            stop = "own_decision"
+            break
+        if d.kind not in SIM_FORCED_KINDS or len(d.options) != 1:
+            stop = "opponent_decision"
+            break
+        if steps >= SIM_MAX_STEPS:
+            stop = "step_cap"
+            break
+        g.step(0)
+        steps += 1
+    f = [f"pv:sim:stop:{stop}"]
+    if g.over:
+        f.append("pv:sim:draw_game" if g.winner is None else "pv:sim:won" if g.winner == player else "pv:sim:lost")
+    else:
+        f.append(f"pv:sim:next:{'self' if g.decision.player == player else 'opponent'}:{g.decision.kind}")
+    after = _sim_summary(g, player)
+    if after["turn"] != before["turn"]:
+        f.append("pv:sim:new_turn")
+    if after["turn"] != before["turn"] or after["step"] != before["step"]:
+        f.append(f"pv:sim:step:{after['step']}")
+    now = {p[0] for p in after["perms"]}
+    was = {p[0]: p for p in before["perms"]}
+    for k, side in enumerate(("self", "opponent")):
+        mine = k == 0
+        f += _signed(f"pv:sim:{side}:life", after["life"][k] - before["life"][k], LIFE_STEPS)
+        lost = [p for p in before["perms"] if p[1] == mine and p[0] not in now]
+        gained = [p for p in after["perms"] if p[1] == mine and p[0] not in was]
+        kept = [(was[p[0]], p) for p in after["perms"] if p[1] == mine and p[0] in was]
+        lost_cr = [p for p in lost if p[2]]
+        gained_cr = [p for p in gained if p[2]]
+        f += _thermo(f"pv:sim:{side}:creatures_lost", len(lost_cr))
+        f += _thermo(f"pv:sim:{side}:power_lost", sum(p[3] for p in lost_cr), POWER_STEPS)
+        f += _counted([f"pv:sim:{side}:lost_power_tier:{min(p[3], SIM_TIER_CAP)}" for p in lost_cr])
+        f += _thermo(f"pv:sim:{side}:creatures_gained", len(gained_cr))
+        f += _thermo(f"pv:sim:{side}:power_gained", sum(p[3] for p in gained_cr), POWER_STEPS)
+        f += _thermo(f"pv:sim:{side}:perms_lost", len(lost))
+        f += _thermo(f"pv:sim:{side}:perms_gained", len(gained))
+        f += _thermo(f"pv:sim:{side}:tapped", sum(1 for a, b in kept if b[4] and not a[4]))
+        f += _thermo(f"pv:sim:{side}:untapped", sum(1 for a, b in kept if a[4] and not b[4]))
+        f += _thermo(f"pv:sim:{side}:damage", sum(max(b[5] - a[5], 0) for a, b in kept), POWER_STEPS)
+        for z, zone in enumerate(("hand", "graveyard", "exile", "library")):
+            f += _signed(f"pv:sim:{side}:{zone}", after["zones"][k][z] - before["zones"][k][z])
+    f += _signed("pv:sim:stack", after["stack"] - before["stack"])
+    f += _thermo("pv:sim:mana_left", min(after["mana"], MANA_LEFT_CAP))
+    f += [f"pv:sim:color:{col}" for col in PREVIEW_COLORS if col in after["colors"]]
+    for flag in SIM_FLAGS:
+        if flag in after["flags"]:
+            f.append(f"pv:sim:{flag}")
+            if flag not in before["flags"]:
+                f.append(f"pv:sim:gained:{flag}")
+        elif flag in before["flags"]:
+            f.append(f"pv:sim:lost:{flag}")
+    return f
 
 
 def hash_feature(feature: str, dim: int = DEFAULT_DIM) -> int:
