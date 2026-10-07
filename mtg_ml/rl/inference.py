@@ -46,6 +46,7 @@ shared spec counters, so `rollout.run_specs` can stream games to them.
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from array import array
@@ -55,6 +56,7 @@ from multiprocessing import shared_memory
 SLOTS_PER_WORKER = 8192  # (game, seat) slots per worker: jobs of up to 4096 games
 MAX_ROWS = 4096  # decisions per request: one per live game of a group (rollout.MAX_LIVE)
 REC = 9  # ints per decision record: slot, fresh, s_off, s_len, e_off, e_len, opt_off, n_opts, o_off
+GREEDY_FLAG = 2  # or-ed into a record's `fresh` word (bit 0): take the most likely option instead of sampling (`Job.greedy`)
 HDR = 128  # ints per request header
 H_TICKET, H_ROWS, H_OPTS, H_S, H_E, H_O, H_ENT, H_RUNS = range(8)
 RUNS0 = 16  # header: (policy id, rows) per run of equal policy from here
@@ -745,7 +747,8 @@ class _Server:
         rvalid = ar(R_p) < R
         rec = region[(in_base[req] + REC * loc)[:, None] + ar(REC)].long()
         rec = torch.where(rvalid[:, None], rec, 0)
-        slot, fresh, s_off, s_len, e_off, e_len, opt_off, n_opt, o_off = rec.unbind(1)
+        slot, flags, s_off, s_len, e_off, e_len, opt_off, n_opt, o_off = rec.unbind(1)
+        fresh = flags & 1
         a_opt = in_base + REC * q_rows  # areas of each request: option lengths, state, event and option tokens
         a_s = a_opt + q_opts
         a_e = a_s + q_s
@@ -770,6 +773,8 @@ class _Server:
             s_len=s_len, e_len=e_len, n_opt=n_opt, s_tok=s_tok, s_row=s_row, s_valid=s_valid, ev_tok=ev_tok, ev_valid=ev_valid,
             o_len=o_len, o_row=o_row, ot_tok=ot_tok, ot_opt=ot_opt, ot_valid=ot_valid, n_ent=E_p,
         )  # fmt: skip
+        # greedy rows: constant noise exp(-1) makes the Gumbel perturbation 0, so the draw is the argmax
+        noise = torch.where((flags & GREEDY_FLAG != 0)[o_row], math.exp(-1.0), noise)
         act, logp, val, hn = step_forward(self.stack, x, self.hidden, noise, write_hidden=False)
         out = torch.stack([act.to(torch.float32), logp, val], 1)
         pos = torch.where(rvalid, out_base[req] + 3 * loc, self.layout.dummy_out)
@@ -792,7 +797,7 @@ class _Server:
                 net = self.dev_nets.get(pid)
                 if net is None:
                     net = self.dev_nets[pid] = self.cpu_nets[pid].to(self.device)
-                xs, gslots, fresh, outs = [], [], [], []
+                xs, gslots, fresh, greedy, outs = [], [], [], [], []
                 for r in rows:
                     k = int(pend[row_req[r]])
                     base = L.in_base(k)
@@ -806,7 +811,8 @@ class _Server:
                     parts = (dn[a_s + s_off : a_s + s_off + s_len], ol, dn[a_o + o_off : a_o + o_off + int(ol.sum())], dn[a_e + e_off : a_e + e_off + e_len])
                     xs.append(tuple(array("i", p.tobytes()) for p in parts))
                     gslots.append(sl + int(self.wbase[k]))
-                    fresh.append(fr)
+                    fresh.append(fr & 1)
+                    greedy.append(bool(fr & GREEDY_FLAG))
                     outs.append(L.out_base(k) + 3 * int(row_loc[r]))
                 batch, width = _batch(torch, xs)
                 batch = batch.to(self.device)
@@ -818,7 +824,7 @@ class _Server:
                 if hn is not None:
                     self.hidden[gs] = hn
                 dist = torch.distributions.Categorical(logits=logits, validate_args=False)
-                a = dist.sample()
+                a = torch.where(torch.tensor(greedy, device=self.device), logits.argmax(-1), dist.sample())
                 res = torch.stack([a.to(torch.float32), dist.log_prob(a), values], 1).cpu().numpy()
                 pos = np.array(outs)
                 for j in range(3):
