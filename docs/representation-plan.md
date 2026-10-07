@@ -113,9 +113,15 @@ from the ledger.
 
 ## What this does not solve
 
-- **Engine cost per deck.** Each new deck needs its cards implemented in both engines
-  ([adding-cards.md](adding-cards.md)). Once features stop being per-card, that is the bottleneck
-  for adding decks. Track new ops per deck; a deck that needs no new ops is nearly free.
+- **Engine cost per deck is small; correctness is the cost.** Agents implement a deck's cards in
+  both engines from `data/oracle_cards.json`, [adding-cards.md](adding-cards.md) and XMage's
+  implementations as a reference; difftest proves the engines agree, not that they follow the rules.
+  Guard correctness with per-card rules tests written from the oracle text and LLM transcript
+  reviews (`mtg_ml.review`). Agents should also turn `custom` ops (9 of 60 cards today) into shared
+  ops, which keeps step 4's shape tokens covering new cards.
+- **Training compute per deck.** 25 decks are ~325 pairings, and each new deck needs games against
+  all the others. This, not card code, is what grows; it argues for one deck-conditioned model and
+  for step 4's transfer.
 - **Strategy.** Land-before-spell sequencing, passing with castable spells, flyers not attacking:
   the handoff lists these as training-side. Better inputs make them learnable, not learned.
 - **Multi-turn combos.** The Shaman + Toxin sweep needs a plan over several decisions. Simulated
