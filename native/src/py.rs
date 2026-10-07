@@ -46,6 +46,12 @@ fn known_list(k: u8) -> Vec<u8> {
     (0..2).filter(|p| k & (1 << p) != 0).collect()
 }
 
+/// A player's Undercity room by name.
+fn room_name(room: Option<usize>) -> Option<&'static str> {
+    let d = db();
+    room.map(|r| d.def(d.undercity.unwrap()).triggers[r].name.as_str())
+}
+
 fn card_tuple(py: Python<'_>, c: &Card) -> PyObject {
     let d = db();
     let temp: Vec<PyObject> = c.temp.iter().map(|t| (d.keyword_list(t.keywords), t.power, t.toughness).into_py(py)).collect();
@@ -105,6 +111,12 @@ fn data_list(py: Python<'_>, st: &State, d: &Data) -> PyObject {
     }
     if let Some(n) = d.sacrificed_mv {
         v.push(("sacrificed_mv", n.into_py(py)));
+    }
+    if let Some(o) = d.chosen_oid {
+        v.push(("chosen_oid", o.into_py(py)));
+    }
+    if let Some(n) = d.power {
+        v.push(("power", n.into_py(py)));
     }
     v.sort_by(|a, b| a.0.cmp(b.0));
     v.into_py(py)
@@ -305,6 +317,34 @@ impl PyGame {
         self.mutate().active = v;
         Ok(())
     }
+    /// The player with the initiative (Undercity), or None.
+    #[getter]
+    fn initiative(&self) -> Option<u8> {
+        self.st().initiative
+    }
+    #[setter]
+    fn set_initiative(&mut self, v: Option<u8>) -> PyResult<()> {
+        if let Some(p) = v {
+            Self::pidx(p as usize)?;
+        }
+        self.mutate().initiative = v;
+        Ok(())
+    }
+    /// Scenario setups: put player `p`'s venture marker in a room (None: no dungeon).
+    #[pyo3(signature = (p, room))]
+    fn set_dungeon_room(&mut self, p: usize, room: Option<&str>) -> PyResult<()> {
+        let p = Self::pidx(p)?;
+        let idx = match room {
+            None => None,
+            Some(r) => {
+                let d = db();
+                let u = d.def(d.undercity.ok_or_else(|| PyValueError::new_err("no Undercity"))?);
+                Some(u.triggers.iter().position(|t| t.name == r).ok_or_else(|| PyValueError::new_err(format!("unknown room {r:?}")))?)
+            }
+        };
+        self.mutate().players[p].dungeon_room = idx;
+        Ok(())
+    }
     #[getter]
     fn starting_player(&self) -> u8 {
         self.st().starting_player
@@ -357,7 +397,7 @@ impl PyGame {
     fn player(&self, py: Python<'_>, p: usize) -> PyResult<PyObject> {
         let pl = &self.st().players[Self::pidx(p)?];
         let pool = pl.pool.iter().map(|(c, n)| (color_str(*c), *n)).collect::<Vec<_>>();
-        Ok((pl.life, pl.library.clone(), pl.hand.clone(), pl.graveyard.clone(), pl.exile.clone(), pool, pl.drew_from_empty, pl.cards_drawn_this_turn, pl.landfall_turn).into_py(py))
+        Ok((pl.life, pl.library.clone(), pl.hand.clone(), pl.graveyard.clone(), pl.exile.clone(), pool, pl.drew_from_empty, pl.cards_drawn_this_turn, pl.landfall_turn, room_name(pl.dungeon_room)).into_py(py))
     }
 
     fn life(&self, p: usize) -> PyResult<i32> {
@@ -451,6 +491,8 @@ impl PyGame {
             Val::Order(v) => PyTuple::new_bound(py, v.iter().map(|&c| card(c))).into_py(py),
             Val::Top => "top".into_py(py),
             Val::Bottom => "bottom".into_py(py),
+            Val::Name(n) => n.into_py(py),
+            Val::ScryN(order, k) => (PyTuple::new_bound(py, order[..*k].iter().map(|&c| card(c))), PyTuple::new_bound(py, order[*k..].iter().map(|&c| card(c)))).into_py(py),
         })
     }
 
@@ -642,6 +684,9 @@ impl PyGame {
         s.set_item("pool", pool(me)?)?;
         s.set_item("cards_drawn_this_turn", me.cards_drawn_this_turn)?;
         s.set_item("mulligans", st.mulligans_taken[viewer as usize])?;
+        if let Some(r) = room_name(me.dungeon_room) {
+            s.set_item("dungeon_room", r)?;
+        }
         o.set_item("self", s)?;
         let t = PyDict::new_bound(py);
         t.set_item("life", them.life)?;
@@ -653,6 +698,9 @@ impl PyGame {
         t.set_item("exile", exiled(&them.exile))?;
         t.set_item("pool", pool(them)?)?;
         t.set_item("mulligans", st.mulligans_taken[opp as usize])?;
+        if let Some(r) = room_name(them.dungeon_room) {
+            t.set_item("dungeon_room", r)?;
+        }
         o.set_item("opponent", t)?;
         o.set_item("lands_played", if st.active == viewer { Some(st.lands_played) } else { None })?;
         let bf = PyList::empty_bound(py);
@@ -693,6 +741,10 @@ impl PyGame {
             stack.append(d)?;
         }
         o.set_item("stack", stack)?;
+        // view.py: initiative keys only once someone took it.
+        if let Some(i) = st.initiative {
+            o.set_item("initiative", rel(i, viewer))?;
+        }
         match &st.decision {
             Some(d) if d.player == viewer => {
                 let dd = PyDict::new_bound(py);
@@ -796,6 +848,7 @@ impl PyGame {
         d.set_item("winner", st.winner)?;
         d.set_item("end_reason", st.end_reason)?;
         d.set_item("match_game", st.match_game)?;
+        d.set_item("initiative", st.initiative)?;
         let players = PyList::empty_bound(py);
         for p in &st.players {
             let pd = PyDict::new_bound(py);
@@ -807,6 +860,7 @@ impl PyGame {
             pd.set_item("pool", p.pool.iter().map(|(c, n)| (color_str(*c), *n)).collect::<Vec<_>>())?;
             pd.set_item("drew_from_empty", p.drew_from_empty)?;
             pd.set_item("cards_drawn_this_turn", p.cards_drawn_this_turn)?;
+            pd.set_item("dungeon_room", room_name(p.dungeon_room))?;
             players.append(pd)?;
         }
         d.set_item("players", players)?;

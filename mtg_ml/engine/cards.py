@@ -1,5 +1,6 @@
-"""Card definitions for the supported pool: Jund Wildfire, Mono Blue Terror
-and Red Madness (Pauper), plus the tokens they create.
+"""Card definitions for the supported pool: Jund Wildfire, Mono Blue Terror,
+Red Madness and Elves (Pauper), plus the tokens they create and the
+Undercity dungeon (initiative).
 
 The pool itself is data: `cards.toml` (shared with the Rust port). This
 module turns each entry into a `CardDef` and each effect, a list of ops,
@@ -38,6 +39,8 @@ SPEC_PATH = os.path.join(os.path.dirname(__file__), "cards.toml")
 CARDS: dict[str, CardDef] = {}
 TOKENS: dict[str, CardDef] = {}
 FACES: dict[str, CardDef] = {}
+DUNGEONS: dict[str, CardDef] = {}  # a dungeon's rooms are its triggers (event "room")
+ROOM_NEXT: dict[tuple[str, str], tuple[str, ...]] = {}  # (dungeon, room) -> the rooms below it
 
 M = ManaCost.parse
 
@@ -48,6 +51,18 @@ def is_instant_or_sorcery(c) -> bool:
 
 def _is_basic(c) -> bool:
     return "Basic" in c.face.supertypes and "Land" in c.face.types
+
+
+def has_creature_type(face, t: str) -> bool:
+    """Subtype check that honours changeling (every creature type: Masked Vandal)."""
+    return t in face.subtypes or "changeling" in face.keywords
+
+
+def count_of(g, what: str) -> int:
+    """Counts used by effects: 'elves' = Elves on the battlefield (both players)."""
+    if what == "elves":
+        return sum(1 for c in g.battlefield if has_creature_type(c.face, "Elf"))
+    raise ValueError(f"unknown count {what!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +195,15 @@ def _metalcraft(g, item) -> bool:
     return _artifacts_you_control(g, item.controller) >= 3
 
 
+def _chosen_power(g, item) -> int:
+    """Monstrous Emergence: the power of the creature chosen as the cost
+    (its current power if it is still on the battlefield), or of the
+    revealed creature card."""
+    oid = item.data.get("chosen_oid")
+    live = g.perm(oid) if oid is not None else None
+    return g.power(live) if live is not None else item.data["power"]
+
+
 def _op_damage_target(g, item, op):
     """index: which target (default 0). n_landfall: the amount instead of n
     if a land entered under the controller's control this turn. n_metalcraft:
@@ -200,6 +224,12 @@ def _op_damage_target_controller(g, item, op):
     t = g.target(item)
     if t is not None:
         g.deal_damage(_source(item), ("player", t.controller), op["n"])
+
+
+def _op_damage_chosen_power(g, item, op):
+    """The source deals damage equal to the power chosen as the additional cost to target 0."""
+    if item.targets and g.target_legal(item, 0):
+        g.deal_damage(_source(item), item.targets[0], _chosen_power(g, item))
 
 
 def _op_damage_each_opponent(g, item, op):
@@ -303,6 +333,102 @@ def _op_optional_payment(g, item, op):
 
 def _op_scry(g, item, op):
     yield from g.scry(item.controller, op["n"])
+
+
+def _op_untap_target(g, item, op):
+    t = g.target(item)
+    if t is not None:
+        t.tapped = False
+
+
+def _op_pump_target(g, item, op):
+    """+n/+n (or +X/+X, X = count_of(count) on resolution) until end of turn."""
+    t = g.target(item)
+    if t is not None:
+        n = count_of(g, op["count"]) if "count" in op else op["n"]
+        t.temp.append(TempEffect(power=n, toughness=n))
+
+
+def _op_counters_target(g, item, op):
+    t = g.target(item)
+    if t is not None:
+        t.counters += op["n"]
+
+
+def _op_shuffle_target_into_library(g, item, op):
+    """Its owner shuffles the targeted permanent into their library (Deglamer)."""
+    t = g.target(item)
+    if t is not None:
+        owner = t.owner
+        g._move(t, "library")
+        g.shuffle(owner)
+
+
+def _op_dig(g, item, op):
+    """Look at the top n cards; put those of one card type into your hand
+    and the rest into your graveyard (all revealed: Winding Way) or on the
+    bottom in the order they were (Lead the Stampede). take: the type, or
+    choose_type: the types the controller chooses from first."""
+    p = item.controller
+    if "choose_type" in op:
+        options = [Option(f"Choose {t.lower()}", ("choose_type", t), t) for t in op["choose_type"]]
+        typ = yield from g.ask(p, CHOOSE_MODE, f"{item.name}: choose a card type", options)
+    else:
+        typ = op["take"]
+    top = list(g.players[p].library[: op["n"]])
+    to_gy = op["rest"] == "graveyard"
+    for c in top:
+        if to_gy:
+            c.known_to = {0, 1}
+        else:
+            c.known_to.add(p)
+    taken = [c for c in top if typ in c.face.types]
+    g._log(f"p{p} reveals {[c.name for c in (top if to_gy else taken)]}")
+    for c in taken:
+        g._move(c, "hand", known_to={0, 1})
+    for c in top:
+        if c in taken:
+            continue
+        if to_gy:
+            g._move(c, "graveyard")
+        else:
+            g._move(c, "library", position="bottom", known_to={p})
+
+
+def _op_may_exile_from_graveyard(g, item, op):
+    """You may exile a card of `type` from your graveyard; if you do, run `then`."""
+    p = item.controller
+    cands = g._dedupe_by_name(c for c in g.players[p].graveyard if op["type"] in c.face.types)
+    if not cands:
+        return
+    options = [Option("Exile nothing", ("exile_gy", None), None)] + [Option(f"Exile {c.name}", ("exile_gy", c.name), c) for c in cands]
+    c = yield from g.ask(p, EXILE_FROM_GY, f"{item.name}: exile a {op['type'].lower()} card from your graveyard?", options)
+    if c is not None:
+        g._move(c, "exile")
+        yield from run_ops(g, item, op["then"])
+
+
+def _op_take_initiative(g, item, op):
+    yield from g.take_initiative(item.controller)
+
+
+def _op_reveal_to_battlefield(g, item, op):
+    """Reveal the top n cards, put a card of `type` from among them onto the
+    battlefield with `counters` +1/+1 counters (hexproof until your next
+    turn), then shuffle (Throne of the Dead Three)."""
+    p = item.controller
+    top = list(g.players[p].library[: op["n"]])
+    for c in top:
+        c.known_to = {0, 1}
+    g._log(f"p{p} reveals {[c.name for c in top]}")
+    cands = g._dedupe_by_name(c for c in top if op["type"] in c.face.types)
+    if cands:
+        options = [Option(f"Put {c.name} onto the battlefield", ("put", c.name), c) for c in cands]
+        c = yield from g.ask(p, CHOOSE_CARD, f"{item.name}: put a {op['type'].lower()} card onto the battlefield", options)
+        new = g.put_onto_battlefield(c, p)
+        new.counters += op.get("counters", 0)
+        new.hexproof = op.get("hexproof", False)
+    g.shuffle(p)
 
 
 def _op_explore_target(g, item, op):
@@ -424,6 +550,15 @@ OPS = {
     "tap_or_untap_target": _op_tap_or_untap_target,
     "return_from_graveyard": _op_return_from_graveyard,
     "opponent_sacrifices": _op_opponent_sacrifices,
+    "damage_chosen_power": _op_damage_chosen_power,
+    "untap_target": _op_untap_target,
+    "pump_target": _op_pump_target,
+    "counters_target": _op_counters_target,
+    "shuffle_target_into_library": _op_shuffle_target_into_library,
+    "dig": _op_dig,
+    "may_exile_from_graveyard": _op_may_exile_from_graveyard,
+    "take_initiative": _op_take_initiative,
+    "reveal_to_battlefield": _op_reveal_to_battlefield,
     "custom": _op_custom,
 }
 
@@ -618,7 +753,7 @@ def _condition(spec: dict | None):
         return None
     if set(spec) == {"sacrificed_subtype"}:
         sub = spec["sacrificed_subtype"]
-        return lambda g, src, lki: sub in lki.face.subtypes
+        return lambda g, src, lki: has_creature_type(lki.face, sub)
     if set(spec) == {"spell"}:  # you_cast: the kind of spell cast
         flt = CAST_FILTERS[spec["spell"]]
         return lambda g, src, card: flt(card)
@@ -627,6 +762,11 @@ def _condition(spec: dict | None):
         return lambda g, src, card: src.attached_to is not None and flt(card)
     if spec == {"bargained": True}:  # etb: the permanent was cast bargained
         return lambda g, src, method: method == "bargain"
+    if spec == {"entered_untapped": True}:  # etb: "enters untapped" (Gingerbread Cabin)
+        return lambda g, src, method: not src.tapped
+    if set(spec) == {"cast_mode"}:  # etb: the spell was cast this way (collect evidence)
+        mode = spec["cast_mode"]
+        return lambda g, src, method: method == mode
     raise ValueError(f"unsupported trigger condition {spec!r}")
 
 
@@ -641,7 +781,7 @@ def make_effect(ops: list[dict] | None):
             )
         if op["op"] == "custom" and op["fn"] not in CUSTOM:
             raise ValueError(f"unknown custom effect {op['fn']!r}")
-        if op["op"] == "optional_payment":
+        if op["op"] in ("optional_payment", "may_exile_from_graveyard"):
             make_effect(op["then"])
     fn = lambda g, item: run_ops(g, item, ops)  # noqa: E731
     fn.ops = tuple(ops)  # read by encode.option_preview
@@ -660,12 +800,13 @@ SHAPE_CARD_FIELDS = frozenset({
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow",
     "plot", "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect",
     "modes", "overload_effect", "abilities", "triggers", "bargain", "collect_evidence", "equipped_power", "equipped_toughness",
+    "omen", "enters_tapped_unless_forests", "additional_power",
 })  # fmt: skip
 # Shown on entities otherwise (name, printed types, keywords, P/T) or not at all.
 NON_SHAPE_CARD_FIELDS = frozenset({"name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"})
 SHAPE_ABILITY_FIELDS = frozenset({
     "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone",
-    "sorcery_speed", "mana", "targets",
+    "sorcery_speed", "mana", "targets", "mana_amount", "return_land", "once_per_turn",
 })  # fmt: skip
 NON_SHAPE_ABILITY_FIELDS = frozenset({"name"})
 SHAPE_TRIGGER_FIELDS = frozenset({"event", "effect", "condition", "targets", "up_to"})
@@ -700,6 +841,9 @@ def _ability(a: dict) -> AbilityDef:
         zone=a.get("zone", "battlefield"),
         sorcery_speed=a.get("sorcery_speed", False),
         mana=tuple(a["mana"]) if "mana" in a else None,
+        mana_amount=a.get("mana_amount"),
+        return_land=a.get("return_land"),
+        once_per_turn=a.get("once_per_turn", False),
         targets=_targets(a.get("targets")),
     )
 
@@ -795,6 +939,10 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t.append("e:cost:bargain")
     if spec.get("collect_evidence"):
         t.append("e:cost:collect_evidence")
+    if spec.get("additional_power"):
+        t.append("e:cost:additional_power")
+    if spec.get("omen"):
+        t.append("e:cost:omen")
     if spec.get("equipped_power") or spec.get("equipped_toughness"):
         t.append("e:equipment_bonus")
     t += [f"e:cost:{k}" for k in SHAPE_COST_KEYS if k in spec]
@@ -804,7 +952,7 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t += ["e:cost:alternative", "e:cost:sac_lands"]
     if spec.get("ward"):
         t.append("e:ward")
-    for k in ("enters_tapped", "etb_x_counters"):
+    for k in ("enters_tapped", "etb_x_counters", "enters_tapped_unless_forests"):
         if spec.get(k):
             t.append(f"e:{k}")
     if "back" in spec:
@@ -821,10 +969,12 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t.append(f"e:ab:zone:{a.get('zone', 'battlefield')}")
         if "mana" in a:
             t += ["e:ab:mana"] + [f"e:ab:mana:{c}" for c in a["mana"]]
+            if a.get("mana_amount"):
+                t.append("e:ab:mana_amount")
         mv = M(a.get("cost")).mana_value
         if mv > 0:
             t.append(f"e:ab:mv:{min(mv, SHAPE_AB_MV_CAP)}")
-        for k in ("tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self"):
+        for k in ("tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "return_land", "once_per_turn"):
             if a.get(k):
                 t.append(f"e:ab:{k}")
         if "sac_other" in a:
@@ -888,6 +1038,9 @@ def card_def(spec: dict) -> CardDef:
         etb_x_counters=spec.get("etb_x_counters", False),
         back=FACES[spec["back"]] if "back" in spec else None,
         modes=tuple(SpellMode(m["name"], _targets(m.get("targets")), make_effect(m["effect"])) for m in spec.get("modes", ())),
+        omen=spec.get("omen", False),
+        enters_tapped_unless_forests=spec.get("enters_tapped_unless_forests", 0),
+        additional_power=spec.get("additional_power", False),
     )
     d.shape = card_shape(spec, d)
     return d
@@ -901,6 +1054,30 @@ def load(path: str = SPEC_PATH) -> None:
             if s["name"] in registry:
                 raise ValueError(f"duplicate {section} {s['name']!r}")
             registry[s["name"]] = card_def(s)
+    for s in spec.get("dungeon", ()):
+        _dungeon(s)
+
+
+def _dungeon(spec: dict) -> None:
+    """[[dungeon]]: name and rooms (name, next, targets, effect), the first
+    room on top. Rooms become the dungeon's triggers (event "room")."""
+    if set(spec) - {"name", "rooms"}:
+        raise ValueError(f"dungeon {spec.get('name')}: unknown fields {sorted(set(spec) - {'name', 'rooms'})}")
+    name = spec["name"]
+    rooms = spec["rooms"]
+    known = {r["name"] for r in rooms}
+    for r in rooms:
+        if set(r) - {"name", "next", "targets", "effect"}:
+            raise ValueError(f"room {r.get('name')}: unknown fields")
+        if not set(r.get("next", ())) <= known:
+            raise ValueError(f"room {r['name']}: unknown next room")
+        ROOM_NEXT[(name, r["name"])] = tuple(r.get("next", ()))
+    DUNGEONS[name] = CardDef(
+        name=name,
+        cost=ManaCost(),
+        types=frozenset(),
+        triggers=tuple(TriggerDef(r["name"], "room", make_effect(r["effect"]), None, _targets(r.get("targets"))) for r in rooms),
+    )
 
 
 load()

@@ -17,6 +17,8 @@ lists. Each is that build's typical 15 card for card: nothing is left out
 for missing rules (Envelop was implemented for it) and nothing is trimmed.
 Grixis Affinity: main and sideboard are the "Stock list" builds (main 228
 of 524 lists, 44%; sideboard 174 of 524, 33%), see docs/grixis-affinity.md.
+Elves: the modal counts of the cards played in >= 50% of 399 Q3 2026 lists
+(Pauper-Research, 2026-07-05 to 2026-10-02), see docs/elves.md.
 """
 
 JUND_WILDFIRE = {
@@ -137,12 +139,44 @@ GRIXIS_AFFINITY_SIDEBOARD = {
     "Nihil Spellbomb": 1,
 }
 
-DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS, "grixis_affinity": GRIXIS_AFFINITY}
+# Modal counts of the cards in >= 50% of Q3 2026 lists sum to 61; Sagu
+# Wildling (mean 1.85 copies) goes from 3 to 2. Land Grant (40%) is out.
+ELVES = {
+    "Forest": 12,
+    "Gingerbread Cabin": 1,
+    "Llanowar Elves": 4,
+    "Fyndhorn Elves": 3,
+    "Elvish Mystic": 2,
+    "Priest of Titania": 4,
+    "Quirion Ranger": 4,
+    "Timberwatch Elf": 4,
+    "Masked Vandal": 4,
+    "Nyxborn Hydra": 4,
+    "Avenging Hunter": 4,
+    "Generous Ent": 4,
+    "Sagu Wildling": 2,
+    "Winding Way": 4,
+    "Lead the Stampede": 4,
+}
+
+# Elves: the Q3 2026 modal sideboard (cards in >= 50% of lists): 4 Monstrous
+# Emergence, 3 Faerie Macabre, 3 Vitu-Ghazi Inspector, 3 Spinewoods Paladin,
+# then 2 Deglamer (the most played card below 50%) for 15.
+ELVES_SIDEBOARD = {
+    "Monstrous Emergence": 4,
+    "Faerie Macabre": 3,
+    "Vitu-Ghazi Inspector": 3,
+    "Spinewoods Paladin": 3,
+    "Deglamer": 2,
+}
+
+DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS, "grixis_affinity": GRIXIS_AFFINITY, "elves": ELVES}
 SIDEBOARDS = {
     "jund_wildfire": JUND_WILDFIRE_SIDEBOARD,
     "mono_blue_terror": MONO_BLUE_TERROR_SIDEBOARD,
     "red_madness": RED_MADNESS_SIDEBOARD,
     "grixis_affinity": GRIXIS_AFFINITY_SIDEBOARD,
+    "elves": ELVES_SIDEBOARD,
 }
 
 

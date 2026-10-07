@@ -312,7 +312,7 @@ def test_steel_sabotage_counters_artifact_or_bounces():
 def test_postboard_decks_are_legal():
     for d, o in SIDEBOARD_PLANS:
         pb = postboard(d, o)
-        assert sum(pb.values()) == 60 and all(n <= 4 or name in ("Island", "Mountain") for name, n in pb.items())
+        assert sum(pb.values()) == 60 and all(n <= 4 or name in ("Island", "Mountain", "Forest") for name, n in pb.items())
         assert set(pb) - set(DECKS[d]) <= set(SIDEBOARDS[d])
     for a, b in MATCHUPS.values():
         assert (a, b) in SIDEBOARD_PLANS and (b, a) in SIDEBOARD_PLANS

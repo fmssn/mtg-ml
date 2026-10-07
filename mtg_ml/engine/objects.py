@@ -112,6 +112,9 @@ class AbilityDef(_Immutable):
     zone: str = "battlefield"  # 'hand' for cycling
     sorcery_speed: bool = False
     mana: tuple[str, ...] | None = None  # set => mana ability producing one of these
+    mana_amount: str | None = None  # 'elves': one unit per Elf on the battlefield (Priest of Titania)
+    return_land: str | None = None  # 'forest': return a Forest you control to its owner's hand as a cost
+    once_per_turn: bool = False
     targets: tuple[TargetSpec, ...] = ()
 
 
@@ -120,10 +123,12 @@ class TriggerDef(_Immutable):
     """event: etb | to_graveyard_from_battlefield | cast | you_sacrifice_another
     | your_upkeep | you_cast (another spell you cast, from the battlefield)
     | third_draw (you draw your third card in a turn, from the graveyard)
-    | leaves_battlefield (to any zone).
-    condition(game, source, event_data) -> bool. targets: chosen as the
-    trigger is put on the stack (removed if there is none, CR 603.3d);
-    up_to: the targets may be left empty ("up to one target")."""
+    | leaves_battlefield (to any zone)
+    | room (a dungeon room: the venture marker moved into it).
+    condition(game, source, event_data) -> bool; for etb the event data is
+    the cast method of the spell that became the permanent (or None).
+    targets: chosen as the trigger is put on the stack (removed if there is
+    none, CR 603.3d); up_to: the targets may be left empty ("up to one target")."""
 
     name: str
     event: str
@@ -179,6 +184,9 @@ class CardDef(_Immutable):
     etb_x_counters: bool = False
     back: "CardDef | None" = None
     modes: tuple[SpellMode, ...] = ()  # modal spells: one is chosen on cast
+    omen: bool = False  # the back face is an omen: cast mode "omen" casts it, then it is shuffled into the library
+    enters_tapped_unless_forests: int = 0  # enters tapped unless you control this many other Forests
+    additional_power: bool = False  # additional cost: choose a creature you control or reveal a creature card (Monstrous Emergence)
     # What the card does, as entity tokens derived from its spec (cards.card_shape;
     # feature set 5, docs/features.md). Computed once at load.
     shape: tuple[str, ...] = ()
@@ -234,6 +242,8 @@ class Card:
     attached_to: int | None = None  # oid of enchanted creature (bestow)
     skip_untap: int = 0
     plotted_turn: int = 0  # turn this card was plotted on (exile), 0 = not plotted
+    once_used_turn: int = 0  # turn its once-each-turn ability was activated
+    hexproof: bool = False  # hexproof until its controller's next turn (Throne of the Dead Three)
     temp: list[TempEffect] = field(default_factory=list)
     known_to: set[int] = field(default_factory=set)
     # Until it leaves the battlefield: base (power, toughness) of a permanent
@@ -269,6 +279,8 @@ class Card:
         self.attached_to = None
         self.skip_untap = 0
         self.plotted_turn = 0
+        self.once_used_turn = 0
+        self.hexproof = False
         self.temp = []
         self.animated = None
         self.granted = frozenset()
@@ -318,3 +330,4 @@ class Player:
     drew_from_empty: bool = False
     cards_drawn_this_turn: int = 0
     landfall_turn: int = 0  # last turn a land entered the battlefield under this player's control
+    dungeon_room: str | None = None  # the room of Undercity their venture marker is in

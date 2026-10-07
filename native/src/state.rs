@@ -3,7 +3,7 @@
 //! Mirrors the non-generator methods of mtg_ml/engine/game.py one to one;
 //! the method names are kept so the two files can be read side by side.
 
-use crate::cards::{T_ENCHANTMENT, color_bit, db, CardDef, CastFilter, CostRed, DefId, Event, Op, SacFilter, TriggerDef, T_ARTIFACT, T_CREATURE, T_INSTANT, T_LAND, T_SORCERY, TK};
+use crate::cards::{color_bit, db, AbilityDef, CardDef, CastFilter, CostRed, DefId, Event, Op, SacFilter, TriggerDef, T_ARTIFACT, T_CREATURE, T_ENCHANTMENT, T_INSTANT, T_LAND, T_SORCERY, TK};
 use crate::mana::{bit, can_pay, ManaCost, Remaining};
 use crate::rng::PyRandom;
 use std::rc::Rc;
@@ -36,6 +36,8 @@ pub enum Zone {
     Battlefield,
     Stack,
     Gone,
+    /// Outside the game's zones: the Undercity as a trigger source.
+    Command,
 }
 
 impl Zone {
@@ -48,6 +50,7 @@ impl Zone {
             Zone::Battlefield => "battlefield",
             Zone::Stack => "stack",
             Zone::Gone => "gone",
+            Zone::Command => "command",
         }
     }
     pub fn parse(s: &str) -> Option<Zone> {
@@ -95,6 +98,10 @@ pub struct Card {
     pub skip_untap: i32,
     /// Turn this card was plotted on (in exile), 0 = not plotted.
     pub plotted_turn: i32,
+    /// Turn its once-each-turn ability was activated.
+    pub once_used_turn: i32,
+    /// Hexproof until its controller's next turn (Throne of the Dead Three).
+    pub hexproof: bool,
     pub temp: Vec<TempEffect>,
     /// Bit p set: player p knows this card.
     pub known_to: u8,
@@ -131,6 +138,8 @@ impl Card {
         self.attached_to = None;
         self.skip_untap = 0;
         self.plotted_turn = 0;
+        self.once_used_turn = 0;
+        self.hexproof = false;
         self.temp.clear();
         self.animated = None;
         self.granted = 0;
@@ -193,12 +202,14 @@ pub enum Method {
     Alternative,
     Phyrexian,
     Bargain,
-    /// Collect evidence as an optional additional cost (Extract a Confession).
+    /// Cast the back face, an omen (Sagu Wildling's Roost Seek).
+    Omen,
+    /// Collect evidence as an additional cost (Extract a Confession; normal cost plus collect evidence).
     Evidence,
 }
 
 /// Cast modes from the hand, in the order they are offered (game.HAND_MODES).
-pub const HAND_MODES: [Method; 7] = [Method::Normal, Method::Bestow, Method::Overload, Method::Alternative, Method::Phyrexian, Method::Bargain, Method::Evidence];
+pub const HAND_MODES: [Method; 8] = [Method::Normal, Method::Bestow, Method::Overload, Method::Alternative, Method::Phyrexian, Method::Bargain, Method::Omen, Method::Evidence];
 
 impl Method {
     pub fn name(self) -> &'static str {
@@ -213,6 +224,7 @@ impl Method {
             Method::Alternative => "alternative",
             Method::Phyrexian => "phyrexian",
             Method::Bargain => "bargain",
+            Method::Omen => "omen",
             Method::Evidence => "evidence",
         }
     }
@@ -235,6 +247,9 @@ pub struct Data {
     pub storm: Option<i32>,
     /// Spells with an additional sacrifice: the sacrificed permanent's mana value.
     pub sacrificed_mv: Option<i32>,
+    /// Monstrous Emergence: the creature chosen as the cost and its power then.
+    pub chosen_oid: Option<u32>,
+    pub power: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -276,6 +291,8 @@ pub struct Player {
     pub cards_drawn_this_turn: i32,
     /// Last turn a land entered the battlefield under this player's control.
     pub landfall_turn: i32,
+    /// The Undercity room (trigger index) their venture marker is in.
+    pub dungeon_room: Option<usize>,
 }
 
 impl Player {
@@ -397,6 +414,10 @@ pub enum Val {
     Order(Vec<CIdx>),
     Top,
     Bottom,
+    /// A name chosen from a fixed list (a card type, a dungeon room).
+    Name(&'static str),
+    /// Scry N: the cards in order, the first `usize` stay on top.
+    ScryN(Vec<CIdx>, usize),
 }
 
 #[derive(Clone, Debug)]
@@ -467,6 +488,8 @@ pub enum EquivKey {
         blocked: bool,
         animated: Option<(i32, i32)>,
         granted: u32,
+        once_used: bool,
+        hexproof: bool,
     },
 }
 
@@ -533,6 +556,8 @@ pub struct State {
     pub lands_played: i32,
     /// Spells cast this turn by both players: the storm count.
     pub spells_cast_this_turn: i32,
+    /// The player who has the initiative (Undercity).
+    pub initiative: Option<u8>,
     pub attackers: Vec<u32>,
     pub blocked: Vec<u32>,
     /// blocker oid -> attacker oid, insertion ordered (Python dict).
@@ -613,6 +638,7 @@ impl State {
             step_name: "untap",
             lands_played: 0,
             spells_cast_this_turn: 0,
+            initiative: None,
             attackers: vec![],
             blocked: vec![],
             blocks: vec![],
@@ -702,6 +728,8 @@ impl State {
             attached_to: None,
             skip_untap: 0,
             plotted_turn: 0,
+            once_used_turn: 0,
+            hexproof: false,
             temp: vec![],
             known_to,
             animated: None,
@@ -846,6 +874,9 @@ impl State {
             let d = db();
             k |= d.kw("reach") | d.kw("trample");
         }
+        if c.hexproof {
+            k |= db().kw("hexproof");
+        }
         k
     }
 
@@ -895,6 +926,8 @@ impl State {
             blocked: self.blocked.contains(&c.oid),
             animated: c.animated,
             granted: c.granted,
+            once_used: c.once_used_turn == self.turn,
+            hexproof: c.hexproof,
         }
     }
 
@@ -975,10 +1008,11 @@ impl State {
         let owner = self.c(ci).owner as usize;
         match to {
             Zone::Battlefield => {
+                let unless = self.enters_tapped_unless(ci);
                 let c = self.cm(ci);
                 c.known_to = BOTH;
                 c.sick = true;
-                c.tapped = tapped || c.face().enters_tapped;
+                c.tapped = tapped || c.face().enters_tapped || unless;
                 let ctl = c.controller as usize;
                 self.battlefield.push(ci);
                 if self.is_land(self.c(ci)) {
@@ -1013,12 +1047,23 @@ impl State {
             Zone::Stack => {
                 self.cm(ci).known_to = BOTH;
             }
-            Zone::Gone => panic!("cannot move to gone"),
+            Zone::Gone | Zone::Command => panic!("cannot move to {}", to.name()),
         }
         if let Some(l) = lki {
             self.after_leave_battlefield(l, ci, to);
         }
         Some(ci)
+    }
+
+    /// Enters tapped unless its controller controls N other Forests (Gingerbread Cabin).
+    fn enters_tapped_unless(&self, ci: CIdx) -> bool {
+        let c = self.c(ci);
+        let n = c.face().enters_tapped_unless_forests;
+        if n == 0 {
+            return false;
+        }
+        let others = self.battlefield.iter().filter(|&&x| self.c(x).controller == c.controller && self.c(x).face().has_subtype("Forest")).count() as i32;
+        others < n
     }
 
     pub fn mv(&mut self, ci: CIdx, to: Zone) -> Option<CIdx> {
@@ -1147,6 +1192,40 @@ impl State {
         new
     }
 
+    /// `Game._dungeon_card`: the Undercity as the source of room and
+    /// initiative triggers (oid 0, never on the battlefield).
+    pub fn dungeon_card(&self, p: u8) -> Card {
+        Card {
+            uid: 0,
+            oid: 0,
+            def: db().undercity.expect("no [[dungeon]] Undercity in cards.toml"),
+            owner: p,
+            controller: p,
+            zone: Zone::Command,
+            is_token: false,
+            transformed: false,
+            tapped: false,
+            damage: 0,
+            deathtouch_damage: false,
+            counters: 0,
+            sick: false,
+            attached_to: None,
+            skip_untap: 0,
+            plotted_turn: 0,
+            once_used_turn: 0,
+            hexproof: false,
+            animated: None,
+            granted: 0,
+            temp: vec![],
+            known_to: BOTH,
+        }
+    }
+
+    /// cards.py `count_of("elves")`: Elves on the battlefield (changelings included).
+    pub fn count_elves(&self) -> i32 {
+        self.battlefield.iter().filter(|&&c| self.c(c).face().has_creature_type("Elf")).count() as i32
+    }
+
     pub fn deal_damage(&mut self, source: &Card, target: Ref, amount: i32) {
         if amount <= 0 {
             return;
@@ -1186,7 +1265,16 @@ impl State {
     pub fn emit_etb(&mut self, ci: CIdx, method: Option<Method>) {
         let c = self.c(ci);
         let controller = c.controller;
+        let tapped = c.tapped;
         for t in &c.face().triggers {
+            if t.entered_untapped && tapped {
+                continue;
+            }
+            if let Some(m) = &t.cast_mode {
+                if method.map(|x| x.name()) != Some(m.as_str()) {
+                    continue;
+                }
+            }
             if t.event == Event::Etb && (!t.bargained || method == Some(Method::Bargain)) {
                 self.pending.push(PendingTrigger { controller, source: Src::Live(ci), tdef: t, data: Data::default() });
             }
@@ -1201,7 +1289,7 @@ impl State {
                 continue;
             }
             for t in &pc.face().triggers {
-                if t.event == Event::YouSacrificeAnother && t.sacrificed_subtype.as_ref().map_or(true, |s| lki.face().has_subtype(s)) {
+                if t.event == Event::YouSacrificeAnother && t.sacrificed_subtype.as_ref().map_or(true, |s| lki.face().has_creature_type(s)) {
                     new.push(PendingTrigger { controller: pc.controller, source: Src::Live(perm), tdef: t, data: Data { sacrificed: Some(Box::new(lki.clone())), ..Default::default() } });
                 }
             }
@@ -1221,6 +1309,10 @@ impl State {
                     new.push(PendingTrigger { controller: pc.controller, source: Src::Live(perm), tdef: t, data: Data::default() });
                 }
             }
+        }
+        if self.initiative == Some(self.active) {
+            let a = self.active;
+            new.push(PendingTrigger { controller: a, source: Src::Snap(Box::new(self.dungeon_card(a))), tdef: &db().venture, data: Data::default() });
         }
         self.pending.extend(new);
     }
@@ -1378,6 +1470,9 @@ impl State {
     }
 
     pub fn perm_matches(&self, spec: TK, c: &Card, controller: u8) -> bool {
+        if c.controller != controller && c.hexproof {
+            return false;
+        }
         match spec {
             TK::Creature | TK::Any | TK::CreatureOfTargetPlayer | TK::AnotherCreature => self.is_creature(c),
             TK::ArtifactOrEnchantmentYouDontControl => c.controller != controller && self.types(c) & (T_ARTIFACT | T_ENCHANTMENT) != 0,
@@ -1392,6 +1487,7 @@ impl State {
             TK::Artifact => self.is_artifact(c),
             TK::BluePermanent => c.face().colors & crate::cards::color_bit(b'U') != 0,
             TK::RedPermanent => c.face().colors & crate::cards::color_bit(b'R') != 0,
+            TK::ArtifactOrEnchantment => c.face().types & (T_ARTIFACT | T_ENCHANTMENT) != 0,
             _ => false,
         }
     }
@@ -1484,6 +1580,15 @@ impl State {
         out
     }
 
+    /// `Game.mana_units`: mana one activation makes.
+    pub fn mana_units(&self, ab: &AbilityDef) -> i32 {
+        if ab.mana_elves {
+            self.count_elves()
+        } else {
+            1
+        }
+    }
+
     pub fn sac_candidates(&self, p: u8, flt: SacFilter, exclude: &[u32]) -> Vec<CIdx> {
         self.battlefield
             .iter()
@@ -1521,7 +1626,10 @@ impl State {
             if ab.sac_self {
                 selfsac.push(*ci);
             } else {
-                base.push(ab.mana.as_ref().unwrap().iter().fold(0, |m, c| m | bit(*c)));
+                let u = ab.mana.as_ref().unwrap().iter().fold(0, |m, c| m | bit(*c));
+                for _ in 0..self.mana_units(ab) {
+                    base.push(u);
+                }
             }
         }
         match sac_filter {
@@ -1537,20 +1645,25 @@ impl State {
                 if cands.is_empty() {
                     return false;
                 }
-                for &ci in &selfsac {
-                    let ab = self.c(ci).face().abilities.iter().find(|a| a.mana.is_some()).unwrap();
-                    assert!(ab.mana.as_deref() == Some(&[b'C'][..]), "self-sacrificing mana sources must produce {{C}}");
-                }
-                let mut ordered: Vec<u32> = selfsac.iter().map(|&c| self.c(c).oid).filter(|o| !cands.contains(o)).collect();
-                ordered.extend(selfsac.iter().map(|&c| self.c(c).oid).filter(|o| cands.contains(o)));
-                for k in 0..=ordered.len() {
-                    let used = &ordered[..k];
-                    let left = cands.iter().filter(|o| !used.contains(o)).count();
-                    if left >= 1 {
-                        let mut units = base.clone();
-                        units.extend(std::iter::repeat(bit(b'C')).take(k));
-                        if can_pay(rem, &units) {
-                            return true;
+                // {C} self-sacrificing sources are interchangeable (spend
+                // non-candidates first); others (a Treasure) are tried as subsets.
+                let mana_of = |ci: CIdx| self.c(ci).face().abilities.iter().find(|a| a.mana.is_some()).unwrap().mana.as_deref().unwrap();
+                let colourless: Vec<u32> = selfsac.iter().filter(|&&c| mana_of(c) == [b'C']).map(|&c| self.c(c).oid).collect();
+                let others: Vec<(u32, u8)> = selfsac.iter().filter(|&&c| mana_of(c) != [b'C']).map(|&c| (self.c(c).oid, mana_of(c).iter().fold(0, |m, x| m | bit(*x)))).collect();
+                let mut ordered: Vec<u32> = colourless.iter().copied().filter(|o| !cands.contains(o)).collect();
+                ordered.extend(colourless.iter().copied().filter(|o| cands.contains(o)));
+                for mask in 0..(1usize << others.len()) {
+                    let chosen: Vec<&(u32, u8)> = (0..others.len()).filter(|i| mask >> i & 1 == 1).map(|i| &others[i]).collect();
+                    for k in 0..=ordered.len() {
+                        let used = &ordered[..k];
+                        let left = cands.iter().filter(|o| !used.contains(o) && !chosen.iter().any(|(x, _)| x == *o)).count();
+                        if left >= 1 {
+                            let mut units = base.clone();
+                            units.extend(chosen.iter().map(|(_, u)| *u));
+                            units.extend(std::iter::repeat(bit(b'C')).take(k));
+                            if can_pay(rem, &units) {
+                                return true;
+                            }
                         }
                     }
                 }
@@ -1591,6 +1704,14 @@ impl State {
             Method::Alternative => d.alternative_sac.map(|_| &db().free),
             Method::Phyrexian => d.phyrexian_cost.as_ref(),
             Method::Bargain => d.bargain.then_some(&d.cost),
+            Method::Omen => {
+                let f = self.c(ci).defn();
+                if f.omen {
+                    Some(&db().def(f.back.unwrap()).cost)
+                } else {
+                    None
+                }
+            }
             Method::Evidence => (d.collect_evidence != 0).then_some(&d.cost),
         }
     }
@@ -1616,6 +1737,9 @@ impl State {
         }
         if mode == Method::Overload {
             return vec![];
+        }
+        if mode == Method::Omen {
+            return db().def(self.c(ci).defn().back.unwrap()).targets.clone();
         }
         let d = self.c(ci).face();
         match choice {
@@ -1657,8 +1781,9 @@ impl State {
         if d.is_type(T_LAND) {
             return false;
         }
+        let spell = if mode == Method::Omen { db().def(d.back.unwrap()) } else { d };
         // Madness casts on resolution of its trigger, whatever the card type (702.35).
-        if mode != Method::Madness && !d.is_type(T_INSTANT) && d.keywords & db().kw("flash") == 0 && !self.sorcery_timing(p) {
+        if mode != Method::Madness && !spell.is_type(T_INSTANT) && spell.keywords & db().kw("flash") == 0 && !self.sorcery_timing(p) {
             return false;
         }
         for spec in self.mode_targets(ci, mode, choice) {
@@ -1678,6 +1803,9 @@ impl State {
         if mode == Method::Phyrexian && self.players[p as usize].life < d.phyrexian_life {
             return false;
         }
+        if d.additional_power && self.power_sources(p, ci).is_empty() {
+            return false;
+        }
         if let Some((flt, n)) = self.mode_sac(ci, mode) {
             if (self.sac_candidates(p, flt, &[]).len() as i32) < n {
                 return false;
@@ -1685,6 +1813,17 @@ impl State {
         }
         let cost = base.with_x(0).reduced(self.cost_reduction(p, ci));
         self.cost_feasible(p, &Remaining::of(&cost), self.mode_additional_sac(ci, mode), &[], None, &[])
+    }
+
+    /// `Game._power_sources`: creatures `p` controls (deduplicated) and creature cards in hand (by name).
+    pub fn power_sources(&self, p: u8, card: CIdx) -> Vec<CIdx> {
+        let mut out = self.dedupe_by_equiv(self.battlefield.iter().copied().filter(|&c| self.c(c).controller == p && self.is_creature(self.c(c))));
+        out.extend(self.dedupe_by_name(self.players[p as usize].hand.iter().copied().filter(|&c| c != card && self.c(c).face().is_type(T_CREATURE))));
+        out
+    }
+
+    pub fn return_land_candidates(&self, p: u8) -> Vec<CIdx> {
+        self.battlefield.iter().copied().filter(|&c| self.c(c).controller == p && self.is_land(self.c(c)) && self.c(c).face().has_subtype("Forest")).collect()
     }
 
     pub fn can_activate(&self, p: u8, ci: CIdx, ai: usize) -> bool {
@@ -1707,6 +1846,12 @@ impl State {
             return true;
         }
         if ab.discard_other && self.players[p as usize].hand.is_empty() {
+            return false;
+        }
+        if ab.once_per_turn && c.once_used_turn == self.turn {
+            return false;
+        }
+        if ab.return_forest && self.return_land_candidates(p).is_empty() {
             return false;
         }
         let exclude: Vec<u32> = if ab.tap { vec![c.oid] } else { vec![] };
@@ -1895,7 +2040,7 @@ impl State {
                     continue;
                 }
                 if ab.mana.is_some() {
-                    if ab.sac_self && self.can_activate(p, card, i) {
+                    if ab.sac_self && ab.mana.as_ref().unwrap().len() == 1 && self.can_activate(p, card, i) {
                         opts.push(Opt {
                             label: format!("{}: {}", face.name, ab.name),
                             key: vec![KI::S("mana"), KI::S(face.name.as_str()), KI::S(ab.name.as_str())],
@@ -1936,6 +2081,19 @@ impl State {
         !(self.has(attacker, "flying") && !(self.has(blocker, "flying") || self.has(blocker, "reach")))
     }
 
+    /// `Game._menace_ok`: blocking a menace creature is offered only while a
+    /// second blocker is possible.
+    pub fn menace_ok(&self, a: CIdx, later: &[CIdx]) -> bool {
+        let ac = self.c(a);
+        if !self.has(ac, "menace") {
+            return true;
+        }
+        if self.blocks.iter().any(|(_, at)| *at == ac.oid) {
+            return true;
+        }
+        later.iter().any(|&b| self.can_block(self.c(b), ac))
+    }
+
     pub fn lethal(&self, attacker: &Card, blocker: &Card) -> i32 {
         if self.has(attacker, "deathtouch") {
             return 1;
@@ -1952,6 +2110,7 @@ impl State {
                 continue;
             }
             c.sick = false;
+            c.hexproof = false;
             if c.skip_untap > 0 {
                 c.skip_untap -= 1;
             } else {
