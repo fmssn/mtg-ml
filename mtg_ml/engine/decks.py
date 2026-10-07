@@ -17,6 +17,7 @@ lists. Each is that build's typical 15 card for card: nothing is left out
 for missing rules (Envelop was implemented for it) and nothing is trimmed.
 Grixis Affinity: main and sideboard are the "Stock list" builds (main 228
 of 524 lists, 44%; sideboard 174 of 524, 33%), see docs/grixis-affinity.md.
+Tron: the typical list and 15 of 443 Q3 2026 lists (docs/tron.md).
 """
 
 JUND_WILDFIRE = {
@@ -98,6 +99,32 @@ GRIXIS_AFFINITY = {
     "Great Furnace": 2,
 }
 
+# Tron (Q3 2026, the green artifact-ramp build): the typical list of all
+# 443 Tron lists from 2026-07-05 to 2026-10-02 (Pauper-Research dashboard,
+# "Builds and decisions": the aggregate decklist), unchanged (docs/tron.md).
+TRON = {
+    "Urza's Mine": 4,
+    "Urza's Power Plant": 4,
+    "Urza's Tower": 4,
+    "Forest": 2,
+    "Bojuka Bog": 1,
+    "Conduit Pylons": 1,
+    "Haunted Fengraf": 1,
+    "Expedition Map": 4,
+    "Ancient Stirrings": 4,
+    "Crop Rotation": 3,
+    "Barrels of Blasting Jelly": 4,
+    "Giant's Boulder": 4,
+    "Bonder's Ornament": 2,
+    "Candy Trail": 3,
+    "Unfathomable Truths": 2,
+    "Bramble Wurm": 4,
+    "Generous Ent": 2,
+    "Boulderbranch Golem": 3,
+    "Pinnacle Kill-Ship": 4,
+    "Maelstrom Colossus": 4,
+}
+
 # Sideboards: exactly 15 cards each, from the Q3 2026 typical lists (see the
 # module docstring). The maindecks above are left as they were so the
 # benchmark stays comparable across PRs.
@@ -137,12 +164,25 @@ GRIXIS_AFFINITY_SIDEBOARD = {
     "Nihil Spellbomb": 1,
 }
 
-DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS, "grixis_affinity": GRIXIS_AFFINITY}
+# Tron: the typical 15 of the same 443 lists, unchanged (docs/tron.md).
+TRON_SIDEBOARD = {
+    "Breath Weapon": 3,
+    "Relic of Progenitus": 3,
+    "Call Damage Control": 2,
+    "Monstrous Emergence": 2,
+    "Scour from Existence": 2,
+    "Kaervek's Torch": 1,
+    "Pulse of Murasa": 1,
+    "Whispersilk Cloak": 1,
+}
+
+DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS, "grixis_affinity": GRIXIS_AFFINITY, "tron": TRON}
 SIDEBOARDS = {
     "jund_wildfire": JUND_WILDFIRE_SIDEBOARD,
     "mono_blue_terror": MONO_BLUE_TERROR_SIDEBOARD,
     "red_madness": RED_MADNESS_SIDEBOARD,
     "grixis_affinity": GRIXIS_AFFINITY_SIDEBOARD,
+    "tron": TRON_SIDEBOARD,
 }
 
 

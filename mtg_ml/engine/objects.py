@@ -109,10 +109,20 @@ class AbilityDef(_Immutable):
     exile_self: bool = False  # exile this permanent as a cost (Relic of Progenitus)
     x_target_mv: int = 0  # cost has this many {X}, X = the target's mana value (Gorilla Shaman)
     x_reveal: str | None = None  # 'red': X = number of red cards revealed from hand (Martyr of Ashes)
-    zone: str = "battlefield"  # 'hand' for cycling
+    zone: str = "battlefield"  # 'hand' for cycling, 'graveyard' (Bramble Wurm)
     sorcery_speed: bool = False
     mana: tuple[str, ...] | None = None  # set => mana ability producing one of these
     targets: tuple[TargetSpec, ...] = ()
+    # Mana abilities: (n, subtypes): n units instead of one while its
+    # controller controls permanents with each of these subtypes (Urza's Tower).
+    mana_amount: tuple[int, tuple[str, ...]] | None = None
+    once_per_turn: bool = False  # "Activate only once each turn" (Barrels of Blasting Jelly)
+    tap_other: str | None = None  # 'creature': tap another untapped creature you control as a cost (station)
+
+    @property
+    def is_filter(self) -> bool:
+        """A mana ability with a mana cost ({1}: add one mana of any color)."""
+        return self.mana is not None and not self.cost.is_zero()
 
 
 @dataclass
@@ -182,9 +192,19 @@ class CardDef(_Immutable):
     # What the card does, as entity tokens derived from its spec (cards.card_shape;
     # feature set 5, docs/features.md). Computed once at load.
     shape: tuple[str, ...] = ()
+    prototype: ManaCost | None = None  # cast mode "prototype" (Boulderbranch Golem)
+    prototype_face: "CardDef | None" = None  # its characteristics while prototyped
+    station: int = 0  # Spacecraft: a creature with this many charge counters
+    station_keywords: frozenset[str] = frozenset()  # ... and these keywords
+    additional_choose_creature: bool = False  # choose a creature you control or reveal one from hand (Monstrous Emergence)
+    equipped_keywords: frozenset[str] = frozenset()
 
     def is_type(self, t: str) -> bool:
         return t in self.types
+
+    @property
+    def is_equipment(self) -> bool:
+        return "Equipment" in self.subtypes
 
     @property
     def mana_value(self) -> int:
@@ -231,9 +251,12 @@ class Card:
     deathtouch_damage: bool = False
     counters: int = 0  # +1/+1 counters
     sick: bool = False  # not continuously controlled since start of turn
-    attached_to: int | None = None  # oid of enchanted creature (bestow)
+    attached_to: int | None = None  # oid of the enchanted (bestow) or equipped creature
     skip_untap: int = 0
     plotted_turn: int = 0  # turn this card was plotted on (exile), 0 = not plotted
+    prototyped: bool = False  # cast (and on the battlefield) as its prototype
+    charge: int = 0  # charge counters (station)
+    mana_used_turn: int = 0  # turn a once-per-turn mana ability was last activated
     temp: list[TempEffect] = field(default_factory=list)
     known_to: set[int] = field(default_factory=set)
     # Until it leaves the battlefield: base (power, toughness) of a permanent
@@ -246,6 +269,8 @@ class Card:
     def face(self) -> CardDef:
         if self.transformed and self.defn.back is not None:
             return self.defn.back
+        if self.prototyped and self.defn.prototype_face is not None:
+            return self.defn.prototype_face
         return self.defn
 
     @property
@@ -269,6 +294,9 @@ class Card:
         self.attached_to = None
         self.skip_untap = 0
         self.plotted_turn = 0
+        self.prototyped = False
+        self.charge = 0
+        self.mana_used_turn = 0
         self.temp = []
         self.animated = None
         self.granted = frozenset()
@@ -288,7 +316,7 @@ class StackItem:
     targets: list[tuple] = field(default_factory=list)  # ('player', i) | ('perm', oid) | ('stack', sid)
     card: Card | None = None  # spells: the card on the stack
     source: Card | None = None  # abilities: (LKI of) the source
-    method: str = "normal"  # normal | flashback | escape | bestow | madness | plot | overload | alternative
+    method: str = "normal"  # normal | flashback | escape | bestow | madness | plot | overload | alternative | prototype | cascade
     cast_from: str = "hand"
     x: int = 0
     data: dict = field(default_factory=dict)

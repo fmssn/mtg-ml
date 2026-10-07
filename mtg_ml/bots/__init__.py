@@ -9,8 +9,9 @@ from .affinity import AffinityBot
 from .blue import BlueBot
 from .jund import JundBot
 from .red import RedBot
+from .tron import TronBot
 
-BOTS = {"jund_wildfire": JundBot, "mono_blue_terror": BlueBot, "red_madness": RedBot, "grixis_affinity": AffinityBot}
+BOTS = {"jund_wildfire": JundBot, "mono_blue_terror": BlueBot, "red_madness": RedBot, "grixis_affinity": AffinityBot, "tron": TronBot}
 
 
 def make_bot(seat: int, deck: str | None = None):
@@ -21,4 +22,4 @@ def make_bot(seat: int, deck: str | None = None):
     return BOTS[deck](seat)
 
 
-__all__ = ["AffinityBot", "BOTS", "BlueBot", "JundBot", "RedBot", "make_bot"]
+__all__ = ["AffinityBot", "BOTS", "BlueBot", "JundBot", "RedBot", "TronBot", "make_bot"]

@@ -70,6 +70,9 @@ fn card_tuple(py: Python<'_>, c: &Card) -> PyObject {
         known_list(c.known_to).into_py(py),
         c.animated.into_py(py),
         d.keyword_list(c.granted).into_py(py),
+        c.prototyped.into_py(py),
+        c.charge.into_py(py),
+        c.mana_used_turn.into_py(py),
     ];
     PyTuple::new_bound(py, fields).into_py(py)
 }
@@ -105,6 +108,12 @@ fn data_list(py: Python<'_>, st: &State, d: &Data) -> PyObject {
     }
     if let Some(n) = d.sacrificed_mv {
         v.push(("sacrificed_mv", n.into_py(py)));
+    }
+    if let Some(c) = &d.chosen {
+        v.push(("chosen", card_tuple(py, c)));
+    }
+    if let Some(n) = d.tapped_power {
+        v.push(("tapped_power", n.into_py(py)));
     }
     v.sort_by(|a, b| a.0.cmp(b.0));
     v.into_py(py)
@@ -451,6 +460,9 @@ impl PyGame {
             Val::Order(v) => PyTuple::new_bound(py, v.iter().map(|&c| card(c))).into_py(py),
             Val::Top => "top".into_py(py),
             Val::Bottom => "bottom".into_py(py),
+            Val::Filter(c, col) => ("filter", card(*c), color_str(*col)).into_py(py),
+            Val::Scry(top, bottom) => (PyTuple::new_bound(py, top.iter().map(|&c| card(c))), PyTuple::new_bound(py, bottom.iter().map(|&c| card(c)))).into_py(py),
+            Val::Typed(t, c) => (*t, card(*c)).into_py(py),
         })
     }
 
@@ -541,6 +553,7 @@ impl PyGame {
             "damage" => card.damage = value.extract()?,
             "counters" => card.counters = value.extract()?,
             "skip_untap" => card.skip_untap = value.extract()?,
+            "charge" => card.charge = value.extract()?,
             "attached_to" => card.attached_to = value.extract()?,
             "controller" => card.controller = Self::pidx(value.extract::<usize>()?)? as u8,
             _ => return Err(PyValueError::new_err(format!("card field {field:?} is not settable"))),
@@ -913,10 +926,14 @@ card_get! {
     plotted_turn: i32 => |c: &Card| c.plotted_turn;
     animated: Option<(i32, i32)> => |c: &Card| c.animated;
     _granted: Vec<&'static str> => |c: &Card| db().keyword_list(c.granted);
+    prototyped: bool => |c: &Card| c.prototyped;
+    charge: i32 => |c: &Card| c.charge;
+    mana_used_turn: i32 => |c: &Card| c.mana_used_turn;
     _known: Vec<u8> => |c: &Card| known_list(c.known_to);
     _temp: Vec<(Vec<&'static str>, i32, i32)> => |c: &Card| c.temp.iter().map(|t| (db().keyword_list(t.keywords), t.power, t.toughness)).collect::<Vec<_>>();
     @set set_tapped = "tapped", set_transformed = "transformed", set_sick = "sick", set_deathtouch_damage = "deathtouch_damage",
-    set_damage = "damage", set_counters = "counters", set_skip_untap = "skip_untap", set_attached_to = "attached_to", set_controller = "controller"
+    set_damage = "damage", set_counters = "counters", set_skip_untap = "skip_untap", set_attached_to = "attached_to", set_controller = "controller",
+    set_charge = "charge"
 }
 
 fn ref_exists(st: &State, r: Ref) -> bool {

@@ -187,10 +187,27 @@ impl Remaining {
 /// Can `rem` be paid with `units` (each a bitmask of the mana types that unit
 /// can be)? Kuhn's augmenting-path matching of coloured symbols to units.
 pub fn can_pay(rem: &Remaining, units: &[u8]) -> bool {
+    can_pay_wild(rem, units, 0)
+}
+
+/// mana.py `can_pay(..., wild)`: up to `wild` coloured (WUBRG) symbols may
+/// go unmatched (mana filters pay them as generic); {C} symbols come first
+/// and must all be matched.
+pub fn can_pay_wild(rem: &Remaining, units: &[u8], wild: i32) -> bool {
     let mut symbols: Vec<u8> = Vec::with_capacity(8);
     for (c, n) in &rem.colored {
-        for _ in 0..*n {
-            symbols.push(bit(*c));
+        if *c == b'C' {
+            for _ in 0..*n {
+                symbols.push(bit(*c));
+            }
+        }
+    }
+    let n_c = symbols.len();
+    for (c, n) in &rem.colored {
+        if *c != b'C' {
+            for _ in 0..*n {
+                symbols.push(bit(*c));
+            }
         }
     }
     if (units.len() as i32) < symbols.len() as i32 + rem.generic {
@@ -213,10 +230,17 @@ pub fn can_pay(rem: &Remaining, units: &[u8]) -> bool {
         false
     }
     let mut seen = vec![false; units.len()];
+    let mut unmatched = 0;
     for si in 0..symbols.len() {
         seen.iter_mut().for_each(|s| *s = false);
         if !augment(si, &symbols, units, &mut seen, &mut match_unit) {
-            return false;
+            if si < n_c {
+                return false;
+            }
+            unmatched += 1;
+            if unmatched > wild {
+                return false;
+            }
         }
     }
     true
