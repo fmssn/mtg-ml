@@ -151,19 +151,34 @@ can attack this turn) and moved only to one that is clearly better.
 Sideboard cards: Breath Weapon (two or more of theirs die), Scour, Torch,
 Emergence, Call Damage Control, Pulse, the Cloak.
 
-## Bot-vs-bot (200 game-1 games per matchup, native engine, Apple M3 laptop, shared with other jobs, 2026-10-07)
+## Bot-vs-bot (200 games per matchup and game, native engine, Apple M3 laptop, shared with other jobs, 2026-10-07)
 
-| matchup | Tron wins | Q3 2026 Tron match win rate | turns mean / p50 / p90 / max | decisions mean / p90 / max |
-|---|---|---|---|---|
-| Jund Wildfire vs Tron | 72.5% | 47% vs Jund Midrange (38 matches) | 16.6 / 16 / 22 / 36 | 318 / 542 / 1065 |
-| Mono Blue Terror vs Tron | 62.5% | 38% (55 matches) | 14.5 / 14 / 18 / 31 | 189 / 309 / 598 |
-| Red Madness vs Tron | 49.0% | 46% (90 matches) | 11.5 / 11 / 15 / 28 | 173 / 277 / 380 |
-| for reference: Jund vs Blue | | | 15.8 / 15 / 21 / 27 | 243 / 395 / 593 |
-| Jund vs Red | | | 13.5 / 13 / 20 / 25 | 245 / 407 / 579 |
-| Blue vs Red | | | 11.6 / 11 / 15 / 20 | 164 / 228 / 340 |
+Seeds 0-199, starting player alternating, Tron in seat 1. "Before" is the
+previous list (no Boulder, no Cloak, Blue Elemental Blast in the 15) on the
+same seeds and code; the engine and bot changes since only touch Boulder and
+Cloak, so it replays the old games. One standard error at 200 games is about
+3.5 points.
 
-Game 2 (both sides sideboarded, 200 games each): Tron 72% vs Jund, 67.5% vs
-Blue, 53.5% vs Red.
+| matchup | Tron wins game 1 (before → now) | game 2, both sideboarded | Q3 2026 Tron match win rate | turns mean / p50 / p90 / max (game 1) | decisions mean / p90 / max (game 1) |
+|---|---|---|---|---|---|
+| Jund Wildfire vs Tron | 74.0% → 79.0% | 73.5% → 79.0% | 47% vs Jund Midrange (38 matches) | 16.4 / 16 / 22 / 37 | 323 / 560 / 1186 |
+| Mono Blue Terror vs Tron | 68.0% → 71.5% | 66.5% → 66.5% | 38% (55 matches) | 14.7 / 14 / 20 / 25 | 197 / 345 / 511 |
+| Red Madness vs Tron | 51.5% → 46.0% | 57.0% → 53.0% | 46% (90 matches) | 11.2 / 11 / 15 / 18 | 167 / 261 / 411 |
+| for reference: Jund vs Blue | | | | 15.8 / 15 / 21 / 27 | 243 / 395 / 593 |
+| Jund vs Red | | | | 13.5 / 13 / 20 / 25 | 245 / 407 / 579 |
+| Blue vs Red | | | | 11.6 / 11 / 15 / 20 | 164 / 228 / 340 |
+
+How often Tron's new cards were used (200 games each): Giant's Boulder was
+cast 181 / 184 / 138 times in game 1 vs Jund / Blue / Red and its {7}
+ability destroyed something 78 / 63 / 0 times (Red's creatures are below
+the bot's threshold; it is a mana filter there). Whispersilk Cloak, a
+one-of brought in for game 2 against Jund and Blue, was cast 26 / 21 times
+and equipped 28 / 18 times.
+
+Against Jund and Blue the Boulder is removal for their biggest creatures, and the win rate goes
+up. Against Red it replaces faster cards (Golem, Candy Trail, Truths) with a
+{1} artifact that does little against burn, and Tron loses about 5 points,
+within two standard errors.
 
 Red is close to the field data. Tron beats the Jund and Blue bots far more
 often than real Tron beats those decks because those bots were written for
@@ -174,8 +189,8 @@ threats or Crop Rotation (real Blue wins this matchup by countering the
 payoff). "Jund Wildfire" is also not "Jund Midrange" of the field data.
 
 **Game length.** Tron games are the longest (Jund vs Tron: p90 22 turns,
-max 36; two of the 200 sideboarded games ended with Jund decked), and a turn with assembled Tron costs
-more decisions (each floating {C} is paid by its own decision unless
-`auto_mana` is on). Every cap still fits: `max_turns` is 100 everywhere
-(engine, rollouts, evaluation), and `SearchBot.max_decisions` is 4000
-against a maximum of about 1100 decisions per game.
+max 37 in game 1, 39 in game 2), and a turn with assembled Tron costs more
+decisions (each floating {C} is paid by its own decision unless `auto_mana`
+is on). Every cap still fits: `max_turns` is 100 everywhere (engine,
+rollouts, evaluation), and `SearchBot.max_decisions` is 4000 against a
+maximum of about 1200 decisions per game.
