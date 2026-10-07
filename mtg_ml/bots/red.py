@@ -50,6 +50,9 @@ class RedBot(Bot):
             "Searing Blaze": 3.5,
             "Electrickery": 3,
             "Pyroblast": 3,
+            "Red Elemental Blast": 3,
+            "Cast into the Fire": 3,
+            "End the Festivities": 2.5,
             "Gorilla Shaman": 2,
             "Martyr of Ashes": 2,
             "Relic of Progenitus": 1.5,
@@ -149,6 +152,14 @@ class RedBot(Bot):
         if n == "Searing Blaze":
             targets = [c for c in self.creatures(g, self.opp) if g.toughness(c) - c.damage <= (3 if self.me(g).landfall_turn == g.turn else 1)]
             return 20.0 if targets and (main or g.step_name in ("declare_attackers", "declare_blockers")) else NEG
+        if n == "End the Festivities":
+            if not main:
+                return NEG
+            dead = [c for c in self.creatures(g, self.opp) if g.toughness(c) - c.damage <= 1]
+            value = sum(self.creature_value(g, c) for c in dead)
+            if len(dead) >= 2 or value >= KILL_VALUE:
+                return 14.0 + value
+            return 4.0 if self.going_face(g) else NEG
         if n == "Electrickery":
             small = [c for c in self.creatures(g, self.opp) if g.toughness(c) - c.damage <= 1]
             if mode == "overload":
@@ -179,8 +190,19 @@ class RedBot(Bot):
             return 10.0
         return NEG
 
+    def pingable(self, g: Game) -> list[Card]:
+        return [c for c in self.creatures(g, self.opp) if g.toughness(c) - c.damage <= 1 and self.creature_value(g, c) >= 1.5]
+
     def modal_score(self, g: Game, card: Card, mode: str) -> float:
-        if card.name != "Pyroblast":
+        if card.name == "Cast into the Fire":
+            if mode == "exile":
+                arts = [c for c in g.battlefield if c.controller == self.opp and g.is_artifact(c) and (c.face.mana_value >= 2 or g.is_creature(c))]
+                return 10.0 if arts and (self.main_phase(g) or self.end_of_their_turn(g)) else NEG
+            small = self.pingable(g)
+            if mode == "two creatures":
+                return 16.0 if len(small) >= 2 else NEG
+            return 12.0 if small and self.creature_value(g, max(small, key=lambda c: self.creature_value(g, c))) >= KILL_VALUE else NEG
+        if card.name not in ("Pyroblast", "Red Elemental Blast"):
             return NEG
         if mode == "counter":
             top = self.stack_top(g)
@@ -225,7 +247,22 @@ class RedBot(Bot):
         if name == "Gorilla Shaman":
             c = self.ref_card(g, o)
             return c.face.mana_value + (1 if not c.is_token else 0) if c is not None else NEG
-        if name in ("Electrickery", "Pyroblast"):
+        if name in ("Pyroblast", "Red Elemental Blast"):
+            it = self.ref_spell(g, o)
+            if it is not None:
+                return 5.0 if it.controller == self.opp and "U" in it.card.face.colors else NEG
+            c = self.ref_card(g, o)
+            if c is None or c.controller == self.p or "U" not in c.face.colors:
+                return NEG
+            return self.creature_value(g, c) if g.is_creature(c) else 0.0
+        if name == "Cast into the Fire":
+            c = self.ref_card(g, o)
+            if c is None or c.controller == self.p:
+                return NEG
+            if d.prompt.startswith("Choose target (artifact)"):  # exile mode
+                return c.face.mana_value + (self.creature_value(g, c) if g.is_creature(c) else 0)
+            return (2.0 + self.creature_value(g, c)) if g.toughness(c) - c.damage <= 1 else -1.0
+        if name == "Electrickery":
             c = self.ref_card(g, o)
             if c is None or c.controller == self.p:
                 return NEG

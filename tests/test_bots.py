@@ -183,3 +183,30 @@ def test_search_pins_offered_cards_through_determinize():
         hl = h.players[0].library
         assert sorted(c.defn.name for c in hl) == before
         assert {c.oid: c.defn.name for c in hl if c.oid in pins} == pins
+
+
+# Sideboard cards: the bots know when to use them.
+
+
+def test_blue_hydroblasts_a_burn_spell_and_gut_shots_an_x1():
+    from mtg_ml.bots import RedBot
+
+    g = scenario(p0={"hand": ["Lightning Bolt"], "battlefield": ["Mountain"]}, p1={"hand": ["Hydroblast"], "battlefield": ["Island", "Delver of Secrets"]})
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target Delver of Secrets")
+    pass_priority(g)
+    assert _label(g, BlueBot(1)) == "Cast Hydroblast (counter)"
+    g = scenario(p0={"battlefield": ["Voldaren Epicure", "Mountain"]}, p1={"hand": ["Gut Shot"], "battlefield": ["Island"]}, active=1)
+    assert _label(g, BlueBot(1)) == "Cast Gut Shot (phyrexian)"
+    g = scenario(p0={"hand": ["End the Festivities"], "battlefield": ["Mountain"]}, p1={"battlefield": ["Delver of Secrets", "Delver of Secrets"]})
+    assert _label(g, RedBot(0)) == "Cast End the Festivities"
+
+
+def test_jund_uses_faerie_macabre_and_breath_weapon():
+    g = scenario(p0={"hand": ["Faerie Macabre"]}, p1={"graveyard": ["Brainstorm", "Ponder", "Counterspell", "Mental Note"]}, active=1)
+    pass_priority(g)
+    assert _label(g, JundBot(0)).startswith("Faerie Macabre: exile")
+    g = scenario(p0={"hand": ["Breath Weapon"], "battlefield": ["Mountain"] * 3}, p1={"battlefield": ["Guttersnipe", "Voldaren Epicure"]})
+    assert _label(g, JundBot(0)) == "Cast Breath Weapon"
+    g = scenario(p0={"hand": ["Breath Weapon"], "battlefield": ["Mountain"] * 3 + ["Krark-Clan Shaman", "Gixian Infiltrator"]}, p1={"battlefield": ["Voldaren Epicure"]})
+    assert _label(g, JundBot(0)) == "Pass priority"  # would kill more of ours

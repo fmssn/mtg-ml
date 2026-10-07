@@ -10,9 +10,11 @@
 "starting_player": 0,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "782bdb1f498770cd"
+"digest": "8780121f8ebae0c3"
 },
 {
 "scenario": {
@@ -25,7 +27,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "5afa5aa077b0efc5"
 },
@@ -40,9 +44,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "dcf93d6b03138d15"
+"digest": "c01a087e9577a538"
 },
 {
 "scenario": {
@@ -55,7 +61,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "831ba372f156a13a"
 },
@@ -70,7 +78,9 @@
 "starting_player": 1,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "7ea6d0f2b01b0137"
 },
@@ -85,7 +95,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "3f2c709804ddfc3f"
 },
@@ -100,7 +112,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "7f1c9b3f9da639ea"
 },
@@ -115,7 +129,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "1d530fef7dbc3f6e"
 },
@@ -130,7 +146,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "655d9ad6f721cf67"
 },
@@ -145,7 +163,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "f1bfb3b838ce9271"
 },
@@ -160,7 +180,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "9b7ebd989f82fc5a"
 },
@@ -175,9 +197,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "e18ed866bec7d2a2"
+"digest": "abec416bf703edb2"
 },
 {
 "scenario": {
@@ -190,7 +214,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "c479131faf3027cd"
 },
@@ -205,9 +231,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "27debc1796641aac"
+"digest": "298a11da9b49480d"
 },
 {
 "scenario": {
@@ -220,7 +248,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "90eca711e442e2fd"
 },
@@ -235,7 +265,9 @@
 "starting_player": null,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "cc48ca37ebc037ea"
 },
@@ -250,9 +282,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "16ebcb3a579d0fa1"
+"digest": "760dccca9408473e"
 },
 {
 "scenario": {
@@ -265,9 +299,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "4d33cb7d29d11d46"
+"digest": "0fa4b12e1a710ba2"
 },
 {
 "scenario": {
@@ -280,9 +316,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "a99c6ce31fc44cfc"
+"digest": "a37c056286a09e42"
 },
 {
 "scenario": {
@@ -295,9 +333,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "9d9412cd1d9ef86b"
+"digest": "3f8a107976fdeceb"
 },
 {
 "scenario": {
@@ -310,7 +350,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "7d39429547fee4d6"
 },
@@ -325,7 +367,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "22d3e332b71db28e"
 },
@@ -340,7 +384,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "ee6593a53fc4f583"
 },
@@ -355,9 +401,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "654e4b552e7dadf0"
+"digest": "03d617645bae1020"
 },
 {
 "scenario": {
@@ -370,7 +418,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "64a57f39ceeb278b"
 },
@@ -385,9 +435,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "fd2d19181239a9d1"
+"digest": "c3475f0eb6e2bb5b"
 },
 {
 "scenario": {
@@ -400,7 +452,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "f1b925c259e68da0"
 },
@@ -415,7 +469,9 @@
 "starting_player": null,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "50977a46816b5790"
 },
@@ -430,7 +486,9 @@
 "starting_player": 0,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "ab81161b368ceb40"
 },
@@ -445,9 +503,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "c546b8c2f19d1229"
+"digest": "618e6ea9a0781eaf"
 },
 {
 "scenario": {
@@ -460,7 +520,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "0f071b5965ccd010"
 },
@@ -475,9 +537,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "14680f3a93be2d51"
+"digest": "5776f50c93dc40aa"
 },
 {
 "scenario": {
@@ -490,9 +554,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "ab58c9b9cc0237e3"
+"digest": "3be5f40f25fe0868"
 },
 {
 "scenario": {
@@ -505,7 +571,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "34a37609a89f211c"
 },
@@ -520,9 +588,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "0eccc0772508a4ae"
+"digest": "d3d6173f30c16ba3"
 },
 {
 "scenario": {
@@ -535,9 +605,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "f02c173d2b82a77e"
+"digest": "81f5bc652b35c02b"
 },
 {
 "scenario": {
@@ -550,7 +622,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "b02ded6dabd1d3ef"
 },
@@ -565,9 +639,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "9bed495219b57a0a"
+"digest": "a9623481b9bb184a"
 },
 {
 "scenario": {
@@ -580,7 +656,9 @@
 "starting_player": 1,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "6a9ae93c05170eda"
 },
@@ -595,9 +673,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "321a99ef8967c5b5"
+"digest": "9e55ce9c415100f9"
 },
 {
 "scenario": {
@@ -610,9 +690,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "749070b52104d235"
+"digest": "5c17963a0475acb6"
 },
 {
 "scenario": {
@@ -625,7 +707,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "f33076c0129d665e"
 },
@@ -640,9 +724,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "43eef977e544166c"
+"digest": "6bfa94639e1eb735"
 },
 {
 "scenario": {
@@ -655,7 +741,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "aedde0b459643784"
 },
@@ -670,7 +758,9 @@
 "starting_player": 1,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "38da1bc18e85a6aa"
 },
@@ -685,7 +775,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "c43bde9d7fef299a"
 },
@@ -700,9 +792,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "3bbf4abc9e955cb5"
+"digest": "4f3562a8b384614d"
 },
 {
 "scenario": {
@@ -715,9 +809,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "e54f69070585921a"
+"digest": "8e6199bf3ee37002"
 },
 {
 "scenario": {
@@ -730,7 +826,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "65865724dcc8b1fa"
 },
@@ -745,7 +843,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "930ec50244796a15"
 },
@@ -760,9 +860,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "794183842a4b5004"
+"digest": "d4a825c1155d998c"
 },
 {
 "scenario": {
@@ -775,9 +877,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "f2e20d52265de9fa"
+"digest": "7d08a66bff866c81"
 },
 {
 "scenario": {
@@ -790,7 +894,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "dd091cf2690a3132"
 },
@@ -805,9 +911,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "1d5f0e7e8d01cc03"
+"digest": "7e3dacdb6d921865"
 },
 {
 "scenario": {
@@ -820,9 +928,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "84e63f0f521992c8"
+"digest": "af8503636eefb4be"
 },
 {
 "scenario": {
@@ -835,9 +945,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "c99639b8de91cfac"
+"digest": "94122552c4e62b7d"
 },
 {
 "scenario": {
@@ -850,7 +962,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "801a5dc35fa66147"
 },
@@ -865,7 +979,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "89b929b20a549f0e"
 },
@@ -880,7 +996,9 @@
 "starting_player": 0,
 "mulligans": false,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "100d26a196ab7846"
 },
@@ -895,9 +1013,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "5c6cfafaba7af19b"
+"digest": "24ac1508743943cf"
 },
 {
 "scenario": {
@@ -910,7 +1030,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "f10441135aea4be6"
 },
@@ -925,9 +1047,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "56775dc0afb45cbe"
+"digest": "c04de71d1b39662b"
 },
 {
 "scenario": {
@@ -940,7 +1064,9 @@
 "starting_player": 0,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "1debf716aabb49f0"
 },
@@ -955,9 +1081,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "8f725212585f48fd"
+"digest": "0d79e8eb285bc2c4"
 },
 {
 "scenario": {
@@ -970,9 +1098,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "8ddb0f7140ff4fdf"
+"digest": "33908a140818ef53"
 },
 {
 "scenario": {
@@ -985,9 +1115,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "7caa77b43c9ace32"
+"digest": "e572509575f05ebc"
 },
 {
 "scenario": {
@@ -1000,7 +1132,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "5b6cf3f8b8e16387"
 },
@@ -1015,7 +1149,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "67411fd7bda5b6d1"
 },
@@ -1030,9 +1166,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "2217ef40d2771970"
+"digest": "1ca521d063ece1e1"
 },
 {
 "scenario": {
@@ -1045,7 +1183,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "4a54de5736cf2414"
 },
@@ -1060,7 +1200,9 @@
 "starting_player": 1,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "b5b69c53e5448ed5"
 },
@@ -1075,7 +1217,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "236bf1b353bcba03"
 },
@@ -1090,9 +1234,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "54069318dd33c896"
+"digest": "ec50c2a4eec07c58"
 },
 {
 "scenario": {
@@ -1105,9 +1251,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "01b4a07f913348fc"
+"digest": "eba79b44a7cbdba7"
 },
 {
 "scenario": {
@@ -1120,9 +1268,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "105152e7e377a154"
+"digest": "26a1d00fa193d16f"
 },
 {
 "scenario": {
@@ -1135,9 +1285,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "aa721b03c7c3de23"
+"digest": "f46b8920265a934d"
 },
 {
 "scenario": {
@@ -1150,7 +1302,9 @@
 "starting_player": 1,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "9d3dbe8e5e31ff38"
 },
@@ -1165,9 +1319,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "9a9a51dc738eddf3"
+"digest": "1923fccf52ceee41"
 },
 {
 "scenario": {
@@ -1180,7 +1336,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "17b9b9b64e8cebb7"
 },
@@ -1195,7 +1353,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "548d31885b609210"
 },
@@ -1210,7 +1370,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "8fc5ce86ecd2eb8c"
 },
@@ -1225,7 +1387,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "eeb00e07170a9387"
 },
@@ -1240,9 +1404,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "7bd91374212d4828"
+"digest": "5163f117d61e5bdf"
 },
 {
 "scenario": {
@@ -1255,7 +1421,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "ea29c40e341a738a"
 },
@@ -1270,7 +1438,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "b8bca5091c634fb8"
 },
@@ -1285,9 +1455,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "977cf33454519f2f"
+"digest": "17f39f82c4d8b4b8"
 },
 {
 "scenario": {
@@ -1300,9 +1472,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "dcc2933e8a7dc182"
+"digest": "bf984dd30d3633af"
 },
 {
 "scenario": {
@@ -1315,9 +1489,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "b81b34d65a81342a"
+"digest": "90a930fc4209c1e6"
 },
 {
 "scenario": {
@@ -1330,9 +1506,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "bca1ca8834182586"
+"digest": "213abdab2f3423ed"
 },
 {
 "scenario": {
@@ -1345,7 +1523,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "649e6024b525af95"
 },
@@ -1360,9 +1540,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "a6e2be487bd6a80e"
+"digest": "da68760e4eed588f"
 },
 {
 "scenario": {
@@ -1375,7 +1557,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "c1cc7ce7d9081534"
 },
@@ -1390,7 +1574,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "2370b79a1a250e12"
 },
@@ -1405,7 +1591,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "0de6297765f7cf61"
 },
@@ -1420,9 +1608,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "9442d20914d27a28"
+"digest": "6a544f539be42d13"
 },
 {
 "scenario": {
@@ -1435,9 +1625,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "ca7bc055381da0ea"
+"digest": "427b5ec6b94ecc2e"
 },
 {
 "scenario": {
@@ -1450,9 +1642,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "c6e1e9e7bb8ed96a"
+"digest": "4dc4cb65bfd12675"
 },
 {
 "scenario": {
@@ -1465,7 +1659,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "d0629f679b083964"
 },
@@ -1480,7 +1676,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "d99481fcc0063a53"
 },
@@ -1495,9 +1693,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "95bc81fbae06c679"
+"digest": "4773a79555648bfb"
 },
 {
 "scenario": {
@@ -1510,7 +1710,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "27b0170faee73fc6"
 },
@@ -1525,9 +1727,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "c89da2971a01d4bf"
+"digest": "fad31a725e020ef2"
 },
 {
 "scenario": {
@@ -1540,7 +1744,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "e641cfe9e18b455b"
 },
@@ -1555,9 +1761,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "ea73f79d324dba27"
+"digest": "581b3a240c235f2f"
 },
 {
 "scenario": {
@@ -1570,9 +1778,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "74ab2475190717d7"
+"digest": "168bcee415e28cb7"
 },
 {
 "scenario": {
@@ -1585,7 +1795,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "0cc83a47e8f991d7"
 },
@@ -1600,7 +1812,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "39fced4d76c73c96"
 },
@@ -1615,7 +1829,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "1aeee5a234c22fbb"
 },
@@ -1630,7 +1846,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "fbd814853d3dbdfb"
 },
@@ -1645,7 +1863,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "7cf62523177f2437"
 },
@@ -1660,7 +1880,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "c0337b8f31e41859"
 },
@@ -1675,7 +1897,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "c7ceb62a7d4c0e18"
 },
@@ -1690,9 +1914,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "e61b98804093c5f2"
+"digest": "b18508162b69c9bc"
 },
 {
 "scenario": {
@@ -1705,7 +1931,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "8737f23c0c14d103"
 },
@@ -1720,7 +1948,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "f99ffe0fe852961f"
 },
@@ -1735,7 +1965,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "f73b00c06a48b75e"
 },
@@ -1750,9 +1982,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "1dfa7799f6c10441"
+"digest": "58771123d438b896"
 },
 {
 "scenario": {
@@ -1765,7 +1999,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "a81612fdffc6dde2"
 },
@@ -1780,7 +2016,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "88f9be75d1a3d802"
 },
@@ -1795,9 +2033,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "0f6f44671b292d27"
+"digest": "cded0cbe8a5ee78a"
 },
 {
 "scenario": {
@@ -1810,7 +2050,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "cb21e75ab3e98a58"
 },
@@ -1825,9 +2067,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "47076c69d5b4ff17"
+"digest": "89804fd36fbc07ac"
 },
 {
 "scenario": {
@@ -1840,9 +2084,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "6f7e09a1897bf3a7"
+"digest": "79a9e765b4b77db8"
 },
 {
 "scenario": {
@@ -1855,9 +2101,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "b9d51d8619005753"
+"digest": "e28c9c0047ea7150"
 },
 {
 "scenario": {
@@ -1870,9 +2118,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "ccfdf112739d7163"
+"digest": "7b9851bbd7a63d68"
 },
 {
 "scenario": {
@@ -1885,7 +2135,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "f4c9f46e56560596"
 },
@@ -1900,7 +2152,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "ceb536ffb64b49ce"
 },
@@ -1915,7 +2169,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "8fec00dc1b796f0f"
 },
@@ -1930,7 +2186,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "3439826eb28245f2"
 },
@@ -1945,9 +2203,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "0eda2f9e4c8f25c6"
+"digest": "3ab1d8fa21eb4ef7"
 },
 {
 "scenario": {
@@ -1960,9 +2220,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "9f613c36139c342a"
+"digest": "1a5460fec03b8ece"
 },
 {
 "scenario": {
@@ -1975,7 +2237,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "74ff840d9ae8fd18"
 },
@@ -1990,9 +2254,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "ab77787c948fa319"
+"digest": "32cecd95992bc441"
 },
 {
 "scenario": {
@@ -2005,9 +2271,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "c26fb7674e051885"
+"digest": "802e01e7a02c5f26"
 },
 {
 "scenario": {
@@ -2020,7 +2288,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "af75482a25bdf8bd"
 },
@@ -2035,9 +2305,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "ad46bc0203e0a606"
+"digest": "d26ec2a5d0012672"
 },
 {
 "scenario": {
@@ -2050,9 +2322,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "7c1149932f34ea6e"
+"digest": "fa4396764ef18730"
 },
 {
 "scenario": {
@@ -2065,9 +2339,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "217cf203fab36a55"
+"digest": "49f64b204435c02a"
 },
 {
 "scenario": {
@@ -2080,7 +2356,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "2a104461db08d96e"
 },
@@ -2095,7 +2373,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "704b398593eba38c"
 },
@@ -2110,7 +2390,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "3188389e380c8c00"
 },
@@ -2125,9 +2407,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "0a13fea21cb4e41f"
+"digest": "bdbdd635fdce8bc0"
 },
 {
 "scenario": {
@@ -2140,9 +2424,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "1538ca1e8433afe3"
+"digest": "fa047836a93327b1"
 },
 {
 "scenario": {
@@ -2155,9 +2441,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "b4ed66c5248076bb"
+"digest": "a063a41e251df5ba"
 },
 {
 "scenario": {
@@ -2170,9 +2458,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "dada043886249928"
+"digest": "a587ea184fec126d"
 },
 {
 "scenario": {
@@ -2185,7 +2475,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "f98ae36ee6e98df3"
 },
@@ -2200,7 +2492,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "ec64c675780cca11"
 },
@@ -2215,7 +2509,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "01a426825fd43d34"
 },
@@ -2230,7 +2526,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "02b4c83aedaddf00"
 },
@@ -2245,7 +2543,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "84f6ec622472f32d"
 },
@@ -2260,9 +2560,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "823364b4387ac431"
+"digest": "2cedec010769c532"
 },
 {
 "scenario": {
@@ -2275,9 +2577,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "e205a4050f6fe4ec"
+"digest": "5a5bccb107f85f9b"
 },
 {
 "scenario": {
@@ -2290,9 +2594,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "59827de311a5cf02"
+"digest": "1c4d62528b69d774"
 },
 {
 "scenario": {
@@ -2305,9 +2611,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "dce4bea2ae948166"
+"digest": "26ad58f1443cddf3"
 },
 {
 "scenario": {
@@ -2320,9 +2628,11 @@
 "starting_player": 0,
 "mulligans": false,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "4bb36d4c7031fe00"
+"digest": "174840a6e21e7877"
 },
 {
 "scenario": {
@@ -2335,9 +2645,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "2525def3e33ba158"
+"digest": "1c68f0b36c513a31"
 },
 {
 "scenario": {
@@ -2350,7 +2662,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "7266db517b6d2419"
 },
@@ -2365,9 +2679,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "6e086f556efc6f42"
+"digest": "0ac43c0732a889e1"
 },
 {
 "scenario": {
@@ -2380,7 +2696,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "1f8058c0ec605045"
 },
@@ -2395,7 +2713,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "cc1e520239047f3a"
 },
@@ -2410,7 +2730,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "148bc584fb594aca"
 },
@@ -2425,9 +2747,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "def35f91478702ab"
+"digest": "82ea11d2316fd6bb"
 },
 {
 "scenario": {
@@ -2440,9 +2764,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "eecc1a4ca14d16f6"
+"digest": "976b9d7a43ef4bdd"
 },
 {
 "scenario": {
@@ -2455,9 +2781,11 @@
 "starting_player": null,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "5377cfec25e5536c"
+"digest": "8ac7caf71280d3ac"
 },
 {
 "scenario": {
@@ -2470,7 +2798,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "0f6df0d1bf9b84d9"
 },
@@ -2485,7 +2815,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "dcc1642ca8aade90"
 },
@@ -2500,7 +2832,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "a4d0f13d85e191d1"
 },
@@ -2515,7 +2849,9 @@
 "starting_player": 1,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "51b3c13cc99ca0fc"
 },
@@ -2530,9 +2866,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "3ad34d1de448af81"
+"digest": "26d88f5245462449"
 },
 {
 "scenario": {
@@ -2545,7 +2883,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "9d4a027cefaa3ffb"
 },
@@ -2560,9 +2900,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "44fbe86efd9f44b0"
+"digest": "d3d5b67d4624db74"
 },
 {
 "scenario": {
@@ -2575,9 +2917,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "6113ca4655a808d6"
+"digest": "7f6fcbad92a66fdd"
 },
 {
 "scenario": {
@@ -2590,9 +2934,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "0ecf63f1b3838ad6"
+"digest": "76d8ce0bddb2ea6d"
 },
 {
 "scenario": {
@@ -2605,9 +2951,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "46f508126f1efefa"
+"digest": "a62a7eacf9053bb5"
 },
 {
 "scenario": {
@@ -2620,7 +2968,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "40fe238de89e15e2"
 },
@@ -2635,7 +2985,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "a149a66a4c6e2edf"
 },
@@ -2650,9 +3002,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "27349caf261f6f8b"
+"digest": "e9e62fd1b257ff2e"
 },
 {
 "scenario": {
@@ -2665,9 +3019,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "dfc482c40561d333"
+"digest": "96217f4a1beaf570"
 },
 {
 "scenario": {
@@ -2680,9 +3036,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "b4c2202f9724ed44"
+"digest": "87f2501e1c4c7a68"
 },
 {
 "scenario": {
@@ -2695,7 +3053,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "0785b4a07976bf69"
 },
@@ -2710,7 +3070,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "c9a094f0d0f61d67"
 },
@@ -2725,7 +3087,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "b2ebfe982db0dca7"
 },
@@ -2740,9 +3104,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "46eafa1ad1be3fb5"
+"digest": "a5a489963639d0ac"
 },
 {
 "scenario": {
@@ -2755,9 +3121,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "dde7257b3dcb9ac5"
+"digest": "08bd7d79385f3eb1"
 },
 {
 "scenario": {
@@ -2770,7 +3138,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "752c83a9a30731bc"
 },
@@ -2785,9 +3155,11 @@
 "starting_player": 1,
 "mulligans": false,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "d6a0fb2b470034e5"
+"digest": "606458fdc2ca98f2"
 },
 {
 "scenario": {
@@ -2800,7 +3172,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "79bec07ff392f920"
 },
@@ -2815,7 +3189,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "d48c3c5192269918"
 },
@@ -2830,7 +3206,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "3cca4b466d343944"
 },
@@ -2845,7 +3223,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "aebaf6d62d6d0a7d"
 },
@@ -2860,7 +3240,9 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "06b7307606695fb2"
 },
@@ -2875,7 +3257,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "3b0f8c549d4032e8"
 },
@@ -2890,9 +3274,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "2bd9da36787fb4ef"
+"digest": "7b441315b796b9b7"
 },
 {
 "scenario": {
@@ -2905,9 +3291,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "3d1f83aad36a6761"
+"digest": "b3c32eed3392c4c9"
 },
 {
 "scenario": {
@@ -2920,9 +3308,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "b500a5404def3ef9"
+"digest": "9834a6e03284d507"
 },
 {
 "scenario": {
@@ -2935,7 +3325,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "85af1af8ad9a8996"
 },
@@ -2950,9 +3342,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "17f9de16c5afaae2"
+"digest": "3966d21131beb1a7"
 },
 {
 "scenario": {
@@ -2965,7 +3359,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "12f814661c5c6dba"
 },
@@ -2980,7 +3376,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "64a379a0a91b918c"
 },
@@ -2995,9 +3393,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "8ee0f65bc40724b1"
+"digest": "4cb37a156d4d5cbe"
 },
 {
 "scenario": {
@@ -3010,9 +3410,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "b20f0360b0e76f66"
+"digest": "46a93983b123596b"
 },
 {
 "scenario": {
@@ -3025,9 +3427,11 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "79952dac8d9de8b6"
+"digest": "c0f875a32bef2ded"
 },
 {
 "scenario": {
@@ -3040,9 +3444,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "8278ec2fa34615cb"
+"digest": "3aa9cf55b60ec8cc"
 },
 {
 "scenario": {
@@ -3055,9 +3461,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "4d75241d4543b9fb"
+"digest": "748faa47197c5930"
 },
 {
 "scenario": {
@@ -3070,7 +3478,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "3e1baf252825bfea"
 },
@@ -3085,7 +3495,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "445eaef5b6f63fa4"
 },
@@ -3100,9 +3512,11 @@
 "starting_player": null,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "885cd3ee411f8e6a"
+"digest": "e2b6dee2df152db2"
 },
 {
 "scenario": {
@@ -3115,9 +3529,11 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
-"digest": "0c6a59a657c6fefc"
+"digest": "d5f3c37d09d3f5ed"
 },
 {
 "scenario": {
@@ -3130,7 +3546,9 @@
 "starting_player": 1,
 "mulligans": true,
 "max_turns": 100,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "2fbdfa4d21cb6956"
 },
@@ -3145,7 +3563,9 @@
 "starting_player": 0,
 "mulligans": true,
 "max_turns": 12,
-"extra": []
+"extra": [],
+"auto_mana": false,
+"auto_pass": false
 },
 "digest": "2d8f152df2e90f07"
 }
