@@ -209,13 +209,12 @@ def test_feature_set_1_reproduces_the_features_before_set_2():
     import os
 
     from mtg_ml.encode import entity_features
-    from mtg_ml.match import match_decks
     from mtg_ml.rl.features import featurize
 
     with open(os.path.join(os.path.dirname(__file__), "data", "features_v1_digests.json")) as f:
         want = json.load(f)
     for seed in range(0, 24, 3):  # a third of the recorded games keeps it quick
-        g = new_game(match_decks(1 + seed % 2), seed=seed, max_turns=30)
+        g = new_game(pinned_game_args(1 + seed % 2, "jund_blue")["decks"], seed=seed, max_turns=30)
         r = random.Random(seed)
         h = hashlib.sha256()
         while not g.over:
@@ -232,11 +231,10 @@ def test_feature_set_1_has_no_strings_added_after_it():
     view text keeps the mark."""
     from mtg_ml.encode import entity_features
     from mtg_ml.engine.view import observe
-    from mtg_ml.match import game_args
 
     seen = set()
     for seed in (0, 3):  # games where Red plots a card
-        g = new_game(seed=seed, max_turns=30, **game_args(1, "jund_madness"))
+        g = new_game(seed=seed, max_turns=30, **pinned_game_args(1, "jund_madness"))
         r = random.Random(seed)
         while not g.over:
             for v in (0, 1):
@@ -259,6 +257,18 @@ def test_feature_set_2_adds_to_set_1():
     assert entity_features(g, 0, features=1)[1] == entity_features(g, 0, features=2)[1]
 
 
+def pinned_game_args(game_no: int, matchup: str) -> dict:
+    """`match.game_args(game_no, matchup)` as it was when the feature fixtures
+    and digests were recorded (`tests/data/feature_decks.json`), so deck,
+    sideboard and sideboard-plan changes never alter those games."""
+    import json
+    import os
+
+    with open(os.path.join(os.path.dirname(__file__), "data", "feature_decks.json")) as f:
+        x = json.load(f)[f"{matchup}:{game_no}"]
+    return {"decks": tuple(x["decks"]), "match_game": game_no, "deck_names": tuple(x["deck_names"])}
+
+
 def _fixtures() -> dict:
     """{(seed, decision): game at that decision} for tests/data/feature_fixtures.json:
     decisions from the r4-control game review (docs/features.md, set 4),
@@ -266,12 +276,10 @@ def _fixtures() -> dict:
     import json
     import os
 
-    from mtg_ml.match import game_args
-
     with open(os.path.join(os.path.dirname(__file__), "data", "feature_fixtures.json")) as f:
         out = {}
         for x in json.load(f):
-            g = new_game(**game_args(x["match_game"], x["matchup"]), seed=x["seed"], starting_player=x["starting_player"])
+            g = new_game(**pinned_game_args(x["match_game"], x["matchup"]), seed=x["seed"], starting_player=x["starting_player"])
             for a in x["actions"]:
                 g.step(a)
             assert [o.label for o in g.legal_options()] == x["options"], (x["seed"], x["decision"])
@@ -380,10 +388,9 @@ def features_digest(matchup: str, game_no: int, seed: int, features: int) -> str
     import json
 
     from mtg_ml.encode import entity_features, option_preview
-    from mtg_ml.match import game_args
     from mtg_ml.rl.features import featurize
 
-    g = new_game(seed=seed, max_turns=30, **game_args(game_no, matchup))
+    g = new_game(seed=seed, max_turns=30, **pinned_game_args(game_no, matchup))
     r = random.Random(seed)
     h = hashlib.sha256()
     while not g.over:
