@@ -613,6 +613,8 @@ def _pay_preview(game, player: int, v) -> list[str]:
         r2.apply(v[1])
         pool = dict(game.players[player].pool)
         pool[v[1]] -= 1
+    elif v[0] != "source":  # a mana filter (Tron): no preview, as in native/src/features.rs
+        return []
     else:
         card, color = v[1], v[2]
         r2.apply(color)

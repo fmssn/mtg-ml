@@ -53,11 +53,11 @@ equipment rules; both are back, and equipment is in both engines.
 | Tron vs Jund | 3 Breath Weapon, 2 Call Damage Control, 1 Whispersilk Cloak | 2 Candy Trail, 2 Unfathomable Truths, 1 Bonder's Ornament, 1 Boulderbranch Golem | Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; the Cloak keeps a seven-drop safe from Cast Down |
 | Jund vs Tron | 2 Duress | 1 Makeshift Munitions, 1 Lembas | Duress takes Stirrings, Map, Crop Rotation, Truths |
 | Tron vs Blue | 2 Breath Weapon, 2 Scour from Existence, 1 Whispersilk Cloak | 2 Candy Trail, 2 Boulderbranch Golem, 1 Bramble Wurm | instant-speed answer to Delver, Scour for Terror and Serpent, the Cloak against Deem Inferior; life gain matters little |
-| Blue vs Tron | 2 Dispel | 2 Sleep of the Dead | Dispel counters Crop Rotation and Truths |
+| Blue vs Tron | 4 Annul, 1 Envelop | 2 Sleep of the Dead, 2 Force Spike, 1 Plunder the Trollshaws | Annul for Map, Candy Trail, Barrels and the artifact threats, Envelop for Crop Rotation, Stirrings, Truths (Q3 sideboard has no Dispel) |
 | Tron vs Red | 3 Breath Weapon, 1 Kaervek's Torch, 1 Pulse of Murasa | 2 Unfathomable Truths, 2 Maelstrom Colossus, 1 Bonder's Ornament | sweep the small creatures, kill one at instant speed, gain life; the slowest cards out |
-| Red vs Tron | 2 Gorilla Shaman | 2 Voldaren Epicure | Shaman eats Maps, Barrels, Boulders, Candy Trails, Ornaments |
+| Red vs Tron | 2 Cast into the Fire | 2 Voldaren Epicure | exiles a Map, Candy Trail or Barrels (Q3 sideboard has no Gorilla Shaman) |
 
-Rows for Affinity and Elves, to add to the table when those decks land (the
+Rows for Affinity (in sideboard_plans.toml since the r6 integration, with Affinity's own row vs Tron) and Elves (to add when Elves lands; the
 loader requires both decks to exist):
 
 ```toml
