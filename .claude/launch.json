@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "mtg_ml.replay", "serve"],
       "port": 8765
+    },
+    {
+      "name": "live-play",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "mtg_ml.replay", "serve", "--models", "runs/", "--port", "8766"],
+      "port": 8766
     }
   ]
 }
