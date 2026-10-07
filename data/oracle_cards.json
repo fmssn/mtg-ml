@@ -792,5 +792,164 @@
    "Flashback"
   ],
   "cmc": 2.0
+ },
+ {
+  "name": "Myr Enforcer",
+  "mana_cost": "{7}",
+  "type_line": "Artifact Creature \u2014 Myr",
+  "oracle_text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)",
+  "power": "4",
+  "toughness": "4",
+  "keywords": [
+   "Affinity"
+  ],
+  "cmc": 7.0
+ },
+ {
+  "name": "Thoughtcast",
+  "mana_cost": "{4}{U}",
+  "type_line": "Sorcery",
+  "oracle_text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)\nDraw two cards.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Affinity"
+  ],
+  "cmc": 5.0
+ },
+ {
+  "name": "Galvanic Blast",
+  "mana_cost": "{R}",
+  "type_line": "Instant",
+  "oracle_text": "Galvanic Blast deals 2 damage to any target.\nMetalcraft \u2014 Galvanic Blast deals 4 damage instead if you control three or more artifacts.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Metalcraft"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Reckoner's Bargain",
+  "mana_cost": "{1}{B}",
+  "type_line": "Instant",
+  "oracle_text": "As an additional cost to cast this spell, sacrifice an artifact or creature.\nYou gain life equal to the sacrificed permanent's mana value. Draw two cards.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Mistvault Bridge",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "This land enters tapped.\nIndestructible\n{T}: Add {U} or {B}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Indestructible"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Utrom Monitor",
+  "mana_cost": "{4}{U}",
+  "type_line": "Artifact Creature \u2014 Utrom Scientist",
+  "oracle_text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)\nFlying (This creature can't be blocked except by creatures with flying or reach.)",
+  "power": "3",
+  "toughness": "3",
+  "keywords": [
+   "Flying",
+   "Affinity"
+  ],
+  "cmc": 5.0
+ },
+ {
+  "name": "Seat of the Synod",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "{T}: Add {U}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Silverbluff Bridge",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "This land enters tapped.\nIndestructible\n{T}: Add {U} or {R}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Indestructible"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Great Furnace",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "{T}: Add {R}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Blood Fountain",
+  "mana_cost": "{B}",
+  "type_line": "Artifact",
+  "oracle_text": "When this artifact enters, create a Blood token. (It's an artifact with \"{1}, {T}, Discard a card, Sacrifice this token: Draw a card.\")\n{3}{B}, {T}, Sacrifice this artifact: Return up to two target creature cards from your graveyard to your hand.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Sewer-veillance Cam",
+  "mana_cost": "{U}",
+  "type_line": "Artifact",
+  "oracle_text": "Flash\nWhen this artifact enters or leaves the battlefield, you may tap or untap target creature.\n{3}{U}, Sacrifice this artifact: Draw two cards.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flash"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Kenku Artificer",
+  "mana_cost": "{2}{U}",
+  "type_line": "Creature \u2014 Bird Artificer",
+  "oracle_text": "Homunculus Servant \u2014 When this creature enters, put three +1/+1 counters on up to one target noncreature artifact. That artifact becomes a 0/0 Homunculus artifact creature with flying.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [
+   "Homunculus Servant"
+  ],
+  "cmc": 3.0
+ },
+ {
+  "name": "Extract a Confession",
+  "mana_cost": "{1}{B}",
+  "type_line": "Sorcery",
+  "oracle_text": "As an additional cost to cast this spell, you may collect evidence 6. (Exile cards with total mana value 6 or greater from your graveyard.)\nEach opponent sacrifices a creature of their choice. If evidence was collected, instead each opponent sacrifices a creature with the greatest power among creatures they control.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Collect evidence"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Unexpected Fangs",
+  "mana_cost": "{1}{B}",
+  "type_line": "Instant",
+  "oracle_text": "Put a +1/+1 counter and a lifelink counter on target creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
  }
 ]

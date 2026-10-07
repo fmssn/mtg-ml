@@ -46,7 +46,7 @@ def _card(c) -> tuple:
     return (
         c.uid, c.oid, c.name, c.defn.name, c.owner, c.controller, c.zone, c.is_token, c.transformed, c.tapped, c.damage,
         c.deathtouch_damage, c.counters, c.sick, c.attached_to, c.skip_untap,
-        [(sorted(t.keywords), t.power, t.toughness) for t in c.temp], sorted(c.known_to),
+        [(sorted(t.keywords), t.power, t.toughness) for t in c.temp], sorted(c.known_to), c.animated, sorted(c.granted),
     )  # fmt: skip
 
 

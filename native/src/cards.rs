@@ -166,6 +166,8 @@ pub enum Event {
     YouCast,
     /// Its owner draws their third card in a turn (from the graveyard).
     ThirdDraw,
+    /// It leaves the battlefield (to any zone).
+    LeavesBattlefield,
     /// Engine-internal: the madness trigger.
     Discarded,
 }
@@ -218,11 +220,12 @@ pub enum Op {
     TapTarget { skip_untap: i32 },
     GrantTarget { keywords: u32 },
     CreateToken { token: DefId, n: i32 },
-    /// per_storm: n for each spell cast before this one this turn (Weather the Storm's storm trigger).
-    GainLife { n: i32, per_storm: bool },
+    /// per_storm: n for each spell cast before this one this turn (Weather the Storm's storm trigger);
+    /// sacrificed_mv: instead of n, the mana value of the permanent sacrificed to cast it.
+    GainLife { n: i32, per_storm: bool, sacrificed_mv: bool },
     LoseLife { who: Who, n: i32 },
     CounterOnSource,
-    DamageTarget { n: i32, index: usize, n_landfall: Option<i32> },
+    DamageTarget { n: i32, index: usize, n_landfall: Option<i32>, n_metalcraft: Option<i32> },
     /// To the controller of the targeted permanent.
     DamageTargetController { n: i32 },
     DamageEachOpponent { n: i32, if_discarded_nonland: bool },
@@ -240,6 +243,14 @@ pub enum Op {
     Scry { n: i32 },
     ExploreTarget,
     ShuffleIntoLibrary,
+    /// n +1/+1 counters and keyword counters on the target.
+    CountersOnTarget { n: i32, keywords: u32 },
+    /// The target becomes a creature with this base P/T and gains keywords.
+    AnimateTarget { power: i32, toughness: i32, keywords: u32 },
+    TapOrUntapTarget,
+    /// Up to n cards of a type from the controller's graveyard to hand; type_name for the prompt.
+    ReturnFromGraveyard { types: u16, type_name: String, n: i32 },
+    OpponentSacrifices { greatest_power_if_evidence: bool },
     Custom(Custom),
     /// Engine-internal: the ward trigger.
     Ward,
@@ -314,6 +325,8 @@ pub struct TriggerDef {
     pub bargained: bool,
     /// Chosen as the trigger is put on the stack.
     pub targets: Vec<TK>,
+    /// "Up to one target": the targets may be left empty.
+    pub up_to: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -356,6 +369,8 @@ pub struct CardDef {
     pub phyrexian_cost: Option<ManaCost>,
     pub phyrexian_life: i32,
     pub bargain: bool,
+    /// Cast mode "evidence": exile cards with this total mana value from the graveyard.
+    pub collect_evidence: i32,
     pub abilities: Vec<AbilityDef>,
     pub triggers: Vec<TriggerDef>,
     pub enters_tapped: bool,
@@ -398,7 +413,7 @@ pub struct CardDb {
 }
 
 /// Keywords the engine itself gives meaning to (or grants).
-const ENGINE_KEYWORDS: [&str; 6] = ["deathtouch", "flying", "indestructible", "lifelink", "reach", "trample"];
+const ENGINE_KEYWORDS: [&str; 7] = ["deathtouch", "flash", "flying", "indestructible", "lifelink", "reach", "trample"];
 
 impl CardDb {
     pub fn def(&self, id: DefId) -> &CardDef {
@@ -467,8 +482,8 @@ impl CardDb {
             cards: HashMap::new(),
             tokens: HashMap::new(),
             keyword_names: kws,
-            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![] },
-            madness: TriggerDef { name: "madness".into(), event: Event::Discarded, effect: vec![Op::Madness], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![] },
+            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![], up_to: false },
+            madness: TriggerDef { name: "madness".into(), event: Event::Discarded, effect: vec![Op::Madness], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![], up_to: false },
             free: ManaCost::default(),
             spec_text: text.to_string(),
         };
@@ -571,13 +586,13 @@ fn check_keys(t: &Table, allowed: &[&str], what: &str) -> Result<(), String> {
 pub const SHAPE_CARD_FIELDS: &[&str] = &[
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow", "plot",
     "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect", "modes",
-    "overload_effect", "abilities", "triggers", "bargain",
+    "overload_effect", "abilities", "triggers", "bargain", "collect_evidence",
 ];
 pub const NON_SHAPE_CARD_FIELDS: &[&str] = &["name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"];
 pub const SHAPE_ABILITY_FIELDS: &[&str] =
     &["effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone", "sorcery_speed", "mana", "targets"];
 pub const NON_SHAPE_ABILITY_FIELDS: &[&str] = &["name"];
-pub const SHAPE_TRIGGER_FIELDS: &[&str] = &["event", "effect", "condition", "targets"];
+pub const SHAPE_TRIGGER_FIELDS: &[&str] = &["event", "effect", "condition", "targets", "up_to"];
 pub const NON_SHAPE_TRIGGER_FIELDS: &[&str] = &["name"];
 
 /// cards.py `_check_fields`: an unclassified field names the lists to extend.
@@ -626,9 +641,13 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "tap_target" => &["op", "skip_untap"],
             "grant_target" => &["op", "keywords"],
             "create_token" => &["op", "token", "n"],
-            "gain_life" => &["op", "n", "per_storm"],
+            "gain_life" => &["op", "n", "per_storm", "sacrificed_mv"],
+            "counters_on_target" => &["op", "n", "keywords"],
+            "animate_target" => &["op", "power", "toughness", "keywords"],
+            "return_from_graveyard" => &["op", "type", "n"],
+            "opponent_sacrifices" => &["op", "greatest_power_if_evidence"],
             "scry" | "discard" | "exile_from_graveyards" | "damage_target_controller" => &["op", "n"],
-            "damage_target" => &["op", "n", "index", "n_landfall"],
+            "damage_target" => &["op", "n", "index", "n_landfall", "n_metalcraft"],
             "damage_each_opponent" => &["op", "n", "if_discarded_nonland"],
             "counter_target" => &["op", "if_color"],
             "destroy_target" => &["op", "if_color", "mv_is_x"],
@@ -662,7 +681,10 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 let name = req_str(t, "token")?;
                 Op::CreateToken { token: *tokens.get(name).ok_or_else(|| format!("unknown token {name:?}"))?, n: get_int(t, "n")?.unwrap_or(1) }
             }
-            "gain_life" => Op::GainLife { n: n()?, per_storm: get_bool(t, "per_storm")? },
+            "gain_life" => {
+                let sacrificed_mv = get_bool(t, "sacrificed_mv")?;
+                Op::GainLife { n: if sacrificed_mv { get_int(t, "n")?.unwrap_or(0) } else { n()? }, per_storm: get_bool(t, "per_storm")?, sacrificed_mv }
+            }
             "lose_life" => Op::LoseLife {
                 who: match req_str(t, "who")? {
                     "you" => Who::You,
@@ -678,6 +700,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 n: n()?,
                 index: get_int(t, "index")?.unwrap_or(0).max(0) as usize,
                 n_landfall: get_int(t, "n_landfall")?,
+                n_metalcraft: get_int(t, "n_metalcraft")?,
             },
             "damage_target_controller" => Op::DamageTargetController { n: n()? },
             "damage_each_opponent" => Op::DamageEachOpponent { n: n()?, if_discarded_nonland: get_bool(t, "if_discarded_nonland")? },
@@ -731,6 +754,18 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             }
             "explore_target" => Op::ExploreTarget,
             "shuffle_into_library" => Op::ShuffleIntoLibrary,
+            "counters_on_target" => Op::CountersOnTarget { n: get_int(t, "n")?.unwrap_or(0), keywords: get_str_list(t, "keywords")?.iter().fold(0, |m, k| m | db.kw(k)) },
+            "animate_target" => Op::AnimateTarget {
+                power: get_int(t, "power")?.ok_or("animate_target needs power")?,
+                toughness: get_int(t, "toughness")?.ok_or("animate_target needs toughness")?,
+                keywords: get_str_list(t, "keywords")?.iter().fold(0, |m, k| m | db.kw(k)),
+            },
+            "tap_or_untap_target" => Op::TapOrUntapTarget,
+            "return_from_graveyard" => {
+                let ty = req_str(t, "type")?;
+                Op::ReturnFromGraveyard { types: type_bit(ty)?, type_name: ty.to_lowercase(), n: n()? }
+            }
+            "opponent_sacrifices" => Op::OpponentSacrifices { greatest_power_if_evidence: get_bool(t, "greatest_power_if_evidence")? },
             "custom" => Op::Custom(match req_str(t, "fn")? {
                 "delver_reveal" => Custom::DelverReveal,
                 "brainstorm" => Custom::Brainstorm,
@@ -852,6 +887,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
                     "your_upkeep" => Event::YourUpkeep,
                     "you_cast" => Event::YouCast,
                     "third_draw" => Event::ThirdDraw,
+                    "leaves_battlefield" => Event::LeavesBattlefield,
                     e => return Err(format!("unknown trigger event {e:?}")),
                 },
                 effect: parse_ops(tr.get("effect"), db, tokens)?.ok_or("trigger without effect")?,
@@ -859,6 +895,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
                 cast_filter,
                 bargained,
                 targets: targets(tr)?,
+                up_to: get_bool(tr, "up_to")?,
             });
         }
     }
@@ -917,6 +954,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         additional_discard: get_bool(t, "additional_discard")?,
         alternative_sac: land_sac(t, "alternative_cost")?,
         flashback_sac: land_sac(t, "flashback_cost")?,
+        collect_evidence: get_int(t, "collect_evidence")?.unwrap_or(0),
         abilities,
         triggers,
         enters_tapped: get_bool(t, "enters_tapped")?,
@@ -944,6 +982,8 @@ fn tables(v: Option<&Value>) -> Vec<&Table> {
 
 /// cards.py `SHAPE_N_STEPS`.
 const SHAPE_N_STEPS: [i64; 4] = [1, 2, 3, 4];
+/// cards.py `SHAPE_OP_FLAGS`.
+const SHAPE_OP_FLAGS: [&str; 3] = ["n_metalcraft", "sacrificed_mv", "greatest_power_if_evidence"];
 
 /// cards.py `_op_tokens`: `{prefix}{op}` per op in order, its amount `n` as
 /// a thermometer, the same under `e:op:`, an `optional_payment`'s ops after it.
@@ -955,6 +995,7 @@ fn op_names(v: Option<&Value>, out: &mut Vec<String>, prefix: &str) {
                 if let Some(Value::Integer(n)) = op.get("n") {
                     out.extend(SHAPE_N_STEPS.iter().filter(|&&k| *n >= k).map(|k| format!("{p}{name}:n>={k}")));
                 }
+                out.extend(SHAPE_OP_FLAGS.iter().filter(|&&k| truthy(op, k)).map(|k| format!("{p}{name}:{k}")));
             }
             if name == "optional_payment" {
                 op_names(op.get("then"), out, prefix);
@@ -1000,6 +1041,9 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
     }
     if truthy(t, "bargain") {
         v.push("e:cost:bargain".into());
+    }
+    if truthy(t, "collect_evidence") {
+        v.push("e:cost:collect_evidence".into());
     }
     for k in SHAPE_COST_KEYS {
         if t.contains_key(k) {
@@ -1086,6 +1130,9 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
             }
         }
         targets(tr, "e:trig:target:", &mut v)?;
+        if truthy(tr, "up_to") {
+            v.push("e:trig:up_to".into());
+        }
         op_names(tr.get("effect"), &mut v, "e:trig:op:");
     }
     let mut seen = std::collections::HashSet::new();
@@ -1106,7 +1153,7 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 71);
+        assert_eq!(db.cards.len(), 85);
         let gut = db.def(db.cards["Gut Shot"]);
         assert_eq!((gut.colors, gut.phyrexian_life, gut.cost.mana_value()), (color_bit(b'R'), 2, 1));
         assert!(gut.phyrexian_cost.as_ref().unwrap().is_zero());

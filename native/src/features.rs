@@ -739,7 +739,7 @@ fn target_preview(st: &State, player: u8, r: Ref, out: &mut impl FnMut(std::fmt:
     let landfall = st.players[item.controller as usize].landfall_turn == st.turn;
     for op in item.effect.unwrap_or(&[]) {
         // Only the op for the target being chosen.
-        if let Op::DamageTarget { n, index, n_landfall } = op {
+        if let Op::DamageTarget { n, index, n_landfall, .. } = op {
             if *index != item.targets.len() {
                 continue;
             }

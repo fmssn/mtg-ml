@@ -109,14 +109,18 @@ class AbilityDef:
 class TriggerDef:
     """event: etb | to_graveyard_from_battlefield | cast | you_sacrifice_another
     | your_upkeep | you_cast (another spell you cast, from the battlefield)
-    | third_draw (you draw your third card in a turn, from the graveyard).
-    condition(game, source, event_data) -> bool."""
+    | third_draw (you draw your third card in a turn, from the graveyard)
+    | leaves_battlefield (to any zone).
+    condition(game, source, event_data) -> bool. targets: chosen as the
+    trigger is put on the stack (removed if there is none, CR 603.3d);
+    up_to: the targets may be left empty ("up to one target")."""
 
     name: str
     event: str
     effect: Effect
     condition: Callable[..., bool] | None = None
     targets: tuple[TargetSpec, ...] = ()  # chosen as the trigger is put on the stack
+    up_to: bool = False  # "up to one target": no target is a legal choice
 
 
 @dataclass
@@ -154,6 +158,7 @@ class CardDef:
     phyrexian_cost: ManaCost | None = None
     phyrexian_life: int = 0
     bargain: bool = False  # cast mode "bargain": also sacrifice an artifact, enchantment or token
+    collect_evidence: int = 0  # cast mode "evidence": exile cards with total mana value >= N from your graveyard
     # permanents
     abilities: tuple[AbilityDef, ...] = ()
     triggers: tuple[TriggerDef, ...] = ()
@@ -218,6 +223,11 @@ class Card:
     plotted_turn: int = 0  # turn this card was plotted on (exile), 0 = not plotted
     temp: list[TempEffect] = field(default_factory=list)
     known_to: set[int] = field(default_factory=set)
+    # Until it leaves the battlefield: base (power, toughness) of a permanent
+    # that became a creature (Kenku Artificer), and keywords it gained
+    # (Kenku's flying, a lifelink counter).
+    animated: tuple[int, int] | None = None
+    granted: frozenset[str] = frozenset()
 
     @property
     def face(self) -> CardDef:
@@ -247,6 +257,8 @@ class Card:
         self.skip_untap = 0
         self.plotted_turn = 0
         self.temp = []
+        self.animated = None
+        self.granted = frozenset()
 
     def __repr__(self) -> str:
         return f"{self.name}#{self.oid}"

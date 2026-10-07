@@ -5,11 +5,12 @@
     agents = [make_bot(0), make_bot(1, "red_madness")]
 """
 
+from .affinity import AffinityBot
 from .blue import BlueBot
 from .jund import JundBot
 from .red import RedBot
 
-BOTS = {"jund_wildfire": JundBot, "mono_blue_terror": BlueBot, "red_madness": RedBot}
+BOTS = {"jund_wildfire": JundBot, "mono_blue_terror": BlueBot, "red_madness": RedBot, "grixis_affinity": AffinityBot}
 
 
 def make_bot(seat: int, deck: str | None = None):
@@ -20,4 +21,4 @@ def make_bot(seat: int, deck: str | None = None):
     return BOTS[deck](seat)
 
 
-__all__ = ["BOTS", "BlueBot", "JundBot", "RedBot", "make_bot"]
+__all__ = ["AffinityBot", "BOTS", "BlueBot", "JundBot", "RedBot", "make_bot"]

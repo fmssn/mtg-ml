@@ -97,6 +97,11 @@ pub struct Card {
     pub temp: Vec<TempEffect>,
     /// Bit p set: player p knows this card.
     pub known_to: u8,
+    /// Until it leaves the battlefield: base (power, toughness) of a
+    /// permanent that became a creature (Kenku Artificer).
+    pub animated: Option<(i32, i32)>,
+    /// Keywords gained until it leaves the battlefield (keyword counters, Kenku's flying).
+    pub granted: u32,
 }
 
 impl Card {
@@ -126,6 +131,8 @@ impl Card {
         self.skip_untap = 0;
         self.plotted_turn = 0;
         self.temp.clear();
+        self.animated = None;
+        self.granted = 0;
     }
     pub fn repr(&self) -> String {
         format!("{}#{}", self.name(), self.oid)
@@ -185,10 +192,12 @@ pub enum Method {
     Alternative,
     Phyrexian,
     Bargain,
+    /// Collect evidence as an optional additional cost (Extract a Confession).
+    Evidence,
 }
 
 /// Cast modes from the hand, in the order they are offered (game.HAND_MODES).
-pub const HAND_MODES: [Method; 6] = [Method::Normal, Method::Bestow, Method::Overload, Method::Alternative, Method::Phyrexian, Method::Bargain];
+pub const HAND_MODES: [Method; 7] = [Method::Normal, Method::Bestow, Method::Overload, Method::Alternative, Method::Phyrexian, Method::Bargain, Method::Evidence];
 
 impl Method {
     pub fn name(self) -> &'static str {
@@ -203,6 +212,7 @@ impl Method {
             Method::Alternative => "alternative",
             Method::Phyrexian => "phyrexian",
             Method::Bargain => "bargain",
+            Method::Evidence => "evidence",
         }
     }
 }
@@ -222,6 +232,8 @@ pub struct Data {
     pub discarded_land: Option<bool>,
     /// Cast triggers: spells cast before this one this turn (storm).
     pub storm: Option<i32>,
+    /// Spells with an additional sacrifice: the sacrificed permanent's mana value.
+    pub sacrificed_mv: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -430,7 +442,23 @@ pub fn rules<T>(msg: impl Into<String>) -> R<T> {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum EquivKey {
     Unique(u32),
-    State { face: DefId, controller: u8, is_token: bool, tapped: bool, damage: i32, deathtouch_damage: bool, counters: i32, sick: bool, skip_untap: i32, transformed: bool, temp: Vec<TempEffect>, attacking: bool, blocked: bool },
+    State {
+        face: DefId,
+        controller: u8,
+        is_token: bool,
+        tapped: bool,
+        damage: i32,
+        deathtouch_damage: bool,
+        counters: i32,
+        sick: bool,
+        skip_untap: i32,
+        transformed: bool,
+        temp: Vec<TempEffect>,
+        attacking: bool,
+        blocked: bool,
+        animated: Option<(i32, i32)>,
+        granted: u32,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -635,6 +663,8 @@ impl State {
             plotted_turn: 0,
             temp: vec![],
             known_to,
+            animated: None,
+            granted: 0,
         });
         (self.cards.len() - 1) as CIdx
     }
@@ -710,6 +740,9 @@ impl State {
 
     pub fn types(&self, c: &Card) -> u16 {
         let mut t = c.face().types;
+        if c.animated.is_some() {
+            t |= T_CREATURE;
+        }
         if self.is_bestowed(c) {
             t &= !T_CREATURE;
         }
@@ -717,7 +750,7 @@ impl State {
     }
 
     pub fn is_creature(&self, c: &Card) -> bool {
-        c.face().types & T_CREATURE != 0 && !self.is_bestowed(c)
+        (c.face().types & T_CREATURE != 0 || c.animated.is_some()) && !self.is_bestowed(c)
     }
     pub fn is_artifact(&self, c: &Card) -> bool {
         c.face().types & T_ARTIFACT != 0
@@ -731,15 +764,15 @@ impl State {
     }
 
     pub fn power(&self, c: &Card) -> i32 {
-        c.face().power.unwrap_or(0) + c.counters + c.temp.iter().map(|t| t.power).sum::<i32>() + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
+        c.animated.map_or(c.face().power.unwrap_or(0), |a| a.0) + c.counters + c.temp.iter().map(|t| t.power).sum::<i32>() + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
     }
 
     pub fn toughness(&self, c: &Card) -> i32 {
-        c.face().toughness.unwrap_or(0) + c.counters + c.temp.iter().map(|t| t.toughness).sum::<i32>() + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
+        c.animated.map_or(c.face().toughness.unwrap_or(0), |a| a.1) + c.counters + c.temp.iter().map(|t| t.toughness).sum::<i32>() + self.auras_on(c.oid).map(|a| a.counters).sum::<i32>()
     }
 
     pub fn keywords(&self, c: &Card) -> u32 {
-        let mut k = c.face().keywords;
+        let mut k = c.face().keywords | c.granted;
         for t in &c.temp {
             k |= t.keywords;
         }
@@ -794,6 +827,8 @@ impl State {
             temp: c.temp.clone(),
             attacking: self.attackers.contains(&c.oid),
             blocked: self.blocked.contains(&c.oid),
+            animated: c.animated,
+            granted: c.granted,
         }
     }
 
@@ -941,6 +976,11 @@ impl State {
                         data: Data { card: Some(new), oid: Some(new_oid), ..Default::default() },
                     });
                 }
+            }
+        }
+        for t in &lki.face().triggers {
+            if t.event == Event::LeavesBattlefield {
+                self.pending.push(PendingTrigger { controller: lki.controller, source: Src::Snap(Box::new(lki.clone())), tdef: t, data: Data::default() });
             }
         }
     }
@@ -1483,6 +1523,7 @@ impl State {
             Method::Alternative => d.alternative_sac.map(|_| &db().free),
             Method::Phyrexian => d.phyrexian_cost.as_ref(),
             Method::Bargain => d.bargain.then_some(&d.cost),
+            Method::Evidence => (d.collect_evidence != 0).then_some(&d.cost),
         }
     }
 
@@ -1549,7 +1590,7 @@ impl State {
             return false;
         }
         // Madness casts on resolution of its trigger, whatever the card type (702.35).
-        if mode != Method::Madness && !d.is_type(T_INSTANT) && !self.sorcery_timing(p) {
+        if mode != Method::Madness && !d.is_type(T_INSTANT) && d.keywords & db().kw("flash") == 0 && !self.sorcery_timing(p) {
             return false;
         }
         for spec in self.mode_targets(ci, mode, choice) {
@@ -1558,6 +1599,9 @@ impl State {
             }
         }
         if mode == Method::Escape && (self.players[p as usize].graveyard.len() as i32) - 1 < d.escape_exile {
+            return false;
+        }
+        if mode == Method::Evidence && self.players[p as usize].graveyard.iter().map(|&g| self.c(g).face().mana_value()).sum::<i32>() < d.collect_evidence {
             return false;
         }
         if d.additional_discard && (self.players[p as usize].hand.len() as i32 - (c.zone == Zone::Hand) as i32) < 1 {

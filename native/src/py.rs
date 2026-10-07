@@ -68,6 +68,8 @@ fn card_tuple(py: Python<'_>, c: &Card) -> PyObject {
         c.skip_untap.into_py(py),
         temp.into_py(py),
         known_list(c.known_to).into_py(py),
+        c.animated.into_py(py),
+        d.keyword_list(c.granted).into_py(py),
     ];
     PyTuple::new_bound(py, fields).into_py(py)
 }
@@ -100,6 +102,9 @@ fn data_list(py: Python<'_>, st: &State, d: &Data) -> PyObject {
     }
     if let Some(n) = d.storm {
         v.push(("storm", n.into_py(py)));
+    }
+    if let Some(n) = d.sacrificed_mv {
+        v.push(("sacrificed_mv", n.into_py(py)));
     }
     v.sort_by(|a, b| a.0.cmp(b.0));
     v.into_py(py)
@@ -324,7 +329,7 @@ impl PyGame {
 
     /// (uid, oid, name, defn name, owner, controller, zone, is_token,
     /// transformed, tapped, damage, deathtouch_damage, counters, sick,
-    /// attached_to, skip_untap, temp, known_to)
+    /// attached_to, skip_untap, temp, known_to, animated, granted)
     fn card_info(&self, py: Python<'_>, c: CIdx) -> PyResult<PyObject> {
         Ok(card_tuple(py, self.card(c)?))
     }
@@ -832,6 +837,8 @@ card_get! {
     attached_to: Option<u32> => |c: &Card| c.attached_to;
     skip_untap: i32 => |c: &Card| c.skip_untap;
     plotted_turn: i32 => |c: &Card| c.plotted_turn;
+    animated: Option<(i32, i32)> => |c: &Card| c.animated;
+    _granted: Vec<&'static str> => |c: &Card| db().keyword_list(c.granted);
     _known: Vec<u8> => |c: &Card| known_list(c.known_to);
     _temp: Vec<(Vec<&'static str>, i32, i32)> => |c: &Card| c.temp.iter().map(|t| (db().keyword_list(t.keywords), t.power, t.toughness)).collect::<Vec<_>>();
     @set set_tapped = "tapped", set_transformed = "transformed", set_sick = "sick", set_deathtouch_damage = "deathtouch_damage",
