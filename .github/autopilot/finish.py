@@ -2,7 +2,7 @@
 
 Usage: finish.py <fix|escalate> <pr> <head-branch> <round>
 Reads $RUNNER_TEMP/claude.json (claude --output-format json) and $RUNNER_TEMP/conflicts.txt.
-Writes `outcome` (automerge | escalate | human | error) and `reason` to $GITHUB_OUTPUT.
+Writes `outcome` (automerge | escalate | human | retry | error) and `reason` to $GITHUB_OUTPUT.
 """
 
 import json
@@ -21,7 +21,11 @@ MARKER = re.compile(r"^(<<<<<<<|>>>>>>>) ", re.M)
 
 
 def sh(*args, check=True):
-    return subprocess.run(args, check=check, capture_output=True, text=True).stdout
+    r = subprocess.run(args, capture_output=True, text=True)
+    if check and r.returncode:
+        print(f"$ {' '.join(args)}\n{r.stdout}{r.stderr}", file=sys.stderr)
+        r.check_returncode()
+    return r.stdout
 
 
 def gh(*args):
@@ -109,7 +113,20 @@ def main():
         msg = f"autopilot ({stage}): {result.get('summary', 'fixes')}"[:200]
         sh("git", "commit", "--no-verify", "-m", msg)
     if sh("git", "rev-list", f"origin/{head}..HEAD").strip():
-        sh("git", "push", "origin", f"HEAD:refs/heads/{head}")
+        try:
+            sh("git", "push", "origin", f"HEAD:refs/heads/{head}")
+        except subprocess.CalledProcessError:
+            sh("git", "fetch", "-q", "origin", head)
+            if not subprocess.run(("git", "merge-base", "--is-ancestor", f"origin/{head}", "HEAD")).returncode:
+                raise
+            # The developer pushed while we worked. Drop this round and run again on the new head.
+            if stage == "fix":
+                gh("pr", "edit", pr, "--remove-label", f"autopilot:round-{rnd}")
+            else:
+                gh("pr", "edit", pr, "--remove-label", "autopilot:opus-used")
+            output(outcome="retry", reason=f"{head} moved during the run")
+            print(f"{head} moved during the run; nothing pushed, retrying", file=sys.stderr)
+            return 0
 
     if result.get("findings") or result.get("verdict") == "fixed":
         comment(pr, "fixed and pushed", result)
