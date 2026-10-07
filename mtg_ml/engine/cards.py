@@ -516,8 +516,8 @@ def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:
 
 # Spec fields, split by whether `card_shape` turns them into shape tokens
 # (feature set 5). A new field goes into exactly one of the two sets of its
-# level, and into card_def / _ability / _trigger and card_shape here and in
-# native/src/cards.rs (parse_card / card_shape); `_check_fields` says so.
+# level, here and in native/src/cards.rs (same names), and is parsed in
+# card_def / _ability / _trigger and parse_card; `_check_fields` says so.
 SHAPE_CARD_FIELDS = frozenset({
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow",
     "plot", "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect",
@@ -537,10 +537,11 @@ NON_SHAPE_TRIGGER_FIELDS = frozenset({"name"})
 def _check_fields(spec: dict, what: str, shape: frozenset, non_shape: frozenset, owner: str) -> None:
     unknown = set(spec) - shape - non_shape
     if unknown:
+        w = what.upper()
         raise ValueError(
-            f"{owner}: unknown {what} fields {sorted(unknown)}: add each to SHAPE_{what.upper()}_FIELDS (and to card_shape) or"
-            f" NON_SHAPE_{what.upper()}_FIELDS in mtg_ml/engine/cards.py, read it in card_def / _ability / _trigger, and do the"
-            " same in native/src/cards.rs (the allowed keys of parse_card, card_shape); docs/adding-cards.md"
+            f"{owner}: unknown {what} fields {sorted(unknown)}: add each to SHAPE_{w}_FIELDS (if it changes what the card does;"
+            f" then also to card_shape) or NON_SHAPE_{w}_FIELDS, in both mtg_ml/engine/cards.py and native/src/cards.rs, and"
+            " parse it in card_def / _ability / _trigger and parse_card; docs/adding-cards.md"
         )
 
 

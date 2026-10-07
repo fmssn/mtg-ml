@@ -874,6 +874,19 @@ fn card_shapes() -> std::collections::HashMap<String, Vec<String>> {
     db().defs.iter().map(|d| (d.name.clone(), d.shape.clone())).collect()
 }
 
+/// {level: (shape fields, non-shape fields)} of the card spec (tests).
+#[pyfunction]
+fn spec_fields() -> std::collections::HashMap<&'static str, (Vec<&'static str>, Vec<&'static str>)> {
+    use crate::cards::*;
+    [
+        ("card", (SHAPE_CARD_FIELDS.to_vec(), NON_SHAPE_CARD_FIELDS.to_vec())),
+        ("ability", (SHAPE_ABILITY_FIELDS.to_vec(), NON_SHAPE_ABILITY_FIELDS.to_vec())),
+        ("trigger", (SHAPE_TRIGGER_FIELDS.to_vec(), NON_SHAPE_TRIGGER_FIELDS.to_vec())),
+    ]
+    .into_iter()
+    .collect()
+}
+
 #[pymodule]
 fn mtg_ml_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGame>()?;
@@ -881,6 +894,7 @@ fn mtg_ml_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(load_cards, m)?)?;
     m.add_function(wrap_pyfunction!(loaded_spec, m)?)?;
     m.add_function(wrap_pyfunction!(card_shapes, m)?)?;
+    m.add_function(wrap_pyfunction!(spec_fields, m)?)?;
     m.add("NativeRulesError", m.py().get_type_bound::<NativeRulesError>())?;
     Ok(())
 }
