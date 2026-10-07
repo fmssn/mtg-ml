@@ -403,7 +403,9 @@ def make_effect(ops: list[dict] | None):
             raise ValueError(f"unknown custom effect {op['fn']!r}")
         if op["op"] == "optional_payment":
             make_effect(op["then"])
-    return lambda g, item: run_ops(g, item, ops)
+    fn = lambda g, item: run_ops(g, item, ops)  # noqa: E731
+    fn.ops = tuple(ops)  # read by encode.option_preview
+    return fn
 
 
 def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:

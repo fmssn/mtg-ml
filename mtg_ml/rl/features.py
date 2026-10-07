@@ -8,7 +8,9 @@ Options also get a pointer `option_dim + k` for every entity k they are
 about (the attacker, blocker, mana source, target, ...), so the network can
 score "block with this Terror" from that Terror's own vector. Options: each legal option's key is expanded into hashed tokens
 (every key element with its position, and every key prefix), so options
-that share structure ("cast X", "pay with Swamp") share parameters. The
+that share structure ("cast X", "pay with Swamp") share parameters, plus
+`encode.option_preview` tokens (what the option would do: creatures a
+sweeper kills, ward and lethal damage on a target, mana left after a cast). The
 policy scores options one by one; illegal actions never exist, which is
 action masking over the open-ended key vocabulary.
 """
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 import zlib
 
-from ..encode import entity_features, option_object_ids, state_features
+from ..encode import entity_features, option_object_ids, option_preview, state_features
 
 STATE_DIM = 1 << 16
 OPTION_DIM = 1 << 15
@@ -48,8 +50,8 @@ def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = O
         state.append(state_dim)
         state.extend(sorted({_h(t, state_dim) for t in e}))
     opts = []
-    for o in game.legal_options():
-        toks = sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key)})
+    for i, o in enumerate(game.legal_options()):
+        toks = sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key) + option_preview(game, player, i)})
         toks += sorted({option_dim + index[i] for i in option_object_ids(o) if i in index})
         opts.append(toks)
     return state, opts

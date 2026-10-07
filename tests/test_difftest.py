@@ -76,6 +76,24 @@ def test_search_bot_identical_on_both_engines():
     assert picks["python"] == picks["native"]
 
 
+def test_entity_and_preview_strings_identical():
+    """`featurize` hashes are compared in lockstep; this compares the strings
+    behind them (entities, option previews) so a mismatch is readable."""
+    from mtg_ml.encode import entity_features, option_preview
+
+    for seed in range(6):
+        py, nat = (game_class(e)(match_decks(1 + seed % 2), seed=seed, max_turns=30) for e in ("python", "native"))
+        r = random.Random(seed)
+        while not py.over:
+            p = py.decision.player
+            assert entity_features(py, p) == entity_features(nat, p)
+            for i in range(len(py.legal_options())):
+                assert option_preview(py, p, i) == option_preview(nat, p, i), py.legal_options()[i].label
+            a = r.randrange(len(py.legal_options()))
+            py.step(a)
+            nat.step(a)
+
+
 def test_divergence_json_keeps_fork_every():
     d = Divergence(Scenario(seed=5, agents=("bot", "bot")), 3, ".x", [1, 0, 2], fork_every=41)
     assert Divergence.from_json(d.to_json()) == d
