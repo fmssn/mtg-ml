@@ -492,17 +492,29 @@ def _play(job: Job) -> Result:
             _step(lv.game, lv.seats, a)
         inflight[k] = None
 
-    while True:
-        busy = False
-        for k in range(n_groups):
-            if inflight[k] is not None:
-                apply(k)
-            items = prepare(k)
-            if items:
-                inflight[k] = (ev.submit(k, items), items)
-                busy = True
-        if not busy and all(f is None for f in inflight):
-            break
+    try:
+        while True:
+            busy = False
+            for k in range(n_groups):
+                if inflight[k] is not None:
+                    apply(k)
+                items = prepare(k)
+                if items:
+                    inflight[k] = (ev.submit(k, items), items)
+                    busy = True
+            if not busy and all(f is None for f in inflight):
+                break
+    except BaseException:
+        # Collect every request still in flight before the error leaves the
+        # job: the server may still be reading a request area, and the next
+        # job in this worker writes its requests to the same areas.
+        for f in inflight:
+            if f is not None:
+                try:
+                    ev.collect(f[0])
+                except Exception:  # noqa: BLE001, S110 - the server failed too; the original error matters
+                    pass
+        raise
     out.timing.append((time.perf_counter() - t_start, waited, sum(g[4] for g in out.games)))
     return out
 

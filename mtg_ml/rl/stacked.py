@@ -397,8 +397,6 @@ def step_input(decisions: list, pols: list[int], gslots: list[int], fresh: list[
     and one padded option. Padded rows use hidden slot gslots[-1] + 1."""
     from .features import STATE_DIM
 
-    R = len(decisions)
-    R_p = R + pad
     t = lambda v: torch.tensor(v, dtype=torch.long, device=device)  # noqa: E731
     s_len = [len(d[0]) for d in decisions] + [0] * pad
     e_len = [len(d[3]) for d in decisions] + [0] * pad

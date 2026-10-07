@@ -94,6 +94,7 @@ from .model import PolicyNet
 from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update
 from .rollout import BOT, LEARNER, GameSpec, Job, create_pool, play
 
+TRAIN_SEED_BASE = 1 << 40  # training game seeds start here: disjoint from the fixed evaluation/benchmark seeds (EVAL_SEED + s, and 4x that for best-of-three games)
 KEEP_POLICIES = 3  # the newest, the one a lagged rollout may still be loading, one spare (plus those pinned by evaluations)
 
 
@@ -201,9 +202,15 @@ class Trainer:
             self.iteration = self.checkpointed = ck["iteration"]
             self.games_total = ck.get("games_total", self.iteration * cfg.games_per_iter)
             self.rng.setstate(ck["rng"])
+            if "torch_rng" in ck:  # older checkpoints lack it: the update's minibatch shuffles then restart from cfg.seed
+                torch.set_rng_state(ck["torch_rng"])
+                if ck.get("cuda_rng") is not None and torch.cuda.is_available():
+                    torch.cuda.set_rng_state_all(ck["cuda_rng"])
             self._drop_lost_iterations()
             print(f"resumed {self.latest} at iteration {self.iteration}")
-        self.pool: list[str] = sorted(os.path.join(cfg.run, "pool", f) for f in os.listdir(os.path.join(cfg.run, "pool")))
+        self._remove_partial_writes()
+        pool_dir = os.path.join(cfg.run, "pool")
+        self.pool: list[str] = sorted(os.path.join(pool_dir, f) for f in os.listdir(pool_dir) if f.startswith("iter_") and f.endswith(".pt"))
         weights = self._weights()
         self._publish(weights)
         if not self.pool:
@@ -274,6 +281,8 @@ class Trainer:
             "iteration": self.iteration,
             "games_total": self.games_total,
             "rng": rng,
+            "torch_rng": torch.get_rng_state(),  # the update's minibatch shuffles
+            "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
             "train_config": asdict(self.cfg),
         }
         self.saving = self.saver.submit(_save, ck, self.latest)
@@ -283,6 +292,13 @@ class Trainer:
         if self.saving is not None:
             self.saving.result()  # re-raises a failed write
             self.saving = None
+
+    def _remove_partial_writes(self) -> None:
+        """Delete `*.tmp` files a killed run left behind mid-`_save`."""
+        for d in (self.cfg.run, os.path.join(self.cfg.run, "pool"), os.path.join(self.cfg.run, "policy")):
+            for f in os.listdir(d):
+                if f.endswith(".tmp"):
+                    os.remove(os.path.join(d, f))
 
     def _drop_lost_iterations(self) -> None:
         """After resuming at iteration k: policy files, pool snapshots and
@@ -318,7 +334,7 @@ class Trainer:
 
     def _train_specs(self, it: int) -> list[GameSpec]:
         c, specs = self.cfg, []
-        base = (it + 1) * 1_000_003 + c.seed * 7919
+        base = TRAIN_SEED_BASE + (it + 1) * 1_000_003 + c.seed * 7919
         for k in range(c.games_per_iter):
             r = self.rng.random()
             if r < c.self_play_frac:
@@ -416,7 +432,8 @@ class Trainer:
                     self._checkpoint(weights, nxt.rng if nxt else self.rng.getstate())
                 t2 = time.monotonic()
 
-                learner_games = [(g, s) for g in data.games for s in (0, 1) if g[0][s] == LEARNER and g[0][1 - s] != LEARNER]
+                learner_games = [(g, s) for g in data.games for s in (0, 1) if g[0][s] == LEARNER and g[0][1 - s] not in (LEARNER, BOT)]
+                bot_games = [(g, s) for g in data.games for s in (0, 1) if g[0][s] == LEARNER and g[0][1 - s] == BOT]
                 row = {
                     "iteration": self.iteration,
                     "decisions": len(data.actions),
@@ -426,6 +443,7 @@ class Trainer:
                     "draws": sum(g[1] is None for g in data.games) / max(len(data.games), 1),
                     "jund_wins_selfplay": _rate([g for g in data.games if g[0] == (LEARNER, LEARNER)], 0),
                     "win_vs_pool": sum(g[1] == s for g, s in learner_games) / max(len(learner_games), 1),
+                    "win_vs_bot": sum(g[1] == s for g, s in bot_games) / max(len(bot_games), 1),
                     "shaping": roll.shaping,
                     "pool_size": len(self.pool),
                     "rollout_s": round(roll.rollout_s, 2),

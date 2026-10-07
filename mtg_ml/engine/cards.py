@@ -98,7 +98,7 @@ def _op_tap_target(g, item, op):
     t = g.target(item)
     if t is not None:
         t.tapped = True
-        t.skip_untap += op.get("skip_untap", 0)
+        t.skip_untap = max(t.skip_untap, op.get("skip_untap", 0))
 
 
 def _op_grant_target(g, item, op):

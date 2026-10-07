@@ -46,15 +46,18 @@ class SearchBot:
         if len(ranked) == 1:
             return ranked[0]
         seeds = [self.rng.randrange(1 << 30) for _ in range(self.playouts)]
+        pins = _option_cards(d)
         best, best_v = ranked[0], -1.0
         for i in ranked:  # ties keep the base bot's preference (ranked order)
-            v = sum(self._playout(g, i, s) for s in seeds) / len(seeds)
+            v = sum(self._playout(g, i, s, pins) for s in seeds) / len(seeds)
             if v > best_v:
                 best, best_v = i, v
         return best
 
-    def _playout(self, g: Game, option: int, seed: int) -> float:
+    def _playout(self, g: Game, option: int, seed: int, pins: dict | None = None) -> float:
         h = determinize(g, self.p, random.Random(seed))
+        if pins:
+            _pin(h, self.p, pins)
         h.rng = random.Random(seed ^ 0x5EED)  # future shuffles must not mirror the real game's
         h.step(option)
         bots = (make_bot(0), make_bot(1))
@@ -65,3 +68,47 @@ class SearchBot:
         if h.winner is None:
             return 0.5
         return 1.0 if h.winner == self.p else 0.0
+
+
+def _option_cards(d) -> dict[int, str]:
+    """oid -> definition name of the cards the decision's options point to.
+    The decider sees them (e.g. the library cards a search offers), even when
+    they are not marked known, so determinize must not re-deal them."""
+    pins = {}
+    for o in d.options:
+        v = o.value
+        if hasattr(v, "oid") and hasattr(v, "defn"):
+            pins[v.oid] = v.defn.name
+    return pins
+
+
+def _set_defn(h, c, defn) -> None:
+    if getattr(h, "NATIVE", False):
+        h._g.set_card_def(c._idx, defn.name)  # noqa: SLF001 - what NativeGame.determinize uses
+    else:
+        c.defn = defn
+        c.transformed = False
+
+
+def _pin(h, viewer: int, pins: dict[int, str]) -> None:
+    """Give the pinned cards of the determinized game `h` their real
+    definitions back, swapping with another re-dealt card of the same pool
+    (the one that drew it), so the multiset of hidden cards is unchanged and
+    the option indices still mean the cards the real decision offers.
+    Consumes no randomness; identical on both engines."""
+    for p in h.players:
+        hidden = [c for c in p.library if viewer not in c.known_to]
+        if p.idx != viewer:
+            hidden += [c for c in p.hand if viewer not in c.known_to]
+        for c in hidden:
+            want = pins.get(c.oid)
+            if want is None or c.defn.name == want:
+                continue
+            other = next((x for x in hidden if x.oid not in pins and x.defn.name == want), None)
+            if other is None:
+                other = next((x for x in hidden if x.defn.name == want and pins.get(x.oid) != want), None)
+            if other is None:
+                continue  # not in this pool (cannot happen for a re-deal of the same pool)
+            a, b = c.defn, other.defn
+            _set_defn(h, c, b)
+            _set_defn(h, other, a)

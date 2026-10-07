@@ -180,9 +180,14 @@ class Divergence:
     step: int  # number of actions taken before the mismatch
     diff: str
     actions: list[int] = field(default_factory=list)  # the action script that reproduces it
+    fork_every: int = 0  # the fork()/determinize() check interval it was found with (needed to reproduce it)
 
     def to_json(self) -> dict:
-        return {"scenario": self.scenario.to_json(), "step": self.step, "diff": self.diff, "actions": self.actions}
+        return {"scenario": self.scenario.to_json(), "step": self.step, "diff": self.diff, "actions": self.actions, "fork_every": self.fork_every}
+
+    @classmethod
+    def from_json(cls, d: dict) -> Divergence:
+        return cls(Scenario.from_json(d["scenario"]), d["step"], d["diff"], d["actions"], d.get("fork_every", 0))
 
     def __str__(self) -> str:
         return f"seed {self.scenario.seed} {self.scenario.agents} game {self.scenario.match_game}: step {self.step}: {self.diff}"
@@ -200,37 +205,47 @@ def _check(py, nat, full: bool) -> str | None:
 
 def run_lockstep(sc: Scenario, script: list[int] | None = None, full_every: int = 1, fork_every: int = 0) -> Divergence | None:
     """Play `sc` in both engines. With `script`, play those actions (clamped
-    to the option count) instead of the agents, then stop."""
+    to the option count) instead of the agents, then stop; scripted-bot
+    seats still compute their choice on both engines (compared, not played),
+    so a bot-choice divergence reproduces from its script.
+
+    A step that raises the same error in both engines is reported too (diff
+    starting with "both raised"): the port agrees, but the reference engine
+    has a bug."""
     from .engine.game import RulesError
 
+    def div(n: int, diff: str) -> Divergence:
+        return Divergence(sc, n, diff, list(taken), fork_every)
+
+    taken: list[int] = []
     try:
         py, nat = _new_pair(sc)
     except RulesError as e:
-        return Divergence(sc, 0, f"construction failed: {e}")
+        return div(0, f"construction failed: {e}")
     agents = make_agents(sc)
-    taken: list[int] = []
     n = 0
     while True:
         diff = _check(py, nat, full=full_every > 0 and n % full_every == 0)
         if diff:
-            return Divergence(sc, n, diff, list(taken))
+            return div(n, diff)
         if fork_every and n % fork_every == fork_every - 1 and not py.over:
             diff = _check_fork(py, nat, sc.seed * 31 + n)
             if diff:
-                return Divergence(sc, n, diff, list(taken))
+                return div(n, diff)
         if py.over:
             break
-        if script is not None:
-            if n >= len(script):
-                return None
-            a = min(script[n], len(py.legal_options()) - 1)
-        else:
-            seat = py.decision.player
+        seat = py.decision.player
+        a = None
+        if script is None or sc.agents[seat] == "bot":
             a = agents[seat].act(py)
             if sc.agents[seat] == "bot":  # bots read the object model: same choice on the native proxies
                 b = agents[seat].act(nat)
                 if a != b:
-                    return Divergence(sc, n, f"bot choice: python={a} native={b}", list(taken))
+                    return div(n, f"bot choice: python={a} native={b}")
+        if script is not None:
+            if n >= len(script):
+                return None
+            a = min(script[n], len(py.legal_options()) - 1)
         taken.append(a)
         errs = []
         for g in (py, nat):
@@ -242,10 +257,10 @@ def run_lockstep(sc: Scenario, script: list[int] | None = None, full_every: int 
         n += 1
         if errs[0] or errs[1]:
             if errs[0] != errs[1]:
-                return Divergence(sc, n, f"step raised: python={errs[0]} native={errs[1]}", list(taken))
-            return None  # both engines failed identically: a reference-engine bug, not a port bug
+                return div(n, f"step raised: python={errs[0]} native={errs[1]}")
+            return div(n, f"both raised (reference-engine bug, the port agrees): {errs[0]}")
     diff = first_diff(outcome(py), outcome(nat))
-    return Divergence(sc, n, "outcome" + diff, list(taken)) if diff else None
+    return div(n, "outcome" + diff) if diff else None
 
 
 def _check_fork(py, nat, seed: int) -> str | None:
@@ -283,11 +298,11 @@ def minimize(div: Divergence, budget: int = 200) -> Divergence:
             continue
         cand = script[:i] + [0] + script[i + 1 :]
         tries += 1
-        d = run_lockstep(div.scenario, script=cand)
+        d = run_lockstep(div.scenario, script=cand, fork_every=div.fork_every)
         if d is not None:
             script = d.actions + cand[len(d.actions) :]
             best = d
-    trimmed = run_lockstep(best.scenario, script=best.actions)
+    trimmed = run_lockstep(best.scenario, script=best.actions, fork_every=div.fork_every)
     return trimmed or best
 
 
@@ -313,7 +328,7 @@ def fuzz(n: int, start: int = 0, jobs: int = 1, full_every: int = 1, fork_every:
     print(f"{n - len(failures)}/{n} games identical in both engines ({dt:.0f}s)")
     if failures:
         first = min(failures, key=lambda f: f["scenario"]["seed"])
-        div = Divergence(Scenario.from_json(first["scenario"]), first["step"], first["diff"], first["actions"])
+        div = Divergence.from_json(first)
         print(f"{len(failures)} divergent games; first: {div}")
         small = minimize(div)
         print(f"minimized: step {small.step} with {sum(1 for a in small.actions if a)} non-default choices: {small.diff}")
@@ -329,7 +344,7 @@ def _collect(results, total: int, quiet: bool) -> list[dict]:
         if r is not None:
             failures.append(r)
             if not quiet:
-                print("DIVERGENCE:", Divergence(Scenario.from_json(r["scenario"]), r["step"], r["diff"]), flush=True)
+                print("DIVERGENCE:", Divergence.from_json(r), flush=True)
         if not quiet and i % 250 == 0:
             print(f"  {i}/{total} games, {len(failures)} divergent", flush=True)
     return failures
@@ -364,8 +379,8 @@ def main(argv=None) -> None:
         sys.exit(1 if fuzz(args.games, args.start, args.jobs, args.full_every, args.fork_every, args.out, args.quiet, tuple(extra)) else 0)
     with open(args.file) as fh:
         data = json.load(fh)
-    sc = Scenario.from_json(data["scenario"])
-    d = run_lockstep(sc, script=data["actions"])
+    saved = Divergence.from_json(data)
+    d = run_lockstep(saved.scenario, script=saved.actions, fork_every=saved.fork_every)
     print("reproduced:" if d else "no longer diverges", d or "")
     sys.exit(1 if d else 0)
 

@@ -60,7 +60,10 @@ H_TICKET, H_ROWS, H_OPTS, H_S, H_E, H_O, H_ENT, H_RUNS = range(8)
 RUNS0 = 16  # header: (policy id, rows) per run of equal policy from here
 MAX_RUNS = (HDR - RUNS0) // 2
 RESP_STRIDE = 16  # ints between reply tickets (a cache line each)
-GLOBAL = 16  # ints of global words at the start of the control block: [0] the server failed
+GLOBAL = 16  # ints of global words at the start of the control block: [0] the server failed, [1] its pid, [2] its heartbeat
+G_FAILED, G_PID, G_BEAT = range(3)
+HEARTBEAT_S = 0.1  # the server's heartbeat thread bumps G_BEAT this often
+SERVER_TIMEOUT_S = 120.0  # a worker gives up on a server whose heartbeat stood still this long
 OUT_INTS = 3 * MAX_ROWS
 LEGACY = 1 << 20  # ids of policies outside the stack start here
 _I32 = 4
@@ -152,6 +155,11 @@ class InferenceClient:
         pid = self.ids.get(key)
         if pid is None:
             self.req_q.put(("register", self.wid, key))
+            watch = _Watch(self.c)
+            while not self.resp_q._reader.poll(0.5):  # noqa: SLF001 - SimpleQueue has no get(timeout)
+                if self.c[G_FAILED]:
+                    break  # the server put its traceback on our queue
+                watch.check()
             r = self.resp_q.get()
             if isinstance(r, str):
                 raise RuntimeError(f"inference server failed: {r}")
@@ -219,15 +227,18 @@ class InferenceClient:
         after 50 ms (the server loads a policy or captures a graph) sleep
         between checks."""
         c = self.c
-        spins, t0 = 0, None
+        spins, t0, watch = 0, None, None
         while c[i] != ticket:
             spins += 1
             if spins & 0x3FFF == 0:
-                if c[0]:
+                if c[G_FAILED]:
                     raise RuntimeError(f"inference server failed: {self._error()}")
                 if t0 is None:
                     t0 = time.monotonic()
                 elif time.monotonic() - t0 > 0.05:
+                    if watch is None:
+                        watch = _Watch(c)
+                    watch.check()
                     time.sleep(0.0002)
 
     def _error(self) -> str:
@@ -242,26 +253,101 @@ class InferenceClient:
         self.data.close()
 
 
+def _pid_alive(pid: int) -> bool:
+    """Whether process `pid` exists and is not a zombie (a dead server stays
+    a zombie until its parent, the trainer, reaps it)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            return f.read().rsplit(b")", 1)[1].split()[0] not in (b"Z", b"X")
+    except (OSError, IndexError):
+        return True  # no /proc (macOS): the heartbeat catches a zombie
+
+
+class _Watch:
+    """Server liveness while a worker waits: its pid (written by the parent
+    and by the server) and its heartbeat word. A server without a pid
+    (standalone, in-process: tests, tools/profile_server.py) is not watched."""
+
+    def __init__(self, c):
+        self.c = c
+        self.beat = c[G_BEAT]
+        self.since = self.last = time.monotonic()
+
+    def check(self) -> None:
+        now = time.monotonic()
+        if now - self.last < 0.5:
+            return
+        self.last = now
+        pid = self.c[G_PID]
+        if not pid:
+            return
+        if not _pid_alive(pid):
+            raise RuntimeError(f"inference server (pid {pid}) died without reporting an error (killed? out of memory?)")
+        beat = self.c[G_BEAT]
+        if beat != self.beat:
+            self.beat, self.since = beat, now
+        elif now - self.since > SERVER_TIMEOUT_S:
+            raise RuntimeError(f"inference server (pid {pid}) has not answered or sent a heartbeat for {now - self.since:.0f} s (hung?)")
+
+
+def _heartbeat(name: str) -> None:
+    """Server process: a daemon thread bumps G_BEAT while the process lives."""
+    import threading
+
+    shm = shared_memory.SharedMemory(name=name)
+    _KEEP.append(shm)
+    c = shm.buf.cast("i")
+    c[G_PID] = os.getpid()
+
+    def beat() -> None:
+        while True:
+            c[G_BEAT] = c[G_BEAT] % 0x3FFFFFFF + 1
+            time.sleep(HEARTBEAT_S)
+
+    threading.Thread(target=beat, daemon=True, name="inference-heartbeat").start()
+
+
 _CLIENT: InferenceClient | None = None
 
 
-def init_worker(counter, shards, cpus=None, claim=None) -> None:
-    """Pool initializer for server mode: claim a worker id, pin to a CPU
-    (round robin over `cpus`, Linux), connect to the server whose block of
-    workers it falls in, and take the pool's spec counters
-    (`rollout.connect`). shards: (first worker, workers, layout, block
-    names, request queue, response queues) per server."""
+def _claim_id(ids) -> int:
+    """Claim a free worker id: `ids` holds the pid of each id's worker (0 =
+    free). The id of a worker that exited (a pool replacing workers,
+    maxtasksperchild, a crash, an earlier pool) is free again; a live one is
+    never shared."""
+    me = os.getpid()
+    with ids.get_lock():
+        owners = ids.get_obj()
+        for wid, pid in enumerate(owners):
+            if pid == 0 or pid == me or not _pid_alive(pid):
+                owners[wid] = me
+                return wid
+    raise RuntimeError(f"no free inference worker id: all {len(owners)} are held by live processes (more pool workers than InferenceServer(n_workers)?)")
+
+
+def init_worker(ids, shards, cpus=None, claim=None) -> None:
+    """Pool initializer for server mode: claim a free worker id (`ids`: a
+    shared int array, one pid per id), pin to a CPU (round robin over
+    `cpus`, Linux), connect to the server whose block of workers it falls
+    in, and take the pool's spec counters (`rollout.connect`). shards:
+    (first worker, workers, layout, block names, request queue, response
+    queues) per server."""
     global _CLIENT
     from .rollout import connect
 
     connect(claim)
-    with counter.get_lock():
-        wid = counter.value
-        counter.value += 1
+    total = sum(sh[1] for sh in shards)
+    if len(ids) != total:
+        raise ValueError(f"{len(ids)} worker ids for {total} server worker slots")
+    wid = _claim_id(ids)
     if cpus and hasattr(os, "sched_setaffinity"):
         os.sched_setaffinity(0, {cpus[wid % len(cpus)]})
-    total = sum(sh[1] for sh in shards)
-    wid %= total
     for first, n, layout, names, req_q, resp_qs in shards:
         if first <= wid < first + n:
             _CLIENT = InferenceClient(wid - first, req_q, resp_qs[wid - first], names, layout)
@@ -796,6 +882,7 @@ def serve(cfg: ServerConfig, layout: Layout, names: tuple, req_q, resp_qs, stats
         if local:
             free = set(local) - set(worker_cpus or ())
             os.sched_setaffinity(0, free or set(local))
+    _heartbeat(names[0])  # before the (slow) torch import: workers can tell a loading server from a dead one
     srv = _Server(cfg, layout.n_workers, layout, names, resp_qs)
     prof_path = os.environ.get("MTG_SERVER_PROFILE")
     if prof_path:  # debugging aid: cProfile of the whole server loop
@@ -861,7 +948,7 @@ def _serve_loop(cfg: ServerConfig, srv: _Server, req_q, stats_q) -> None:
                 reader.poll(0.0002)
     except Exception as e:
         msg = "".join(traceback.format_exception(e))
-        srv.c[0] = 1
+        srv.c[G_FAILED] = 1
         for q in srv.resp_qs:
             q.put(msg)
         raise
@@ -889,7 +976,7 @@ class InferenceServer:
             raise ValueError("need between 1 and n_workers devices")
         self.n_workers = n_workers
         self.worker_cpus = worker_cpus
-        self.counter = self.ctx.Value("i", 0)
+        self.worker_ids = self.ctx.Array("i", n_workers)  # pid of each worker id's process (init_worker)
         self.claim = self.ctx.Array("i", MAX_MATCHUPS)  # spec counters of rollout.run_specs
         # SimpleQueue writes in the calling thread. A Queue hands writes to a
         # feeder thread, which can wait for the GIL for a whole switch
@@ -908,6 +995,9 @@ class InferenceServer:
             scfg = replace(self.cfg, device=dev, cpus=tuple(cpus) if cpus else None)
             proc = self.ctx.Process(target=serve, args=(scfg, layout, names, req_q, resp_qs, self.stats_q, worker_cpus), daemon=True, name=f"inference-server-{s}")
             proc.start()
+            c = blocks[0].buf.cast("i")
+            c[G_PID] = proc.pid  # workers watch it (the server writes it again itself)
+            c.release()
             self.blocks.append(blocks)
             self.shards.append((bounds[s], n, layout, names, req_q, resp_qs))
             self.procs.append(proc)
@@ -917,7 +1007,7 @@ class InferenceServer:
         return self.procs[0]
 
     def pool(self):
-        pool = self.ctx.Pool(self.n_workers, initializer=init_worker, initargs=(self.counter, self.shards, self.worker_cpus, self.claim))
+        pool = self.ctx.Pool(self.n_workers, initializer=init_worker, initargs=(self.worker_ids, self.shards, self.worker_cpus, self.claim))
         pool.claim = self.claim
         return pool
 

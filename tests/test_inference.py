@@ -265,3 +265,64 @@ def test_grouped_linear_kernel_matches_per_policy_matmuls():
     x = torch.randn(M, K, device="cuda")
     ref = torch.bmm(x[:, None, :].double(), w[pol].double().transpose(1, 2))[:, 0] + b[pol].double()
     assert (stacked.grouped_linear(x, w, b, pol).double() - ref).abs().max() < 1e-4
+
+
+def test_worker_ids_are_never_shared():
+    """A replacement pool worker takes a dead worker's id, never a live one's."""
+    import multiprocessing as mp
+    import os
+
+    from mtg_ml.rl import inference
+
+    ids = mp.get_context("spawn").Array("i", 3)
+    dead = mp.get_context("spawn").Process(target=os.getpid)
+    dead.start()
+    dead.join()
+    ids.get_obj()[:] = [os.getppid(), dead.pid, 0]  # a live process, a dead one, a free slot
+    assert inference._claim_id(ids) == 1
+    assert inference._claim_id(ids) == 1  # this process already holds it
+    ids.get_obj()[1] = os.getppid()
+    assert inference._claim_id(ids) == 2
+    ids.get_obj()[2] = os.getppid()
+    with pytest.raises(RuntimeError, match="no free inference worker id"):
+        inference._claim_id(ids)
+
+
+def _client(srv):
+    from mtg_ml.rl.inference import InferenceClient
+
+    first, n, layout, names, req_q, resp_qs = srv.shards[0]
+    return InferenceClient(0, req_q, resp_qs[0], names, layout)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("reaped", [True, False])
+def test_worker_notices_a_killed_server(tmp_path, monkeypatch, reaped):
+    """A server that dies without a Python exception (SIGKILL, OOM) makes
+    waiting workers raise instead of spinning forever: by its pid once
+    reaped, by its heartbeat while it is a zombie."""
+    import os
+    import signal
+
+    from mtg_ml.rl import inference
+
+    monkeypatch.setattr(inference, "SERVER_TIMEOUT_S", 2.0)
+    _, path = _ckpt(tmp_path, "none")
+    srv = InferenceServer(1, ServerConfig(device="cpu", threads=1))
+    try:
+        cl = _client(srv)
+        g = game_class(ENGINE)(match_decks(1), seed=0)
+        state, ol, of = featurize_flat(g, g.decision.player)
+        row = ((path, 0), 0, 1, array("i", state), array("i", ol), array("i", of), array("i", encode_event_hashes([])))
+        cl.collect(cl.submit(0, [row]))  # the server works
+        os.kill(srv.proc.pid, signal.SIGKILL)
+        if reaped:
+            srv.proc.join()
+        h = cl.submit(0, [row])
+        with pytest.raises(RuntimeError, match="died|heartbeat"):
+            cl.collect(h)
+        with pytest.raises(RuntimeError, match="died|heartbeat"):
+            cl._id(("other.pt", 0))
+        cl.close()
+    finally:
+        srv.close()

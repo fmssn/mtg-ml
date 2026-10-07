@@ -189,26 +189,34 @@ class NativeDecision:
         self.player, self.kind, self.prompt = head
         self._options = self._keys = self._label_list = None
 
+    def _check(self) -> None:
+        """Lazily loaded fields come from the engine's *current* decision, so
+        refuse to load them once the game has moved past this one."""
+        if self._version != self._g._g.version:
+            raise RulesError("decision read after the game moved on")
+
     @property
     def options(self) -> list[NativeOption]:
         if self._options is None:
+            self._check()
             self._options = [NativeOption(self, i) for i in range(self._g._g.n_options())]
         return self._options
 
     @property
     def keys(self) -> list[tuple]:
         if self._keys is None:
+            self._check()
             self._keys = self._g._g.option_keys()
         return self._keys
 
     def _labels(self) -> list[str]:
         if self._label_list is None:
+            self._check()
             self._label_list = self._g._g.option_labels()
         return self._label_list
 
     def _value(self, i: int):
-        if self._version != self._g._g.version:
-            raise RulesError("option value read after the game moved on")
+        self._check()
         return self._g._resolve(self._g._g.option_value(i))
 
     def __repr__(self) -> str:
@@ -485,11 +493,25 @@ class NativeGame:
     def is_bestowed(self, c) -> bool:
         return c.zone == "battlefield" and c.attached_to is not None
 
+    # Live cards go to Rust; last-known-information snapshots (stack item and
+    # trigger sources) are computed here from their stored characteristics,
+    # exactly as `Game` does for its `Card.snapshot()` copies.
+
+    def _auras_on(self, c) -> list[NativeCard]:
+        return [a for a in self.battlefield if a.attached_to == c.oid]
+
     def types(self, c) -> set[str]:
-        return set(self._g.types(self._idx(c)))
+        if c.__class__ is NativeCard:
+            return set(self._g.types(c._idx))
+        t = set(c.face.types)
+        if self.is_bestowed(c):
+            t.discard("Creature")
+        return t
 
     def is_creature(self, c) -> bool:
-        return self._g.is_creature(c._idx)
+        if c.__class__ is NativeCard:
+            return self._g.is_creature(c._idx)
+        return "Creature" in c.face.types and not self.is_bestowed(c)
 
     def is_artifact(self, c) -> bool:
         return "Artifact" in c.face.types
@@ -498,16 +520,29 @@ class NativeGame:
         return "Land" in c.face.types
 
     def power(self, c) -> int:
-        return self._g.power(c._idx)
+        if c.__class__ is NativeCard:
+            return self._g.power(c._idx)
+        return (c.face.power or 0) + c.counters + sum(t.power for t in c.temp) + sum(a.counters for a in self._auras_on(c))
 
     def toughness(self, c) -> int:
-        return self._g.toughness(c._idx)
+        if c.__class__ is NativeCard:
+            return self._g.toughness(c._idx)
+        return (c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp) + sum(a.counters for a in self._auras_on(c))
 
     def keywords(self, c) -> set[str]:
-        return set(self._g.keywords(self._idx(c)))
+        if c.__class__ is NativeCard:
+            return set(self._g.keywords(c._idx))
+        k = set(c.face.keywords)
+        for t in c.temp:
+            k |= t.keywords
+        if self._auras_on(c):
+            k |= {"reach", "trample"}
+        return k
 
     def has(self, c, kw: str) -> bool:
-        return self._g.has(c._idx, kw)
+        if c.__class__ is NativeCard:
+            return self._g.has(c._idx, kw)
+        return kw in self.keywords(c)
 
     def sorcery_timing(self, p: int) -> bool:
         return self._g.sorcery_timing(p)

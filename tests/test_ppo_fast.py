@@ -21,8 +21,9 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_se
 from mtg_ml.backend import native_available  # noqa: E402
 from mtg_ml.rl.features import OPTION_DIM, STATE_DIM  # noqa: E402
 from mtg_ml.rl.model import MEMORY_KINDS, PAD_FIELDS, TRUNKS, VALUE_NETS, Batch, PolicyNet, _Core, _sequence_layout, collate_packed, masked_entropy, packed_tensors, pad_fits, pad_sequences, pad_split, split, structure  # noqa: E402
-from mtg_ml.rl.ppo import PPOConfig, make_optimizer, ppo_update, trajectory_minibatches  # noqa: E402
-from mtg_ml.rl.rollout import LEARNER, RANDOM, GameSpec, Job, run_job  # noqa: E402
+from mtg_ml.rl.ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update, trajectory_minibatches  # noqa: E402
+from mtg_ml.rl.rollout import LEARNER, RANDOM, GameSpec, Job, Result, run_job  # noqa: E402
+from mtg_ml.rl.samples import PackedSamples  # noqa: E402
 
 DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 SHARED = ("s_idx", "s_off", "e_idx", "e_off", "o_idx", "o_off", "o_row", "o_pos", "n_opts")
@@ -235,6 +236,50 @@ def test_make_optimizer_fuses_on_cuda_only():
     assert not make_optimizer(p, 1e-3, "cpu").param_groups[0]["fused"]
     if torch.cuda.is_available():
         assert make_optimizer([nn.Parameter(torch.zeros(3, device="cuda"))], 1e-3, "cuda").param_groups[0]["fused"]
+
+
+def test_load_optimizer_state_keeps_the_configured_lr():
+    """Resuming with a changed --ppo-lr: the checkpoint's Adam moments and
+    steps are restored, its learning rate is not."""
+    p = [nn.Parameter(torch.ones(3))]
+    opt = make_optimizer(p, 1e-3, "cpu")
+    p[0].sum().backward()
+    opt.step()
+    saved = copy.deepcopy(opt.state_dict())
+    saved["param_groups"][0]["initial_lr"] = 1e-3
+    q = [nn.Parameter(torch.ones(3))]
+    new = make_optimizer(q, 5e-4, "cpu")
+    load_optimizer_state(new, saved)
+    g = new.param_groups[0]
+    assert g["lr"] == 5e-4 and g["initial_lr"] == 5e-4
+    assert torch.equal(new.state[q[0]]["exp_avg"], opt.state[p[0]]["exp_avg"])
+
+
+def _first_decision(data) -> Result:
+    s = PackedSamples()
+    s.append(data.samples[0])
+    return Result(samples=s, lengths=[1], actions=data.actions[:1], logps=data.logps[:1], advantages=data.advantages[:1], returns=data.returns[:1])
+
+
+def test_ppo_update_with_no_decisions():
+    """No minibatches: the update is skipped (it divided by their number)."""
+    torch.manual_seed(0)
+    net = PolicyNet(hidden=16)
+    opt = make_optimizer(net.parameters(), 1e-3, "cpu")
+    before = copy.deepcopy(net.state_dict())
+    out = ppo_update(net, opt, Result(), PPOConfig(minibatch=64))
+    assert out["updates"] == 0 and not out["early_stop"]
+    assert all(torch.equal(v, net.state_dict()[k]) for k, v in before.items())
+
+
+def test_ppo_update_with_one_decision(data):
+    """The advantage std of one sample is NaN, which must not reach the weights."""
+    torch.manual_seed(0)
+    net = PolicyNet(hidden=16)
+    opt = make_optimizer(net.parameters(), 1e-3, "cpu")
+    out = ppo_update(net, opt, _first_decision(data), PPOConfig(minibatch=64, epochs=2), mode="eager")
+    assert out["updates"] == 2 and all(math.isfinite(out[k]) for k in ("approx_kl", "entropy"))
+    assert all(torch.isfinite(p).all() for p in net.parameters())
 
 
 # -- padded minibatches and the captured step ----------------------------------------

@@ -143,3 +143,22 @@ def test_search_bot_returns_legal_choices_and_respects_hidden_info():
             assert SearchBot(0, playouts=2, max_options=2, seed=1).act(h) == SearchBot(0, playouts=2, max_options=2, seed=1).act(g)
         g.step(a)
         steps += 1
+
+
+def test_search_pins_offered_cards_through_determinize():
+    """Library cards a decision offers (a search) keep their real definitions
+    in the re-dealt worlds; the hidden multiset is unchanged."""
+    from mtg_ml.bots.search import _pin
+
+    g = new_game(DECKS, seed=3)
+    lib = g.players[0].library
+    names = sorted({c.defn.name for c in lib})
+    picks = [next(c for c in lib if c.defn.name == n) for n in names[:3]]
+    pins = {c.oid: c.defn.name for c in picks}
+    for s in range(10):
+        h = determinize(g, 0, random.Random(s))
+        before = sorted(c.defn.name for c in h.players[0].library)
+        _pin(h, 0, pins)
+        hl = h.players[0].library
+        assert sorted(c.defn.name for c in hl) == before
+        assert {c.oid: c.defn.name for c in hl if c.oid in pins} == pins

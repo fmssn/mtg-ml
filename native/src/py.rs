@@ -132,6 +132,14 @@ impl PyGame {
             StepError::Rules(m) => NativeRulesError::new_err(m),
         }
     }
+    /// Player indices from Python must be 0 or 1 (indexing panics otherwise).
+    fn pidx(p: usize) -> PyResult<usize> {
+        if p < 2 {
+            Ok(p)
+        } else {
+            Err(PyIndexError::new_err(format!("player index {p} out of range (0..2)")))
+        }
+    }
     fn decision(&self) -> PyResult<&Decision> {
         self.st().decision.as_ref().ok_or_else(|| NativeRulesError::new_err("no decision pending"))
     }
@@ -154,6 +162,9 @@ impl PyGame {
         mulligans: bool,
         match_game: i32,
     ) -> PyResult<Self> {
+        if let Some(p) = starting_player {
+            Self::pidx(p as usize)?;
+        }
         if !STEPS.contains(&start_step.as_str()) {
             return Err(PyValueError::new_err(format!("{start_step:?} is not in list")));
         }
@@ -212,8 +223,10 @@ impl PyGame {
         self.st().active
     }
     #[setter]
-    fn set_active(&mut self, v: u8) {
+    fn set_active(&mut self, v: u8) -> PyResult<()> {
+        Self::pidx(v as usize)?;
         self.mutate().active = v;
+        Ok(())
     }
     #[getter]
     fn starting_player(&self) -> u8 {
@@ -264,21 +277,25 @@ impl PyGame {
         self.g.broken.clone()
     }
 
-    fn player(&self, py: Python<'_>, p: usize) -> PyObject {
-        let pl = &self.st().players[p];
-        (pl.life, pl.library.clone(), pl.hand.clone(), pl.graveyard.clone(), pl.exile.clone(), pl.pool.iter().map(|(c, n)| (color_str(*c), *n)).collect::<Vec<_>>(), pl.drew_from_empty, pl.cards_drawn_this_turn)
-            .into_py(py)
+    fn player(&self, py: Python<'_>, p: usize) -> PyResult<PyObject> {
+        let pl = &self.st().players[Self::pidx(p)?];
+        Ok((pl.life, pl.library.clone(), pl.hand.clone(), pl.graveyard.clone(), pl.exile.clone(), pl.pool.iter().map(|(c, n)| (color_str(*c), *n)).collect::<Vec<_>>(), pl.drew_from_empty, pl.cards_drawn_this_turn)
+            .into_py(py))
     }
 
-    fn life(&self, p: usize) -> i32 {
-        self.st().players[p].life
+    fn life(&self, p: usize) -> PyResult<i32> {
+        Ok(self.st().players[Self::pidx(p)?].life)
     }
 
-    fn set_life(&mut self, p: usize, v: i32) {
+    fn set_life(&mut self, p: usize, v: i32) -> PyResult<()> {
+        let p = Self::pidx(p)?;
         self.mutate().players[p].life = v;
+        Ok(())
     }
-    fn set_cards_drawn_this_turn(&mut self, p: usize, v: i32) {
+    fn set_cards_drawn_this_turn(&mut self, p: usize, v: i32) -> PyResult<()> {
+        let p = Self::pidx(p)?;
         self.mutate().players[p].cards_drawn_this_turn = v;
+        Ok(())
     }
 
     #[getter]
@@ -385,16 +402,20 @@ impl PyGame {
     fn perm(&self, oid: u32) -> Option<CIdx> {
         self.st().perm(oid)
     }
-    fn sorcery_timing(&self, p: u8) -> bool {
-        self.st().sorcery_timing(p)
+    fn sorcery_timing(&self, p: u8) -> PyResult<bool> {
+        Self::pidx(p as usize)?;
+        Ok(self.st().sorcery_timing(p))
     }
-    fn mana_sources(&self, p: u8) -> Vec<(CIdx, usize)> {
-        self.st().mana_sources(p, &[])
+    fn mana_sources(&self, p: u8) -> PyResult<Vec<(CIdx, usize)>> {
+        Self::pidx(p as usize)?;
+        Ok(self.st().mana_sources(p, &[]))
     }
     fn sac_candidates(&self, p: u8, flt: &str) -> PyResult<Vec<CIdx>> {
+        Self::pidx(p as usize)?;
         Ok(self.st().sac_candidates(p, sac_filter(flt)?, &[]))
     }
     fn cost_reduction(&self, p: u8, c: CIdx) -> PyResult<i32> {
+        Self::pidx(p as usize)?;
         self.card(c)?;
         Ok(self.st().cost_reduction(p, c))
     }
@@ -402,6 +423,7 @@ impl PyGame {
         Ok(self.st().lethal(self.card(a)?, self.card(b)?))
     }
     fn target_candidates(&self, py: Python<'_>, kind: &str, controller: u8) -> PyResult<Vec<PyObject>> {
+        Self::pidx(controller as usize)?;
         let k = TK::parse(kind).map_err(PyValueError::new_err)?;
         Ok(self.st().target_candidates(k, controller, None).into_iter().map(|r| ref_to_py(py, r)).collect())
     }
@@ -410,6 +432,7 @@ impl PyGame {
 
     #[pyo3(signature = (name, player, zone, tapped=false, sick=false, counters=0))]
     fn add_card(&mut self, name: &str, player: u8, zone: &str, tapped: bool, sick: bool, counters: i32) -> PyResult<CIdx> {
+        Self::pidx(player as usize)?;
         let z = Zone::parse(zone).filter(|z| *z != Zone::Stack).ok_or_else(|| PyValueError::new_err(format!("bad zone {zone:?}")))?;
         self.mutate().add_card(name, player, z, tapped, sick, counters).map_err(PyValueError::new_err)
     }
@@ -429,7 +452,7 @@ impl PyGame {
             "counters" => card.counters = value.extract()?,
             "skip_untap" => card.skip_untap = value.extract()?,
             "attached_to" => card.attached_to = value.extract()?,
-            "controller" => card.controller = value.extract()?,
+            "controller" => card.controller = Self::pidx(value.extract::<usize>()?)? as u8,
             _ => return Err(PyValueError::new_err(format!("card field {field:?} is not settable"))),
         }
         Ok(())
@@ -497,6 +520,7 @@ impl PyGame {
 
     /// `view.observe(game, viewer)`.
     fn observe<'py>(&self, py: Python<'py>, viewer: u8) -> PyResult<Bound<'py, PyDict>> {
+        Self::pidx(viewer as usize)?;
         let st = self.st();
         let opp = 1 - viewer;
         let me = &st.players[viewer as usize];
@@ -599,25 +623,29 @@ impl PyGame {
     }
 
     /// `encode.state_features(game, viewer)`.
-    fn state_features(&self, viewer: u8) -> Vec<String> {
-        state_features(self.st(), viewer)
+    fn state_features(&self, viewer: u8) -> PyResult<Vec<String>> {
+        Self::pidx(viewer as usize)?;
+        Ok(state_features(self.st(), viewer))
     }
 
     /// `encode.entity_features(game, viewer)`: (feature lists, {object id: entity index}).
-    fn entity_features(&self, viewer: u8) -> (Vec<Vec<String>>, std::collections::HashMap<u32, usize>) {
+    fn entity_features(&self, viewer: u8) -> PyResult<(Vec<Vec<String>>, std::collections::HashMap<u32, usize>)> {
+        Self::pidx(viewer as usize)?;
         let mut o = crate::features::EntityStrings::default();
         let ids = crate::features::entity_features_into(self.st(), viewer, &mut o);
-        (o.0, ids.into_iter().enumerate().map(|(k, id)| (id, k)).collect())
+        Ok((o.0, ids.into_iter().enumerate().map(|(k, id)| (id, k)).collect()))
     }
 
     /// `rl.features.featurize(game, player, state_dim, option_dim)`.
     fn featurize(&self, player: u8, state_dim: u32, option_dim: u32) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
+        Self::pidx(player as usize)?;
         crate::features::featurize(self.st(), player, state_dim, option_dim).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
     }
 
     /// `featurize` with the options flattened: (state, option lengths, all
     /// option tokens). Cheaper to pack into requests and samples.
     fn featurize_flat(&self, player: u8, state_dim: u32, option_dim: u32) -> PyResult<(Vec<u32>, Vec<u32>, Vec<u32>)> {
+        Self::pidx(player as usize)?;
         let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
         let lens = opts.iter().map(|o| o.len() as u32).collect();
         Ok((state, lens, opts.concat()))
@@ -707,8 +735,11 @@ macro_rules! card_get {
         #[pymethods]
         impl CardView {
             #[new]
-            fn new(game: Py<PyGame>, idx: CIdx) -> Self {
-                CardView { game, idx }
+            fn new(py: Python<'_>, game: Py<PyGame>, idx: CIdx) -> PyResult<Self> {
+                // Cards are never removed from a game, so an index valid now
+                // stays valid for the getters below.
+                game.borrow(py).card(idx)?;
+                Ok(CardView { game, idx })
             }
             #[getter]
             fn _idx(&self) -> CIdx {

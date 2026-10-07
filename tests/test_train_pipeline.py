@@ -6,6 +6,7 @@ hands the merged result over in shared memory, and the evaluation runs in a
 process of its own, merged into the metrics rows when it ends.
 `--pipeline 0` keeps the old sequential order."""
 
+import gc
 import json
 import multiprocessing as mp
 import os
@@ -31,6 +32,14 @@ NO_EVAL = ["--eval-every", "0"]
 SMALL_EVAL = ["--eval-games", "4", "--eval-bo3-matches", "2", "--bench-games", "4", "--bench-bo3-matches", "2", "--eval-workers", "1"]
 TIMING = {"rollout_s", "update_s", "wait_s", "wall_s", "decisions_per_s", "eval_s", "eval_lag"}
 IN_PROCESS = ["--collector", "thread", "--eval-process", "0"]
+
+
+@pytest.fixture(autouse=True)
+def _free_native_garbage():
+    """Earlier tests leave native games in reference cycles. The native objects
+    are unsendable, so collect them here on the main thread before a test
+    starts threads; a GC pass on one of those threads would free them there."""
+    gc.collect()
 
 
 def _cfg(run, *args):
@@ -231,8 +240,9 @@ def test_checkpoint_every_and_resume_after_a_crash(tmp_path, in_process, monkeyp
     """latest.pt only every --checkpoint-every iterations: a run killed in
     the update of iteration 5 restarts from iteration 4, drops the rows and
     the snapshots of the lost iterations, and then plays the same games as a
-    run that was never interrupted (the weights differ: torch's global rng,
-    which samples actions and shuffles minibatches, is not checkpointed)."""
+    run that was never interrupted (unpipelined also the same updates: the
+    checkpoint keeps torch's global rng, which samples actions and shuffles
+    minibatches)."""
     args = ["--pipeline", str(pipeline), "--iterations", "6", "--checkpoint-every", "2", "--snapshot-every", "3", "--max-turns", "20", *IN_PROCESS, *NO_EVAL]
     Trainer(_cfg(tmp_path / "ref", *args)).train()
     ref_games = [r.games for r in in_process if r.train]
@@ -268,7 +278,9 @@ def test_checkpoint_every_and_resume_after_a_crash(tmp_path, in_process, monkeyp
     strip = lambda r: {k: v for k, v in r.items() if k not in TIMING}  # noqa: E731
     rows, ref = _rows(run), _rows(tmp_path / "ref")
     if not pipeline:  # pipelined, the rollout thread and the update draw from torch's rng in varying order
-        assert [strip(r) for r in rows[:4]] == [strip(r) for r in ref[:4]]
+        assert [strip(r) for r in rows] == [strip(r) for r in ref]
+        wa, wb = (torch.load(r / "latest.pt", weights_only=False)["model"] for r in (run, tmp_path / "ref"))
+        assert all(torch.equal(wa[k], wb[k]) for k in wa)
     assert [(r["iteration"], r["games_total"], r["pool_size"]) for r in rows] == [(r["iteration"], r["games_total"], r["pool_size"]) for r in ref]
     assert torch.load(run / "latest.pt", weights_only=False)["iteration"] == 6
     assert sorted(p.name for p in (run / "pool").iterdir()) == ["iter_00000.pt", "iter_00003.pt", "iter_00006.pt"]
@@ -310,3 +322,44 @@ def test_amend_merges_into_the_newest_row(tmp_path):
     train_mod._amend(path, 9, {"eval/x": 0.1})
     rows = [json.loads(ln) for ln in (tmp_path / "m.jsonl").read_text().splitlines()]
     assert rows == [{"iteration": 1, "a": 1}, {"iteration": 2, "a": 2, "eval/x": 0.5}, {"iteration": 3, "a": 3}, {"iteration": 9, "eval/x": 0.1}]
+
+
+def test_resume_ignores_and_removes_partial_writes(tmp_path, in_process):
+    """A run killed inside `_save` leaves `*.tmp` files; the pool must not
+    pick one up as its newest snapshot."""
+    run = tmp_path / "run"
+    cfg = _cfg(run, "--iterations", "1", *IN_PROCESS, *NO_EVAL)
+    Trainer(cfg).train()
+    tmps = [run / "pool" / "iter_00009.pt.tmp", run / "policy" / "v00009.pt.tmp", run / "latest.pt.tmp"]
+    for f in tmps:
+        f.write_bytes(b"partial")
+    t = Trainer(cfg)
+    assert [os.path.basename(p) for p in t.pool] == ["iter_00000.pt"]
+    assert not any(f.exists() for f in tmps)
+    t.train()
+
+
+def test_resume_restores_torch_rng_and_keeps_the_ppo_lr(tmp_path, in_process):
+    run = tmp_path / "run"
+    Trainer(_cfg(run, "--iterations", "1", *IN_PROCESS, *NO_EVAL)).train()
+    ck = torch.load(run / "latest.pt", weights_only=False)
+    torch.manual_seed(12345)  # what a resumed run must not continue from
+    t = Trainer(_cfg(run, "--iterations", "1", "--ppo-lr", "1e-5", *IN_PROCESS, *NO_EVAL))
+    assert torch.equal(torch.get_rng_state(), ck["torch_rng"])
+    assert all(g["lr"] == 1e-5 for g in t.opt.param_groups)
+    t.train()
+
+
+def test_training_seeds_and_metrics(tmp_path, in_process):
+    """Training games never reuse an evaluation or benchmark seed; win_vs_pool
+    counts only games against pool snapshots, win_vs_bot those against the bot."""
+    from mtg_ml.match import game_seed
+    from mtg_ml.rl.evaluate import EVAL_SEED
+
+    run = tmp_path / "run"
+    t = Trainer(_cfg(run, "--iterations", "2", "--games-per-iter", "8", "--self-play-frac", "0", "--bot-frac", "0.5", *IN_PROCESS, *NO_EVAL))
+    t.train()
+    seeds = [g[0] for r in in_process if r.train for g in r.games]
+    assert min(seeds) >= train_mod.TRAIN_SEED_BASE > game_seed(EVAL_SEED + 10**6, 3)
+    assert all(sp.seed >= train_mod.TRAIN_SEED_BASE for it in (9, 39) for sp in t._train_specs(it))  # it=9 used to hit EVAL_SEED + s
+    assert all({"win_vs_pool", "win_vs_bot"} <= r.keys() for r in _rows(run))

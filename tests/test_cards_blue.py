@@ -189,6 +189,20 @@ def test_sleep_of_the_dead_and_escape():
     assert not gix.tapped
 
 
+def test_two_doesnt_untap_effects_do_not_stack():
+    g = scenario(p0={"battlefield": ["Gixian Infiltrator"]}, p1={"battlefield": ISLANDS(2), "hand": ["Sleep of the Dead", "Sleep of the Dead"]}, active=1)
+    for _ in range(2):
+        choose(g, "Cast Sleep of the Dead")
+        pay(g)
+        resolve_stack(g)
+    gix = find(g, "Gixian Infiltrator")
+    assert gix.tapped and gix.skip_untap == 1
+    g.active = 0
+    g._untap_step()
+    g._untap_step()
+    assert not gix.tapped
+
+
 def test_escape_needs_three_other_cards():
     g = scenario(p0={"battlefield": ["Gixian Infiltrator"]}, p1={"battlefield": ISLANDS(3), "graveyard": ["Sleep of the Dead", "Brainstorm", "Ponder"]}, active=1)
     assert not has(g, "escape")

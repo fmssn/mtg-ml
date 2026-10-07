@@ -1,9 +1,11 @@
 """Turn structure, priority, combat and state-based actions."""
 
+import pytest
 from helpers import bf, choose, find, has, labels, names, new_game, pass_priority, pay, resolve_stack, scenario
 
 from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, expand
 from mtg_ml.engine import objects as O
+from mtg_ml.engine.game import RulesError
 
 
 def attack(g: Game, *names: str) -> None:
@@ -155,6 +157,58 @@ def test_blocked_creature_whose_blocker_left_deals_no_damage():
     g.destroy(find(g, "Delver of Secrets"))
     to_step(g, "end_combat")
     assert g.players[1].life == 20
+
+
+def test_blocked_attacker_whose_blocker_left_is_not_interchangeable():
+    """Two identical attackers, one blocked by a creature that then left: they
+    still differ (blocked vs unblocked), so both are offered as targets."""
+    g = scenario(
+        p0={"battlefield": ["Gixian Infiltrator", "Gixian Infiltrator", "Swamp"], "hand": ["Toxin Analysis"]},
+        p1={"battlefield": ["Delver of Secrets"]},
+        step="declare_attackers",
+    )
+    attack(g, "Gixian Infiltrator", "Gixian Infiltrator")
+    pass_priority(g, 2)
+    choose(g, "blocks Gixian")
+    g.destroy(find(g, "Delver of Secrets"))
+    assert g.step_name == "declare_blockers" and g.decision.player == 0
+    choose(g, "Cast Toxin Analysis")
+    assert len([lb for lb in labels(g) if "Gixian Infiltrator" in lb]) == 2
+
+
+def test_stale_decision_never_reports_a_later_decisions_options():
+    g = scenario(p0={"battlefield": ["Gixian Infiltrator"]}, step="declare_attackers")
+    first = labels(g.fork())
+    d = g.decision  # nothing read from it yet
+    g.step(0)
+    assert g.decision is not None
+    try:
+        stale = [o.label for o in d.options]
+    except RulesError:
+        return
+    assert stale == first
+
+
+def test_rules_queries_on_last_known_information():
+    """Characteristics of a stack item's source after the source has left."""
+    g = scenario(p0={"battlefield": ["Krark-Clan Shaman", "Ichor Wellspring"]}, p1={"battlefield": ["Tolarian Terror"]}, auto_single=False)
+    choose(g, "Krark-Clan Shaman: 1 damage")  # sacrificing the Wellspring is forced
+    g.sacrifice(find(g, "Krark-Clan Shaman"))
+    src = next(it for it in g.stack if "Krark-Clan Shaman" in it.name).source
+    assert g.live(src) is None
+    assert g.is_creature(src) and g.power(src) == 1 and g.toughness(src) == 1
+    assert "Creature" in g.types(src) and not g.has(src, "deathtouch") and g.keywords(src) == set()
+
+
+def test_native_bad_indices_raise_python_errors(engine):
+    if engine != "native":
+        pytest.skip("native bindings only")
+    g = scenario()
+    for call in (lambda: g._g.player(2), lambda: g._g.set_life(5, 1), lambda: g._g.set_cards_drawn_this_turn(2, 0),
+                 lambda: g._g.observe(2), lambda: g._g.state_features(3), lambda: g._g.featurize(2, 64, 64),
+                 lambda: g.add_card("Swamp", 2, "hand"), lambda: g._card(10**6)):  # fmt: skip
+        with pytest.raises((IndexError, ValueError)):
+            call()
 
 
 def test_sba_life_loss_ends_game():
