@@ -15,12 +15,13 @@ feature set is versioned and travels with the model:
 |---|---|
 | 1 | everything up to 2026-10-06 |
 | 2 | + the readiness/lethal and known-position state features, the `e:skip_untap` / `e:targets` / `e:targeted_by` / `e:x` entity features and the `pv:` option previews below; from PR #23 the `self:deck:{deck}` state feature (a seat not on its usual deck) and the ` (plotted)` mark on exiled card names (`view._exiled`; set 1 uses the plain name, the view text keeps the mark) |
+| 3 | + `opp:deck:{deck}` (the opponent not on its seat's usual deck), so one network can play every matchup of a `--matchup` mix; on jund_blue identical to set 2, so `--init <set-2 checkpoint> --features 3` changes nothing there |
 
 - `PolicyNet(features=...)` stores it in `config["features"]`, only when it
   is not 1, so a config without the key (every checkpoint before this) is
   set 1.
 - Training (`--features`, default 0 = unset): a new run takes the latest
-  (2); `--init` and `--exploit` keep the source checkpoint's version (no
+  (3); `--init` and `--exploit` keep the source checkpoint's version (no
   weights depend on it, so `--features N` may move a fine-tune to another
   set, but then the parent sees inputs it never learned); a resumed run keeps
   its checkpoint's, and `--features N` on a resume overrides it and writes it

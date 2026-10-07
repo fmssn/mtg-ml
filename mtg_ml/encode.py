@@ -28,8 +28,10 @@ DEFAULT_DIM = 1 << 16
 #   1: the set up to 2026-10-06
 #   2: + lethal / readiness, known library positions, skip_untap, stack
 #      targets and X, option previews (docs/features.md)
-FEATURES = 2  # the latest; what new runs train on
-FEATURE_VERSIONS = (1, 2)
+#   3: + `opp:deck:{deck}` (the opponent not on its seat's usual deck), so
+#      one network can play several matchups; identical to 2 on jund_blue
+FEATURES = 3  # the latest; what new runs train on
+FEATURE_VERSIONS = (1, 2, 3)
 
 
 def check_features(features: int) -> int:
@@ -92,6 +94,9 @@ def state_features(game, viewer: int, features: int = FEATURES) -> list[str]:
     deck = game.deck_names[viewer]
     if deck is not None and features >= 2:  # not the seat's usual deck (match.deck_names)
         f.append(f"self:deck:{deck}")
+    opp_deck = game.deck_names[1 - viewer]
+    if opp_deck is not None and features >= 3:
+        f.append(f"opp:deck:{opp_deck}")
     f += _thermo("turn", o["turn"], TURN_STEPS)
     if o["lands_played"] is not None:
         f.append(f"land_played:{o['lands_played'] > 0}")

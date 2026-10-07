@@ -116,7 +116,7 @@ import torch
 
 from ..backend import ENV_VAR, engine_name
 from ..encode import FEATURE_VERSIONS, FEATURES
-from ..match import matchup_decks
+from ..match import matchup_decks, parse_matchups
 from .collect import PoolProcess, PoolThread, cpu_layout, release
 from .evaluate import DECK_KEYS, EVAL_BLOCKS, evaluate_policy
 from .model import PolicyNet, load_partial
@@ -194,7 +194,7 @@ class TrainConfig:
     ladder_ratings: str = ""  # JSON with the rungs' Elo (`evaluate ladder`); "" = <run>/ladder.json, rated by the first evaluation if missing
     ladder_greedy: int = 0  # 1: ladder games (and the rating round robin) with greedy play
     max_turns: int = 100
-    matchup: str = "jund_blue"  # match.MATCHUPS: the deck in each seat
+    matchup: str = "jund_blue"  # match.MATCHUPS: the deck in each seat; a mix "a:w,b:w,..." draws each game's matchup by weight (default 1), the first is the primary (full evaluation; the others: benchmark of both seats)
     auto_mana: int = 0  # 1: pay non-strategic mana costs automatically (colour-preserving payer; docs/action-decomposition.md)
     auto_pass: int = 0  # 1: auto-pass priority when the only other options are side-effect-free sacrifice-for-mana abilities
     seed: int = 0
@@ -262,7 +262,9 @@ class Trainer:
                 raise FileNotFoundError(f"ladder file {path} does not exist")
         self.ladder_ratings = cfg.ladder_ratings or os.path.join(cfg.run, "ladder.json")
         self.evaluating = bool(cfg.eval_every or cfg.eval_every_games)
+        self.matchups = parse_matchups(cfg.matchup)
         self.exploit_seat = exploit_seat(cfg)  # also validates --matchup
+        self.spec_matchup: dict[int, str] = {}  # seed -> matchup of the training games in flight (a mix only)
         torch.manual_seed(cfg.seed)
         self.rng = random.Random(cfg.seed)
         ck = torch.load(self.latest, map_location=cfg.device, weights_only=False) if os.path.exists(self.latest) else None
@@ -482,8 +484,23 @@ class Trainer:
                         opp = self.rng.choices(self.pool, weights)[0] if weights else self.rng.choice(self.pool)
                     seats = (LEARNER, opp) if self.rng.random() < 0.5 else (opp, LEARNER)
             game_no = 2 if self.rng.random() < c.postboard_frac else 1
-            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no, matchup=c.matchup))
+            matchup = self.matchups[0][0]
+            if len(self.matchups) > 1:
+                matchup = self.rng.choices([m for m, _ in self.matchups], [w for _, w in self.matchups])[0]
+                self.spec_matchup[base + k] = matchup
+            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no, matchup=matchup))
         return specs
+
+    def _matchup_stats(self, games: list) -> dict:
+        """A mix: each matchup's share of the games and seat 0's self-play win rate on it."""
+        by = {m: [] for m, _ in self.matchups}
+        for g in games:
+            by[self.spec_matchup.pop(g[-1])].append(g)
+        out = {}
+        for m, gs in by.items():
+            out[f"matchup_share/{m}"] = len(gs) / max(len(games), 1)
+            out[f"seat0_wins_selfplay/{m}"] = _rate([g for g in gs if g[0] == (LEARNER, LEARNER)], 0)
+        return out
 
     def _pfsp_weights(self) -> list[float] | None:
         """Prioritised fictitious self-play: pool snapshot i weighted (1 -
@@ -523,7 +540,7 @@ class Trainer:
         c = self.cfg
         return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference,
                 self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass),
-                c.matchup, self.exploit_seat, os.path.abspath(c.exploit) if c.exploit else "", self.pool_features)
+                self.matchups[0][0], self.exploit_seat, os.path.abspath(c.exploit) if c.exploit else "", self.pool_features, tuple(m for m, _ in self.matchups[1:]))
 
     def _request_eval(self) -> dict:
         """Evaluate the newest policy file. Inline (`--eval-process 0`): on the
@@ -630,6 +647,8 @@ class Trainer:
                     "decisions_per_s": round(len(data.actions) / max(roll.rollout_s, 1e-9)),
                     **{k: round(v, 4) if isinstance(v, float) else v for k, v in stats.items()},
                 }
+                if len(self.matchups) > 1:
+                    row.update(self._matchup_stats(data.games))
                 if c.exploit:  # every training game is against the frozen main policy
                     row["win_vs_main"] = row["win_vs_pool"]
                 if self._eval_due(len(data.games)):
@@ -769,9 +788,12 @@ CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "
 
 def exploit_seat(cfg: TrainConfig) -> int | None:
     """The learner's seat in exploiter mode (where --exploit-deck sits in --matchup), else None."""
-    decks = [DECK_KEYS[d] for d in matchup_decks(cfg.matchup)]
+    matchups = parse_matchups(cfg.matchup)
     if not cfg.exploit:
         return None
+    if len(matchups) > 1:
+        raise ValueError(f"exploiter mode plays one matchup, not the mix {cfg.matchup!r}")
+    decks = [DECK_KEYS[d] for d in matchup_decks(matchups[0][0])]
     if cfg.exploit_deck not in decks:
         raise ValueError(f"--exploit-deck {cfg.exploit_deck} is not in --matchup {cfg.matchup} ({', '.join(decks)})")
     return decks.index(cfg.exploit_deck)

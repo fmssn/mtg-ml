@@ -21,6 +21,7 @@ Flags of `python -m mtg_ml.rl.train` added for the follow-ups in `docs/next-acti
 ## Game mix
 
 - `--postboard-frac 0.2` (item 13): the flag already existed and its default is still 0.5.
+- `--matchup a[:w],b[:w],...`: a matchup mix. Each training game draws its matchup by weight (default 1; `match.MATCHUPS`: `jund_blue`, `jund_madness`, `blue_madness`), so one network learns all three decks. The first matchup gets the full evaluation (keys unchanged); every other one a benchmark of each seat against the other deck's bot (`bench/<matchup>/<deck>_vs_bot*`). Logged per matchup: `matchup_share/<m>`, `seat0_wins_selfplay/<m>`. Needs feature set 3 (`opp:deck:`), else seat 0 cannot tell Blue from Red: pass `--features 3` with `--init` from an older checkpoint. Not with exploiter mode.
 - `--bot-seat both|jund` (item 15): `jund` makes every bot game the benchmark matchup, with the learner as Jund (seat 0) against the blue bot. Bot games keep coming out of the pool share (`--bot-frac`), and only the learner's seat is recorded. Suggested: `--bot-frac 0.25 --bot-seat jund`.
 - `--pool-sampling uniform|pfsp`, `--pfsp-power 2`, `--pfsp-ema 0.05` (item 14): the pool games that do not go to the newest snapshot (`1 − pool_recent_frac`) pick snapshot i with weight (1 − p_i) ** power. Here p_i is a running estimate of the learner's win rate against snapshot i. It starts at 0.5, each game moves it `pfsp_ema` toward the result (1 win, 0.5 draw, 0 loss), and it is stored in `latest.pt`. If every weight is 0, the pick falls back to uniform.
 
