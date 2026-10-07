@@ -74,6 +74,9 @@ def state_features(game, viewer: int) -> list[str]:
         return game.state_features(viewer)
     o = observe(game, viewer)
     f = [f"step:{o['step']}", f"active:{o['active']}", f"postboard:{o['match_game'] > 1}"]
+    deck = game.deck_names[viewer]
+    if deck is not None:  # not the seat's usual deck (match.deck_names)
+        f.append(f"self:deck:{deck}")
     f += _thermo("turn", o["turn"], TURN_STEPS)
     if o["lands_played"] is not None:
         f.append(f"land_played:{o['lands_played'] > 0}")

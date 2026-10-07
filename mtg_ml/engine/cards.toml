@@ -12,12 +12,17 @@
 #   indicator), power, toughness, keywords, ward, targets (list of target
 #   kinds), effect (list of ops), additional_sac, cost_reduction, flashback,
 #   escape, escape_exile, bestow, enters_tapped, etb_x_counters, back (name
-#   of a [[face]]), modes, abilities, triggers.
+#   of a [[face]]), modes, abilities, triggers, madness, plot, overload and
+#   overload_effect, additional_discard, alternative_cost and flashback_cost
+#   ({ sacrifice = "mountain", n = N }: lands sacrificed instead of mana).
 # Abilities: name (required), cost, tap, sac_self, sac_other, discard_self,
-#   zone ("battlefield" | "hand"), sorcery_speed, mana (list of colours:
-#   a mana ability), targets, effect.
+#   discard_other, exile_self, x_target_mv (X = the target's mana value),
+#   x_reveal ("red": X red cards revealed from hand), zone ("battlefield" |
+#   "hand"), sorcery_speed, mana (list of colours: a mana ability), targets,
+#   effect.
 # Triggers: name (required), event (etb | to_graveyard_from_battlefield |
-#   cast | you_sacrifice_another | your_upkeep), effect, condition.
+#   cast | you_sacrifice_another | your_upkeep | you_cast | third_draw),
+#   effect, condition.
 
 # ---------------------------------------------------------------------------
 # Lands
@@ -365,6 +370,170 @@ toughness = 1
 triggers = [{ name = "+1/+1 counter", event = "you_sacrifice_another", effect = [{ op = "counter_on_source" }] }]
 
 # ---------------------------------------------------------------------------
+# Red Madness
+# ---------------------------------------------------------------------------
+
+[[card]]
+name = "Guttersnipe"
+cost = "{2}{R}"
+types = "Creature"
+subtypes = "Goblin Shaman"
+text = "Whenever you cast an instant or sorcery spell, this creature deals 2 damage to each opponent."
+power = 2
+toughness = 2
+triggers = [{ name = "2 damage to each opponent", event = "you_cast", condition = { spell = "instant_or_sorcery" }, effect = [{ op = "damage_each_opponent", n = 2 }] }]
+
+[[card]]
+name = "Kessig Flamebreather"
+cost = "{1}{R}"
+types = "Creature"
+subtypes = "Human Shaman"
+text = "Whenever you cast a noncreature spell, this creature deals 1 damage to each opponent."
+power = 1
+toughness = 3
+triggers = [{ name = "1 damage to each opponent", event = "you_cast", condition = { spell = "noncreature" }, effect = [{ op = "damage_each_opponent", n = 1 }] }]
+
+[[card]]
+name = "Voldaren Epicure"
+cost = "{R}"
+types = "Creature"
+subtypes = "Vampire"
+text = "When this creature enters, it deals 1 damage to each opponent. Create a Blood token."
+power = 1
+toughness = 1
+triggers = [{ name = "1 damage to each opponent, create a Blood token", event = "etb", effect = [{ op = "damage_each_opponent", n = 1 }, { op = "create_token", token = "Blood", n = 1 }] }]
+
+[[card]]
+name = "Sneaky Snacker"
+cost = "{U}{B}"
+types = "Creature"
+subtypes = "Faerie Rogue"
+text = "Flying. When you draw your third card in a turn, return this card from your graveyard to the battlefield tapped."
+power = 2
+toughness = 1
+keywords = ["flying"]
+triggers = [{ name = "return to the battlefield tapped", event = "third_draw", effect = [{ op = "return_to_battlefield", tapped = true }] }]
+
+[[card]]
+name = "Lightning Bolt"
+cost = "{R}"
+types = "Instant"
+text = "Lightning Bolt deals 3 damage to any target."
+targets = ["any"]
+effect = [{ op = "damage_target", n = 3 }]
+
+[[card]]
+name = "Lava Dart"
+cost = "{R}"
+types = "Instant"
+text = "Lava Dart deals 1 damage to any target. Flashback - Sacrifice a Mountain."
+targets = ["any"]
+effect = [{ op = "damage_target", n = 1 }]
+flashback_cost = { sacrifice = "mountain", n = 1 }
+
+[[card]]
+name = "Fireblast"
+cost = "{4}{R}{R}"
+types = "Instant"
+text = "You may sacrifice two Mountains rather than pay this spell's mana cost. Fireblast deals 4 damage to any target."
+targets = ["any"]
+effect = [{ op = "damage_target", n = 4 }]
+alternative_cost = { sacrifice = "mountain", n = 2 }
+
+[[card]]
+name = "Fiery Temper"
+cost = "{1}{R}{R}"
+types = "Instant"
+text = "Fiery Temper deals 3 damage to any target. Madness {R}."
+targets = ["any"]
+effect = [{ op = "damage_target", n = 3 }]
+madness = "{R}"
+
+[[card]]
+name = "Faithless Looting"
+cost = "{R}"
+types = "Sorcery"
+text = "Draw two cards, then discard two cards. Flashback {2}{R}."
+effect = [{ op = "draw", n = 2 }, { op = "discard", n = 2 }]
+flashback = "{2}{R}"
+
+[[card]]
+name = "Highway Robbery"
+cost = "{1}{R}"
+types = "Sorcery"
+text = "You may discard a card or sacrifice a land. If you do, draw two cards. Plot {1}{R}."
+effect = [{ op = "custom", fn = "highway_robbery" }]
+plot = "{1}{R}"
+
+[[card]]
+name = "Grab the Prize"
+cost = "{1}{R}"
+types = "Sorcery"
+text = "As an additional cost, discard a card. Draw two cards. If the discarded card wasn't a land card, 2 damage to each opponent."
+additional_discard = true
+effect = [{ op = "draw", n = 2 }, { op = "damage_each_opponent", n = 2, if_discarded_nonland = true }]
+
+# Red Madness sideboard
+
+[[card]]
+name = "Gorilla Shaman"
+cost = "{R}"
+types = "Creature"
+subtypes = "Ape Shaman"
+text = "{X}{X}{1}: Destroy target noncreature artifact with mana value X."
+power = 1
+toughness = 1
+abilities = [{ name = "destroy target noncreature artifact", cost = "{1}", x_target_mv = 2, targets = ["noncreature_artifact"], effect = [{ op = "destroy_target", mv_is_x = true }] }]
+
+[[card]]
+name = "Martyr of Ashes"
+cost = "{R}"
+types = "Creature"
+subtypes = "Human Shaman"
+text = "{2}, Reveal X red cards from your hand, Sacrifice this creature: X damage to each creature without flying."
+power = 1
+toughness = 1
+abilities = [{ name = "X damage to each creature without flying", cost = "{2}", sac_self = true, x_reveal = "red", effect = [{ op = "damage_each_creature", x = true, without = "flying" }] }]
+
+[[card]]
+name = "Pyroblast"
+cost = "{R}"
+types = "Instant"
+text = "Choose one - Counter target spell if it's blue; or destroy target permanent if it's blue."
+modes = [
+    { name = "counter", targets = ["spell"], effect = [{ op = "counter_target", if_color = "U" }] },
+    { name = "destroy", targets = ["permanent"], effect = [{ op = "destroy_target", if_color = "U" }] },
+]
+
+[[card]]
+name = "Searing Blaze"
+cost = "{R}{R}"
+types = "Instant"
+text = "1 damage to target player and 1 damage to target creature that player controls. Landfall - 3 damage to each instead."
+targets = ["player_with_creature", "creature_of_target_player"]
+effect = [{ op = "damage_target", index = 0, n = 1, n_landfall = 3 }, { op = "damage_target", index = 1, n = 1, n_landfall = 3 }]
+
+[[card]]
+name = "Electrickery"
+cost = "{R}"
+types = "Instant"
+text = "1 damage to target creature you don't control. Overload {1}{R}."
+targets = ["creature_you_dont_control"]
+effect = [{ op = "damage_target", n = 1 }]
+overload = "{1}{R}"
+overload_effect = [{ op = "damage_each_creature", n = 1, whose = "opponent" }]
+
+[[card]]
+name = "Relic of Progenitus"
+cost = "{1}"
+types = "Artifact"
+text = "{T}: Target player exiles a card from their graveyard. {1}, Exile this artifact: Exile all graveyards. Draw a card."
+abilities = [
+    { name = "target player exiles a card from their graveyard", tap = true, targets = ["player"], effect = [{ op = "custom", fn = "relic_exile_one" }] },
+    { name = "exile all graveyards, draw a card", cost = "{1}", exile_self = true, effect = [{ op = "exile_all_graveyards" }, { op = "draw", n = 1 }] },
+]
+
+# ---------------------------------------------------------------------------
 # Sideboards (lean, matchup-relevant; see decks.py)
 # ---------------------------------------------------------------------------
 
@@ -462,3 +631,10 @@ types = "Artifact"
 subtypes = "Map"
 text = "{1}, {T}, Sacrifice: target creature you control explores. Sorcery speed."
 abilities = [{ name = "explore", cost = "{1}", tap = true, sac_self = true, sorcery_speed = true, targets = ["creature_you_control"], effect = [{ op = "explore_target" }] }]
+
+[[token]]
+name = "Blood"
+types = "Artifact"
+subtypes = "Blood"
+text = "{1}, {T}, Discard a card, Sacrifice this token: Draw a card."
+abilities = [{ name = "draw a card", cost = "{1}", tap = true, discard_other = true, sac_self = true, effect = [{ op = "draw", n = 1 }] }]
