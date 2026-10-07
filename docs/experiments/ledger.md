@@ -6,6 +6,7 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
+| 20261007-red-madness-1m | new deck: Red Madness learner vs frozen r1-control Jund, warm-started from it | 1M | (vs Jund bot) 89.9% | 92.6% | | new-deck baseline³ |
 | 20261007-r2-* | round 2: features, bot games as Jund, PFSP, auto mana | 1M each | running | | | |
 | 20261007-r1-lranneal | lr 3e-4 → 3e-5 linear over 1M games | 8.4M + 1M | **72.1%** | 73.1% | 135 ± 13 (at +0.85M) | **adopt** |
 | 20261007-r1-control | none (fixed engine, value clamp) | 8.4M + 1M | 65.9% | 71.9% | 99 ± 13 (at +0.85M) | control |
@@ -16,7 +17,28 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | 20261006-overnight-selfplay | open-ended self-play + pool | 8.4M | 64.6% | 70.9% | ~79 | parent |
 | 20261006-overnight-bot10 | + 10% games vs scripted bots | 8.4M | 65.6% | | | no effect |
 
-Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue).
+Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows.
+
+---
+
+## 20261007-red-madness-1m · a third deck against a frozen Jund
+
+- **Question**: can a new deck (Red Madness, `docs/red-madness.md`) be learned in 1M games against a fixed opponent, and what do its greedy games show about the engine and the training setup.
+- **Parent / opponent**: `20261007-r1-control` policy (Jund + Blue network, never trained against Red); the learner starts from its weights, the opponent stays frozen. (`r1-lranneal`, the stronger Jund, was not yet adopted when this launched.)
+- **Code**: `claude/mono-red-burn-pauper-627e45` @ 09020f2 (PR fmssn/mtg-ml#23) with this branch's original flags `--matchup jund_madness --learner-seat 1 --opponent J --init-from J`, which the merge renamed to `--matchup jund_madness --exploit J --exploit-deck red`. Native engine.
+- **Flags**: `--self-play-frac 0 --bot-frac 0 --engine native --device cuda --inference server --server-device cuda:1 --workers 22 --games-per-iter 2048 --total-games 1000000 --eval-every-games 100000 --bench-games 1000 --bench-greedy-games 1000 --eval-games 200`, defaults otherwise (postboard 0.5, shaping 0.2 annealed over 100 iterations). 489 iterations, 1.4 s each, ~15 minutes on cores 32-63 and two H100s.
+
+| games | win vs frozen Jund (training, sampled, g1+g2) | vs frozen Jund (eval, g1) | vs Jund bot sampled / greedy |
+|---|---|---|---|
+| 0 | 0.8% | | |
+| 0.1M | 64.6% | 68.5% | 75.7% / 82.6% |
+| 0.5M | 77.2% | 83.5% | 84.7% / 89.8% |
+| 1.0M | 78.7% | 88.5% | 89.9% / 92.6% |
+
+- **Controls**: the frozen Jund scores only 41% (greedy, 1,000 games) against the scripted Red bot, and the Jund bot 21% against it, so the opponent is weak in this matchup; the learner (88.5% vs the same Jund) is well beyond the scripted bot (59%).
+- **Review** (20 greedy games + statistics over 200 more): no engine mistakes found. Most of the win rate is the frozen Jund not knowing Red's threats; Red's own leaks are madness discards without {R} open (a third of Fiery Temper discards are lost), plot never used (0 / 366), greedy 1-land keeps, burn almost never aimed at creatures, sideboard cards near-unused. Details: `docs/red-madness-review.md`.
+- **Verdict**: baseline for the new deck; the setup (one frozen opponent that never saw Red) inflates the number. Next: train both sides (self-play over the jund_madness matchup), see the review.
+- **Archive**: `20261007-red-madness-1m` (evals.txt has the numbers above).
 
 ---
 
