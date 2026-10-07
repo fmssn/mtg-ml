@@ -37,11 +37,11 @@ Rows in `engine/sideboard_plans.toml` (format: [sideboarding.md](sideboarding.md
 | deck vs opponent | in | out |
 |---|---|---|
 | Affinity vs Jund | 2 Hydroblast, 2 Extract a Confession, 1 Krark-Clan Shaman | 2 Kenku Artificer, 1 Sewer-veillance Cam, 1 Makeshift Munitions, 1 Toxin Analysis |
-| Jund vs Affinity | 2 Red Elemental Blast, 2 Duress | 2 Cleansing Wildfire, 2 Lembas |
+| Jund vs Affinity | 2 Troublemaker Ouphe, 2 Breath Weapon, 1 Ancient Grudge, 2 Pyroblast | 2 Lembas, 2 Gixian Infiltrator, 2 Eviscerator's Insight, 1 Nyxborn Hydra |
 | Affinity vs Blue | 4 Pyroblast, 1 Red Elemental Blast | 2 Toxin Analysis, 2 Kenku Artificer, 1 Makeshift Munitions |
-| Blue vs Affinity | 2 Steel Sabotage, 2 Dispel, 2 Blue Elemental Blast | 2 Sleep of the Dead, 3 Force Spike, 1 Plunder the Trollshaws |
+| Blue vs Affinity | 4 Annul, 2 Steel Sabotage, 2 Gut Shot | 3 Force Spike, 2 Sleep of the Dead, 1 Plunder the Trollshaws, 2 Ponder |
 | Affinity vs Red | 4 Hydroblast, 2 Blue Elemental Blast, 1 Unexpected Fangs, 1 Krark-Clan Shaman | 2 Kenku Artificer, 3 Nihil Spellbomb, 1 Sewer-veillance Cam, 1 Makeshift Munitions, 1 Blood Fountain |
-| Red vs Affinity | 2 Gorilla Shaman, 2 Electrickery, 2 Pyroblast | 2 Highway Robbery, 2 Grab the Prize, 2 Sneaky Snacker |
+| Red vs Affinity | 2 End the Festivities, 2 Cast into the Fire, 2 Pyroblast | 2 Highway Robbery, 2 Grab the Prize, 2 Sneaky Snacker |
 
 Rows for Elves and Tron (both directions) are at the end of the file,
 commented out until those decks are in `decks.DECKS`.
@@ -68,6 +68,24 @@ Blood Fountain chooses its two creature cards on resolution rather than
 targeting them (differs only if the graveyard changes in response), and Kenku
 Artificer's Homunculus subtype is not tracked.
 
+## Card shapes (feature set 5)
+
+New spec fields are classified in `SHAPE_*_FIELDS` in both engines, with
+these shape tokens (new ops and the `leaves_battlefield` event get their
+`e:*:op:` / `e:trig:` tokens automatically):
+
+| field | tokens |
+|---|---|
+| card `collect_evidence` | `e:cost:collect_evidence` |
+| trigger `up_to` | `e:trig:up_to` |
+| trigger `targets` (from #37) | `e:trig:target:<kind>`, `e:target:<kind>` |
+| card `bargain` (from #37) | `e:cost:bargain` |
+| phyrexian mana in `cost` (from #37) | `e:cost:phyrexian` |
+| op params `n_metalcraft`, `sacrificed_mv`, `greatest_power_if_evidence` | `<prefix><op>:<param>` |
+
+Trigger conditions with non-string values (`{ bargained = true }`) render as
+`e:trig:cond:bargained:true` in both engines.
+
 ## Bot
 
 `bots/affinity.py` (a `JundBot` subclass, which already knows the shared
@@ -80,15 +98,15 @@ life or less; Reckoner's Bargain sacrifices spare artifacts.
 
 200 bot-vs-bot games per matchup, Affinity in seat 1, starting player
 alternating, seeds 1000-1199, max 60 turns; identical results on the Python
-and Rust engines (the project owner's 8-core Mac: about 25 s for all 1200
-games on Rust, 40 to 80 s on Python depending on load). Game 2 uses both
-decks' sideboard plans. Q3 is the Grixis Affinity match win rate in the Q3 2026 data (Jund Midrange stands in for Jund
-Wildfire).
+and Rust engines (the project owner's 8-core Mac: 8 to 25 s for all 1200
+games on Rust, 23 to 80 s on Python, depending on load). Game 2 uses both
+decks' sideboard plans. Q3 is the Grixis Affinity match win rate in the
+Q3 2026 data (Jund Midrange stands in for Jund Wildfire).
 
 | matchup | Affinity wins, game 1 | game 2 | Q3 (matches) |
 |---|---|---|---|
-| vs Jund Wildfire | 59.0% | 58.0% | 37.7% vs Jund Midrange (n=102) |
-| vs Mono Blue Terror | 46.5% | 54.0% | 49.5% (n=103) |
+| vs Jund Wildfire | 59.0% | 63.5% | 37.7% vs Jund Midrange (n=102) |
+| vs Mono Blue Terror | 46.5% | 46.5% | 49.5% (n=103) |
 | vs Red Madness | 57.0% | 62.5% | 62.4% (n=178) |
 
 Blue and Red land close to the real data. Jund does about 20 points worse
@@ -96,8 +114,11 @@ here than Jund Midrange does in the data. Seen in the traces: the Jund bot
 stacks five Makeshift Munitions activations (sacrificing three lands) on a
 1/1 that the first one kills, and Cast Down cannot answer an animated,
 indestructible Bridge. Whether the gap is the bots or the archetype
-difference is open. Games end by damage (4 of 200 Jund games by decking,
-after board stalls); none hit the turn limit.
+difference is open. Jund's artifact hate does not help its bot in game 2
+(Affinity goes from 59.0% to 63.5%): the Jund bot's rules for Troublemaker
+Ouphe, Breath Weapon and Ancient Grudge come from #37 and are worth a look.
+Games end by damage (4 of 200 game-1 Jund games by decking, after board
+stalls); none hit the turn limit.
 
 ## Traces read
 

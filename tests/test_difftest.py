@@ -122,14 +122,16 @@ SET4_TOKENS = (
 def test_entity_and_preview_strings_identical():
     """`featurize` hashes are compared in lockstep; this compares the strings
     behind them (state, entities, option previews) so a mismatch is
-    readable, in sets 3 and up, over all three matchups. Entities of both
+    readable, in sets 3 and up, over every matchup. Entities of both
     seats (set 5 adds the viewer's own hand) and the ids options point at."""
     from mtg_ml.encode import FEATURE_VERSIONS, entity_features, option_object_ids, option_preview, state_features
     from mtg_ml.match import MATCHUPS, game_args
 
+    first = ("blue_madness", "jund_blue", "jund_madness")  # the token coverage below was found on these
+    later = sorted(set(MATCHUPS) - set(first))
+    runs = [(seed, first[seed % 3]) for seed in range(12)] + [(12 + i, later[i % len(later)]) for i in range(2 * len(later))]
     seen = set()
-    for seed in range(12):
-        matchup = sorted(MATCHUPS)[seed % 3]
+    for seed, matchup in runs:
         args = game_args(1 + seed // 3 % 2, matchup)
         py, nat = (game_class(e)(seed=seed, max_turns=30, **args) for e in ("python", "native"))
         r = random.Random(seed)
