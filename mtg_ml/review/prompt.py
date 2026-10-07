@@ -12,6 +12,7 @@ CAUSES = {
     "undertraining": "the better option was offered, the policy put low probability on it and high probability on the worse one, and nothing in the reward explains it: a situation the policy has not learned (rare board, long-horizon payoff, a combo).",
     "sampling_noise": "the policy's most likely option was fine, but a low-probability option was sampled (the game was played sampling from the policy). Not a training problem unless it recurs.",
     "observation_gap": "a good decision needs information the policy probably does not observe or cannot remember (exact library order, a revealed card many turns ago). Low confidence unless the pattern is clear.",
+    "architecture": "the decision needs something the network's structure cannot represent: a relation between two objects (which creature blocks which attacker, what an aura is attached to, which of two same-name creatures is which) or exact arithmetic over many objects. Use it only with the policy observation sheet, and say which relation or quantity is missing.",
     "unclear": "a misplay whose cause you cannot attribute.",
 }
 
@@ -50,14 +51,31 @@ Reply with only a JSON object, no prose around it:
 }}"""
 
 
+# What the policy observes (feature sets 2-3, entity trunk). Shown with
+# --focus setup so the reviewer can name a missing feature, not guess one.
+OBSERVES = """# WHAT THE POLICY OBSERVES (feature set 2-3, entity trunk)
+The network never sees card text. It knows card names only from experience. It sees:
+- Global state: step, active player, turn, each side's life, library size (bucketed), mulligans, graveyard and exile (card names with counts), mana pool, known library cards with their position, its own hand (names with counts), the opponent's hand size and any of the opponent's cards it has seen, per-side counts of permanent types (tapped and untapped), total board power per side, stack size. Per side, combat readiness: the power that could attack right now (untapped creatures that can attack), the part of it no untapped enemy creature can block (by flying/reach only), the number of untapped potential blockers, `lethal_on_board` / `evasive_lethal_on_board` (that power >= the other side's life), untapped mana sources. Deck markers.
+  Note: the readiness features count only creatures that could still attack, so during the opponent's combat (attackers tapped) they no longer show the incoming damage.
+- One entity per permanent and per stack item, encoded independently: name, controller, types, keywords, tapped, summoning-sick, attacking, token, `blocking` (a flag only: NOT which attacker), `attached` (a flag only: NOT to what), power / toughness / damage / counters, skip-untap, who targets it with what; stack items also have position, kind, X and what kind of object they target.
+  Nothing marks an attacker as blocked or unblocked, or says how much combat damage will get through.
+- Each option: the decision kind and the option's key, written with card NAMES (e.g. `declare_blocker|block|Eldrazi Spawn|Cryptic Serpent`), a pointer to the entities its label names (so two same-name objects are told apart only by their entity features), and engine previews: creatures a sweeper would kill per side, whether damage is lethal to a target, ward on a target and whether it can be paid, mana and colours left after paying a cost.
+- Memory: a GRU carries state from one of the player's decisions to the next. The actions since its previous decision (its own, and the opponent's public ones, as option keys) are fed in as events (at most 256 tokens).
+- Network: the entity vectors are summed into the state. In this checkpoint there is no attention between entities, so any relation between two objects has to come from features, option pointers or memory.
+"""
+
+FOCUS_SETUP = """# FOCUS
+This review is for finding flaws in the SETUP before looking at play quality: engine bugs, masking gaps, observation gaps (information the policy does not get, judged against the sheet above) and architecture limits. Report misplays mainly when they point to one of these. A misplay explained by sampling or plain undertraining is only worth a finding when it is severe or recurs. For every observation_gap or architecture finding, name the exact missing feature or relation and the decision kind it affects."""
+
+
 def system_prompt() -> str:
     return SYSTEM.format(causes="\n".join(f"- {k}: {v}" for k, v in CAUSES.items()))
 
 
-def user_prompt(transcript: str, part: tuple[int, int] | None = None, of: int = 1) -> str:
-    scope = ""
+def user_prompt(transcript: str, part: tuple[int, int] | None = None, of: int = 1, focus: str = "all") -> str:
+    scope = OBSERVES + "\n" + FOCUS_SETUP + "\n\n" if focus == "setup" else ""
     if part is not None and of > 1:
-        scope = f"This is the part of the game from turn {part[0]} to turn {part[1]} ({of} parts in all); review only decisions in it.\n\n"
+        scope += f"This is the part of the game from turn {part[0]} to turn {part[1]} ({of} parts in all); review only decisions in it.\n\n"
     return scope + transcript
 
 

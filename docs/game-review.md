@@ -29,6 +29,10 @@ python -m mtg_ml.review report reviews/games/*.json --backend deepseek > reviews
 - **Long games** are split by turns to fit the backend's context (`MAX_CHARS`). The system prompt is the same for every game, so it is served from the prompt cache.
 - **Verify.** The game is rebuilt from its recorded constructor arguments and replayed to the decision. The recorded agents replay the prefix too, so GRU memory matches the real game. For each of `n` determinizations (everything the deciding seat could not see is re-dealt), both the chosen option and the claimed better one are played out with the same seeds. The verdict uses the mean paired difference in the seat's result and its standard error: `confirmed` (> 2 se and >= 0.05), `refuted`, or `inconclusive`. Rollouts use the same policy, so "better" means better for this policy's own continuation. On the Python engine, 16 playouts take about 2 s. Engine-bug and masking-gap findings get no rollout; they need a rules test (`docs/adding-cards.md`).
 
+## Setup focus
+
+`review --focus setup` adds two things to each prompt. The first is a sheet of what the policy observes (feature sets 2-3, entity trunk). It lists what is missing: which attacker a blocker blocks, what an aura is attached to, and incoming combat damage. The second is an instruction to look for engine, mask, observation and architecture flaws before judging play quality. It also enables the `architecture` cause: a decision that needs a relation between objects, which this network (entities encoded independently and summed, no attention) cannot represent. Run it on greedy games, so sampling noise does not crowd out the setup findings.
+
 ## Calibration: seeded faults
 
 The reviewer can't be trusted until its recall on faults you planted is known:

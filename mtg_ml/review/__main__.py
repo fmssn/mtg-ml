@@ -42,7 +42,7 @@ def _record(args, fault_specs: list[str], tag: str = "") -> list[pathlib.Path]:
     return paths
 
 
-def review_file(path: pathlib.Path, backend: str, model: str | None = None, effort: str = "high") -> dict | None:
+def review_file(path: pathlib.Path, backend: str, model: str | None = None, effort: str = "high", focus: str = "all") -> dict | None:
     from . import llm
 
     rep = json.loads(path.read_text())
@@ -55,13 +55,13 @@ def review_file(path: pathlib.Path, backend: str, model: str | None = None, effo
     else:
         chunks = turn_chunks(rep, MAX_CHARS[backend])
         if backend == "prompt":
-            text = user_prompt(transcript(rep))
+            text = user_prompt(transcript(rep), focus=focus)
             p = llm.write_prompt(path.with_name(path.stem + ".x"), system, text)
             print(f"{p}: {len(text) // 4:,} tokens (approx.); put the reply in {path.stem}.reply.txt, then --backend file")
             return None
         result = {"summary": [], "findings": [], "usage": [], "backend": backend, "model": model or llm.DEFAULTS[backend]}
         for part in chunks:
-            text = user_prompt(transcript(rep, part if len(chunks) > 1 else None), part, len(chunks))
+            text = user_prompt(transcript(rep, part if len(chunks) > 1 else None), part, len(chunks), focus=focus)
             reply, usage = llm.complete(backend, system, text, model=model, effort=effort)
             try:
                 got = parse_findings(reply)
@@ -173,6 +173,7 @@ def main(argv=None) -> None:
         p.add_argument("--backend", default="deepseek", choices=("deepseek", "claude", "prompt", "file"))
         p.add_argument("--model", default=None, help="deepseek-chat / deepseek-reasoner / claude-opus-5-5 / claude-sonnet-5-5")
         p.add_argument("--effort", default="high", help="Claude effort level")
+        p.add_argument("--focus", default="all", choices=("all", "setup"), help="setup: engine, mask, feature and architecture flaws first, with a sheet of what the policy observes")
 
     r = sub.add_parser("record", help="play games and write review files")
     play_args(r)
@@ -199,7 +200,7 @@ def main(argv=None) -> None:
     elif args.cmd == "review":
         for p in args.games:
             try:
-                review_file(p, args.backend, args.model, args.effort)
+                review_file(p, args.backend, args.model, args.effort, args.focus)
             except (ValueError, OSError) as e:
                 print(f"{p}: FAILED: {e}")
     elif args.cmd == "verify":
@@ -219,7 +220,7 @@ def main(argv=None) -> None:
             specs = args.fault or ["mask:0:blocks", "blunder:1:2", "life:1:6:-3"] + (["power:0:8:2"] if seed % 2 else [])
             paths += _record(args, specs, tag="-faults")
         for p in paths:
-            review_file(p, args.backend, args.model, args.effort)
+            review_file(p, args.backend, args.model, args.effort, args.focus)
         if args.backend != "prompt":
             print(calibration_report(paths, args.model or args.backend))
 
