@@ -417,6 +417,19 @@ def test_feature_sets_2_and_3_are_unchanged():
             assert features_digest(m, n, s, features) == want[f"{m}:{n}:{s}:{features}"], (m, n, s, features)
 
 
+def test_feature_set_4_is_unchanged():
+    """Set 4 is byte for byte what it was before set 5 was added (digests
+    recorded with that code, `tests/data/features_v4_digests.json`, on the
+    same games as the set 2 and 3 digests)."""
+    import json
+    import os
+
+    with open(os.path.join(os.path.dirname(__file__), "data", "features_v4_digests.json")) as f:
+        want = json.load(f)
+    for m, n, s in V3_DIGEST_GAMES:
+        assert features_digest(m, n, s, 4) == want[f"{m}:{n}:{s}:4"], (m, n, s)
+
+
 if __name__ == "__main__":  # re-record tests/data/features_v3_digests.json (only with the pre-set-4 code)
     import json
     import os
