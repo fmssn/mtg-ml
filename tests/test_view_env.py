@@ -257,3 +257,55 @@ def test_feature_set_2_adds_to_set_1():
     i = next(i for i, o in enumerate(g.legal_options()) if o.label.startswith("Krark-Clan Shaman"))
     assert option_preview(g, 0, i, features=1) == [] and option_preview(g, 0, i, features=2)
     assert entity_features(g, 0, features=1)[1] == entity_features(g, 0, features=2)[1]
+
+
+# (matchup, game number, seed) of the games behind tests/data/features_v3_digests.json.
+V3_DIGEST_GAMES = [(m, n, s) for s, (m, n) in enumerate((m, n) for m in ("jund_blue", "jund_madness", "blue_madness") for n in (1, 2) for _ in range(3))]
+
+
+def features_digest(matchup: str, game_no: int, seed: int, features: int) -> str:
+    """sha256 over every featurizer output of a random-play game: featurize,
+    both seats' state features, entities with their index, and each option's
+    preview. `python tests/test_view_env.py` re-records the file."""
+    import hashlib
+    import json
+
+    from mtg_ml.encode import entity_features, option_preview
+    from mtg_ml.match import game_args
+    from mtg_ml.rl.features import featurize
+
+    g = new_game(seed=seed, max_turns=30, **game_args(game_no, matchup))
+    r = random.Random(seed)
+    h = hashlib.sha256()
+    while not g.over:
+        p = g.decision.player
+        ents, index = entity_features(g, p, features)
+        previews = [option_preview(g, p, i, features) for i in range(len(g.legal_options()))]
+        rec = [featurize(g, p, features=features), state_features(g, 0, features), state_features(g, 1, features), ents, sorted(index.items()), previews]
+        h.update(json.dumps(rec).encode())
+        g.step(r.randrange(len(g.legal_options())))
+    return h.hexdigest()
+
+
+def test_feature_sets_2_and_3_are_unchanged():
+    """Sets 2 and 3 are byte for byte what they were before set 4 was added
+    (digests recorded with that code, `tests/data/features_v3_digests.json`),
+    across all three matchups, pre- and postboard."""
+    import json
+    import os
+
+    with open(os.path.join(os.path.dirname(__file__), "data", "features_v3_digests.json")) as f:
+        want = json.load(f)
+    for m, n, s in V3_DIGEST_GAMES:
+        for features in (2, 3):
+            assert features_digest(m, n, s, features) == want[f"{m}:{n}:{s}:{features}"], (m, n, s, features)
+
+
+if __name__ == "__main__":  # re-record tests/data/features_v3_digests.json (only with the pre-set-4 code)
+    import json
+    import os
+
+    out = {f"{m}:{n}:{s}:{f}": features_digest(m, n, s, f) for m, n, s in V3_DIGEST_GAMES for f in (2, 3)}
+    with open(os.path.join(os.path.dirname(__file__), "data", "features_v3_digests.json"), "w") as fh:
+        json.dump(out, fh, indent=1, sort_keys=True)
+        fh.write("\n")
