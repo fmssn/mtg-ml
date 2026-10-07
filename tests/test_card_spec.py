@@ -66,7 +66,7 @@ def test_an_unknown_spec_field_says_where_to_add_it_in_both_engines():
     from mtg_ml.engine.cards import card_def
 
     for spec in ({"name": "X", "types": "Instant", "storm": True}, {"name": "X", "types": "Artifact", "abilities": [{"name": "a", "crew": 1}]}):
-        with pytest.raises(ValueError, match="card_shape.*native/src/cards.rs"):
+        with pytest.raises(ValueError, match="SHAPE_(CARD|ABILITY)_FIELDS.*card_shape.*native/src/cards.rs"):
             card_def(spec)
     with pytest.raises(ValueError, match="OPS.*native/src/cards.rs"):
         card_def({"name": "X", "types": "Instant", "effect": [{"op": "proliferate"}]})

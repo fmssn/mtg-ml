@@ -534,7 +534,37 @@ fn get_str_list(t: &Table, k: &str) -> Result<Vec<String>, String> {
 fn check_keys(t: &Table, allowed: &[&str], what: &str) -> Result<(), String> {
     for k in t.keys() {
         if !allowed.contains(&k.as_str()) {
-            return Err(format!("unknown {what} field {k:?}: add it to the allowed keys here and to the parser and card_shape (native/src/cards.rs), and to card_def / _ability / _trigger, the SHAPE_ or NON_SHAPE_ field sets and card_shape (mtg_ml/engine/cards.py); docs/adding-cards.md"));
+            return Err(format!("unknown {what} field {k:?}: add it to the allowed keys and the parser here (native/src/cards.rs) and in mtg_ml/engine/cards.py; docs/adding-cards.md"));
+        }
+    }
+    Ok(())
+}
+
+/// cards.py `SHAPE_*_FIELDS` / `NON_SHAPE_*_FIELDS`: the spec fields of a
+/// card, ability and trigger, split by whether `card_shape` turns them into
+/// shape tokens (feature set 5). Both engines list the same fields
+/// (`test_spec_field_sets_identical`).
+pub const SHAPE_CARD_FIELDS: &[&str] = &[
+    "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow", "plot",
+    "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect", "modes",
+    "overload_effect", "abilities", "triggers",
+];
+pub const NON_SHAPE_CARD_FIELDS: &[&str] = &["name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"];
+pub const SHAPE_ABILITY_FIELDS: &[&str] =
+    &["effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone", "sorcery_speed", "mana", "targets"];
+pub const NON_SHAPE_ABILITY_FIELDS: &[&str] = &["name"];
+pub const SHAPE_TRIGGER_FIELDS: &[&str] = &["event", "effect", "condition"];
+pub const NON_SHAPE_TRIGGER_FIELDS: &[&str] = &["name"];
+
+/// cards.py `_check_fields`: an unclassified field names the lists to extend.
+fn check_fields(t: &Table, shape: &[&str], non_shape: &[&str], what: &str) -> Result<(), String> {
+    for k in t.keys() {
+        if !shape.contains(&k.as_str()) && !non_shape.contains(&k.as_str()) {
+            let w = what.to_uppercase();
+            return Err(format!(
+                "unknown {what} field {k:?}: add it to SHAPE_{w}_FIELDS (if it changes what the card does; then also to card_shape) or NON_SHAPE_{w}_FIELDS, \
+                 in both mtg_ml/engine/cards.py and native/src/cards.rs, and parse it in card_def / _ability / _trigger and parse_card; docs/adding-cards.md"
+            ));
         }
     }
     Ok(())
@@ -716,15 +746,7 @@ fn land_sac(t: &Table, k: &str) -> Result<Option<(SacFilter, i32)>, String> {
 }
 
 fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>, tokens: &HashMap<String, DefId>) -> Result<CardDef, String> {
-    check_keys(
-        t,
-        &[
-            "name", "cost", "types", "subtypes", "supertypes", "text", "devoid", "colors", "power", "toughness", "keywords", "ward", "targets", "effect",
-            "additional_sac", "cost_reduction", "flashback", "escape", "escape_exile", "bestow", "enters_tapped", "etb_x_counters", "back", "modes",
-            "abilities", "triggers", "madness", "plot", "overload", "overload_effect", "additional_discard", "alternative_cost", "flashback_cost",
-        ],
-        "card",
-    )?;
+    check_fields(t, SHAPE_CARD_FIELDS, NON_SHAPE_CARD_FIELDS, "card")?;
     let cost_text = get_str(t, "cost")?;
     let colors = match get_str(t, "colors")? {
         Some(c) => c.split_whitespace().fold(0, |m, s| m | color_bit(s.as_bytes()[0])),
@@ -739,11 +761,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
     if let Some(v) = t.get("abilities") {
         for a in v.as_array().ok_or("abilities must be a list")? {
             let a = a.as_table().ok_or("abilities must be tables")?;
-            check_keys(
-                a,
-                &["name", "effect", "cost", "tap", "sac_self", "sac_other", "discard_self", "discard_other", "exile_self", "x_target_mv", "x_reveal", "zone", "sorcery_speed", "mana", "targets"],
-                "ability",
-            )?;
+            check_fields(a, SHAPE_ABILITY_FIELDS, NON_SHAPE_ABILITY_FIELDS, "ability")?;
             let x_target_mv = get_int(a, "x_target_mv")?.unwrap_or(0);
             if x_target_mv != 0 && targets(a)?.len() != 1 {
                 return Err("x_target_mv needs exactly one target".into());
@@ -779,7 +797,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
     if let Some(v) = t.get("triggers") {
         for tr in v.as_array().ok_or("triggers must be a list")? {
             let tr = tr.as_table().ok_or("triggers must be tables")?;
-            check_keys(tr, &["name", "event", "effect", "condition"], "trigger")?;
+            check_fields(tr, SHAPE_TRIGGER_FIELDS, NON_SHAPE_TRIGGER_FIELDS, "trigger")?;
             let (mut sacrificed_subtype, mut cast_filter) = (None, None);
             match tr.get("condition") {
                 None => {}

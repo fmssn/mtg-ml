@@ -151,6 +151,16 @@ def test_entity_and_preview_strings_identical():
     assert seen == set(SET4_TOKENS), sorted(set(SET4_TOKENS) - seen)
 
 
+def test_spec_field_sets_identical():
+    """Both engines classify the same card-spec fields as shape / non-shape."""
+    import mtg_ml_native
+
+    from mtg_ml.engine import cards
+
+    want = {lvl: (getattr(cards, f"SHAPE_{lvl.upper()}_FIELDS"), getattr(cards, f"NON_SHAPE_{lvl.upper()}_FIELDS")) for lvl in ("card", "ability", "trigger")}
+    assert {k: (frozenset(a), frozenset(b)) for k, (a, b) in mtg_ml_native.spec_fields().items()} == want
+
+
 def test_card_shapes_identical():
     """Both engines derive the same shape tokens from cards.toml (set 5)."""
     import mtg_ml_native
