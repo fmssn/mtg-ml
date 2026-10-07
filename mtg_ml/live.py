@@ -9,6 +9,12 @@ value stay on the server. The model moves until the human has a decision,
 so one request answers each human choice. A finished game is written to the
 replay directory as an ordinary (omniscient) replay, model policy included.
 
+The player also gets a frame per model decision, so the viewer can play the
+model's turn back step by step. Those show the chosen option only for
+decision kinds whose choice is public (`rl.features.PUBLIC_KINDS`, the rule
+the model itself sees its opponent by); a scry or a put-back shows just
+its kind.
+
 The browser picks a checkpoint by name from the `--models` directory, never
 by path: loading a checkpoint unpickles it, which can run code.
 """
@@ -25,6 +31,7 @@ from .agents import take
 from .backend import engine_name, game_class
 from .match import MATCHUPS, game_args, matchup_decks
 from .replay import DECK_TITLES, FORMAT, snapshot, visible_events
+from .rl.features import PUBLIC_KINDS
 
 MAX_GAMES = 8  # games held at once; the oldest idle one makes room
 IDLE_SECONDS = 3600  # a game nobody touched for this long is dropped
@@ -79,12 +86,22 @@ class LiveGame:
         while not g.over and g.decision.player != self.seat:
             d = g.decision
             choice = self.model.act(g)
-            self._record({"player": d.player, "kind": d.kind, "prompt": d.prompt, "options": [o.label for o in d.options], "chosen": choice, **(self.model.last_info or {})})
+            options = [o.label for o in d.options]
+            self._record({"player": d.player, "kind": d.kind, "prompt": d.prompt, "options": options, "chosen": choice, **(self.model.last_info or {})})
+            if d.kind in PUBLIC_KINDS:
+                shown = {"prompt": d.prompt, "options": [options[choice]]}
+            else:
+                shown = {"prompt": "", "options": [f"(hidden {d.kind.replace('_', ' ')})"]}
+            self._view_frame({"player": d.player, "kind": d.kind, **shown, "chosen": 0})
             take(g, self.agents, choice)
         decision = None
         if not g.over:
             d = g.decision
             decision = {"player": d.player, "kind": d.kind, "prompt": d.prompt, "options": [o.label for o in d.options], "chosen": None}
+        self._view_frame(decision)
+
+    def _view_frame(self, decision: dict | None) -> None:
+        g = self.g
         self.frames.append({"state": snapshot(g, self.view_info, viewer=self.seat), "events": visible_events(g.log[self.view_seen :], self.seat), "decision": decision})
         self.view_seen = len(g.log)
 

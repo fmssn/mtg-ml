@@ -79,18 +79,28 @@ def test_live_game_to_the_end_writes_a_replay(manager, seat, tmp_path):
     view = manager.new({"model": "tiny/model", "seat": seat, "seed": 3})
     assert view["meta"]["agents"][seat] == "you"
     view, frames = play_out(manager, view, random.Random(seat))
+    from mtg_ml.rl.features import PUBLIC_KINDS
+
     for f in frames[:-1]:
         d = f["decision"]
-        assert d["player"] == seat and 0 <= d["chosen"] < len(d["options"])
+        assert 0 <= d["chosen"] < len(d["options"])
         assert "policy" not in d and "value" not in d  # the model's thoughts stay on the server
         assert all(not line.startswith(f"  p{1 - seat} ") for line in f["events"])
     assert frames[-1]["decision"] is None
     rep = json.loads((tmp_path / "replays" / view["live"]["replay"]).read_text())
     assert rep["meta"]["winner"] == view["meta"]["winner"]
-    model_moves = [f["decision"] for f in rep["frames"][:-1] if f["decision"]["player"] != seat]
-    assert model_moves and all("policy" in d for d in model_moves)
-    human_moves = [f["decision"]["chosen"] for f in rep["frames"][:-1] if f["decision"]["player"] == seat]
-    assert human_moves == [f["decision"]["chosen"] for f in frames[:-1]]
+    # The player saw every model decision, in order, but private choices only by kind.
+    full = [f["decision"] for f in rep["frames"][:-1]]
+    assert [d["player"] for d in full] == [f["decision"]["player"] for f in frames[:-1]]
+    for d, f in zip(full, frames[:-1]):
+        shown = f["decision"]
+        if d["player"] == seat:
+            assert shown["options"] == d["options"] and shown["chosen"] == d["chosen"]
+        elif d["kind"] in PUBLIC_KINDS:
+            assert shown["options"] == [d["options"][d["chosen"]]] and "policy" in d
+        else:
+            assert shown["options"] == [f"(hidden {d['kind'].replace('_', ' ')})"] and shown["prompt"] == ""
+    assert any(d["player"] != seat for d in full)
 
 
 def test_bad_requests_are_refused(manager):
@@ -101,12 +111,12 @@ def test_bad_requests_are_refused(manager):
     with pytest.raises(LiveError):
         manager.new({"model": "tiny/model", "seat": 2})
     view = manager.new({"model": "tiny/model", "seed": 1})
-    gid = view["live"]["id"]
+    gid, frame = view["live"]["id"], len(view["frames"]) - 1
     with pytest.raises(LiveError):
-        manager.choose(gid, {"frame": 0, "index": 99})
-    manager.choose(gid, {"frame": 0, "index": 0})
+        manager.choose(gid, {"frame": frame, "index": 99})
+    manager.choose(gid, {"frame": frame, "index": 0})
     with pytest.raises(LiveError, match="already"):
-        manager.choose(gid, {"frame": 0, "index": 0})  # a double click
+        manager.choose(gid, {"frame": frame, "index": 0})  # a double click
     with pytest.raises(LiveError):
         manager.choose("nope", {"frame": 0, "index": 0})
 
@@ -146,14 +156,15 @@ def test_http_endpoints(manager, tmp_path, engine):
         gid = view["live"]["id"]
         code, again = call(f"/api/live/{gid}?since=0")
         assert code == 200 and again["frames"] == view["frames"]
-        code, after = call(f"/api/live/{gid}/choose", {"frame": 0, "index": 0})
+        frame = len(view["frames"]) - 1
+        code, after = call(f"/api/live/{gid}/choose", {"frame": frame, "index": 0, "since": frame})
         assert code == 200 and after["frames"][0]["decision"]["chosen"] == 0
         while not after["live"]["over"]:  # play on, a request (thread) per move
             frame = after["live"]["since"] + len(after["frames"]) - 1
             code, after = call(f"/api/live/{gid}/choose", {"frame": frame, "index": 0, "since": frame})
             assert code == 200, after
         assert after["live"]["replay"]
-        assert call(f"/api/live/{gid}/choose", {"frame": 0, "index": 0})[0] == 400
+        assert call(f"/api/live/{gid}/choose", {"frame": frame, "index": 0})[0] == 400
         assert call("/api/live/new", {"model": "missing"})[0] == 400
     finally:
         srv.shutdown()

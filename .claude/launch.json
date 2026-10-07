@@ -9,8 +9,8 @@
     },
     {
       "name": "live-play",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "mtg_ml.replay", "serve", "--models", "runs/", "--port", "8766"],
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--no-sync", "python", "-m", "mtg_ml.replay", "serve", "--models", "runs/", "--engine", "native", "--port", "8766"],
       "port": 8766
     }
   ]
