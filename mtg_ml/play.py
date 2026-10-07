@@ -18,16 +18,17 @@ import time
 from .agents import HumanAgent, RandomAgent, play_game
 from .backend import engine_name
 from .bots import make_bot
-from .match import play_match
+from .match import matchup_decks, play_match
 
 
-def make_agent(kind: str, seat: int, seed: int, greedy: bool = False):
+def make_agent(kind: str, seat: int, seed: int, greedy: bool = False, deck: str | None = None):
+    """`deck`: the deck in `seat` (default: the seat's usual one), for the bot."""
     if kind.startswith("model:"):  # model:<checkpoint path>
         from .rl.agent import ModelAgent
 
         return ModelAgent(kind[len("model:"):], seat, sample=not greedy, seed=seed)
     if kind == "bot":
-        return make_bot(seat)
+        return make_bot(seat, deck)
     if kind.startswith("search"):  # search or search:<playouts>
         from .bots.search import SearchBot
 
@@ -55,6 +56,7 @@ def main(argv=None) -> None:
     m.add_argument("--matches", type=int, default=100)
     m.add_argument("--agents", default="bot,bot", help="seat0,seat1 from: random, bot, search[:playouts]")
     m.add_argument("--log", action="store_true", help="print the game logs of the first match")
+    m.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue or jund_madness")
     for p in (w, h, b, m):
         p.add_argument("--engine", default=None, help="python (reference) or native (Rust); default: $MTG_ENGINE, else python")
     args = ap.parse_args(argv)
@@ -88,16 +90,17 @@ def main(argv=None) -> None:
         kinds = args.agents.split(",")
         matches, games = collections.Counter(), collections.Counter()
         for s in range(args.matches):
-            r = play_match([make_agent(k, i, s * 10_000) for i, k in enumerate(kinds)], seed=s, log=args.log and s == 0, engine=engine)
+            decks = matchup_decks(args.matchup)
+            r = play_match([make_agent(k, i, s * 10_000, deck=decks[i]) for i, k in enumerate(kinds)], seed=s, log=args.log and s == 0, engine=engine, matchup=args.matchup)
             matches[r.winner] += 1
             for n, (_, w, _) in enumerate(r.games, 1):
                 games[(n, w)] += 1
-        name = {0: "Jund", 1: "Blue", None: "draw"}
+        name = {0: "seat 0", 1: "seat 1", None: "draw"}
         print(f"{args.matches} matches: " + ", ".join(f"{name[k]} {v}" for k, v in sorted(matches.items(), key=lambda kv: str(kv[0]))))
         for n in (1, 2, 3):
             tot = sum(v for (gn, _), v in games.items() if gn == n)
             if tot:
-                print(f"  game {n}: Jund wins {games[(n, 0)]}/{tot} ({games[(n, 0)] / tot:.1%})")
+                print(f"  game {n}: seat 0 wins {games[(n, 0)]}/{tot} ({games[(n, 0)] / tot:.1%})")
 
 
 if __name__ == "__main__":
