@@ -24,8 +24,23 @@ DECK_NAMES = ("jund_wildfire", "mono_blue_terror")
 MATCHUPS = {
     "jund_blue": ("jund_wildfire", "mono_blue_terror"),
     "jund_madness": ("jund_wildfire", "red_madness"),
+    "blue_madness": ("mono_blue_terror", "red_madness"),
 }
 DEFAULT_MATCHUP = "jund_blue"
+
+
+def parse_matchups(spec: str) -> list[tuple[str, float]]:
+    """A training mix: comma-separated matchups, each with an optional
+    `:weight` (default 1), e.g. "jund_blue:2,jund_madness,blue_madness"."""
+    out = []
+    for part in spec.split(","):
+        name, _, w = part.strip().partition(":")
+        matchup_decks(name)
+        weight = float(w) if w else 1.0
+        if weight <= 0 or name in dict(out):
+            raise ValueError(f"matchup mix {spec!r}: weights must be > 0 and each matchup listed once")
+        out.append((name, weight))
+    return out
 
 
 def matchup_decks(matchup: str = DEFAULT_MATCHUP) -> tuple[str, str]:

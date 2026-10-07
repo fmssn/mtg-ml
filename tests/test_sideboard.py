@@ -1,3 +1,4 @@
+import pytest
 """Sideboard cards, sideboard plans and best-of-three matches."""
 
 from helpers import bf, choose, find, has, labels, names, pass_priority, pay, resolve_stack, scenario
@@ -6,7 +7,8 @@ from mtg_ml.agents import RandomAgent
 from mtg_ml.bots import make_bot
 from mtg_ml.engine import DECKS, SIDEBOARD_PLANS, SIDEBOARDS, postboard
 from mtg_ml.engine import objects as O
-from mtg_ml.match import MATCHUPS, MatchResult, deck_names, match_decks, next_starting_player, play_match
+from mtg_ml.encode import state_features
+from mtg_ml.match import MATCHUPS, MatchResult, deck_names, game_args, match_decks, next_starting_player, parse_matchups, play_match
 
 ISLANDS = lambda n: ["Island"] * n  # noqa: E731
 
@@ -135,6 +137,39 @@ def test_postboard_decks_are_legal():
 def test_deck_names_only_for_non_default_decks():
     assert deck_names("jund_blue") == (None, None)
     assert deck_names("jund_madness") == (None, "red_madness")
+    assert deck_names("blue_madness") == ("mono_blue_terror", "red_madness")
+
+
+def test_opponent_deck_feature_from_set_3(engine):
+    """Set 3 names the opponent's deck where it is not its seat's usual one,
+    so every seat of every matchup tells its opponent apart; jund_blue is
+    unchanged from set 2."""
+    from helpers import new_game
+
+    seen = {}
+    for m in MATCHUPS:
+        g = new_game(seed=1, **game_args(1, m))
+        for v in (0, 1):
+            f3, f2 = state_features(g, v, 3), state_features(g, v, 2)
+            seen[(m, v)] = tuple(sorted(x for x in f3 if x.startswith(("self:deck:", "opp:deck:"))))
+            assert [x for x in f3 if not x.startswith("opp:deck:")] == f2
+    assert seen[("jund_blue", 0)] == seen[("jund_blue", 1)] == ()
+    assert seen[("jund_madness", 0)] == ("opp:deck:red_madness",)
+    assert seen[("blue_madness", 1)] == ("opp:deck:mono_blue_terror", "self:deck:red_madness")
+    assert len(set(seen.values())) == len(seen) - 1  # only jund_blue's two seats look alike (seat is a feature of its own)
+
+
+def test_blue_vs_red_bots_play_a_match(engine):
+    res = play_match([make_bot(0, "mono_blue_terror"), make_bot(1, "red_madness")], seed=5, engine=engine, matchup="blue_madness")
+    assert res.over and len(res.games) >= 2
+
+
+def test_parse_matchups():
+    assert parse_matchups("jund_blue") == [("jund_blue", 1.0)]
+    assert parse_matchups("jund_blue:2, jund_madness,blue_madness:0.5") == [("jund_blue", 2.0), ("jund_madness", 1.0), ("blue_madness", 0.5)]
+    for bad in ("nope", "jund_blue,jund_blue", "jund_blue:0"):
+        with pytest.raises(ValueError):
+            parse_matchups(bad)
 
 
 def test_match_loser_starts_next_game_and_best_of_three():

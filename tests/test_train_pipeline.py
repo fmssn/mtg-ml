@@ -397,6 +397,27 @@ def test_new_deck_against_a_fixed_opponent_from_its_weights(tmp_path):
         Trainer(_cfg(tmp_path / "bad", "--exploit", jund, "--exploit-deck", "red"))  # no red deck in jund_blue
 
 
+def test_matchup_mix_draws_each_game_and_benchmarks_every_seat(tmp_path):
+    """--matchup a,b,c: each training game's matchup is drawn by weight; the
+    first matchup gets the full evaluation, the others a benchmark per seat."""
+    run = tmp_path / "mix"
+    t = Trainer(_cfg(run, "--iterations", "1", "--matchup", "jund_blue,jund_madness,blue_madness", *IN_PROCESS, *SMALL_EVAL, "--eval-every", "1"))
+    specs = t._train_specs(0)
+    assert {sp.matchup for sp in specs} == {"jund_blue", "jund_madness", "blue_madness"}
+    t.spec_matchup.clear()
+    t.train()
+    row = _rows(run)[0]
+    assert abs(sum(row[f"matchup_share/{m}"] for m in ("jund_blue", "jund_madness", "blue_madness")) - 1) < 1e-9
+    assert "bench/jund_vs_bot" in row and "eval/random/blue" in row
+    for key in ("jund_madness/jund", "jund_madness/red", "blue_madness/blue", "blue_madness/red"):
+        assert f"bench/{key}_vs_bot_n" in row
+    assert not t.spec_matchup  # every game's entry consumed
+    single = Trainer(_cfg(tmp_path / "one", "--iterations", "1", *IN_PROCESS, *NO_EVAL))
+    assert {sp.matchup for sp in single._train_specs(0)} == {"jund_blue"} and not single.spec_matchup
+    with pytest.raises(ValueError):
+        Trainer(_cfg(tmp_path / "bad", "--matchup", "jund_blue,jund_madness", "--exploit", str(run / "pool" / "iter_00000.pt")))
+
+
 def test_restore_torch_rng_accepts_states_moved_by_map_location():
     from mtg_ml.rl.train import restore_torch_rng
 

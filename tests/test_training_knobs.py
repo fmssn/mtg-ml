@@ -16,6 +16,7 @@ from test_train_pipeline import IN_PROCESS, NO_EVAL, _cfg, _free_native_garbage,
 
 from mtg_ml.backend import game_class  # noqa: E402
 from mtg_ml.encode import FEATURES  # noqa: E402
+from mtg_ml.match import parse_matchups  # noqa: E402
 from mtg_ml.rl import stacked  # noqa: E402
 from mtg_ml.rl.features import featurize_flat  # noqa: E402
 from mtg_ml.rl.model import PolicyNet  # noqa: E402
@@ -213,6 +214,7 @@ def _bare_trainer(*args):
     t = Trainer.__new__(Trainer)
     t.cfg = _cfg("unused", *args)
     t.rng, t.pool, t.pfsp, t.games_total, t.lr_origin = random.Random(0), [], {}, 0, 0
+    t.matchups, t.spec_matchup = parse_matchups(t.cfg.matchup), {}
     return t
 
 
