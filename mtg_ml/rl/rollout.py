@@ -179,6 +179,8 @@ class Job:
     gamma_turn: float = 0.0
     lam_turn: float = 0.0
     max_turns: int = 100
+    auto_mana: bool = False  # Game(auto_mana=...): colour-preserving auto payment of non-strategic mana costs
+    auto_pass: bool = False  # Game(auto_pass=...): collapse uneventful priority passes
     engine: str | None = None  # None: $MTG_ENGINE, else python
     inference: str = "local"  # "local": CPU torch in the worker; "server": the central inference server
     groups: int = 2  # server mode: requests in flight per worker (its live games are split into this many groups)
@@ -492,7 +494,7 @@ def _play(job: Job) -> Result:
 
     def start(i: int) -> _Live:
         spec = job.games[i]
-        g = Game(_decks(spec.match_game), seed=spec.seed, starting_player=spec.starting_player, max_turns=job.max_turns, match_game=spec.match_game)
+        g = Game(_decks(spec.match_game), seed=spec.seed, starting_player=spec.starting_player, max_turns=job.max_turns, match_game=spec.match_game, auto_mana=job.auto_mana, auto_pass=job.auto_pass)
         return _Live(spec, g, free.pop())
 
     def finish(lv: _Live) -> None:

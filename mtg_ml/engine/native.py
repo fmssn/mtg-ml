@@ -280,6 +280,8 @@ class NativeGame:
         start_step: str = "untap",
         mulligans: bool = True,
         match_game: int = 1,
+        auto_mana: bool = False,
+        auto_pass: bool = False,
     ):
         self._args = dict(
             decks=decks,
@@ -292,14 +294,29 @@ class NativeGame:
             start_step=start_step,
             mulligans=mulligans,
             match_game=match_game,
+            auto_mana=auto_mana,
+            auto_pass=auto_pass,
         )
         self.cards_db = CARDS
         self.match_game = match_game
         self.auto_single = auto_single
+        self.auto_mana = auto_mana
+        self.auto_pass = auto_pass
         self.max_turns = max_turns
         self.logging = log
         self._g = _n.Game(
-            (list(decks[0]), list(decks[1])), seed, starting_player, auto_single, max_turns, log, setup is not None, start_step, mulligans, match_game
+            (list(decks[0]), list(decks[1])),
+            seed,
+            starting_player,
+            auto_single,
+            max_turns,
+            log,
+            setup is not None,
+            start_step,
+            mulligans,
+            match_game,
+            auto_mana,
+            auto_pass,
         )
         self._cache: dict = {}
         self._cache_version = -1

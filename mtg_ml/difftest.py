@@ -21,6 +21,7 @@ option 0 where the mismatch survives) and the reproducer is saved as JSON:
 
     python -m mtg_ml.difftest fuzz --games 5000 --jobs 8      # long fuzz
     python -m mtg_ml.difftest fuzz --games 500 --with-card "1:Vapor Snag:4"   # a new card
+    python -m mtg_ml.difftest fuzz --games 1000 --auto-mana --auto-pass       # action decomposition
     python -m mtg_ml.difftest repro difftest-failure.json      # replay one
 """
 
@@ -312,8 +313,19 @@ def _run_one(args) -> dict | None:
     return None if d is None else d.to_json()
 
 
-def fuzz(n: int, start: int = 0, jobs: int = 1, full_every: int = 1, fork_every: int = 97, out: str = "difftest-failure.json", quiet: bool = False, extra: tuple = ()) -> int:
-    scs = scenarios(n, start, extra)
+def fuzz(
+    n: int,
+    start: int = 0,
+    jobs: int = 1,
+    full_every: int = 1,
+    fork_every: int = 97,
+    out: str = "difftest-failure.json",
+    quiet: bool = False,
+    extra: tuple = (),
+    auto_mana: bool = False,
+    auto_pass: bool = False,
+) -> int:
+    scs = scenarios(n, start, extra, auto_mana, auto_pass)
     t = time.perf_counter()
     work = [(sc, full_every, fork_every) for sc in scs]
     if jobs > 1:
@@ -368,6 +380,8 @@ def main(argv=None) -> None:
         metavar="SEAT:NAME:N",
         help="swap N copies of a card into seat SEAT's deck (0 = Jund, 1 = Blue), e.g. '1:Vapor Snag:4'; repeatable",
     )
+    f.add_argument("--auto-mana", action="store_true", help="play with Game(auto_mana=True): colour-preserving auto payment")
+    f.add_argument("--auto-pass", action="store_true", help="play with Game(auto_pass=True): collapse uneventful priority passes")
     r = sub.add_parser("repro", help="replay a saved divergence")
     r.add_argument("file")
     args = ap.parse_args(argv)
@@ -376,7 +390,7 @@ def main(argv=None) -> None:
         for spec in args.with_card:
             seat, name, n = spec.split(":")
             extra.append((int(seat), name, int(n)))
-        sys.exit(1 if fuzz(args.games, args.start, args.jobs, args.full_every, args.fork_every, args.out, args.quiet, tuple(extra)) else 0)
+        sys.exit(1 if fuzz(args.games, args.start, args.jobs, args.full_every, args.fork_every, args.out, args.quiet, tuple(extra), args.auto_mana, args.auto_pass) else 0)
     with open(args.file) as fh:
         data = json.load(fh)
     saved = Divergence.from_json(data)
