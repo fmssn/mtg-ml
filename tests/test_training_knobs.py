@@ -270,7 +270,7 @@ def test_exploiter_trains_one_deck_against_the_frozen_main_policy(tmp_path, in_p
     torch.save({"config": net.config, "model": net.state_dict()}, main)
     run = tmp_path / "exploit"
     t = Trainer(_cfg(run, "--iterations", "2", "--exploit", str(main), "--exploit-deck", "blue", "--hidden", "32", *IN_PROCESS, *NO_EVAL))
-    assert t.net.config == {**net.config, "features": FEATURES}  # the main policy's architecture and weights, whatever --hidden says; the latest feature set
+    assert t.net.config == net.config  # the main policy's architecture, weights and feature set, whatever --hidden says
     assert all(torch.equal(a, b) for a, b in zip(t.net.state_dict().values(), net.state_dict().values()))
     t.train()
     train = [g for r in in_process if r.train for g in r.games]
@@ -285,7 +285,33 @@ def test_init_starts_a_fresh_run_from_a_checkpoint(tmp_path, in_process):  # noq
     net = PolicyNet(hidden=16)
     torch.save({"config": net.config, "model": net.state_dict()}, src)
     t = Trainer(_cfg(tmp_path / "run", "--iterations", "1", "--init", str(src), "--value-bound", "tanh", *IN_PROCESS, *NO_EVAL))
-    assert t.net.config == {**net.config, "value_bound": "tanh", "features": FEATURES}
+    assert t.net.config == {**net.config, "value_bound": "tanh"}  # and the source's feature set (1)
     assert all(torch.equal(a, b) for a, b in zip(t.net.state_dict().values(), net.state_dict().values()))
     t.train()
+
+
+def test_init_takes_features_only_when_given(tmp_path):
+    src = tmp_path / "src.pt"
+    net = PolicyNet(hidden=16, features=2)
+    torch.save({"config": net.config, "model": net.state_dict()}, src)
+    assert Trainer(_cfg(tmp_path / "a", "--init", str(src), *IN_PROCESS, *NO_EVAL)).net.features == 2
+    assert Trainer(_cfg(tmp_path / "b", "--init", str(src), "--features", "1", *IN_PROCESS, *NO_EVAL)).net.features == 1
+    assert Trainer(_cfg(tmp_path / "c", *IN_PROCESS, *NO_EVAL)).net.features == FEATURES
+
+
+def test_resume_with_features_stamps_the_run(tmp_path, in_process):  # noqa: F811
+    """A run trained on set 2 before checkpoints recorded it, resumed with
+    --features 2: the learner and the run's own unstamped pool snapshots play
+    in set 2, and the version is in every file written from then on."""
+    from mtg_ml.rl.rollout import checkpoint_config
+
+    run = tmp_path / "run"
+    Trainer(_cfg(run, "--iterations", "1", "--features", "1", *IN_PROCESS, *NO_EVAL)).train()
+    assert "features" not in checkpoint_config(str(run / "latest.pt"))
+    t = Trainer(_cfg(run, "--iterations", "2", "--features", "2", *IN_PROCESS, *NO_EVAL))
+    assert t.net.features == 2 and t.pool_features == {p: 2 for p in t.pool}
+    t.train()
+    assert checkpoint_config(str(run / "latest.pt"))["features"] == 2
+    t = Trainer(_cfg(run, "--iterations", "3", *IN_PROCESS, *NO_EVAL))  # without the flag: keeps the stamped version
+    assert t.net.features == 2 and t.pool_features == {p: 2 for p in t.pool if "features" not in checkpoint_config(p)}
 

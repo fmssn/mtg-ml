@@ -18,9 +18,21 @@ feature set is versioned and travels with the model:
 
 - `PolicyNet(features=...)` stores it in `config["features"]`, only when it
   is not 1, so a config without the key (every checkpoint before this) is
-  set 1. New training runs default to the latest (`--features 2`); `--init`
-  takes `--features` (no weights depend on it); a resumed run keeps its
-  checkpoint's.
+  set 1.
+- Training (`--features`, default 0 = unset): a new run takes the latest
+  (2); `--init` and `--exploit` keep the source checkpoint's version (no
+  weights depend on it, so `--features N` may move a fine-tune to another
+  set, but then the parent sees inputs it never learned); a resumed run keeps
+  its checkpoint's, and `--features N` on a resume overrides it and writes it
+  into every file the run saves from then on. A resumed run's pool snapshots
+  that record no version are played in the run's version.
+- Play and evaluation read each checkpoint's version and take an override
+  for checkpoints that record the wrong one: `mtg_ml.rl.evaluate
+  --features N` (the evaluated checkpoint) and `--opponent-features N`,
+  `mtg_ml.rl.evaluate ladder --features N` (every rung), `mtg_ml.play
+  --features N` (every `model:` agent), `ModelAgent(features=N)`,
+  `Job.features` ({policy: version}). The trainer's `--ladder` rungs and
+  `--exploit` opponent take no override: stamp them (below).
 - The encoders take it: `encode.state_features / entity_features /
   option_preview / encode_state`, `rl.features.featurize(_flat)` (keyword
   `features`, default the latest, `encode.FEATURES`), and the native
@@ -34,6 +46,31 @@ feature set is versioned and travels with the model:
   recorded with the code before set 2 existed;
   `test_feature_set_1_reproduces_the_features_before_set_2` checks both
   engines against it, and `make difftest` compares both versions.
+
+### Models trained on set 2 without the key
+
+Set 2 was on from PR #19's merge, but checkpoints only record the version
+since this change, so every model trained in between learned set 2 and reads
+as set 1 (see `docs/experiments/ledger.md`):
+
+- round 2: `20261007-r2-features`, `r2-botjund`, `r2-pfsp`, `r2-automana`
+- round 3: `20261007-r3-control` (the current best parent), `r3-postboard`,
+  `r3-botjund`, `r3-attn` (still training at the time)
+- `20261007-red-madness-1m`
+
+Before one of them is used as a parent (`--init`, `--exploit`), a ladder
+rung or an opponent, write a stamped copy and use that. The archive on
+h100-private is append-only, so stamp next to it, never over it:
+
+    python tools/stamp_features.py <archive>/final.pt <dir>/final.f2.pt --features 2
+
+`tools/stamp_features.py` copies a full checkpoint (`latest.pt`, `final.pt`)
+or a policy / pool file with `config["features"]` set, refuses an existing
+destination and a source that already records another version, and never
+touches the source. For a one-off evaluation, `--features 2` does the same
+without a copy. A run of this list resumed in place (`r3-attn`) takes
+`--features 2` once; its pool snapshots then play in set 2, as they did
+when the code featurized every seat in the latest set.
 
 Both engines produce the same strings: `mtg_ml/encode.py` and
 `mtg_ml/rl/features.py` (Python reference), `native/src/features.rs` (Rust).

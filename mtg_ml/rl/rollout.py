@@ -255,6 +255,10 @@ class Job:
     # likely option instead of sampling (ties: the first). Evaluation only:
     # recorded games must come from the sampling policy.
     greedy: bool = False
+    # {policy: feature-set version} for network seats (LEARNER or a checkpoint
+    # path) whose checkpoint's own version is wrong: models trained on set 2
+    # before checkpoints recorded it (docs/features.md). Others: `policy_features`.
+    features: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -557,6 +561,8 @@ def _play(job: Job) -> Result:
     out = Result()
 
     def features(pol: str) -> int:
+        if pol in job.features:
+            return check_features(job.features[pol])
         return policy_features(job.learner_path, job.learner_version) if pol == LEARNER else policy_features(pol)
 
     def start(i: int) -> _Live:
