@@ -217,13 +217,13 @@ impl PyGame {
 
     /// `Game.copy` from the latest step-start snapshot; None when there is
     /// none (the caller replays instead, see `NativeGame.copy`).
-    fn copy(&self) -> PyResult<Option<PyGame>> {
+    fn copy(&mut self) -> PyResult<Option<PyGame>> {
         Ok(self.g.copy().map_err(Self::step_err)?.map(|g| PyGame { g, version: 0 }))
     }
 
-    /// Take snapshots at every step start from now on (`Game._snapshots`).
-    fn enable_snapshots(&mut self) {
-        self.g.state_mut().snapshots = true;
+    /// Whether to take a snapshot at every step start (`Game._snapshots`).
+    fn set_snapshots(&mut self, on: bool) {
+        self.g.state_mut().snapshots = on;
     }
 
     /// Use `other`'s latest snapshot: it replayed this game's actions and is
@@ -232,7 +232,6 @@ impl PyGame {
         let snap = other.st().snap.clone();
         let st = self.g.state_mut();
         if !st.edited {
-            st.snapshots = true;
             st.snap = snap;
         }
     }

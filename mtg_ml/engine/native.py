@@ -331,7 +331,7 @@ class NativeGame:
         if setup is not None:
             setup(self)
         if _snapshots:
-            self._g.enable_snapshots()
+            self._g.set_snapshots(True)
         try:
             self._g.start()
         except _n.NativeRulesError as e:
@@ -409,6 +409,7 @@ class NativeGame:
             raise RulesError(str(e)) from None
         if inner is None:
             g = self._replay(snapshots=True)
+            g._g.set_snapshots(False)
             self._g.adopt_snapshot(g._g)
             return g
         g = object.__new__(NativeGame)

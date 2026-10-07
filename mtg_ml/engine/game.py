@@ -25,8 +25,8 @@ Copies: a suspended generator cannot be copied, so `copy()` restarts the
 engine from a snapshot of the data state taken at the start of the current
 step (where the generator holds nothing the data does not already carry
 except which step it is and whether the draw is skipped) and replays only the
-actions taken since. Snapshots are taken once a game has been copied, and in
-every copy; before that, `copy()` replays the whole history once.
+actions taken since. Snapshots are taken once a game has been copied; before
+that, `copy()` replays the whole history once.
 """
 
 from __future__ import annotations
@@ -295,17 +295,21 @@ class Game:
 
         Costs a snapshot restore plus a replay of the actions taken since the
         current step began. The first copy of a game replays the full history
-        instead and turns snapshots on, so later copies are cheap.
+        instead and turns snapshots on for the game, so later copies are
+        cheap. A copy shares the snapshot until its next step begins but
+        takes no snapshots of its own until it is copied itself: a preview or
+        playout that is never copied pays nothing for them.
 
         State edits made outside `step()` (determinization, `add_card` after
         the start) drop the snapshot: until the next step begins, a copy
         replays the actions and so, like `fork(replay=True)`, does not carry
         those edits."""
         snap = self._snap
+        self._snapshots = True
         if snap is None:
             g = self._replay(snapshots=True)
+            g._snapshots = False
             if not self._edited:  # the replay reached this exact state
-                self._snapshots = True
                 self._snap = g._snap
             return g
         g = Game.__new__(Game)
@@ -313,6 +317,7 @@ class Game:
         g._args = self._args
         g.cards_db = self.cards_db
         g._snap = snap
+        g._snapshots = False
         g._edited = False
         g._gen =g._main(g._args["start_step"], resume=(snap.step, snap.skip_draw))
         g._primed = False
@@ -336,6 +341,11 @@ class Game:
     def _take_snapshot(self, step: str, skip_draw: bool) -> None:
         self._snap = _Snapshot(_copy_state(self.__dict__), step, skip_draw, len(self.actions))
         self._edited = False
+
+    def _at_snapshot(self, step: str) -> bool:
+        """At the start of the snapshot's own step (a copy resuming from it)."""
+        s = self._snap
+        return s.step == step and s.n_actions == len(self.actions) and s.state["turn"] == self.turn
 
     def add_card(
         self,
@@ -484,6 +494,8 @@ class Game:
                 continue
             if self._snapshots:
                 self._take_snapshot(name, skip_draw)
+            elif self._snap is not None and not self._at_snapshot(name):
+                self._snap = None  # a copy's inherited snapshot is stale now
             self.step_name = name
             self._log(f"-- {name}")
             if name == "untap":

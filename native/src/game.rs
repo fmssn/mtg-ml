@@ -86,17 +86,21 @@ impl Game {
     /// that continues identically. The suspended coroutine cannot be cloned,
     /// so the copy restarts the engine from the latest step-start snapshot
     /// and replays the actions taken since. `Ok(None)` when there is no
-    /// usable snapshot: the caller replays the whole history instead.
-    pub fn copy(&self) -> Result<Option<Game>, StepError> {
+    /// usable snapshot: the caller replays the whole history instead. Either
+    /// way this game takes snapshots from now on; the copy does not until it
+    /// is copied itself (it shares this one's until its next step begins).
+    pub fn copy(&mut self) -> Result<Option<Game>, StepError> {
         if let Some(m) = &self.broken {
             return Err(StepError::Rules(format!("engine stopped after an error: {m}")));
         }
+        self.state_mut().snapshots = true;
         let snap = match (&self.state().snap, self.started) {
             (Some(s), true) => s.clone(),
             _ => return Ok(None),
         };
         let mut st = snap.state.clone();
         st.snap = Some(snap.clone());
+        st.snapshots = false;
         st.edited = false;
         let mut g = Game { st: Box::into_raw(Box::new(st)), co: None, started: false, broken: None };
         g.start_with(Some((snap.step, snap.skip_draw))).map_err(StepError::Rules)?;

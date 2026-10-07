@@ -143,8 +143,15 @@ impl Eng {
             if (name == "declare_blockers" || name == "combat_damage") && self.s().attackers.is_empty() {
                 continue;
             }
-            if self.s().snapshots {
-                self.s().take_snapshot(name, skip_draw);
+            let st = self.s();
+            if st.snapshots {
+                st.take_snapshot(name, skip_draw);
+            } else if let Some(s) = &st.snap {
+                // A copy's inherited snapshot is stale once it leaves the
+                // snapshot's own step start (where it resumed).
+                if !(s.step == name && s.n_actions == st.actions.len() && s.state.turn == st.turn) {
+                    st.snap = None;
+                }
             }
             self.s().step_name = name;
             self.log(|_| format!("-- {name}"));
