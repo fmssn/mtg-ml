@@ -1,13 +1,13 @@
 """Reviewer backends: DeepSeek (cheap first pass) and Claude (escalation).
 
-    deepseek  DEEPSEEK_API_KEY; OpenAI-compatible chat API over plain HTTP
-              (no extra dependency). Model `deepseek-chat` by default;
+    deepseek  DEEPSEEK_API_KEY (environment, or the nearest .env upwards);
+              OpenAI-compatible chat API over plain HTTP (no extra dependency). Model `deepseek-chat` by default;
               `deepseek-reasoner` thinks first and costs more.
     claude    the `anthropic` SDK (pip install anthropic) with its usual
               credentials (ANTHROPIC_API_KEY or `ant auth login`).
     prompt    no API call: writes the system and user prompt next to the
               game so any agent (a Claude Code subagent, a person) can answer;
-              put the reply in `<game>.reply-<backend>.txt` and run `review`
+              put the reply in `<game>.reply.txt` and run `review`
               again with `--backend file`.
     file      reads that reply.
 
@@ -35,8 +35,23 @@ def complete(backend: str, system: str, user: str, model: str | None = None, eff
     raise ValueError(f"backend {backend!r} makes no API calls")
 
 
+def _dotenv(name: str) -> str | None:
+    """`name` from the environment, else from the nearest `.env` in the
+    working directory or a parent (worktrees find the main checkout's)."""
+    if os.environ.get(name):
+        return os.environ[name]
+    for d in (pathlib.Path.cwd(), *pathlib.Path.cwd().parents):
+        f = d / ".env"
+        if f.is_file():
+            for line in f.read_text().splitlines():
+                k, sep, v = line.strip().removeprefix("export ").partition("=")
+                if sep and k.strip() == name:
+                    return v.strip().strip("'\"")
+    return None
+
+
 def _deepseek(system: str, user: str, model: str) -> tuple[str, dict]:
-    key = os.environ.get("DEEPSEEK_API_KEY")
+    key = _dotenv("DEEPSEEK_API_KEY")
     if not key:
         raise SystemExit("set DEEPSEEK_API_KEY")
     body = {

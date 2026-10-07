@@ -92,3 +92,16 @@ def test_verify_skips_invalid_options(game):
     i = _choices(game)[0]
     out = verify(game, [{"decision": i, "better_option": 99, "cause": "undertraining"}], n=1)
     assert out[0]["rollout"]["verdict"] == "invalid option"
+
+
+def test_dotenv_reads_the_nearest_env_upwards(tmp_path, monkeypatch):
+    from mtg_ml.review.llm import _dotenv
+
+    (tmp_path / ".env").write_text("# keys\nexport FAKE_REVIEW_KEY='abc'\nOTHER=1\n")
+    sub = tmp_path / "a" / "b"
+    sub.mkdir(parents=True)
+    monkeypatch.chdir(sub)
+    monkeypatch.delenv("FAKE_REVIEW_KEY", raising=False)
+    assert _dotenv("FAKE_REVIEW_KEY") == "abc"
+    monkeypatch.setenv("FAKE_REVIEW_KEY", "env")
+    assert _dotenv("FAKE_REVIEW_KEY") == "env"
