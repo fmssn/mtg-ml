@@ -29,6 +29,8 @@ def _record(args, fault_specs: list[str], tag: str = "") -> list[pathlib.Path]:
             args.agents.split(","), seed, matchup=args.matchup, match_game=args.match_game,
             engine=args.engine, greedy=args.greedy, wrap=F.wrapper(fs, seed) if fs else None,
         )
+        if getattr(args, "note", None):  # policy files carry no training state; say it here
+            rep["meta"]["review"]["policies"] = [args.note if k.startswith("model:") else None for k in rep["meta"]["review"]["specs"]]
         for f in fs:
             if f["kind"] in ("life", "power"):
                 F.tamper(rep, f)
@@ -178,6 +180,7 @@ def main(argv=None) -> None:
     r = sub.add_parser("record", help="play games and write review files")
     play_args(r)
     r.add_argument("--fault", action="append", default=[], help="seed a fault (mtg_ml.review.faults); repeatable")
+    r.add_argument("--note", default=None, help="describe the model seats' policy for the reviewer (run, iteration, training games, feature set, trunk)")
     v = sub.add_parser("review", help="have an LLM review game files")
     v.add_argument("games", nargs="+", type=pathlib.Path)
     llm_args(v)
