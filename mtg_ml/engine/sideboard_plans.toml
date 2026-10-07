@@ -59,3 +59,48 @@ opponent = "mono_blue_terror"
 why = "Pyroblast and Red Elemental Blast answer every blue card, Relic of Progenitus starves Terror and Serpent; the slow card draw and Epicure out."
 in = { "Pyroblast" = 4, "Red Elemental Blast" = 2, "Relic of Progenitus" = 2 }
 out = { "Highway Robbery" = 4, "Grab the Prize" = 2, "Voldaren Epicure" = 2 }
+
+# Elves (docs/elves.md). Faerie Macabre is never cast here (no black mana):
+# it is a free graveyard-hate discard.
+
+[[plan]]
+deck = "elves"
+opponent = "jund_wildfire"
+why = "Krark-Clan Shaman sweeps the x/1 mana Elves: Vitu-Ghazi Inspector (1/3 reach) survives it, Deglamer shuffles a Bridge or Wellspring away."
+in = { "Vitu-Ghazi Inspector" = 3, "Deglamer" = 2 }
+out = { "Elvish Mystic" = 2, "Fyndhorn Elves" = 1, "Sagu Wildling" = 2 }
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "elves"
+why = "Go for the Throat kills any Elf; Cleansing Wildfire on a basic Forest only cycles."
+in = { "Go for the Throat" = 2 }
+out = { "Cleansing Wildfire" = 2 }
+
+[[plan]]
+deck = "elves"
+opponent = "mono_blue_terror"
+why = "Faerie Macabre shrinks Terror and Serpent and stops Sleep of the Dead's escape, Emergence kills Delver; no targets for Masked Vandal."
+in = { "Faerie Macabre" = 3, "Monstrous Emergence" = 1 }
+out = { "Masked Vandal" = 4 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "elves"
+why = "Nothing in Blue's sideboard helps (no red cards, no instants worth a Dispel, no artifacts worth a Steel Sabotage)."
+in = {}
+out = {}
+
+[[plan]]
+deck = "elves"
+opponent = "red_madness"
+why = "Life and toughness against burn (Paladin and Inspector gain life); the x/1 mana Elves and Vandals (Red has only Blood) go out."
+in = { "Spinewoods Paladin" = 3, "Vitu-Ghazi Inspector" = 3 }
+out = { "Masked Vandal" = 3, "Elvish Mystic" = 2, "Fyndhorn Elves" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "elves"
+why = "Overloaded Electrickery, Martyr of Ashes and Searing Blaze sweep and burn a board of x/1s; the slow card draw goes out."
+in = { "Electrickery" = 2, "Martyr of Ashes" = 2, "Searing Blaze" = 2 }
+out = { "Highway Robbery" = 4, "Grab the Prize" = 2 }

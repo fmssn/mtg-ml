@@ -77,9 +77,10 @@ pub enum TK {
     AnotherCreature,
     ArtifactOrEnchantmentYouDontControl,
     SorcerySpell,
+    ArtifactOrEnchantment,
 }
 
-const TK_NAMES: [(&str, TK); 26] = [
+const TK_NAMES: [(&str, TK); 27] = [
     ("creature", TK::Creature),
     ("nonlegendary_creature", TK::NonlegendaryCreature),
     ("nonartifact_creature", TK::NonartifactCreature),
@@ -106,6 +107,7 @@ const TK_NAMES: [(&str, TK); 26] = [
     ("another_creature", TK::AnotherCreature),
     ("artifact_or_enchantment_you_dont_control", TK::ArtifactOrEnchantmentYouDontControl),
     ("sorcery_spell", TK::SorcerySpell),
+    ("artifact_or_enchantment", TK::ArtifactOrEnchantment),
 ];
 
 impl TK {
@@ -170,6 +172,10 @@ pub enum Event {
     ThirdDraw,
     /// Engine-internal: the madness trigger.
     Discarded,
+    /// A dungeon room: the venture marker moved into it.
+    Room,
+    /// Engine-internal: the initiative's inherent triggers.
+    Initiative,
 }
 
 /// `you_cast` trigger condition `{ spell = ... }`.
@@ -242,7 +248,22 @@ pub enum Op {
     Scry { n: i32 },
     ExploreTarget,
     ShuffleIntoLibrary,
+    /// Damage equal to the power chosen as the additional cost, to target 0 (Monstrous Emergence).
+    DamageChosenPower,
+    UntapTarget,
+    /// +n/+n until end of turn, or +X/+X with X = the Elves on the battlefield.
+    PumpTarget { n: i32, count_elves: bool },
+    CountersTarget { n: i32 },
+    ExileTarget,
+    ShuffleTargetIntoLibrary,
+    /// Top n cards: one card type (`take`, or chosen from `choose`) to hand, the rest to the graveyard or the bottom.
+    Dig { n: i32, take: Option<String>, choose: Vec<String>, rest_graveyard: bool },
+    MayExileFromGraveyard { types: u16, type_name: String, then: Vec<Op> },
+    TakeInitiative,
+    RevealToBattlefield { n: i32, types: u16, type_name: String, counters: i32, hexproof: bool },
     Custom(Custom),
+    /// Engine-internal: the initiative's upkeep venture.
+    Venture,
     /// Engine-internal: the ward trigger.
     Ward,
     /// Engine-internal: the madness trigger.
@@ -305,6 +326,11 @@ pub struct AbilityDef {
     pub zone_hand: bool,
     pub sorcery_speed: bool,
     pub mana: Option<Vec<u8>>,
+    /// One unit per Elf on the battlefield (Priest of Titania).
+    pub mana_elves: bool,
+    /// Cost: return a Forest you control to its owner's hand (Quirion Ranger).
+    pub return_forest: bool,
+    pub once_per_turn: bool,
     pub targets: Vec<TK>,
 }
 
@@ -317,8 +343,18 @@ pub struct TriggerDef {
     pub cast_filter: Option<CastFilter>,
     /// etb condition `{ bargained = true }`.
     pub bargained: bool,
+    /// etb condition `{ entered_untapped = true }`.
+    pub entered_untapped: bool,
+    /// etb condition `{ cast_mode = ... }`: the cast method's name.
+    pub cast_mode: Option<String>,
     /// Chosen as the trigger is put on the stack.
     pub targets: Vec<TK>,
+}
+
+impl TriggerDef {
+    pub fn internal(name: &str, event: Event, op: Op) -> TriggerDef {
+        TriggerDef { name: name.into(), event, effect: vec![op], sacrificed_subtype: None, cast_filter: None, bargained: false, entered_untapped: false, cast_mode: None, targets: vec![] }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -370,6 +406,10 @@ pub struct CardDef {
     /// cards.py `card_shape`: what the card does, as entity tokens read from
     /// its spec (feature set 5). Computed once at load.
     pub shape: Vec<String>,
+    pub omen: bool,
+    pub enters_tapped_unless_forests: i32,
+    pub additional_power: bool,
+    pub collect_evidence: i32,
 }
 
 impl CardDef {
@@ -388,6 +428,10 @@ impl CardDef {
     pub fn has_supertype(&self, s: &str) -> bool {
         self.supertypes.iter().any(|x| x == s)
     }
+    /// Subtype check that honours changeling (cards.py `has_creature_type`).
+    pub fn has_creature_type(&self, s: &str) -> bool {
+        self.has_subtype(s) || self.keywords & db().kw("changeling") != 0
+    }
 }
 
 pub struct CardDb {
@@ -397,13 +441,18 @@ pub struct CardDb {
     pub keyword_names: Vec<String>,
     pub ward: TriggerDef,
     pub madness: TriggerDef,
+    pub venture: TriggerDef,
+    pub take_initiative: TriggerDef,
+    /// The Undercity (its rooms are its triggers) and, per room, the indices of the rooms below it.
+    pub undercity: Option<DefId>,
+    pub room_next: Vec<Vec<usize>>,
     /// `objects.FREE`: the cost of plot casts and land-sacrifice alternatives.
     pub free: ManaCost,
     pub spec_text: String,
 }
 
 /// Keywords the engine itself gives meaning to (or grants).
-const ENGINE_KEYWORDS: [&str; 6] = ["deathtouch", "flying", "indestructible", "lifelink", "reach", "trample"];
+const ENGINE_KEYWORDS: [&str; 9] = ["changeling", "deathtouch", "flying", "hexproof", "indestructible", "lifelink", "menace", "reach", "trample"];
 
 impl CardDb {
     pub fn def(&self, id: DefId) -> &CardDef {
@@ -430,9 +479,9 @@ impl CardDb {
                 Some(_) => Err(format!("{name} must be an array of tables")),
             }
         };
-        let (faces, cards, tokens) = (section("face")?, section("card")?, section("token")?);
+        let (faces, cards, tokens, dungeons) = (section("face")?, section("card")?, section("token")?, section("dungeon")?);
         for k in root.keys() {
-            if !["face", "card", "token"].contains(&k.as_str()) {
+            if !["face", "card", "token", "dungeon"].contains(&k.as_str()) {
                 return Err(format!("cards.toml: unknown top-level key {k:?}"));
             }
         }
@@ -472,8 +521,12 @@ impl CardDb {
             cards: HashMap::new(),
             tokens: HashMap::new(),
             keyword_names: kws,
-            ward: TriggerDef { name: "ward".into(), event: Event::BecomesTarget, effect: vec![Op::Ward], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![] },
-            madness: TriggerDef { name: "madness".into(), event: Event::Discarded, effect: vec![Op::Madness], sacrificed_subtype: None, cast_filter: None, bargained: false, targets: vec![] },
+            ward: TriggerDef::internal("ward", Event::BecomesTarget, Op::Ward),
+            madness: TriggerDef::internal("madness", Event::Discarded, Op::Madness),
+            venture: TriggerDef::internal("venture into Undercity", Event::Initiative, Op::Venture),
+            take_initiative: TriggerDef::internal("take the initiative", Event::Initiative, Op::TakeInitiative),
+            undercity: None,
+            room_next: vec![],
             free: ManaCost::default(),
             spec_text: text.to_string(),
         };
@@ -498,6 +551,15 @@ impl CardDb {
         let tokens_by_name = db.tokens.clone();
         for (i, (_, t)) in all.iter().enumerate() {
             let d = parse_card(i as DefId, t, &db, &face_ids, &tokens_by_name).map_err(|e| format!("{}: {e}", t.get("name").and_then(|v| v.as_str()).unwrap_or("?")))?;
+            db.defs.push(d);
+        }
+        for t in &dungeons {
+            let (d, next) = parse_dungeon(db.defs.len() as DefId, t, &db, &tokens_by_name).map_err(|e| format!("dungeon: {e}"))?;
+            if d.name != "Undercity" {
+                return Err(format!("unknown dungeon {:?}", d.name));
+            }
+            db.undercity = Some(d.id);
+            db.room_next = next;
             db.defs.push(d);
         }
         Ok(db)
@@ -643,6 +705,11 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "search_library" => &["op", "supertype", "type", "subtypes_any", "dest", "tapped", "reveal", "what"],
             "optional_payment" => &["op", "cost", "prompt", "then"],
             "custom" => &["op", "fn"],
+            "pump_target" => &["op", "n", "count"],
+            "counters_target" => &["op", "n"],
+            "dig" => &["op", "n", "take", "choose_type", "rest"],
+            "may_exile_from_graveyard" => &["op", "type", "then"],
+            "reveal_to_battlefield" => &["op", "n", "type", "counters", "hexproof"],
             _ => &["op"],
         };
         check_keys(t, keys, &format!("op {op:?}"))?;
@@ -728,11 +795,45 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                 prompt: req_str(t, "prompt")?.to_string(),
                 then: parse_ops(t.get("then"), db, tokens)?.unwrap_or_default(),
             },
-            "scry" => {
-                if n()? != 1 {
-                    return Err("scry: only n = 1 is supported".into());
+            "scry" => Op::Scry { n: n()? },
+            "damage_chosen_power" => Op::DamageChosenPower,
+            "untap_target" => Op::UntapTarget,
+            "pump_target" => match get_str(t, "count")? {
+                Some("elves") => Op::PumpTarget { n: 0, count_elves: true },
+                Some(c) => return Err(format!("pump_target: unknown count {c:?}")),
+                None => Op::PumpTarget { n: n()?, count_elves: false },
+            },
+            "counters_target" => Op::CountersTarget { n: n()? },
+            "exile_target" => Op::ExileTarget,
+            "shuffle_target_into_library" => Op::ShuffleTargetIntoLibrary,
+            "dig" => {
+                let take = get_str(t, "take")?.map(|s| s.to_string());
+                let choose = get_str_list(t, "choose_type")?;
+                for ty in take.iter().chain(choose.iter()) {
+                    type_bit(ty)?;
                 }
-                Op::Scry { n: 1 }
+                if take.is_some() == !choose.is_empty() {
+                    return Err("dig: exactly one of take and choose_type".into());
+                }
+                Op::Dig {
+                    n: n()?,
+                    take,
+                    choose,
+                    rest_graveyard: match req_str(t, "rest")? {
+                        "graveyard" => true,
+                        "bottom" => false,
+                        r => return Err(format!("dig: unknown rest {r:?}")),
+                    },
+                }
+            }
+            "may_exile_from_graveyard" => {
+                let ty = req_str(t, "type")?;
+                Op::MayExileFromGraveyard { types: type_bit(ty)?, type_name: ty.to_string(), then: parse_ops(t.get("then"), db, tokens)?.unwrap_or_default() }
+            }
+            "take_initiative" => Op::TakeInitiative,
+            "reveal_to_battlefield" => {
+                let ty = req_str(t, "type")?;
+                Op::RevealToBattlefield { n: n()?, types: type_bit(ty)?, type_name: ty.to_string(), counters: get_int(t, "counters")?.unwrap_or(0), hexproof: get_bool(t, "hexproof")? }
             }
             "explore_target" => Op::ExploreTarget,
             "shuffle_into_library" => Op::ShuffleIntoLibrary,
@@ -824,6 +925,17 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
                 },
                 sorcery_speed: get_bool(a, "sorcery_speed")?,
                 mana: if a.contains_key("mana") { Some(get_str_list(a, "mana")?.iter().map(|s| s.as_bytes()[0]).collect()) } else { None },
+                mana_elves: match get_str(a, "mana_amount")? {
+                    None => false,
+                    Some("elves") => true,
+                    Some(m) => return Err(format!("unknown mana_amount {m:?}")),
+                },
+                return_forest: match get_str(a, "return_land")? {
+                    None => false,
+                    Some("forest") => true,
+                    Some(r) => return Err(format!("unknown return_land {r:?}")),
+                },
+                once_per_turn: get_bool(a, "once_per_turn")?,
                 targets: targets(a)?,
             });
         }
@@ -833,10 +945,12 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         for tr in v.as_array().ok_or("triggers must be a list")? {
             let tr = tr.as_table().ok_or("triggers must be tables")?;
             check_fields(tr, SHAPE_TRIGGER_FIELDS, NON_SHAPE_TRIGGER_FIELDS, "trigger")?;
-            let (mut sacrificed_subtype, mut cast_filter, mut bargained) = (None, None, false);
+            let (mut sacrificed_subtype, mut cast_filter, mut bargained, mut entered_untapped, mut cast_mode) = (None, None, false, false, None);
             match tr.get("condition") {
                 None => {}
                 Some(Value::Table(c)) if c.len() == 1 && c.get("bargained") == Some(&Value::Boolean(true)) => bargained = true,
+                Some(Value::Table(c)) if c.len() == 1 && c.get("entered_untapped") == Some(&Value::Boolean(true)) => entered_untapped = true,
+                Some(Value::Table(c)) if c.len() == 1 && c.contains_key("cast_mode") => cast_mode = Some(req_str(c, "cast_mode")?.to_string()),
                 Some(Value::Table(c)) if c.len() == 1 && c.contains_key("sacrificed_subtype") => sacrificed_subtype = Some(req_str(c, "sacrificed_subtype")?.to_string()),
                 Some(Value::Table(c)) if c.len() == 1 && c.contains_key("spell") => {
                     cast_filter = Some(match req_str(c, "spell")? {
@@ -863,6 +977,8 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
                 sacrificed_subtype,
                 cast_filter,
                 bargained,
+                entered_untapped,
+                cast_mode,
                 targets: targets(tr)?,
             });
         }
@@ -931,6 +1047,10 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
             Some(b) => Some(*faces.get(b).ok_or_else(|| format!("unknown back face {b:?}"))?),
         },
         modes,
+        omen: get_bool(t, "omen")?,
+        enters_tapped_unless_forests: get_int(t, "enters_tapped_unless_forests")?.unwrap_or(0),
+        additional_power: get_bool(t, "additional_power")?,
+        collect_evidence: get_int(t, "collect_evidence")?.unwrap_or(0),
         shape,
     })
 }
@@ -1098,6 +1218,80 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
     Ok(v)
 }
 
+/// `[[dungeon]]`: name and rooms (name, next, targets, effect), the first
+/// room on top. The rooms become the dungeon's triggers (event room).
+fn parse_dungeon(id: DefId, t: &Table, db: &CardDb, tokens: &HashMap<String, DefId>) -> Result<(CardDef, Vec<Vec<usize>>), String> {
+    check_keys(t, &["name", "rooms"], "dungeon")?;
+    let rooms = t.get("rooms").and_then(|v| v.as_array()).ok_or("rooms must be a list")?;
+    let mut names: Vec<String> = vec![];
+    for r in rooms {
+        let r = r.as_table().ok_or("rooms must be tables")?;
+        names.push(req_str(r, "name")?.to_string());
+    }
+    let mut triggers = vec![];
+    let mut next = vec![];
+    for r in rooms {
+        let r = r.as_table().unwrap();
+        check_keys(r, &["name", "next", "targets", "effect"], "room")?;
+        let mut nx = vec![];
+        for n in get_str_list(r, "next")? {
+            nx.push(names.iter().position(|x| *x == n).ok_or_else(|| format!("unknown next room {n:?}"))?);
+        }
+        next.push(nx);
+        triggers.push(TriggerDef {
+            name: req_str(r, "name")?.to_string(),
+            event: Event::Room,
+            effect: parse_ops(r.get("effect"), db, tokens)?.ok_or("room without effect")?,
+            sacrificed_subtype: None,
+            cast_filter: None,
+            bargained: false,
+            entered_untapped: false,
+            cast_mode: None,
+            targets: targets(r)?,
+        });
+    }
+    let d = CardDef {
+        id,
+        name: req_str(t, "name")?.to_string(),
+        cost: ManaCost::default(),
+        types: 0,
+        subtypes: vec![],
+        supertypes: vec![],
+        colors: 0,
+        power: None,
+        toughness: None,
+        keywords: 0,
+        ward: 0,
+        targets: vec![],
+        effect: None,
+        additional_sac: None,
+        cost_reduction: None,
+        flashback: None,
+        escape: None,
+        escape_exile: 0,
+        bestow: None,
+        madness: None,
+        plot: None,
+        overload: None,
+        overload_effect: None,
+        additional_discard: false,
+        alternative_sac: None,
+        flashback_sac: None,
+        abilities: vec![],
+        triggers,
+        enters_tapped: false,
+        etb_x_counters: false,
+        back: None,
+        modes: vec![],
+        omen: false,
+        enters_tapped_unless_forests: 0,
+        additional_power: false,
+        collect_evidence: 0,
+        shape: vec![],
+    };
+    Ok((d, next))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1111,7 +1305,8 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 72);
+        assert_eq!(db.cards.len(), 88);
+        assert!(db.undercity.is_some() && db.room_next[0] == vec![1, 2]);
         let gut = db.def(db.cards["Gut Shot"]);
         assert_eq!((gut.colors, gut.phyrexian_life, gut.cost.mana_value()), (color_bit(b'R'), 2, 1));
         assert!(gut.phyrexian_cost.as_ref().unwrap().is_zero());

@@ -35,6 +35,9 @@ MATCHUPS = {
     "jund_blue": ("jund_wildfire", "mono_blue_terror"),
     "jund_madness": ("jund_wildfire", "red_madness"),
     "blue_madness": ("mono_blue_terror", "red_madness"),
+    "jund_elves": ("jund_wildfire", "elves"),
+    "blue_elves": ("mono_blue_terror", "elves"),
+    "madness_elves": ("red_madness", "elves"),
 }
 DEFAULT_MATCHUP = "jund_blue"
 

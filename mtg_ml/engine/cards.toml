@@ -534,6 +534,197 @@ abilities = [
 ]
 
 # ---------------------------------------------------------------------------
+# Elves
+# ---------------------------------------------------------------------------
+
+# Also played by Tron.
+[[card]]
+name = "Generous Ent"
+cost = "{5}{G}"
+types = "Creature"
+subtypes = "Treefolk"
+text = "Reach. When this creature enters, create a Food token. Forestcycling {1}."
+power = 5
+toughness = 7
+keywords = ["reach"]
+triggers = [{ name = "create a Food token", event = "etb", effect = [{ op = "create_token", token = "Food", n = 1 }] }]
+abilities = [
+    { name = "forestcycling {1}", cost = "{1}", zone = "hand", discard_self = true, effect = [
+        { op = "search_library", subtypes_any = ["Forest"], dest = "hand", reveal = true, what = "a Forest card" },
+    ] },
+]
+
+[[card]]
+name = "Llanowar Elves"
+cost = "{G}"
+types = "Creature"
+subtypes = "Elf Druid"
+text = "{T}: Add {G}."
+power = 1
+toughness = 1
+abilities = [{ name = "add G", tap = true, mana = ["G"] }]
+
+[[card]]
+name = "Fyndhorn Elves"
+cost = "{G}"
+types = "Creature"
+subtypes = "Elf Druid"
+text = "{T}: Add {G}."
+power = 1
+toughness = 1
+abilities = [{ name = "add G", tap = true, mana = ["G"] }]
+
+[[card]]
+name = "Elvish Mystic"
+cost = "{G}"
+types = "Creature"
+subtypes = "Elf Druid"
+text = "{T}: Add {G}."
+power = 1
+toughness = 1
+abilities = [{ name = "add G", tap = true, mana = ["G"] }]
+
+# One activation makes one {G} per Elf; the payment uses one and the rest
+# floats in the pool.
+[[card]]
+name = "Priest of Titania"
+cost = "{1}{G}"
+types = "Creature"
+subtypes = "Elf Druid"
+text = "{T}: Add {G} for each Elf on the battlefield."
+power = 1
+toughness = 1
+abilities = [{ name = "add G for each Elf", tap = true, mana = ["G"], mana_amount = "elves" }]
+
+[[card]]
+name = "Quirion Ranger"
+cost = "{G}"
+types = "Creature"
+subtypes = "Elf Ranger"
+text = "Return a Forest you control to its owner's hand: Untap target creature. Activate only once each turn."
+power = 1
+toughness = 1
+abilities = [{ name = "untap target creature", return_land = "forest", once_per_turn = true, targets = ["creature"], effect = [{ op = "untap_target" }] }]
+
+[[card]]
+name = "Timberwatch Elf"
+cost = "{2}{G}"
+types = "Creature"
+subtypes = "Elf"
+text = "{T}: Target creature gets +X/+X until end of turn, where X is the number of Elves on the battlefield."
+power = 1
+toughness = 2
+abilities = [{ name = "target creature gets +X/+X", tap = true, targets = ["creature"], effect = [{ op = "pump_target", count = "elves" }] }]
+
+[[card]]
+name = "Winding Way"
+cost = "{1}{G}"
+types = "Sorcery"
+text = "Choose creature or land. Reveal the top four cards of your library. Put all cards of the chosen type revealed this way into your hand and the rest into your graveyard."
+effect = [{ op = "dig", n = 4, choose_type = ["Creature", "Land"], rest = "graveyard" }]
+
+# "You may reveal any number of creature cards": taking all of them is
+# never worse (extra cards can be discarded at cleanup), so all are taken.
+# The rest go to the bottom in the order they were.
+[[card]]
+name = "Lead the Stampede"
+cost = "{2}{G}"
+types = "Sorcery"
+text = "Look at the top five cards of your library. You may reveal any number of creature cards from among them and put the revealed cards into your hand. Put the rest on the bottom of your library in any order."
+effect = [{ op = "dig", n = 5, take = "Creature", rest = "bottom" }]
+
+[[card]]
+name = "Masked Vandal"
+cost = "{1}{G}"
+types = "Creature"
+subtypes = "Shapeshifter"
+text = "Changeling. When this creature enters, you may exile a creature card from your graveyard. If you do, exile target artifact or enchantment an opponent controls."
+power = 1
+toughness = 3
+keywords = ["changeling"]
+triggers = [{ name = "exile target artifact or enchantment", event = "etb", targets = ["artifact_or_enchantment_you_dont_control"], effect = [
+    { op = "may_exile_from_graveyard", type = "Creature", then = [{ op = "exile_target" }] },
+] }]
+
+[[card]]
+name = "Avenging Hunter"
+cost = "{4}{G}"
+types = "Creature"
+subtypes = "Dragon Ranger"
+text = "Trample. When this creature enters, you take the initiative."
+power = 5
+toughness = 4
+keywords = ["trample"]
+triggers = [{ name = "take the initiative", event = "etb", effect = [{ op = "take_initiative" }] }]
+
+[[card]]
+name = "Sagu Wildling"
+cost = "{4}{G}"
+types = "Creature"
+subtypes = "Dragon"
+text = "Flying. When this creature enters, you gain 3 life. // Roost Seek {G}, Sorcery - Omen: search for a basic land card, reveal it, put it into your hand, then shuffle (also shuffle this card)."
+power = 3
+toughness = 3
+keywords = ["flying"]
+back = "Roost Seek"
+omen = true
+triggers = [{ name = "gain 3 life", event = "etb", effect = [{ op = "gain_life", n = 3 }] }]
+
+[[card]]
+name = "Gingerbread Cabin"
+types = "Land"
+subtypes = "Forest"
+text = "{T}: Add {G}. Enters tapped unless you control three or more other Forests. When it enters untapped, create a Food token."
+enters_tapped_unless_forests = 3
+abilities = [{ name = "add G", tap = true, mana = ["G"] }]
+triggers = [{ name = "create a Food token", event = "etb", condition = { entered_untapped = true }, effect = [{ op = "create_token", token = "Food", n = 1 }] }]
+
+# Elves sideboard
+
+[[card]]
+name = "Monstrous Emergence"
+cost = "{1}{G}"
+types = "Sorcery"
+text = "As an additional cost, choose a creature you control or reveal a creature card from your hand. Deals damage equal to that creature's power to target creature."
+additional_power = true
+targets = ["creature"]
+effect = [{ op = "damage_chosen_power" }]
+
+[[card]]
+name = "Vitu-Ghazi Inspector"
+cost = "{1}{G}"
+types = "Creature"
+subtypes = "Elf Detective"
+text = "As an additional cost, you may collect evidence 6. Reach. When it enters, if evidence was collected, put a +1/+1 counter on target creature and you gain 2 life."
+power = 1
+toughness = 3
+keywords = ["reach"]
+collect_evidence = 6
+triggers = [{ name = "+1/+1 counter, gain 2 life", event = "etb", condition = { cast_mode = "evidence" }, targets = ["creature"], effect = [
+    { op = "counters_target", n = 1 }, { op = "gain_life", n = 2 },
+] }]
+
+[[card]]
+name = "Spinewoods Paladin"
+cost = "{4}{G}"
+types = "Creature"
+subtypes = "Human Knight"
+text = "Trample. When this creature enters, you gain 3 life. Plot {3}{G}."
+power = 5
+toughness = 4
+keywords = ["trample"]
+plot = "{3}{G}"
+triggers = [{ name = "gain 3 life", event = "etb", effect = [{ op = "gain_life", n = 3 }] }]
+
+[[card]]
+name = "Deglamer"
+cost = "{1}{G}"
+types = "Instant"
+text = "Choose target artifact or enchantment. Its owner shuffles it into their library."
+targets = ["artifact_or_enchantment"]
+effect = [{ op = "shuffle_target_into_library" }]
+
+# ---------------------------------------------------------------------------
 # Sideboard cards (see decks.py; not all are in a current sideboard)
 # ---------------------------------------------------------------------------
 
@@ -735,6 +926,16 @@ power = 3
 toughness = 2
 keywords = ["flying"]
 
+# Sagu Wildling's omen half: cast from hand as this sorcery, then shuffled
+# into the library on resolution.
+[[face]]
+name = "Roost Seek"
+cost = "{G}"
+types = "Sorcery"
+subtypes = "Omen"
+text = "Search your library for a basic land card, reveal it, put it into your hand, then shuffle. (Also shuffle this card.)"
+effect = [{ op = "search_library", supertype = "Basic", type = "Land", dest = "hand", reveal = true, what = "a basic land card" }]
+
 # ---------------------------------------------------------------------------
 # Tokens
 # ---------------------------------------------------------------------------
@@ -768,3 +969,50 @@ types = "Artifact"
 subtypes = "Blood"
 text = "{1}, {T}, Discard a card, Sacrifice this token: Draw a card."
 abilities = [{ name = "draw a card", cost = "{1}", tap = true, discard_other = true, sac_self = true, effect = [{ op = "draw", n = 1 }] }]
+
+[[token]]
+name = "Food"
+types = "Artifact"
+subtypes = "Food"
+text = "{2}, {T}, Sacrifice this token: You gain 3 life."
+abilities = [{ name = "gain 3 life", cost = "{2}", tap = true, sac_self = true, effect = [{ op = "gain_life", n = 3 }] }]
+
+[[token]]
+name = "Treasure"
+types = "Artifact"
+subtypes = "Treasure"
+text = "{T}, Sacrifice this token: Add one mana of any color."
+abilities = [{ name = "add one mana of any color", tap = true, sac_self = true, mana = ["W", "U", "B", "R", "G"] }]
+
+[[token]]
+name = "Skeleton"
+types = "Creature"
+subtypes = "Skeleton"
+colors = "B"
+text = "Menace"
+power = 4
+toughness = 1
+keywords = ["menace"]
+
+# ---------------------------------------------------------------------------
+# Dungeons (initiative: Avenging Hunter)
+# ---------------------------------------------------------------------------
+
+# The Undercity. Rooms are triggered abilities of the dungeon, first room on
+# top; `next` are the rooms below. Arena (goad target creature) is left
+# out: the engine has no attack requirements. Forge therefore leads only to
+# Trap! and Lost Well only to Stash.
+[[dungeon]]
+name = "Undercity"
+rooms = [
+    { name = "Secret Entrance", next = ["Forge", "Lost Well"], effect = [
+        { op = "search_library", supertype = "Basic", type = "Land", dest = "hand", reveal = true, what = "a basic land card" },
+    ] },
+    { name = "Forge", next = ["Trap!"], targets = ["creature"], effect = [{ op = "counters_target", n = 2 }] },
+    { name = "Lost Well", next = ["Stash"], effect = [{ op = "scry", n = 2 }] },
+    { name = "Trap!", next = ["Archives"], targets = ["player"], effect = [{ op = "lose_life", who = "target_player", n = 5 }] },
+    { name = "Stash", next = ["Catacombs"], effect = [{ op = "create_token", token = "Treasure", n = 1 }] },
+    { name = "Archives", next = ["Throne of the Dead Three"], effect = [{ op = "draw", n = 1 }] },
+    { name = "Catacombs", next = ["Throne of the Dead Three"], effect = [{ op = "create_token", token = "Skeleton", n = 1 }] },
+    { name = "Throne of the Dead Three", effect = [{ op = "reveal_to_battlefield", n = 10, type = "Creature", counters = 3, hexproof = true }] },
+]

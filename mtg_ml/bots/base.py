@@ -36,6 +36,8 @@ class Bot:
     def act(self, g: Game) -> int:
         d = g.decision
         handler = getattr(self, f"score_{d.kind}", None)
+        if d.kind == "target" and self.building(g, d) == "Undercity":
+            handler = self.score_room_target  # every deck can take the initiative by combat damage
         if handler is None:
             return 0
         best, best_i = NEG - 1, 0
@@ -242,6 +244,8 @@ class Bot:
         if o.key[0] == "exile_any_gy":
             return self.exile_any_value(g, o)
         c = o.value
+        if c is None:  # "Exile nothing" (an optional exile)
+            return 0.5
         if c.face.is_type("Land"):
             return 3.0
         if c.face.is_type("Instant") or c.face.is_type("Sorcery"):
@@ -275,6 +279,9 @@ class Bot:
         name = o.key[1]
         if verb == "search":
             return NEG if name is None else self.search_value(g, name)
+        if verb == "put":  # Throne of the Dead Three: the biggest creature
+            f = g.cards_db[name]
+            return (f.power or 0) * 1.5 + (f.toughness or 0) * 0.5
         # discard / put back: get rid of the least valuable card
         return -self.card_value(g, name)
 
@@ -298,6 +305,10 @@ class Bot:
         return 0.0
 
     def score_order(self, g: Game, d: Decision, o: Option) -> float:
+        if o.key[0] == "scry":  # scry N: good cards on top (best first), the rest to the bottom
+            k = o.key.index("bottom")
+            tops, bottoms = o.key[2:k], o.key[k + 1 :]
+            return sum(self.card_value(g, n) * w for n, w in zip(tops, (3, 2, 1))) + sum(2 - self.card_value(g, n) for n in bottoms)
         names = o.key[1:]
         return sum(self.card_value(g, n) * w for n, w in zip(names, (3, 2, 1)))
 
@@ -311,6 +322,16 @@ class Bot:
 
     def score_target(self, g: Game, d: Decision, o: Option) -> float:
         return 0.0
+
+    def score_room_target(self, g: Game, d: Decision, o: Option) -> float:
+        """Undercity rooms: Trap! at the opponent, Forge's counters on our best creature."""
+        v = o.value
+        if v[0] == "player":
+            return 1.0 if v[1] == self.opp else NEG
+        c = self.ref_card(g, o)
+        if c is None:
+            return 0.0
+        return self.creature_value(g, c) * (1 if c.controller == self.p else -1)
 
     def score_mulligan(self, g: Game, d: Decision, o: Option) -> float:
         keep = self.keep_hand(g, 7 - g.mulligans_taken[self.p])

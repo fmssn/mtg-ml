@@ -92,6 +92,13 @@ def observe(g: Game, viewer: int) -> dict:
         ],
         "decision": None,
     }
+    # Initiative (Undercity): only present once someone took it, so views of
+    # games without it are unchanged.
+    if g.initiative is not None:
+        obs["initiative"] = "self" if g.initiative == viewer else "opponent"
+    for key, pl in (("self", me), ("opponent", them)):
+        if pl.dungeon_room is not None:
+            obs[key]["dungeon_room"] = pl.dungeon_room
     if d is not None and d.player == viewer:
         obs["decision"] = {"kind": d.kind, "prompt": d.prompt, "options": [o.label for o in d.options], "keys": [o.key for o in d.options]}
     elif d is not None:

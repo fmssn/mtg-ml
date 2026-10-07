@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import copy as _copy
 import inspect
+import itertools
 import random
 from typing import Callable, Iterable
 
@@ -57,7 +58,7 @@ STEPS = (
 
 MAX_HAND = 7
 # Cast modes from the hand, in the order they are offered.
-HAND_MODES = ("normal", "bestow", "overload", "alternative", "phyrexian", "bargain")
+HAND_MODES = ("normal", "bestow", "overload", "alternative", "phyrexian", "bargain", "omen", "evidence")
 BARGAIN_SAC = "artifact_enchantment_or_token"  # bargain's sacrifice filter
 
 
@@ -233,6 +234,7 @@ class Game:
         self.step_name = "untap"
         self.lands_played = 0
         self.spells_cast_this_turn = 0  # by both players: the storm count
+        self.initiative: int | None = None  # the player who has the initiative (Undercity)
         self.attackers: list[int] = []
         self.blocked: set[int] = set()
         self.blocks: dict[int, int] = {}  # blocker oid -> attacker oid
@@ -536,6 +538,7 @@ class Game:
             if c.controller != self.active:
                 continue
             c.sick = False
+            c.hexproof = False  # "until your next turn"
             if c.skip_untap > 0:
                 c.skip_untap -= 1
             else:
@@ -664,8 +667,9 @@ class Game:
                 if ab.zone != "battlefield":
                     continue
                 if ab.mana is not None:
-                    # Only mana abilities with side effects are worth offering at priority.
-                    if ab.sac_self and self._can_activate(p, card, ab):
+                    # Only mana abilities with side effects are worth offering at
+                    # priority (single-colour ones: a Treasure is tapped while paying).
+                    if ab.sac_self and len(ab.mana) == 1 and self._can_activate(p, card, ab):
                         opts.append(Option(f"{card.name}: {ab.name}", ("mana", card.name, ab.name), ("mana", card, i)))
                 elif self._can_activate(p, card, ab):
                     opts.append(Option(f"{card.name}: {ab.name}", ("activate", card.name, ab.name), ("activate", card, i)))
@@ -751,6 +755,8 @@ class Game:
             k |= t.keywords
         for a in self._auras_on(c):
             k |= {"reach", "trample"}
+        if c.hexproof:
+            k.add("hexproof")
         return k
 
     def has(self, c: Card, kw: str) -> bool:
@@ -789,6 +795,8 @@ class Game:
             tuple((tuple(sorted(t.keywords)), t.power, t.toughness) for t in c.temp),
             c.oid in self.attackers,
             c.oid in self.blocked,
+            c.once_used_turn == self.turn,
+            c.hexproof,
         )
 
     def _dedupe_by_equiv(self, cards: Iterable[Card]) -> list[Card]:
@@ -859,7 +867,7 @@ class Game:
         if to == "battlefield":
             card.known_to = {0, 1}
             card.sick = True
-            card.tapped = tapped or card.face.enters_tapped
+            card.tapped = tapped or card.face.enters_tapped or self._enters_tapped_unless(card)
             self.battlefield.append(card)
             if self.is_land(card):
                 self.players[card.controller].landfall_turn = self.turn
@@ -886,6 +894,14 @@ class Game:
         if lki is not None:
             self._after_leave_battlefield(lki, card, to)
         return card
+
+    def _enters_tapped_unless(self, card: Card) -> bool:
+        """Enters tapped unless its controller controls N other Forests (Gingerbread Cabin)."""
+        n = card.face.enters_tapped_unless_forests
+        if not n:
+            return False
+        others = sum(1 for c in self.battlefield if c.controller == card.controller and "Forest" in c.face.subtypes)
+        return others < n
 
     def _after_leave_battlefield(self, lki: Card, new: Card, to: str) -> None:
         self._log(f"leaves: {lki.name}#{lki.oid} (p{lki.controller}) -> {to}")
@@ -968,6 +984,44 @@ class Game:
         self._emit_etb(new)
         return new
 
+    # ------------------------------------------------------------------
+    # Initiative and the Undercity (725, 309)
+    # ------------------------------------------------------------------
+
+    def _dungeon_card(self, p: int) -> Card:
+        """The Undercity as the source of room and initiative triggers: an
+        object outside the game's zones (oid 0, never on the battlefield)."""
+        from .cards import DUNGEONS
+
+        return Card(uid=0, oid=0, defn=DUNGEONS["Undercity"], owner=p, controller=p, zone="command", known_to={0, 1})
+
+    def take_initiative(self, p: int):
+        """725.2: the player takes the initiative (again, if they had it) and ventures into Undercity."""
+        self.initiative = p
+        self._log(f"p{p} takes the initiative")
+        yield from self.venture(p)
+
+    def venture(self, p: int):
+        """701.49: move the venture marker into the next room (a choice where
+        the dungeon branches) and trigger that room. From the last room a
+        new Undercity is started (the completed one is not tracked)."""
+        from .cards import DUNGEONS, ROOM_NEXT
+
+        dungeon = DUNGEONS["Undercity"]
+        room = self.players[p].dungeon_room
+        nxt = ROOM_NEXT[(dungeon.name, room)] if room is not None else ()
+        if not nxt:
+            new = dungeon.triggers[0].name
+        elif len(nxt) == 1:
+            new = nxt[0]
+        else:
+            options = [Option(f"Venture into {r}", ("venture", r), r) for r in nxt]
+            new = yield from self.ask(p, O.CHOOSE_MODE, f"Venture into Undercity: choose the room after {room}", options)
+        self.players[p].dungeon_room = new
+        self._log(f"p{p} ventures into {new}")
+        tdef = next(t for t in dungeon.triggers if t.name == new)
+        self.pending.append(PendingTrigger(p, self._dungeon_card(p), tdef))
+
     def deal_damage(self, source: Card, target: tuple, amount: int) -> None:
         """target: ('player', idx) or ('perm', oid)."""
         if amount <= 0:
@@ -1014,6 +1068,8 @@ class Game:
             for t in perm.face.triggers:
                 if t.event == "your_upkeep":
                     self.pending.append(PendingTrigger(perm.controller, perm, t))
+        if self.initiative == self.active:
+            self.pending.append(PendingTrigger(self.active, self._dungeon_card(self.active), VENTURE_TRIGGER))
 
     def _emit_cast(self, item: StackItem) -> None:
         storm = self.spells_cast_this_turn  # spells cast before this one this turn
@@ -1145,6 +1201,8 @@ class Game:
 
     def _perm_matches(self, spec: TargetSpec, c: Card, controller: int) -> bool:
         k = spec.kind
+        if c.controller != controller and c.hexproof:
+            return False
         if k in ("creature", "any", "creature_of_target_player", "another_creature"):
             return self.is_creature(c)
         if k == "artifact_or_enchantment_you_dont_control":
@@ -1171,6 +1229,8 @@ class Game:
             return "U" in c.face.colors
         if k == "red_permanent":
             return "R" in c.face.colors
+        if k == "artifact_or_enchantment":
+            return bool(c.face.types & {"Artifact", "Enchantment"})
         return False
 
     def _spell_matches(self, spec: TargetSpec, it: StackItem) -> bool:
@@ -1270,6 +1330,14 @@ class Game:
                 break  # every supported permanent has at most one mana ability
         return out
 
+    def mana_units(self, ab: O.AbilityDef) -> int:
+        """Mana one activation makes: one, or one per Elf (Priest of Titania)."""
+        if ab.mana_amount is None:
+            return 1
+        from .cards import count_of
+
+        return count_of(self, ab.mana_amount)
+
     def sac_candidates(self, p: int, flt: str, exclude: set[int] = frozenset()) -> list[Card]:
         out = []
         for c in self.battlefield:
@@ -1299,7 +1367,7 @@ class Game:
         `gone` are permanents a hypothetical payment already sacrificed."""
         pool = self.players[p].pool if pool is None else pool
         sources = self.mana_sources(p, set(exclude) | set(gone))
-        normal = [ab.mana for c, ab in sources if not ab.sac_self]
+        normal = [ab.mana for c, ab in sources if not ab.sac_self for _ in range(self.mana_units(ab))]
         selfsac = [(c, ab) for c, ab in sources if ab.sac_self]
         base = pool_units(pool) + normal
         if sac_filter is None:
@@ -1307,14 +1375,20 @@ class Game:
         cands = {c.oid for c in self.sac_candidates(p, sac_filter, gone)}
         if not cands:
             return False
-        # All self-sacrificing sources in the pool produce {C}; using k of them
-        # is equivalent whichever k we pick, so spend non-candidates first.
-        assert all(ab.mana == ("C",) for _, ab in selfsac)
-        ordered = [c for c, _ in selfsac if c.oid not in cands] + [c for c, _ in selfsac if c.oid in cands]
-        for k in range(len(ordered) + 1):
-            used = {c.oid for c in ordered[:k]}
-            if len(cands - used) >= 1 and can_pay(rem, base + [("C",)] * k):
-                return True
+        # Self-sacrificing {C} sources (Eldrazi Spawn) are interchangeable:
+        # using k of them is equivalent whichever k we pick, so spend
+        # non-candidates first. Others (a Treasure) are tried as subsets.
+        colourless = [c for c, ab in selfsac if ab.mana == ("C",)]
+        others = [(c, ab) for c, ab in selfsac if ab.mana != ("C",)]
+        ordered = [c for c in colourless if c.oid not in cands] + [c for c in colourless if c.oid in cands]
+        for mask in range(1 << len(others)):
+            chosen = [others[i] for i in range(len(others)) if mask >> i & 1]
+            used_o = {c.oid for c, _ in chosen}
+            units_o = [ab.mana for _, ab in chosen]
+            for k in range(len(ordered) + 1):
+                used = used_o | {c.oid for c in ordered[:k]}
+                if len(cands - used) >= 1 and can_pay(rem, base + units_o + [("C",)] * k):
+                    return True
         return False
 
     def _activate_mana_ability(self, card: Card, ab: O.AbilityDef) -> None:
@@ -1339,13 +1413,18 @@ class Game:
                     options.append(Option(f"Pay with floating {color}", ("pay", "pool", color), ("pool", color)))
             for card in self._dedupe_by_equiv(c for c, _ in self.mana_sources(p, exclude)):
                 ab = next(a for a in card.face.abilities if a.mana is not None)
+                extra = self.mana_units(ab) - 1  # floats in the pool (Priest of Titania)
                 for color in ab.mana:
                     if not rem.useful(color):
                         continue
                     r2 = rem.copy()
                     r2.apply(color)
                     gone = {card.oid} if ab.sac_self else set()
-                    if self._cost_feasible(p, r2, sac_filter, exclude | {card.oid}, gone=gone):
+                    pool2 = None
+                    if extra:
+                        pool2 = dict(pl.pool)
+                        pool2[color] = pool2.get(color, 0) + extra
+                    if self._cost_feasible(p, r2, sac_filter, exclude | {card.oid}, pool2, gone=gone):
                         verb = "Sacrifice" if ab.sac_self else "Tap"
                         options.append(
                             Option(f"{verb} {card.name}#{card.oid} for {color}", ("pay", "source", card.name, color), ("source", card, color))
@@ -1367,9 +1446,12 @@ class Game:
             else:
                 card, color = choice[1], choice[2]
                 ab = next(a for a in card.face.abilities if a.mana is not None)
+                extra = self.mana_units(ab) - 1
                 self._activate_mana_ability(card, ab)
                 if not rem.apply(color):
                     raise RulesError("mana unit could not be applied")
+                if extra > 0:
+                    pl.pool[color] = pl.pool.get(color, 0) + extra
 
     def _colour_needs(self, p: int) -> dict[str, int]:
         """Coloured pips the non-land cards in `p`'s hand ask for; instants
@@ -1459,6 +1541,10 @@ class Game:
             return d.phyrexian_cost
         if mode == "bargain":
             return d.cost if d.bargain else None
+        if mode == "omen":
+            return card.defn.back.cost if card.defn.omen else None
+        if mode == "evidence":
+            return d.cost if d.collect_evidence else None
         return None
 
     @staticmethod
@@ -1479,6 +1565,8 @@ class Game:
             return (TargetSpec("creature"),)
         if mode == "overload":
             return ()
+        if mode == "omen":
+            return card.defn.back.targets
         if choice is not None:
             return card.face.modes[choice].targets
         return card.face.targets
@@ -1502,8 +1590,9 @@ class Game:
             return False
         if d.is_type("Land"):
             return False
+        spell = d.back if mode == "omen" else d  # the characteristics it is cast with
         # Madness casts on resolution of its trigger, whatever the card type (702.35).
-        if mode != "madness" and not d.is_type("Instant") and not self.sorcery_timing(p):
+        if mode != "madness" and not spell.is_type("Instant") and not self.sorcery_timing(p):
             return False
         for spec in self._mode_targets(card, mode, choice):
             if not self.target_candidates(spec, p):
@@ -1514,21 +1603,59 @@ class Game:
             return False
         if mode == "phyrexian" and self.players[p].life < d.phyrexian_life:
             return False
+        if mode == "evidence" and sum(c.face.mana_value for c in self.players[p].graveyard) < d.collect_evidence:
+            return False
+        if d.additional_power and not self._power_sources(p, card):
+            return False
         sac = self._mode_sac(card, mode)
         if sac is not None and len(self.sac_candidates(p, sac[0])) < sac[1]:
             return False
         cost = base.with_x(0).reduced(self._cost_reduction(p, card))
         return self._cost_feasible(p, RemainingCost.of(cost), self._mode_additional_sac(card, mode))
 
+    def _power_sources(self, p: int, card: Card) -> list[Card]:
+        """Monstrous Emergence's additional cost: creatures `p` controls
+        (interchangeable ones once) and creature cards in hand (once per name)."""
+        bf = self._dedupe_by_equiv(c for c in self.battlefield if c.controller == p and self.is_creature(c))
+        hand = self._dedupe_by_name(c for c in self.players[p].hand if c is not card and c.face.is_type("Creature"))
+        return bf + hand
+
+    def _choose_power(self, p: int, item: StackItem):
+        options = []
+        for c in self._power_sources(p, item.card):
+            if c.zone == "battlefield":
+                options.append(Option(f"Choose {c.name}#{c.oid}", ("choose_power", "battlefield", c.name), c))
+            else:
+                options.append(Option(f"Reveal {c.name}", ("choose_power", "hand", c.name), c))
+        c = yield from self.ask(p, O.CHOOSE_CARD, f"{item.name}: choose a creature you control or reveal a creature card", options)
+        if c.zone == "battlefield":
+            item.data["chosen_oid"] = c.oid
+            item.data["power"] = self.power(c)
+        else:
+            c.known_to = {0, 1}
+            item.data["power"] = c.face.power or 0
+        self._log(f"p{p} chooses {c.name} (power {item.data['power']})")
+
+    def _collect_evidence(self, p: int, n: int, what: str):
+        """Collect evidence N: exile cards with total mana value N or more from your graveyard."""
+        total = 0
+        while total < n:
+            gy = self.players[p].graveyard
+            options = [Option(f"Exile {c.name}", ("exile_gy", c.name), c) for c in self._dedupe_by_name(gy)]
+            c = yield from self.ask(p, O.EXILE_FROM_GY, f"Collect evidence {n} for {what} ({total}/{n})", options)
+            total += c.face.mana_value
+            self._move(c, "exile")
+
     def _cast(self, p: int, card: Card, mode: str, choice: int | None = None):
         d = card.face
         from_zone = card.zone
-        effect = d.effect if choice is None else d.modes[choice].effect
+        face = d.back if mode == "omen" else d
+        effect = face.effect if choice is None else d.modes[choice].effect
         item = StackItem(
             sid=0,
             kind="spell",
             controller=p,
-            name=card.name,
+            name=face.name,
             effect=d.overload_effect if mode == "overload" else effect,
             target_specs=self._mode_targets(card, mode, choice),
             card=card,
@@ -1536,6 +1663,8 @@ class Game:
             cast_from=from_zone,
         )
         self._move(card, "stack", controller=p)
+        if mode == "omen":
+            card.transformed = True  # on the stack it is the omen face (Roost Seek)
         item.sid = card.oid
         self.stack.append(item)
         self._log(f"p{p} casts {card.name} ({mode}) from {from_zone}")
@@ -1560,6 +1689,10 @@ class Game:
         if d.additional_discard:
             gone = yield from self.choose_discard(p, card.name)
             item.data["discarded_land"] = self.is_land(gone)
+        if d.additional_power:
+            yield from self._choose_power(p, item)
+        if mode == "evidence":
+            yield from self._collect_evidence(p, d.collect_evidence, card.name)
         sac = self._mode_sac(card, mode)
         for _ in range(sac[1] if sac else 0):
             yield from self._choose_sacrifice(p, sac[0], card.name)
@@ -1601,6 +1734,10 @@ class Game:
             return True
         if ab.discard_other and not self.players[p].hand:
             return False
+        if ab.once_per_turn and card.once_used_turn == self.turn:
+            return False
+        if ab.return_land and not self._return_land_candidates(p, ab.return_land):
+            return False
         exclude = {card.oid} if ab.tap else set()
         if ab.x_target_mv:
             return any(self._x_target_affordable(p, card, ab, ref) for ref in self.target_candidates(ab.targets[0], p))
@@ -1608,6 +1745,17 @@ class Game:
             if not self.target_candidates(spec, p):
                 return False
         return self._cost_feasible(p, RemainingCost.of(ab.cost), ab.sac_other, exclude)
+
+    def _return_land_candidates(self, p: int, flt: str) -> list[Card]:
+        assert flt == "forest", flt
+        return [c for c in self.battlefield if c.controller == p and self.is_land(c) and "Forest" in c.face.subtypes]
+
+    def _choose_return_land(self, p: int, flt: str, what: str):
+        """Return a land you control to its owner's hand as a cost (Quirion Ranger)."""
+        cands = self._dedupe_by_equiv(self._return_land_candidates(p, flt))
+        options = [Option(f"Return {c.name}#{c.oid}", ("return_land", c.name), c) for c in cands]
+        c = yield from self.ask(p, O.SACRIFICE, f"Return a {flt} you control to its owner's hand for {what}", options)
+        self._move(c, "hand")
 
     def _x_target_cost(self, ab: O.AbilityDef, ref: tuple) -> ManaCost:
         """Cost of an ability whose X is the target's mana value (Gorilla Shaman)."""
@@ -1634,6 +1782,8 @@ class Game:
         )
         self.stack.append(item)
         self._log(f"p{p} activates {item.name}")
+        if ab.once_per_turn:
+            card.once_used_turn = self.turn
         if ab.x_reveal:
             n = len(self._red_cards_in_hand(p))
             item.x = yield from self.ask(p, O.CHOOSE_X, f"Choose X for {item.name}", [Option(f"X={v}", ("x", v), v) for v in range(n + 1)])
@@ -1652,6 +1802,8 @@ class Game:
             yield from self._choose_sacrifice(p, ab.sac_other, item.name)
         if ab.discard_other:
             yield from self.choose_discard(p, item.name)
+        if ab.return_land:
+            yield from self._choose_return_land(p, ab.return_land, item.name)
         if ab.x_reveal:
             yield from self._reveal_red(p, item.x, item.name)
         item.source = card.snapshot()
@@ -1705,14 +1857,19 @@ class Game:
                 yield from self._run_effect(item.effect, item)
                 if item in self.stack:
                     self.stack.remove(item)
-                    self._spell_leaves_stack(item)
+                    self._spell_leaves_stack(item, resolved=True)
         else:
             yield from self._run_effect(item.effect, item)
             if item in self.stack:
                 self.stack.remove(item)
 
-    def _spell_leaves_stack(self, item: StackItem) -> None:
-        """Instant/sorcery (or countered spell) card leaves the stack."""
+    def _spell_leaves_stack(self, item: StackItem, resolved: bool = False) -> None:
+        """Instant/sorcery (or countered spell) card leaves the stack. A
+        resolved omen is shuffled into its owner's library."""
+        if resolved and item.method == "omen":
+            self._move(item.card, "library")
+            self.shuffle(item.card.owner)
+            return
         dest = "exile" if item.method == "flashback" else "graveyard"
         self._move(item.card, dest)
 
@@ -1761,9 +1918,10 @@ class Game:
         top = lib[:n]
         for c in top:
             c.known_to.add(p)
-        # Scry 1 is all the pool needs; general scry N would be ORDER decisions.
-        assert n == 1
         if not top:
+            return
+        if len(top) > 1:
+            yield from self._scry_n(p, top)
             return
         c = top[0]
         where = yield from self.ask(
@@ -1775,6 +1933,27 @@ class Game:
         if where == "bottom":
             lib.remove(c)
             lib.append(c)
+
+    def _scry_n(self, p: int, top: list[Card]):
+        """Scry N > 1 as one ORDER decision: which cards stay on top (in
+        order) and which go to the bottom (in order), outcomes deduplicated
+        by names."""
+        lib = self.players[p].library
+        options = []
+        seen = set()
+        for perm in itertools.permutations(top):
+            for k in range(len(perm) + 1):
+                tops, bottoms = perm[:k], perm[k:]
+                key = (tuple(c.name for c in tops), tuple(c.name for c in bottoms))
+                if key in seen:
+                    continue
+                seen.add(key)
+                label = f"Top: {', '.join(key[0]) or '-'}; bottom: {', '.join(key[1]) or '-'}"
+                options.append(Option(label, ("scry", "top", *key[0], "bottom", *key[1]), (tops, bottoms)))
+        tops, bottoms = yield from self.ask(p, O.ORDER, f"Scry {len(top)}: {', '.join(c.name for c in top)}", options)
+        del lib[: len(top)]
+        lib[:0] = list(tops)
+        lib.extend(bottoms)
 
     def explore(self, creature: Card):
         p = creature.controller
@@ -1859,9 +2038,9 @@ class Game:
     def _declare_blockers(self):
         d = 1 - self.active
         blockers = [c for c in self.battlefield if c.controller == d and self.is_creature(c) and not c.tapped]
-        for b in blockers:
+        for i, b in enumerate(blockers):
             attackers = [self.perm(a) for a in self.attackers]
-            attackers = [a for a in attackers if a is not None and self._can_block(b, a)]
+            attackers = [a for a in attackers if a is not None and self._can_block(b, a) and self._menace_ok(a, blockers[i + 1 :])]
             options = [Option(f"{b.name}#{b.oid} does not block", ("block", b.name, None), None)]
             refs = self._referenced_oids()
             seen = set()
@@ -1875,8 +2054,25 @@ class Game:
             if a is not None:
                 self.blocks[b.oid] = a.oid
                 self.blocked.add(a.oid)
+        for aoid in list(self.attackers):
+            a = self.perm(aoid)
+            mine = [b for b, at in self.blocks.items() if at == aoid]
+            if a is not None and len(mine) == 1 and self.has(a, "menace"):
+                # 702.111b: a lone blocker of a menace creature is not a legal block; it is undone.
+                del self.blocks[mine[0]]
+                self.blocked.discard(aoid)
+                self._log(f"menace: the block of {a.name}#{a.oid} by one creature is undone")
         if self.blocks:
             self._log(f"p{d} blocks: {self.blocks}")
+
+    def _menace_ok(self, a: Card, later: list[Card]) -> bool:
+        """Blocking a menace creature is offered only while a second blocker
+        is possible: one already blocks it, or a later blocker could."""
+        if not self.has(a, "menace"):
+            return True
+        if any(at == a.oid for at in self.blocks.values()):
+            return True
+        return any(self._can_block(b, a) for b in later)
 
     def _lethal(self, attacker: Card, blocker: Card) -> int:
         if self.has(attacker, "deathtouch"):
@@ -1932,6 +2128,9 @@ class Game:
                 assignments.append((b, ("perm", a.oid), pw))
         for src, tgt, n in assignments:
             self.deal_damage(src, tgt, n)
+        if self.initiative == defender and any(tgt == ("player", defender) and n > 0 for _, tgt, n in assignments):
+            # 725.2: combat damage to the player with the initiative takes it.
+            self.pending.append(PendingTrigger(self.active, self._dungeon_card(self.active), INITIATIVE_TRIGGER))
         if False:
             yield
 
@@ -1975,3 +2174,16 @@ def _madness_effect(g: Game, item: StackItem):
 
 
 MADNESS_TRIGGER = TriggerDef("madness", "discarded", _madness_effect)
+
+
+def _venture_effect(g: Game, item: StackItem):
+    yield from g.venture(item.controller)
+
+
+def _take_initiative_effect(g: Game, item: StackItem):
+    yield from g.take_initiative(item.controller)
+
+
+# The initiative's inherent triggers (725.2), with the Undercity as their source.
+VENTURE_TRIGGER = TriggerDef("venture into Undercity", "initiative", _venture_effect)
+INITIATIVE_TRIGGER = TriggerDef("take the initiative", "initiative", _take_initiative_effect)

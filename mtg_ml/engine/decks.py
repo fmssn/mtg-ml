@@ -102,8 +102,19 @@ RED_MADNESS_SIDEBOARD = {
     "End the Festivities": 2,
 }
 
-DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS}
-SIDEBOARDS = {"jund_wildfire": JUND_WILDFIRE_SIDEBOARD, "mono_blue_terror": MONO_BLUE_TERROR_SIDEBOARD, "red_madness": RED_MADNESS_SIDEBOARD}
+# Elves: the Q3 2026 modal sideboard (cards in >= 50% of lists): 4 Monstrous
+# Emergence, 3 Faerie Macabre, 3 Vitu-Ghazi Inspector, 3 Spinewoods Paladin,
+# then 2 Deglamer (the most played card below 50%) for 15.
+ELVES_SIDEBOARD = {
+    "Monstrous Emergence": 4,
+    "Faerie Macabre": 3,
+    "Vitu-Ghazi Inspector": 3,
+    "Spinewoods Paladin": 3,
+    "Deglamer": 2,
+}
+
+DECKS = {"jund_wildfire": JUND_WILDFIRE, "mono_blue_terror": MONO_BLUE_TERROR, "red_madness": RED_MADNESS, "elves": ELVES}
+SIDEBOARDS = {"jund_wildfire": JUND_WILDFIRE_SIDEBOARD, "mono_blue_terror": MONO_BLUE_TERROR_SIDEBOARD, "red_madness": RED_MADNESS_SIDEBOARD, "elves": ELVES_SIDEBOARD}
 
 
 def expand(decklist: dict[str, int]) -> list[str]:

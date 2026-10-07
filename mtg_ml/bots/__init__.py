@@ -6,10 +6,11 @@
 """
 
 from .blue import BlueBot
+from .elves import ElvesBot
 from .jund import JundBot
 from .red import RedBot
 
-BOTS = {"jund_wildfire": JundBot, "mono_blue_terror": BlueBot, "red_madness": RedBot}
+BOTS = {"jund_wildfire": JundBot, "mono_blue_terror": BlueBot, "red_madness": RedBot, "elves": ElvesBot}
 
 
 def make_bot(seat: int, deck: str | None = None):
@@ -20,4 +21,4 @@ def make_bot(seat: int, deck: str | None = None):
     return BOTS[deck](seat)
 
 
-__all__ = ["BOTS", "BlueBot", "JundBot", "RedBot", "make_bot"]
+__all__ = ["BOTS", "BlueBot", "ElvesBot", "JundBot", "RedBot", "make_bot"]

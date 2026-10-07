@@ -24,7 +24,7 @@ import random
 
 import mtg_ml_native as _n
 
-from .cards import CARDS, FACES, SPEC_PATH, TOKENS
+from .cards import CARDS, FACES, SPEC_PATH, TOKENS, count_of
 from .game import RulesError
 from .mana import ManaCost
 from .objects import FREE, TempEffect
@@ -125,6 +125,15 @@ class NativePlayer:
     pool = property(lambda self: dict(self._info[5]))
     drew_from_empty = property(lambda self: self._info[6])
     landfall_turn = property(lambda self: self._info[8])
+
+    @property
+    def dungeon_room(self) -> str | None:
+        return self._info[9]
+
+    @dungeon_room.setter
+    def dungeon_room(self, room: str | None) -> None:
+        self._g._g.set_dungeon_room(self.idx, room)
+        self._info = self._g._g.player(self.idx)
 
     @property
     def life(self) -> int:
@@ -461,6 +470,14 @@ class NativeGame:
         self._g.active = v
 
     @property
+    def initiative(self) -> int | None:
+        return self._g.initiative
+
+    @initiative.setter
+    def initiative(self, v: int | None) -> None:
+        self._g.initiative = v
+
+    @property
     def starting_player(self) -> int:
         return self._g.starting_player
 
@@ -628,8 +645,14 @@ class NativeGame:
             "alternative": FREE if d.alternative_sac is not None else None,
             "phyrexian": d.phyrexian_cost,
             "bargain": d.cost if d.bargain else None,
+            "omen": card.defn.back.cost if card.defn.omen else None,
+            "evidence": d.cost if d.collect_evidence else None,
         }
         return modes.get(mode)
+
+    def mana_units(self, ab) -> int:
+        """Game.mana_units: one, or one per Elf (Priest of Titania)."""
+        return count_of(self, ab.mana_amount) if ab.mana_amount else 1
 
     def _cost_reduction(self, p: int, card) -> int:
         return self._g.cost_reduction(p, self._idx(card))

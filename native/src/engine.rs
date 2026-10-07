@@ -11,7 +11,7 @@
 
 use corosensei::Yielder;
 
-use crate::cards::{Custom, Op, SacFilter, SearchFilter, Who, T_CREATURE, T_LAND};
+use crate::cards::{db, type_bit, Custom, Op, SacFilter, SearchFilter, Who, T_CREATURE, T_LAND};
 use crate::mana::{ManaCost, Remaining};
 use crate::state::*;
 
@@ -323,12 +323,13 @@ impl Eng {
                 let st = self.s();
                 let sid = st.new_id();
                 let name = format!("{}: {}", st.src(&t.source).name(), t.tdef.name);
+                let tspecs = t.tdef.targets.clone();
                 st.push_log_lazy(|_| format!("trigger -> stack: {name}"));
                 st.stack.push(StackItem {
                     sid,
                     kind: SKind::Trigger,
                     controller: t.controller,
-                    name,
+                    name: name.clone(),
                     effect: Some(&t.tdef.effect),
                     target_specs: t.tdef.targets.clone(),
                     targets: vec![],
@@ -437,6 +438,7 @@ impl Eng {
             for card in st.dedupe_by_equiv(sources) {
                 let c = st.c(card);
                 let ab = c.face().abilities.iter().find(|a| a.mana.is_some()).unwrap();
+                let extra = st.mana_units(ab) - 1; // floats in the pool (Priest of Titania)
                 for &color in ab.mana.as_ref().unwrap() {
                     if !rem.useful(color) {
                         continue;
@@ -446,7 +448,14 @@ impl Eng {
                     let gone: Vec<u32> = if ab.sac_self { vec![c.oid] } else { vec![] };
                     let mut excl = exclude.to_vec();
                     excl.push(c.oid);
-                    if st.cost_feasible(p, &r2, sac_filter, &excl, None, &gone) {
+                    let pool2 = if extra != 0 {
+                        let mut pl = st.players[p as usize].clone();
+                        pl.pool_add(color, extra);
+                        Some(pl.pool)
+                    } else {
+                        None
+                    };
+                    if st.cost_feasible(p, &r2, sac_filter, &excl, pool2.as_deref(), &gone) {
                         let verb = if ab.sac_self { "Sacrifice" } else { "Tap" };
                         let cs = color_str(color);
                         options.push(opt(format!("{verb} {}#{} for {cs}", c.name(), c.oid), vec![s("pay"), s("source"), s(c.name()), s(cs)], Val::Source(card, color)));
@@ -478,9 +487,13 @@ impl Eng {
                 Val::Source(card, color) => {
                     let st = self.s();
                     let ai = st.c(card).face().abilities.iter().position(|a| a.mana.is_some()).unwrap();
+                    let extra = st.mana_units(&st.c(card).face().abilities[ai]) - 1;
                     st.activate_mana_ability(card, ai);
                     if !rem.apply(color) {
                         return rules("mana unit could not be applied");
+                    }
+                    if extra > 0 {
+                        st.players[p as usize].pool_add(color, extra);
                     }
                 }
                 _ => unreachable!(),
@@ -543,14 +556,18 @@ impl Eng {
         let st = self.s();
         let d = st.c(card).face();
         let from_zone = st.c(card).zone;
-        let name = st.c(card).name().to_string();
+        let face = if mode == Method::Omen { db().def(d.back.unwrap()) } else { d };
+        let name = face.name.clone();
         let effect: Option<&'static [Op]> = match choice {
             _ if mode == Method::Overload => d.overload_effect.as_deref(),
-            None => d.effect.as_deref(),
+            None => face.effect.as_deref(),
             Some(i) => Some(&d.modes[i as usize].effect),
         };
         let target_specs = st.mode_targets(card, mode, choice);
         st.move_card(card, Zone::Stack, Some(p), Pos::Top, None, false);
+        if mode == Method::Omen {
+            st.cm(card).transformed = true; // on the stack it is the omen face (Roost Seek)
+        }
         let sid = st.c(card).oid;
         st.stack.push(StackItem {
             sid,
@@ -608,6 +625,12 @@ impl Eng {
             let pos = st.stack_pos(sid).unwrap();
             st.stack[pos].data.discarded_land = Some(land);
         }
+        if d.additional_power {
+            self.choose_power(p, sid, card)?;
+        }
+        if mode == Method::Evidence {
+            self.collect_evidence(p, d.collect_evidence, cname)?;
+        }
         if let Some((flt, n)) = self.s().mode_sac(card, mode) {
             for _ in 0..n {
                 self.choose_sacrifice(p, flt, cname)?;
@@ -618,6 +641,118 @@ impl Eng {
         }
         self.s().emit_cast(sid);
         self.s().emit_targeted(sid);
+        Ok(())
+    }
+
+    /// `Game._choose_power`: Monstrous Emergence's additional cost.
+    fn choose_power(&mut self, p: u8, sid: u32, card: CIdx) -> R<()> {
+        let st = self.s();
+        let mut options = vec![];
+        for c in st.power_sources(p, card) {
+            let cc = st.c(c);
+            if cc.zone == Zone::Battlefield {
+                options.push(opt(format!("Choose {}#{}", cc.name(), cc.oid), vec![s("choose_power"), s("battlefield"), s(cc.name())], Val::Card(c)));
+            } else {
+                options.push(opt(format!("Reveal {}", cc.name()), vec![s("choose_power"), s("hand"), s(cc.name())], Val::Card(c)));
+            }
+        }
+        let iname = st.stack[st.stack_pos(sid).unwrap()].name.clone();
+        let c = match self.ask(p, Kind::ChooseCard, || format!("{iname}: choose a creature you control or reveal a creature card"), options)? {
+            Val::Card(c) => c,
+            _ => unreachable!(),
+        };
+        let st = self.s();
+        let pos = st.stack_pos(sid).unwrap();
+        let power = if st.c(c).zone == Zone::Battlefield {
+            let pw = st.power(st.c(c));
+            st.stack[pos].data.chosen_oid = Some(st.c(c).oid);
+            pw
+        } else {
+            st.cm(c).known_to = BOTH;
+            st.c(c).face().power.unwrap_or(0)
+        };
+        st.stack[pos].data.power = Some(power);
+        st.push_log_lazy(|s| format!("p{p} chooses {} (power {power})", s.c(c).name()));
+        Ok(())
+    }
+
+    /// Collect evidence N: exile cards with total mana value N or more from your graveyard.
+    fn collect_evidence(&mut self, p: u8, n: i32, what: &str) -> R<()> {
+        let mut total = 0;
+        while total < n {
+            let st = self.s();
+            let options = st
+                .dedupe_by_name(st.players[p as usize].graveyard.iter().copied())
+                .into_iter()
+                .map(|c| {
+                    let nm = st.c(c).name();
+                    opt(format!("Exile {nm}"), vec![s("exile_gy"), s(nm)], Val::Card(c))
+                })
+                .collect();
+            if let Val::Card(c) = self.ask(p, Kind::ExileFromGy, || format!("Collect evidence {n} for {what} ({total}/{n})"), options)? {
+                let st = self.s();
+                total += st.c(c).face().mana_value();
+                st.mv(c, Zone::Exile);
+            }
+        }
+        Ok(())
+    }
+
+    /// Return a Forest you control to its owner's hand as a cost (Quirion Ranger).
+    fn choose_return_land(&mut self, p: u8, what: &str) -> R<()> {
+        let st = self.s();
+        let cands = st.dedupe_by_equiv(st.return_land_candidates(p));
+        let options = cands
+            .iter()
+            .map(|&c| {
+                let card = st.c(c);
+                opt(format!("Return {}#{}", card.name(), card.oid), vec![s("return_land"), s(card.name())], Val::Card(c))
+            })
+            .collect();
+        if let Val::Card(c) = self.ask(p, Kind::Sacrifice, || format!("Return a forest you control to its owner's hand for {what}"), options)? {
+            self.s().mv(c, Zone::Hand);
+        }
+        Ok(())
+    }
+
+    /// 725.2: the player takes the initiative (again, if they had it) and ventures into Undercity.
+    fn take_initiative(&mut self, p: u8) -> R<()> {
+        let st = self.s();
+        st.initiative = Some(p);
+        st.push_log_lazy(|_| format!("p{p} takes the initiative"));
+        self.venture(p)
+    }
+
+    /// 701.49: move the venture marker into the next room and trigger it.
+    fn venture(&mut self, p: u8) -> R<()> {
+        let d = db();
+        let dungeon = d.def(d.undercity.expect("no Undercity"));
+        let room = self.s().players[p as usize].dungeon_room;
+        let nxt: &Vec<usize> = match room {
+            Some(r) => &d.room_next[r],
+            None => &d.room_next[0],
+        };
+        let new = if room.is_none() || nxt.is_empty() {
+            0
+        } else if nxt.len() == 1 {
+            nxt[0]
+        } else {
+            let options = nxt.iter().map(|&r| {
+                let n = dungeon.triggers[r].name.as_str();
+                opt(format!("Venture into {n}"), vec![s("venture"), s(n)], Val::Name(n))
+            }).collect();
+            let cur = dungeon.triggers[room.unwrap()].name.as_str();
+            match self.ask(p, Kind::ChooseMode, || format!("Venture into Undercity: choose the room after {cur}"), options)? {
+                Val::Name(n) => dungeon.triggers.iter().position(|t| t.name == n).unwrap(),
+                _ => unreachable!(),
+            }
+        };
+        let st = self.s();
+        st.players[p as usize].dungeon_room = Some(new);
+        let rn = dungeon.triggers[new].name.as_str();
+        st.push_log_lazy(|_| format!("p{p} ventures into {rn}"));
+        let src = Src::Snap(Box::new(st.dungeon_card(p)));
+        st.pending.push(PendingTrigger { controller: p, source: src, tdef: &dungeon.triggers[new], data: Data::default() });
         Ok(())
     }
 
@@ -675,6 +810,10 @@ impl Eng {
             data: Data { source_oid: Some(oid), ..Default::default() },
         });
         st.push_log_lazy(|_| format!("p{p} activates {name}"));
+        if ab.once_per_turn {
+            let t = st.turn;
+            st.cm(card).once_used_turn = t;
+        }
         if ab.x_reveal {
             let n = self.s().red_cards_in_hand(p).len() as i32;
             let options = (0..=n).map(|v| opt(format!("X={v}"), vec![s("x"), KI::I(v as i64)], Val::Int(v))).collect();
@@ -712,6 +851,9 @@ impl Eng {
         }
         if ab.discard_other {
             self.choose_discard(p, &name)?;
+        }
+        if ab.return_forest {
+            self.choose_return_land(p, &name)?;
         }
         if ab.x_reveal {
             let st = self.s();
@@ -785,7 +927,7 @@ impl Eng {
                 self.run_effect(item.effect, &item)?;
                 if let Some(pos) = self.s().stack_pos(item.sid) {
                     self.s().stack.remove(pos);
-                    self.spell_leaves_stack(&item);
+                    self.spell_leaves_stack_resolved(&item, true);
                 }
             }
         } else {
@@ -798,8 +940,21 @@ impl Eng {
     }
 
     fn spell_leaves_stack(&mut self, item: &StackItem) {
+        self.spell_leaves_stack_resolved(item, false)
+    }
+
+    /// A resolved omen is shuffled into its owner's library.
+    fn spell_leaves_stack_resolved(&mut self, item: &StackItem, resolved: bool) {
+        let st = self.s();
+        let card = item.card.unwrap();
+        if resolved && item.method == Method::Omen {
+            st.mv(card, Zone::Library);
+            let owner = st.c(card).owner as usize;
+            st.shuffle(owner);
+            return;
+        }
         let dest = if item.method == Method::Flashback { Zone::Exile } else { Zone::Graveyard };
-        self.s().mv(item.card.unwrap(), dest);
+        st.mv(card, dest);
     }
 
     fn resolve_permanent_spell(&mut self, item: &StackItem) {
@@ -864,13 +1019,19 @@ impl Eng {
         Ok(found)
     }
 
-    fn scry(&mut self, p: u8) -> R<()> {
+    fn scry(&mut self, p: u8, n: i32) -> R<()> {
         let st = self.s();
-        let lib = &st.players[p as usize].library;
-        if lib.is_empty() {
+        let top: Vec<CIdx> = st.players[p as usize].library.iter().take(n.max(1) as usize).copied().collect();
+        if top.is_empty() {
             return Ok(());
         }
-        let c = lib[0];
+        for &c in &top {
+            st.cm(c).known_to |= pbit(p);
+        }
+        if top.len() > 1 {
+            return self.scry_n(p, top);
+        }
+        let c = top[0];
         st.cm(c).known_to |= pbit(p);
         let n = st.c(c).name();
         let options = vec![
@@ -882,6 +1043,43 @@ impl Eng {
             let pos = lib.iter().position(|&x| x == c).unwrap();
             lib.remove(pos);
             lib.push(c);
+        }
+        Ok(())
+    }
+
+    /// `Game._scry_n`: one ORDER decision over (top in order, bottom in order).
+    fn scry_n(&mut self, p: u8, top: Vec<CIdx>) -> R<()> {
+        let st = self.s();
+        let mut options = vec![];
+        let mut seen: Vec<(Vec<&'static str>, Vec<&'static str>)> = vec![];
+        for perm in permutations(&top) {
+            for k in 0..=perm.len() {
+                let tops: Vec<&'static str> = perm[..k].iter().map(|&c| st.c(c).name()).collect();
+                let bottoms: Vec<&'static str> = perm[k..].iter().map(|&c| st.c(c).name()).collect();
+                let key = (tops, bottoms);
+                if seen.contains(&key) {
+                    continue;
+                }
+                let t = if key.0.is_empty() { "-".to_string() } else { key.0.join(", ") };
+                let b = if key.1.is_empty() { "-".to_string() } else { key.1.join(", ") };
+                let label = format!("Top: {t}; bottom: {b}");
+                let mut k_tuple = vec![s("scry"), s("top")];
+                k_tuple.extend(key.0.iter().map(|x| KI::S(x)));
+                k_tuple.push(s("bottom"));
+                k_tuple.extend(key.1.iter().map(|x| KI::S(x)));
+                seen.push(key);
+                options.push(opt(label, k_tuple, Val::ScryN(perm.clone(), k)));
+            }
+        }
+        let names: Vec<&'static str> = top.iter().map(|&c| st.c(c).name()).collect();
+        let prompt = format!("Scry {}: {}", top.len(), names.join(", "));
+        if let Val::ScryN(order, k) = self.ask(p, Kind::Order, || prompt, options)? {
+            let lib = &mut self.s().players[p as usize].library;
+            lib.drain(..order.len());
+            for (i, &c) in order[..k].iter().enumerate() {
+                lib.insert(i, c);
+            }
+            lib.extend_from_slice(&order[k..]);
         }
         Ok(())
     }
@@ -988,10 +1186,11 @@ impl Eng {
                 c.controller == d && st.is_creature(c) && !c.tapped
             })
             .collect();
-        for b in blockers {
+        for (i, &b) in blockers.iter().enumerate() {
             let st = self.s();
             let bc = st.c(b);
-            let attackers: Vec<CIdx> = st.attackers.iter().filter_map(|&a| st.perm(a)).filter(|&a| st.can_block(bc, st.c(a))).collect();
+            let later = &blockers[i + 1..];
+            let attackers: Vec<CIdx> = st.attackers.iter().filter_map(|&a| st.perm(a)).filter(|&a| st.can_block(bc, st.c(a)) && st.menace_ok(a, later)).collect();
             let mut options = vec![opt(format!("{}#{} does not block", bc.name(), bc.oid), vec![s("block"), s(bc.name()), KI::N], Val::None)];
             let refs = st.referenced_oids();
             let mut seen: Vec<EquivKey> = vec![];
@@ -1019,6 +1218,17 @@ impl Eng {
             }
         }
         let st = self.s();
+        for aoid in st.attackers.clone() {
+            let mine: Vec<u32> = st.blocks.iter().filter(|(_, at)| *at == aoid).map(|(b, _)| *b).collect();
+            if let Some(a) = st.perm(aoid) {
+                if mine.len() == 1 && st.has(st.c(a), "menace") {
+                    // 702.111b: a lone blocker of a menace creature is not a legal block; it is undone.
+                    st.blocks.retain(|(b, _)| *b != mine[0]);
+                    st.blocked.retain(|x| *x != aoid);
+                    st.push_log_lazy(|s| format!("menace: the block of {} by one creature is undone", s.c(a).repr()));
+                }
+            }
+        }
         if !st.blocks.is_empty() {
             st.push_log_lazy(|s| format!("p{d} blocks: {{{}}}", s.blocks.iter().map(|(b, a)| format!("{b}: {a}")).collect::<Vec<_>>().join(", ")));
         }
@@ -1096,9 +1306,16 @@ impl Eng {
                 assignments.push((b, Ref::Perm(st.c(a).oid), pw));
             }
         }
+        let steal = st.initiative == Some(defender) && assignments.iter().any(|(_, t, n)| *t == Ref::Player(defender) && *n > 0);
         for (src, tgt, n) in assignments {
             let card = st.c(src).clone();
             st.deal_damage(&card, tgt, n);
+        }
+        if steal {
+            // 725.2: combat damage to the player with the initiative takes it.
+            let a = st.active;
+            let src = Src::Snap(Box::new(st.dungeon_card(a)));
+            st.pending.push(PendingTrigger { controller: a, source: src, tdef: &db().take_initiative, data: Data::default() });
         }
         Ok(())
     }
@@ -1333,7 +1550,95 @@ impl Eng {
                     self.run_effect(Some(then), item)?;
                 }
             }
-            Op::Scry { .. } => self.scry(ctl)?,
+            Op::Scry { n } => self.scry(ctl, *n)?,
+            Op::DamageChosenPower => {
+                if !item.targets.is_empty() && self.s().target_legal(item, 0) {
+                    let src = self.source_card(item);
+                    let st = self.s();
+                    let live = item.data.chosen_oid.and_then(|o| st.perm(o));
+                    let amount = match live {
+                        Some(c) => st.power(st.c(c)),
+                        None => item.data.power.unwrap_or(0),
+                    };
+                    st.deal_damage(&src, item.targets[0], amount);
+                }
+            }
+            Op::UntapTarget => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    self.s().cm(c).tapped = false;
+                }
+            }
+            Op::PumpTarget { n, count_elves } => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    let st = self.s();
+                    let x = if *count_elves { st.count_elves() } else { *n };
+                    st.cm(c).temp.push(TempEffect { keywords: 0, power: x, toughness: x });
+                }
+            }
+            Op::CountersTarget { n } => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    self.s().cm(c).counters += n;
+                }
+            }
+            Op::ExileTarget => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    self.s().mv(c, Zone::Exile);
+                }
+            }
+            Op::ShuffleTargetIntoLibrary => {
+                if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
+                    let st = self.s();
+                    let owner = st.c(c).owner as usize;
+                    st.mv(c, Zone::Library);
+                    st.shuffle(owner);
+                }
+            }
+            Op::Dig { n, take, choose, rest_graveyard } => self.dig(item, *n, take.as_deref(), choose, *rest_graveyard)?,
+            Op::MayExileFromGraveyard { types, type_name, then } => {
+                let st = self.s();
+                let cands = st.dedupe_by_name(st.players[ctl as usize].graveyard.iter().copied().filter(|&c| st.c(c).face().types & types != 0));
+                if cands.is_empty() {
+                    return Ok(());
+                }
+                let mut options = vec![opt("Exile nothing".into(), vec![s("exile_gy"), KI::N], Val::None)];
+                for c in cands {
+                    let nm = st.c(c).name();
+                    options.push(opt(format!("Exile {nm}"), vec![s("exile_gy"), s(nm)], Val::Card(c)));
+                }
+                let lower = type_name.to_lowercase();
+                if let Val::Card(c) = self.ask(ctl, Kind::ExileFromGy, || format!("{}: exile a {lower} card from your graveyard?", item.name), options)? {
+                    self.s().mv(c, Zone::Exile);
+                    self.run_effect(Some(then), item)?;
+                }
+            }
+            Op::TakeInitiative => self.take_initiative(ctl)?,
+            Op::Venture => self.venture(ctl)?,
+            Op::RevealToBattlefield { n, types, type_name, counters, hexproof } => {
+                let st = self.s();
+                let top: Vec<CIdx> = st.players[ctl as usize].library.iter().take(*n as usize).copied().collect();
+                for &c in &top {
+                    st.cm(c).known_to = BOTH;
+                }
+                st.push_log_lazy(|s| format!("p{ctl} reveals [{}]", top.iter().map(|&c| py_repr_str(s.c(c).name())).collect::<Vec<_>>().join(", ")));
+                let cands = st.dedupe_by_name(top.iter().copied().filter(|&c| st.c(c).face().types & types != 0));
+                if !cands.is_empty() {
+                    let options = cands
+                        .iter()
+                        .map(|&c| {
+                            let nm = st.c(c).name();
+                            opt(format!("Put {nm} onto the battlefield"), vec![s("put"), s(nm)], Val::Card(c))
+                        })
+                        .collect();
+                    let lower = type_name.to_lowercase();
+                    if let Val::Card(c) = self.ask(ctl, Kind::ChooseCard, || format!("{}: put a {lower} card onto the battlefield", item.name), options)? {
+                        let st = self.s();
+                        let new = st.put_onto_battlefield(c, ctl, false);
+                        st.cm(new).counters += counters;
+                        st.cm(new).hexproof = *hexproof;
+                    }
+                }
+                self.s().shuffle(ctl as usize);
+            }
             Op::ExploreTarget => {
                 if let Some(Tgt::Card(c)) = self.s().target(item, 0) {
                     self.explore(c)?;
@@ -1361,6 +1666,49 @@ impl Eng {
                 }
             }
             Op::Custom(f) => self.custom(*f, item)?,
+        }
+        Ok(())
+    }
+
+    /// cards.py `_op_dig`: top n cards, one card type to hand, the rest to
+    /// the graveyard (all revealed) or the bottom (in order).
+    fn dig(&mut self, item: &StackItem, n: i32, take: Option<&str>, choose: &'static [String], rest_graveyard: bool) -> R<()> {
+        let p = item.controller;
+        let typ: &str = match take {
+            Some(t) => t,
+            None => {
+                let options = choose.iter().map(|t| opt(format!("Choose {}", t.to_lowercase()), vec![s("choose_type"), s(t.as_str())], Val::Name(t.as_str()))).collect();
+                match self.ask(p, Kind::ChooseMode, || format!("{}: choose a card type", item.name), options)? {
+                    Val::Name(t) => t,
+                    _ => unreachable!(),
+                }
+            }
+        };
+        let tb = type_bit(typ).unwrap();
+        let st = self.s();
+        let top: Vec<CIdx> = st.players[p as usize].library.iter().take(n as usize).copied().collect();
+        for &c in &top {
+            if rest_graveyard {
+                st.cm(c).known_to = BOTH;
+            } else {
+                st.cm(c).known_to |= pbit(p);
+            }
+        }
+        let taken: Vec<CIdx> = top.iter().copied().filter(|&c| st.c(c).face().types & tb != 0).collect();
+        let shown = if rest_graveyard { &top } else { &taken };
+        st.push_log_lazy(|s| format!("p{p} reveals [{}]", shown.iter().map(|&c| py_repr_str(s.c(c).name())).collect::<Vec<_>>().join(", ")));
+        for &c in &taken {
+            st.move_card(c, Zone::Hand, None, Pos::Top, Some(BOTH), false);
+        }
+        for &c in &top {
+            if taken.contains(&c) {
+                continue;
+            }
+            if rest_graveyard {
+                st.mv(c, Zone::Graveyard);
+            } else {
+                st.move_card(c, Zone::Library, None, Pos::Bottom, Some(pbit(p)), false);
+            }
         }
         Ok(())
     }
