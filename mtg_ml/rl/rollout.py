@@ -48,6 +48,23 @@ from ..agents import RandomAgent
 from ..bots import make_bot
 from ..backend import game_class
 from ..engine import Game
+from ..engine.objects import (
+    ASSIGN_DAMAGE,
+    CHOOSE_CARD,
+    CHOOSE_MODE,
+    CHOOSE_X,
+    DECLARE_ATTACKER,
+    DECLARE_BLOCKER,
+    EXILE_FROM_GY,
+    MULLIGAN,
+    ORDER,
+    ORDER_TRIGGERS,
+    PAY_MANA,
+    PRIORITY,
+    SACRIFICE,
+    TARGET,
+    YES_NO,
+)
 from ..match import match_decks
 from .features import encode_event_hashes, event_hashes, featurize_flat
 from .samples import FIELDS, PackedSamples
@@ -58,6 +75,11 @@ BOT = "bot"
 SCRIPTED = (RANDOM, BOT)
 MAX_LIVE = 4096  # games in play per job: the server keeps 8192 hidden-state slots per worker
 MAX_MATCHUPS = 1024  # claim counters a pool shares (run_specs)
+# Decision kinds as recorded per decision (`Result.kinds`, small ints); id 0
+# is any kind not listed. The PPO statistics break entropy and KL down by them.
+KINDS = ("other", PRIORITY, PAY_MANA, TARGET, DECLARE_ATTACKER, DECLARE_BLOCKER, YES_NO, CHOOSE_CARD, CHOOSE_X, SACRIFICE,
+         EXILE_FROM_GY, ORDER, ORDER_TRIGGERS, ASSIGN_DAMAGE, CHOOSE_MODE, MULLIGAN)  # fmt: skip
+KIND_ID = {k: i for i, k in enumerate(KINDS)}
 
 _DECKS: dict[int, tuple] = {}
 _MODELS: dict[tuple, object] = {}
@@ -155,6 +177,10 @@ class Job:
     # 0: play all `games` at once. n > 0: keep n games live, claiming more of
     # `games` from the pool's shared counters as games end (`run_specs`).
     inflight: int = 0
+    # every network seat (learner and frozen checkpoints) takes its most
+    # likely option instead of sampling (ties: the first). Evaluation only:
+    # recorded games must come from the sampling policy.
+    greedy: bool = False
 
 
 @dataclass
@@ -164,6 +190,7 @@ class Trajectory:
     logps: list = field(default_factory=list)
     values: list = field(default_factory=list)
     potentials: list = field(default_factory=list)
+    kinds: list = field(default_factory=list)
 
 
 @dataclass
@@ -176,6 +203,7 @@ class Result:
     logps: list = field(default_factory=list)
     advantages: list = field(default_factory=list)
     returns: list = field(default_factory=list)
+    kinds: list = field(default_factory=list)  # decision kind per recorded decision (`KIND_ID`)
     # per game: (seats, winner, end_reason, turns, decisions, seed)
     games: list = field(default_factory=list)
     # per job: (wall seconds, seconds waiting for inference, decisions)
@@ -211,6 +239,7 @@ def _finish(traj: Trajectory, outcome: float, job: Job, out: Result) -> None:
     out.logps += traj.logps
     out.advantages += adv
     out.returns += [a + v for a, v in zip(adv, traj.values)]
+    out.kinds += traj.kinds
 
 
 class _Seat:
@@ -285,6 +314,7 @@ class _LocalEvaluator:
         self.torch = torch
         self.learner = load_policy(job.learner_path, job.learner_version)
         self.slots = slots
+        self.greedy = job.greedy
         self.hidden: dict = {}
 
     def submit(self, group: int, items: list):
@@ -312,7 +342,7 @@ class _LocalEvaluator:
                 if hn is not None:
                     table[slots] = hn
                 dist = torch.distributions.Categorical(logits=logits, validate_args=False)
-                a = dist.sample()
+                a = logits.argmax(-1) if self.greedy else dist.sample()  # padded options are -inf
                 acts += a.tolist()
                 logps += dist.log_prob(a).tolist()
                 vals += values.tolist()
@@ -323,14 +353,15 @@ class _ServerEvaluator:
     """Sends decisions to the central inference server (rl/inference.py)."""
 
     def __init__(self, job: Job, slots: int):
-        from .inference import client
+        from .inference import GREEDY_FLAG, client
 
         self.client = client()
         self.learner_key = (job.learner_path, job.learner_version)
+        self.flag = GREEDY_FLAG if job.greedy else 0
 
     def submit(self, group: int, items: list):
-        key = self.learner_key
-        return self.client.submit(group, [(key if it[0] == LEARNER else (it[0], 0), it[1], it[2], *it[3]) for it in items])
+        key, flag = self.learner_key, self.flag
+        return self.client.submit(group, [(key if it[0] == LEARNER else (it[0], 0), it[1], it[2] | flag, *it[3]) for it in items])
 
     def collect(self, handle):
         return self.client.collect(handle)
@@ -414,6 +445,8 @@ def _claimer(job: Job):
 
 def _play(job: Job) -> Result:
     t_start = time.perf_counter()
+    if job.greedy and job.record:
+        raise ValueError("greedy games are for evaluation: PPO needs games of the sampling policy (record=False)")
     Game = game_class(job.engine)
     cap = job.inflight or len(job.games)
     if cap > MAX_LIVE:
@@ -486,6 +519,7 @@ def _play(job: Job) -> Result:
         for (pol, _, _, x, lv, p, pot), a, lp, v in zip(items, acts, logps, values):
             if job.record and pol == LEARNER:
                 tr = lv.trajs[p]
+                tr.kinds.append(KIND_ID.get(lv.game.decision.kind, 0))
                 tr.samples.append(x)
                 tr.actions.append(a)
                 tr.logps.append(lp)
