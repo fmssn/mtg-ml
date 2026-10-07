@@ -718,10 +718,12 @@ impl PyGame {
         Ok((state, lens, opts.concat()))
     }
 
-    /// `encode.option_preview(game, player, i)`.
-    fn option_preview(&self, player: u8, i: usize) -> PyResult<Vec<String>> {
+    /// `encode.option_preview(game, player, i, features)`.
+    #[pyo3(signature = (player, i, features = crate::features::FEATURES))]
+    fn option_preview(&self, player: u8, i: usize, features: u8) -> PyResult<Vec<String>> {
         Self::pidx(player as usize)?;
-        crate::features::option_preview_strings(self.st(), player, i).ok_or_else(|| PyIndexError::new_err("no such option"))
+        fver(features)?;
+        crate::features::option_preview_strings(self.st(), player, i, features).ok_or_else(|| PyIndexError::new_err("no such option"))
     }
 
     /// Hashed `event_tokens` of option i for (decider, opponent).

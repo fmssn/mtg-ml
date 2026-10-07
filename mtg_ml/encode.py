@@ -30,8 +30,12 @@ DEFAULT_DIM = 1 << 16
 #      targets and X, option previews (docs/features.md)
 #   3: + `opp:deck:{deck}` (the opponent not on its seat's usual deck), so
 #      one network can play several matchups; identical to 2 on jund_blue
-FEATURES = 3  # the latest; what new runs train on
-FEATURE_VERSIONS = (1, 2, 3)
+#   4: + combat relations (who blocks whom, blocked / unblocked attackers,
+#      block previews), incoming combat damage, choose_x previews and an X
+#      option -> spell pointer, mana colours (sources, hand needs, colour
+#      previews on land plays, basic searches and mana payment)
+FEATURES = 4  # the latest; what new runs train on
+FEATURE_VERSIONS = (1, 2, 3, 4)
 
 
 def check_features(features: int) -> int:
@@ -144,6 +148,8 @@ def state_features(game, viewer: int, features: int = FEATURES) -> list[str]:
                 f.append(f"{side}:known_library:{pos}:{name}")
             elif pos == n - 1:
                 f.append(f"{side}:known_library:bottom:{name}")
+    if features >= 4:
+        f += _combat_features(game, viewer) + _colour_features(game, viewer)
     return f + _counted(raw)
 
 
@@ -190,6 +196,102 @@ def _board_features(o: dict, viewer: int, game) -> list[str]:
     return f
 
 
+def _attackers(game) -> list:
+    """The attacking creatures still on the battlefield, in declaration order."""
+    return [c for c in (game.perm(a) for a in game.attackers) if c is not None]
+
+
+def _blockers_of(game, aoid: int) -> list:
+    """The creatures still on the battlefield blocking attacker `aoid`."""
+    return [c for c in (game.perm(b) for b, a in game.blocks.items() if a == aoid) if c is not None]
+
+
+def _unblocked_power(game, skip: int | None = None) -> int:
+    """Power of the attackers not blocked (`Game.blocked`: an attacker stays
+    blocked when its blockers leave), leaving out attacker `skip`."""
+    return sum(max(game.power(c), 0) for c in _attackers(game) if c.oid not in game.blocked and c.oid != skip)
+
+
+def _combat_features(game, viewer: int) -> list[str]:
+    """Set 4, while creatures attack: the attacking side's total and unblocked
+    power (from the blocks declared so far), whether the unblocked part is
+    lethal to the defender, and the defender's life after it. `_board_features` counts only creatures that
+    could still attack, so during combat it misses the attackers."""
+    att = _attackers(game)
+    if not att:
+        return []
+    side = "self" if game.active == viewer else "opponent"
+    total = sum(max(game.power(c), 0) for c in att)
+    unblocked = _unblocked_power(game)
+    life = game.players[1 - game.active].life
+    f = _thermo(f"{side}:attacking_power", total, POWER_STEPS) + _thermo(f"{side}:unblocked_power", unblocked, POWER_STEPS)
+    if unblocked > 0 and unblocked >= life:
+        f.append(f"{side}:incoming_lethal")
+    other = "opponent" if side == "self" else "self"
+    return f + _thermo(f"{other}:life_after_unblocked", life - unblocked, LIFE_STEPS)
+
+
+def _mana_colors(face) -> tuple[str, ...]:
+    """Colours (WUBRG) the card's mana ability makes; every supported permanent has at most one."""
+    for ab in face.abilities:
+        if ab.mana is not None:
+            return tuple(c for c in PREVIEW_COLORS if c in ab.mana)
+    return ()
+
+
+def _colour_counts(game, viewer: int) -> tuple[dict[str, int], set[str]]:
+    """({colour: permanents of `viewer` whose mana ability makes it, tapped
+    or not}, {colours in the mana costs of the cards in `viewer`'s hand})."""
+    sources = dict.fromkeys(PREVIEW_COLORS, 0)
+    for c in game.battlefield:
+        if c.controller == viewer:
+            for col in _mana_colors(c.face):
+                sources[col] += 1
+    needs = {k for c in game.players[viewer].hand for k, n in c.face.cost.colored if n > 0 and k in sources}
+    return sources, needs
+
+
+def _colour_features(game, viewer: int) -> list[str]:
+    sources, needs = _colour_counts(game, viewer)
+    f = []
+    for col in PREVIEW_COLORS:
+        f += _thermo(f"self:sources:{col}", sources[col])
+    f += [f"self:hand_needs:{col}" for col in PREVIEW_COLORS if col in needs]
+    f += [f"self:hand_missing:{col}" for col in PREVIEW_COLORS if col in needs and sources[col] == 0]
+    return f
+
+
+def _combat_entity(game, c, slots: dict[int, int]) -> list[str]:
+    """Set 4 combat relations of permanent `c`. An attacker: blocked or not,
+    how many creatures block it, their summed power, and whether that kills
+    it. A blocker: the attacker it blocks (name, power and toughness, whether
+    the two kill each other one on one). `e:attack_slot:{j}` and
+    `e:blocking:slot:{j}` tie a blocker to its attacker by declaration order,
+    so blocks on two same-name attackers are told apart."""
+    e = []
+    if c.oid in slots:
+        e.append(f"e:attack_slot:{slots[c.oid]}")
+        e.append("e:blocked" if c.oid in game.blocked else "e:unblocked")
+        blockers = _blockers_of(game, c.oid)
+        e += _thermo("e:blockers", len(blockers), ENT_STEPS)
+        power = sum(max(game.power(b), 0) for b in blockers)
+        e += _thermo("e:block_power", power, ENT_STEPS)
+        if _dies_to(game, c, power, any(game.has(b, "deathtouch") for b in blockers)):
+            e.append("e:block_lethal")
+    a = game.perm(game.blocks[c.oid]) if c.oid in game.blocks else None
+    if a is not None:
+        if a.oid in slots:
+            e.append(f"e:blocking:slot:{slots[a.oid]}")
+        e.append(f"e:blocking:name:{a.name}")
+        e += _thermo("e:blocking:power", game.power(a), ENT_STEPS)
+        e += _thermo("e:blocking:toughness", game.toughness(a), ENT_STEPS)
+        if _dies_to(game, a, game.power(c), game.has(c, "deathtouch")):
+            e.append("e:blocking:kills")
+        if _dies_to(game, c, game.power(a), game.has(a, "deathtouch")):
+            e.append("e:blocking:dies")
+    return e
+
+
 ENT_STEPS = (*range(1, 9), 10, 12, 15)
 MAX_ENTITIES = 64  # permanents and stack items beyond this are left out
 
@@ -208,6 +310,8 @@ def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[l
     ents, index = [], {}
     v2 = features >= 2
     targeted = _targeted_by(o["stack"]) if v2 else {}
+    v4 = features >= 4
+    slots = {a: j for j, a in enumerate(game.attackers)} if v4 else {}
     for p in o["battlefield"]:
         e = [f"e:name:{p['name']}", f"e:ctrl:{p['controller']}"]
         e += [f"e:type:{t}" for t in p["types"]]
@@ -230,6 +334,10 @@ def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[l
         if v2 and p["skip_untap"] > 0:
             e.append(f"e:skip_untap:{p['skip_untap']}")
         e += targeted.get(p["oid"], [])
+        if v4:
+            c = game.perm(p["oid"])
+            e += [f"e:produces:{col}" for col in _mana_colors(c.face)]
+            e += _combat_entity(game, c, slots)
         index[p["oid"]] = len(ents)
         ents.append(e)
     for i, it in enumerate(reversed(o["stack"])):
@@ -271,14 +379,18 @@ def _targeted_by(stack: list[dict]) -> dict[int, list[str]]:
     return out
 
 
-def option_object_ids(option) -> list[int]:
+def option_object_ids(option, game=None, kind: str = "", features: int = 1) -> list[int]:
     """Ids of the objects an option is about: every `Name#id` in its label
     (attackers, blockers, mana sources, sacrifices, targets, damage
-    assignment), plus the source of an activated or mana ability."""
+    assignment), plus the source of an activated or mana ability; in set 4
+    also the spell or ability on top of the stack for a choose_x option
+    (needs `game` and the decision `kind`)."""
     ids = [int(m) for m in _ID.findall(option.label)]
     v = option.value
     if isinstance(v, tuple) and len(v) == 3 and v[0] in ("activate", "mana"):
         ids.append(v[1].oid)
+    if features >= 4 and kind == "choose_x" and game.stack:
+        ids.append(game.stack[-1].sid)
     return ids
 
 
@@ -335,15 +447,16 @@ def _kills_preview(game, player: int, ops, source) -> list[str]:
     return _thermo("pv:kills_opp", kills["opp"]) + _thermo("pv:kills_self", kills["self"]) + ["pv:kills_none"] * (kills["opp"] + kills["self"] == 0)
 
 
-def _item_cost(game, item):
+def _item_cost(game, item, x: int | None = None):
     """(cost, sacrifice filter, excluded source oids) of the stack item being
-    put on the stack (targets are chosen before costs are paid)."""
+    put on the stack (targets are chosen before costs are paid), with X =
+    `x` (default: the item's)."""
     from .engine.mana import ManaCost
 
     if item.kind == "spell":
         card = item.card
         base = game._mode_cost(card, item.method)
-        return base.with_x(item.x).reduced(game._cost_reduction(item.controller, card)), card.face.additional_sac, set()
+        return base.with_x(item.x if x is None else x).reduced(game._cost_reduction(item.controller, card)), card.face.additional_sac, set()
     src = item.source
     for ab in src.face.abilities:
         if f"{src.name}: {ab.name}" == item.name:
@@ -383,15 +496,126 @@ def _target_preview(game, player: int, ref) -> list[str]:
     return f
 
 
+def _block_preview(game, player: int, label: str, attacker) -> list[str]:
+    """Set 4, a declare_blocker option (blocker: the first id in the label;
+    `attacker` None = no block): whether the attacker is already blocked,
+    whether it dies to its blockers plus this one, whether it kills this
+    blocker, and the unblocked damage left if no further blocks follow."""
+    f = []
+    skip = None
+    if attacker is not None:
+        b = game.perm(int(_ID.search(label).group(1)))
+        blockers = _blockers_of(game, attacker.oid)
+        if attacker.oid in game.blocked:
+            f.append("pv:attacker_already_blocked")
+        power = sum(max(game.power(x), 0) for x in blockers) + max(game.power(b), 0)
+        if _dies_to(game, attacker, power, any(game.has(x, "deathtouch") for x in [*blockers, b])):
+            f.append("pv:attacker_dies")
+        if _dies_to(game, b, game.power(attacker), game.has(attacker, "deathtouch")):
+            f.append("pv:blocker_dies")
+        skip = attacker.oid
+    left = _unblocked_power(game, skip)
+    f += _thermo("pv:unblocked_damage_left", left, POWER_STEPS)
+    if left > 0 and left >= game.players[player].life:
+        f.append("pv:lethal_left")
+    return f
+
+
+def _x_preview(game, player: int, x: int) -> list[str]:
+    """Set 4, a choose_x option: X as a thermometer, whether it is the largest
+    X offered, mana and colours left after paying the cost with this X (the
+    item on top of the stack), and the power a creature entering with X
+    +1/+1 counters would have."""
+    f = _thermo("pv:x", x)
+    if x == max(o.value for o in game.decision.options):
+        f.append("pv:x_is_max")
+    if not game.stack:
+        return f
+    item = game.stack[-1]
+    cost, sac, exclude = _item_cost(game, item, x)
+    f += _mana_preview(game, player, cost, sac, exclude)
+    if item.kind == "spell" and item.card.face.etb_x_counters:
+        f += _thermo("pv:enters_power", (item.card.face.power or 0) + x, ENT_STEPS)
+    return f
+
+
+def _adds_colour_preview(game, player: int, face) -> list[str]:
+    """Set 4, playing or fetching a land: the colours it makes, and whether
+    one of them is needed by the hand and made by nothing the player controls."""
+    cols = _mana_colors(face)
+    if not cols:
+        return []
+    sources, needs = _colour_counts(game, player)
+    f = [f"pv:adds_color:{col}" for col in cols]
+    if any(col in needs and sources[col] == 0 for col in cols):
+        f.append("pv:adds_missing_color")
+    return f
+
+
+def _pay_preview(game, player: int, v) -> list[str]:
+    """Set 4, a pay_mana option: the colours that could still be produced
+    once the rest of the cost is paid after spending this unit (exact, like
+    the cast preview's `pv:colors_left`)."""
+    from .engine.mana import RemainingCost
+
+    if game.paying is None:
+        return []
+    rem, sac, exclude = game.paying
+    r2 = rem.copy()
+    pool, gone, excl = None, set(), set(exclude)
+    if v[0] == "pool":
+        r2.apply(v[1])
+        pool = dict(game.players[player].pool)
+        pool[v[1]] -= 1
+    else:
+        card, color = v[1], v[2]
+        r2.apply(color)
+        excl.add(card.oid)
+        ab = next(a for a in card.face.abilities if a.mana is not None)
+        if ab.sac_self:
+            gone = {card.oid}
+    f = []
+    for col in PREVIEW_COLORS:
+        r3 = RemainingCost(r2.generic, dict(r2.colored))
+        r3.colored[col] = r3.colored.get(col, 0) + 1
+        if game._cost_feasible(player, r3, sac, excl, pool, gone):
+            f.append(f"pv:colors_left:{col}")
+    return f
+
+
+def _preview_v4(game, player: int, i: int) -> list[str] | None:
+    """Set-4 previews of option `i`; None for the decision kinds and options it does not cover."""
+    d = game.decision
+    o = d.options[i]
+    v = o.value
+    if d.kind == "declare_blocker":
+        return _block_preview(game, player, o.label, v)
+    if d.kind == "choose_x":
+        return _x_preview(game, player, v)
+    if d.kind == "pay_mana":
+        return _pay_preview(game, player, v)
+    if d.kind == "priority" and isinstance(v, tuple) and v[0] == "land":
+        return _adds_colour_preview(game, player, v[1].face)
+    if d.kind == "choose_card" and o.key[0] == "search" and v is not None:
+        return _adds_colour_preview(game, player, v.face)
+    return None
+
+
 def option_preview(game, player: int, i: int, features: int = FEATURES) -> list[str]:
     """Engine-computed effects of taking option `i` of the current decision,
     from the current state without changing it (`pv:` tokens): creatures a
     sweeper ability kills per side, ward and lethal damage on a target, mana
-    and colours left after a cast or activation. Feature set 2 and up."""
+    and colours left after a cast or activation (set 2 and up); combat
+    results of a block, X previews, colours a land adds and colours left
+    after a mana payment (set 4)."""
     if check_features(features) < 2:
         return []
     if getattr(game, "NATIVE", False):
-        return game.option_preview(player, i)
+        return game.option_preview(player, i, features)
+    if features >= 4:
+        f = _preview_v4(game, player, i)
+        if f is not None:
+            return f
     kind = game.decision.kind
     v = game.decision.options[i].value
     if kind == "target" and isinstance(v, tuple):

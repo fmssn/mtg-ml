@@ -62,8 +62,9 @@ fn thermo<O: FeatureOut>(o: &mut O, name: &str, n: i64, steps: &[i64]) {
 
 /// encode.py `FEATURES` / `FEATURE_VERSIONS`: feature-set versions (1: up to
 /// 2026-10-06; 2: + readiness, known positions, skip_untap, stack targets, X,
-/// option previews; 3: + `opp:deck:`).
-pub const FEATURES: u8 = 3;
+/// option previews; 3: + `opp:deck:`; 4: + combat relations, incoming
+/// damage, choose_x previews and pointer, mana colours).
+pub const FEATURES: u8 = 4;
 
 pub fn check_features(features: u8) -> Result<u8, String> {
     if (1..=FEATURES).contains(&features) {
@@ -162,6 +163,10 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
             }
         }
     }
+    if features >= 4 {
+        combat_features(st, viewer, o);
+        colour_features(st, viewer, o);
+    }
 }
 
 /// `thermo` for `{side}:{name}` without allocating the name.
@@ -225,6 +230,92 @@ fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
     }
 }
 
+/// encode.py `_attackers`: attacking creatures still on the battlefield, in declaration order.
+fn attackers(st: &State) -> impl Iterator<Item = &Card> + '_ {
+    st.attackers.iter().filter_map(move |&a| st.perm(a)).map(move |ci| st.c(ci))
+}
+
+/// encode.py `_blockers_of`: creatures still on the battlefield blocking attacker `aoid`.
+fn blockers_of(st: &State, aoid: u32) -> impl Iterator<Item = &Card> + '_ {
+    st.blocks.iter().filter(move |(_, a)| *a == aoid).filter_map(move |(b, _)| st.perm(*b)).map(move |ci| st.c(ci))
+}
+
+/// encode.py `_unblocked_power`: power of the attackers not blocked, leaving out `skip`.
+fn unblocked_power(st: &State, skip: Option<u32>) -> i64 {
+    attackers(st).filter(|c| !st.blocked.contains(&c.oid) && Some(c.oid) != skip).map(|c| st.power(c).max(0) as i64).sum()
+}
+
+/// encode.py `_combat_features` (set 4).
+fn combat_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
+    if attackers(st).next().is_none() {
+        return;
+    }
+    let side = rel(st.active, viewer);
+    let total: i64 = attackers(st).map(|c| st.power(c).max(0) as i64).sum();
+    let unblocked = unblocked_power(st, None);
+    let life = st.players[(1 - st.active) as usize].life as i64;
+    side_thermo(o, side, "attacking_power", total, POWER_STEPS);
+    side_thermo(o, side, "unblocked_power", unblocked, POWER_STEPS);
+    if unblocked > 0 && unblocked >= life {
+        direct!(o, "{side}:incoming_lethal");
+    }
+    side_thermo(o, rel(1 - st.active, viewer), "life_after_unblocked", life - unblocked, LIFE_STEPS);
+}
+
+/// encode.py `_mana_colors`: bitmask of the colours (WUBRG) the card's mana ability makes.
+fn mana_colors(c: &Card) -> u8 {
+    let colors = PREVIEW_COLORS.iter().fold(0u8, |m, &col| m | bit(col));
+    c.face().abilities.iter().find_map(|a| a.mana.as_ref()).map_or(0, |v| v.iter().fold(0u8, |m, &col| m | bit(col)) & colors)
+}
+
+/// encode.py `_colour_counts`: (permanents of `viewer` making each of
+/// WUBRG, bitmask of the colours in the costs of `viewer`'s hand cards).
+fn colour_counts(st: &State, viewer: u8) -> ([i64; 5], u8) {
+    let mut sources = [0i64; 5];
+    for &ci in &st.battlefield {
+        let c = st.c(ci);
+        if c.controller == viewer {
+            let m = mana_colors(c);
+            for (i, &col) in PREVIEW_COLORS.iter().enumerate() {
+                if m & bit(col) != 0 {
+                    sources[i] += 1;
+                }
+            }
+        }
+    }
+    let mut needs = 0u8;
+    for &ci in &st.players[viewer as usize].hand {
+        for &(col, n) in &st.c(ci).face().cost.colored {
+            if n > 0 && PREVIEW_COLORS.contains(&col) {
+                needs |= bit(col);
+            }
+        }
+    }
+    (sources, needs)
+}
+
+/// encode.py `_colour_features` (set 4).
+fn colour_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
+    let (sources, needs) = colour_counts(st, viewer);
+    for (i, &col) in PREVIEW_COLORS.iter().enumerate() {
+        for &k in COUNT_STEPS {
+            if sources[i] >= k {
+                direct!(o, "self:sources:{}>={k}", col as char);
+            }
+        }
+    }
+    for &col in &PREVIEW_COLORS {
+        if needs & bit(col) != 0 {
+            direct!(o, "self:hand_needs:{}", col as char);
+        }
+    }
+    for (i, &col) in PREVIEW_COLORS.iter().enumerate() {
+        if needs & bit(col) != 0 && sources[i] == 0 {
+            direct!(o, "self:hand_missing:{}", col as char);
+        }
+    }
+}
+
 /// encode.py `ENT_STEPS` / `MAX_ENTITIES`.
 const ENT_STEPS: &[i64] = &[1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15];
 pub const MAX_ENTITIES: usize = 64;
@@ -244,6 +335,37 @@ fn ent_thermo<E: EntityOut>(o: &mut E, name: &str, n: i64) {
         if n >= k {
             tok!(o, "{name}>={k}");
         }
+    }
+}
+
+/// encode.py `_combat_entity` (set 4): attacker and blocker relations.
+fn combat_entity<E: EntityOut>(st: &State, c: &Card, o: &mut E) {
+    let dt = |x: &Card| st.has(x, "deathtouch");
+    if let Some(j) = st.attackers.iter().position(|&a| a == c.oid) {
+        tok!(o, "e:attack_slot:{j}");
+        tok!(o, "{}", if st.blocked.contains(&c.oid) { "e:blocked" } else { "e:unblocked" });
+        ent_thermo(o, "e:blockers", blockers_of(st, c.oid).count() as i64);
+        let power: i32 = blockers_of(st, c.oid).map(|b| st.power(b).max(0)).sum();
+        ent_thermo(o, "e:block_power", power as i64);
+        if dies_to(st, c, power, blockers_of(st, c.oid).any(dt)) {
+            tok!(o, "e:block_lethal");
+        }
+    }
+    let a = match st.blocks.iter().find(|(b, _)| *b == c.oid).and_then(|(_, a)| st.perm(*a)) {
+        Some(ai) => st.c(ai),
+        None => return,
+    };
+    if let Some(j) = st.attackers.iter().position(|&x| x == a.oid) {
+        tok!(o, "e:blocking:slot:{j}");
+    }
+    tok!(o, "e:blocking:name:{}", a.name());
+    ent_thermo(o, "e:blocking:power", st.power(a) as i64);
+    ent_thermo(o, "e:blocking:toughness", st.toughness(a) as i64);
+    if dies_to(st, a, st.power(c), dt(c)) {
+        tok!(o, "e:blocking:kills");
+    }
+    if dies_to(st, c, st.power(a), dt(a)) {
+        tok!(o, "e:blocking:dies");
     }
 }
 
@@ -303,6 +425,15 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, 
             }
             targeted_by(st, viewer, Ref::Perm(c.oid), o);
         }
+        if features >= 4 {
+            let m = mana_colors(c);
+            for &col in &PREVIEW_COLORS {
+                if m & bit(col) != 0 {
+                    tok!(o, "e:produces:{}", col as char);
+                }
+            }
+            combat_entity(st, c, o);
+        }
         ids.push(c.oid);
     }
     for (i, it) in st.stack.iter().rev().enumerate() {
@@ -356,8 +487,9 @@ fn targeted_by<E: EntityOut>(st: &State, viewer: u8, r: Ref, o: &mut E) {
 }
 
 /// encode.py `option_object_ids`: every `#<digits>` in the label, plus the
-/// source of an activated or mana ability.
-pub fn option_object_ids(st: &State, o: &Opt) -> Vec<u32> {
+/// source of an activated or mana ability; in set 4 also the stack item a
+/// choose_x option is for.
+pub fn option_object_ids(st: &State, o: &Opt, kind: Kind, features: u8) -> Vec<u32> {
     let mut ids = vec![];
     let b = o.label.as_bytes();
     let mut i = 0;
@@ -379,6 +511,11 @@ pub fn option_object_ids(st: &State, o: &Opt) -> Vec<u32> {
     }
     if let Val::Activate(c, _) | Val::Mana(c, _) = o.value {
         ids.push(st.c(c).oid);
+    }
+    if features >= 4 && kind == Kind::ChooseX {
+        if let Some(it) = st.stack.last() {
+            ids.push(it.sid);
+        }
     }
     ids
 }
@@ -481,11 +618,11 @@ fn kills_preview(st: &State, player: u8, ops: Option<&[Op]>, source: &Card, out:
 
 /// encode.py `_item_cost`: (cost, sacrifice filter, excluded source) of the
 /// stack item whose targets are being chosen.
-fn item_cost(st: &State, item: &StackItem) -> (ManaCost, Option<SacFilter>, Vec<u32>) {
+fn item_cost(st: &State, item: &StackItem, x: Option<i32>) -> (ManaCost, Option<SacFilter>, Vec<u32>) {
     if item.kind == SKind::Spell {
         let ci = item.card.expect("spell has a card");
         let base = st.mode_cost(ci, item.method).expect("cast mode has a cost");
-        return (base.with_x(item.x).reduced(st.cost_reduction(item.controller, ci)), st.c(ci).face().additional_sac, vec![]);
+        return (base.with_x(x.unwrap_or(item.x)).reduced(st.cost_reduction(item.controller, ci)), st.c(ci).face().additional_sac, vec![]);
     }
     if let Some(s) = &item.source {
         let src = st.src(s);
@@ -513,7 +650,7 @@ fn target_preview(st: &State, player: u8, r: Ref, out: &mut impl FnMut(std::fmt:
         let ward = c.face().ward;
         if ward > 0 && c.controller != player {
             out(format_args!("pv:target_ward:{ward}"));
-            let (cost, sac, exclude) = item_cost(st, item);
+            let (cost, sac, exclude) = item_cost(st, item, None);
             if st.cost_feasible(player, &plus(&cost, ward, None), sac, &exclude, None, &[]) {
                 out(format_args!("pv:ward_payable"));
             }
@@ -549,9 +686,150 @@ fn target_preview(st: &State, player: u8, r: Ref, out: &mut impl FnMut(std::fmt:
     }
 }
 
+/// encode.py `_block_preview` (set 4): a declare_blocker option.
+fn block_preview(st: &State, player: u8, o: &Opt, out: &mut impl FnMut(std::fmt::Arguments)) {
+    let mut skip = None;
+    if let Val::Card(ai) = o.value {
+        let a = st.c(ai);
+        let b = match option_object_ids(st, o, Kind::DeclareBlocker, 1).first().and_then(|&id| st.perm(id)) {
+            Some(bi) => st.c(bi),
+            None => return,
+        };
+        if st.blocked.contains(&a.oid) {
+            out(format_args!("pv:attacker_already_blocked"));
+        }
+        let power = blockers_of(st, a.oid).map(|x| st.power(x).max(0)).sum::<i32>() + st.power(b).max(0);
+        let dt = blockers_of(st, a.oid).any(|x| st.has(x, "deathtouch")) || st.has(b, "deathtouch");
+        if dies_to(st, a, power, dt) {
+            out(format_args!("pv:attacker_dies"));
+        }
+        if dies_to(st, b, st.power(a), st.has(a, "deathtouch")) {
+            out(format_args!("pv:blocker_dies"));
+        }
+        skip = Some(a.oid);
+    }
+    let left = unblocked_power(st, skip);
+    for &k in POWER_STEPS {
+        if left >= k {
+            out(format_args!("pv:unblocked_damage_left>={k}"));
+        }
+    }
+    if left > 0 && left >= st.players[player as usize].life as i64 {
+        out(format_args!("pv:lethal_left"));
+    }
+}
+
+/// encode.py `_x_preview` (set 4): a choose_x option.
+fn x_preview(st: &State, player: u8, x: i32, out: &mut impl FnMut(std::fmt::Arguments)) {
+    for &k in COUNT_STEPS {
+        if x as i64 >= k {
+            out(format_args!("pv:x>={k}"));
+        }
+    }
+    let max = st.decision.as_ref().and_then(|d| d.options.iter().filter_map(|o| if let Val::Int(v) = o.value { Some(v) } else { None }).max());
+    if max == Some(x) {
+        out(format_args!("pv:x_is_max"));
+    }
+    let item = match st.stack.last() {
+        Some(it) => it,
+        None => return,
+    };
+    let (cost, sac, exclude) = item_cost(st, item, Some(x));
+    mana_preview(st, player, &cost, sac, &exclude, out);
+    if item.kind == SKind::Spell {
+        let face = st.c(item.card.expect("spell has a card")).face();
+        if face.etb_x_counters {
+            let p = (face.power.unwrap_or(0) + x) as i64;
+            for &k in ENT_STEPS {
+                if p >= k {
+                    out(format_args!("pv:enters_power>={k}"));
+                }
+            }
+        }
+    }
+}
+
+/// encode.py `_adds_colour_preview` (set 4): playing or fetching a land.
+fn adds_colour_preview(st: &State, player: u8, c: &Card, out: &mut impl FnMut(std::fmt::Arguments)) {
+    let m = mana_colors(c);
+    if m == 0 {
+        return;
+    }
+    let (sources, needs) = colour_counts(st, player);
+    for &col in &PREVIEW_COLORS {
+        if m & bit(col) != 0 {
+            out(format_args!("pv:adds_color:{}", col as char));
+        }
+    }
+    if PREVIEW_COLORS.iter().enumerate().any(|(i, &col)| m & bit(col) != 0 && needs & bit(col) != 0 && sources[i] == 0) {
+        out(format_args!("pv:adds_missing_color"));
+    }
+}
+
+/// encode.py `_pay_preview` (set 4): colours still producible once the rest
+/// of the cost is paid after spending this unit.
+fn pay_preview(st: &State, player: u8, val: &Val, out: &mut impl FnMut(std::fmt::Arguments)) {
+    let (rem, sac, exclude) = match &st.paying {
+        Some(p) => p,
+        None => return,
+    };
+    let mut r2 = rem.clone();
+    let mut excl = exclude.clone();
+    let mut pool2 = None;
+    let mut gone = vec![];
+    match *val {
+        Val::Pool(col) => {
+            r2.apply(col);
+            let mut pool = st.players[player as usize].pool.clone();
+            for e in pool.iter_mut() {
+                if e.0 == col {
+                    e.1 -= 1;
+                }
+            }
+            pool2 = Some(pool);
+        }
+        Val::Source(ci, col) => {
+            r2.apply(col);
+            let c = st.c(ci);
+            excl.push(c.oid);
+            if c.face().abilities.iter().find(|a| a.mana.is_some()).is_some_and(|a| a.sac_self) {
+                gone.push(c.oid);
+            }
+        }
+        _ => return,
+    }
+    for col in PREVIEW_COLORS {
+        let mut r3 = r2.clone();
+        match r3.colored.iter_mut().find(|(k, _)| *k == col) {
+            Some(e) => e.1 += 1,
+            None => r3.colored.push((col, 1)),
+        }
+        if st.cost_feasible(player, &r3, *sac, &excl, pool2.as_deref(), &gone) {
+            out(format_args!("pv:colors_left:{}", col as char));
+        }
+    }
+}
+
+/// encode.py `_preview_v4`: set-4 previews; false for the decision kinds and
+/// options it does not cover.
+fn preview_v4(st: &State, player: u8, kind: Kind, o: &Opt, out: &mut impl FnMut(std::fmt::Arguments)) -> bool {
+    match (kind, &o.value) {
+        (Kind::DeclareBlocker, _) => block_preview(st, player, o, out),
+        (Kind::ChooseX, Val::Int(x)) => x_preview(st, player, *x, out),
+        (Kind::PayMana, v) => pay_preview(st, player, v, out),
+        (Kind::Priority, Val::Land(ci)) => adds_colour_preview(st, player, st.c(*ci), out),
+        (Kind::ChooseCard, Val::Card(ci)) if matches!(o.key.first(), Some(KI::S("search"))) => adds_colour_preview(st, player, st.c(*ci), out),
+        _ => return false,
+    }
+    true
+}
+
 /// encode.py `option_preview`: engine-computed effects of taking an option.
-pub fn option_preview(st: &State, player: u8, kind: Kind, val: &Val, out: &mut impl FnMut(std::fmt::Arguments)) {
-    match (kind, val) {
+pub fn option_preview(st: &State, player: u8, kind: Kind, o: &Opt, features: u8, out: &mut impl FnMut(std::fmt::Arguments)) {
+    if features >= 4 && preview_v4(st, player, kind, o, out) {
+        return;
+    }
+    match (kind, &o.value) {
         (Kind::Target, Val::Ref(r)) => target_preview(st, player, *r, out),
         (Kind::Priority, Val::Activate(ci, ai)) => {
             // A determinized copy re-deals hidden cards under pending options,
@@ -585,11 +863,13 @@ pub fn option_preview(st: &State, player: u8, kind: Kind, val: &Val, out: &mut i
 }
 
 /// String form of option previews (differential tests).
-pub fn option_preview_strings(st: &State, player: u8, i: usize) -> Option<Vec<String>> {
+pub fn option_preview_strings(st: &State, player: u8, i: usize, features: u8) -> Option<Vec<String>> {
     let d = st.decision.as_ref()?;
     let o = d.options.get(i)?;
     let mut v = vec![];
-    option_preview(st, player, d.kind, &o.value, &mut |a| v.push(a.to_string()));
+    if features >= 2 {
+        option_preview(st, player, d.kind, o, features, &mut |a| v.push(a.to_string()));
+    }
     Some(v)
 }
 
@@ -808,7 +1088,7 @@ pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32, featur
             let mut v = Vec::with_capacity(2 * o.key.len() + 3);
             option_token_hashes(d.kind, &o.key, "", option_dim, &mut v);
             if features >= 2 {
-                option_preview(st, player, d.kind, &o.value, &mut |a| {
+                option_preview(st, player, d.kind, o, features, &mut |a| {
                     pbuf.clear();
                     let _ = pbuf.write_fmt(a);
                     v.push(crc32fast::hash(pbuf.as_bytes()) % option_dim);
@@ -816,7 +1096,7 @@ pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32, featur
             }
             v.sort_unstable();
             v.dedup();
-            let mut ptr: Vec<u32> = option_object_ids(st, o).iter().filter_map(|id| ids.iter().position(|x| x == id)).map(|k| option_dim + k as u32).collect();
+            let mut ptr: Vec<u32> = option_object_ids(st, o, d.kind, features).iter().filter_map(|id| ids.iter().position(|x| x == id)).map(|k| option_dim + k as u32).collect();
             ptr.sort_unstable();
             ptr.dedup();
             v.extend(ptr);

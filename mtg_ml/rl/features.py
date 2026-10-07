@@ -55,7 +55,7 @@ def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = O
     opts = []
     for i, o in enumerate(game.legal_options()):
         toks = sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key) + option_preview(game, player, i, features)})
-        toks += sorted({option_dim + index[i] for i in option_object_ids(o) if i in index})
+        toks += sorted({option_dim + index[i] for i in option_object_ids(o, game, d.kind, features) if i in index})
         opts.append(toks)
     return state, opts
 
