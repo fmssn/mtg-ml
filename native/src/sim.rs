@@ -6,7 +6,7 @@
 
 use std::fmt::{Arguments, Write};
 
-use crate::features::{board_features, combat_features, mana_colors, FeatureOut, PREVIEW_COLORS};
+use crate::features::{mana_colors, PREVIEW_COLORS};
 use crate::game::{Game, StepError};
 use crate::mana::bit;
 use crate::state::*;
@@ -56,23 +56,50 @@ pub struct Summary {
     step: &'static str,
 }
 
-/// Collects the lethal flags among `board_features` / `combat_features`.
-struct FlagOut {
-    buf: String,
-    flags: u8,
-}
-
-impl FeatureOut for FlagOut {
-    fn direct(&mut self, args: Arguments) {
-        self.buf.clear();
-        let _ = self.buf.write_fmt(args);
-        if !self.buf.contains(">=") {
-            if let Some(i) = SIM_FLAGS.iter().position(|f| *f == self.buf) {
-                self.flags |= 1 << i;
+/// The `SIM_FLAGS` set by `features.rs::board_features` / `combat_features`
+/// (encode.py reads them from those strings), computed without formatting
+/// their thermometers: the same sums, compared the same way.
+fn flags(st: &State, v: u8) -> u8 {
+    let d = crate::cards::db();
+    let (fly, reach) = (d.kw("flying"), d.kw("reach"));
+    let mut out = 0u8;
+    for (k, p) in [v, 1 - v].into_iter().enumerate() {
+        let active = st.active == p;
+        let (mut ready, mut evasive) = (0i64, 0i64);
+        for &ci in &st.battlefield {
+            let c = st.c(ci);
+            if c.controller != p || !st.is_creature(c) {
+                continue;
+            }
+            let can_attack = if active { !c.tapped && !c.sick } else { !(c.tapped && c.skip_untap > 0) };
+            if !can_attack {
+                continue;
+            }
+            let pw = st.power(c).max(0) as i64;
+            ready += pw;
+            let kw = st.keywords(c);
+            let blockable = st.battlefield.iter().map(|&b| st.c(b)).any(|b| b.controller != p && !b.tapped && st.is_creature(b) && (kw & fly == 0 || st.keywords(b) & (fly | reach) != 0));
+            if !blockable {
+                evasive += pw;
             }
         }
+        let life = st.players[(1 - p) as usize].life as i64;
+        if ready > 0 && ready >= life {
+            out |= 1 << (2 * k);
+        }
+        if evasive > 0 && evasive >= life {
+            out |= 1 << (2 * k + 1);
+        }
     }
-    fn raw(&mut self, _args: Arguments) {}
+    let attackers: Vec<&Card> = st.attackers.iter().filter_map(|&a| st.perm(a)).map(|ci| st.c(ci)).collect();
+    if !attackers.is_empty() {
+        let unblocked: i64 = attackers.iter().filter(|c| !st.blocked.contains(&c.oid)).map(|c| st.power(c).max(0) as i64).sum();
+        let life = st.players[(1 - st.active) as usize].life as i64;
+        if unblocked > 0 && unblocked >= life {
+            out |= 1 << if st.active == v { 4 } else { 5 };
+        }
+    }
+    out
 }
 
 pub fn summary(st: &State, v: u8) -> Summary {
@@ -86,9 +113,7 @@ pub fn summary(st: &State, v: u8) -> Summary {
         })
         .collect();
     let sides = [&st.players[v as usize], &st.players[1 - v as usize]];
-    let mut fo = FlagOut { buf: String::with_capacity(48), flags: 0 };
-    board_features(st, v, &mut fo);
-    combat_features(st, v, &mut fo);
+    let fl = flags(st, v);
     let sources = st.mana_sources(v, &[]);
     let mut colors = 0u8;
     for &(ci, _) in &sources {
@@ -106,7 +131,7 @@ pub fn summary(st: &State, v: u8) -> Summary {
         life: [sides[0].life as i64, sides[1].life as i64],
         zones: [zones(sides[0]), zones(sides[1])],
         stack: st.stack.len() as i64,
-        flags: fo.flags,
+        flags: fl,
         mana: sources.len() as i64 + pool.iter().map(|e| e.1 as i64).sum::<i64>(),
         colors,
         turn: st.turn,
@@ -114,8 +139,11 @@ pub fn summary(st: &State, v: u8) -> Summary {
     }
 }
 
-/// encode.py `_hidden_touched`.
-fn hidden_touched(a: &State, b: &State) -> bool {
+/// encode.py `_hidden_touched`: a library shuffled, a card leaving,
+/// entering or moving in a library, or a library card `viewer` did not know
+/// looked at.
+fn hidden_touched(a: &State, b: &State, viewer: u8) -> bool {
+    let me = pbit(viewer);
     if a.shuffles != b.shuffles {
         return true;
     }
@@ -125,7 +153,7 @@ fn hidden_touched(a: &State, b: &State) -> bool {
         }
         for (&x, &y) in pa.library.iter().zip(pb.library.iter()) {
             let (x, y) = (a.c(x), b.c(y));
-            if x.oid != y.oid || x.known_to != y.known_to {
+            if x.oid != y.oid || (x.known_to & me) != (y.known_to & me) {
                 return true;
             }
         }
@@ -180,7 +208,7 @@ pub fn simulate(g: &mut Game, player: u8, i: usize, before: &Summary, out: &mut 
     g2.step(i)?;
     let mut steps = 1;
     let stop = loop {
-        if hidden_touched(g.state(), g2.state()) {
+        if hidden_touched(g.state(), g2.state(), player) {
             out(format_args!("pv:sim:stop:hidden_info"));
             return Ok(());
         }

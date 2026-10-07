@@ -651,7 +651,9 @@ def option_preview(game, player: int, i: int, features: int = FEATURES) -> list[
     sweeper ability kills per side, ward and lethal damage on a target, mana
     and colours left after a cast or activation (set 2 and up); combat
     results of a block, X previews, colours a land adds and colours left
-    after a mana payment (set 4)."""
+    after a mana payment (set 4); the option simulated on a copy of the game
+    (set 6, `sim_preview`; it copies, so the game takes snapshots from then
+    on)."""
     if check_features(features) < 2:
         return []
     if getattr(game, "NATIVE", False):
@@ -762,17 +764,19 @@ def _sim_summary(game, v: int) -> dict:
     }
 
 
-def _hidden_touched(a, b) -> bool:
-    """Did `b` (a simulation of `a`) touch hidden information: a library
-    shuffled, a card leaving or entering a library, a library card looked at
-    or revealed (any change of its `known_to`)? Libraries are the only hidden
-    zone the engine reads without asking the owner (a hand is read only by
-    its owner's decisions, which stop the simulation)."""
+def _hidden_touched(a, b, viewer: int) -> bool:
+    """Did `b` (a simulation of `a`) touch information hidden from `viewer`:
+    a library shuffled, a card leaving, entering or moving in a library, or
+    a library card `viewer` did not know looked at (`viewer` added to its
+    `known_to`)? Revealing a card `viewer` already knows to the other player
+    reveals nothing to `viewer`. Libraries are the only hidden zone the
+    engine reads without asking the owner (a hand is read only by its
+    owner's decisions, which stop the simulation)."""
     if a.shuffles != b.shuffles:
         return True
     for pa, pb in zip(a.players, b.players):
         la, lb = pa.library, pb.library
-        if len(la) != len(lb) or any(x.oid != y.oid or x.known_to != y.known_to for x, y in zip(la, lb)):
+        if len(la) != len(lb) or any(x.oid != y.oid or (viewer in x.known_to) != (viewer in y.known_to) for x, y in zip(la, lb)):
             return True
     return False
 
@@ -812,15 +816,17 @@ def sim_preview(game, player: int, i: int) -> list[str]:
 def _simulate(game, player: int, i: int, before: dict) -> list[str]:
     """Step a copy with option `i`, take the opponent's forced decisions
     (one option, `SIM_FORCED_KINDS`), and stop at the decider's next
-    decision, any other opponent decision, the end of the game, hidden
-    information (`_hidden_touched`: then only the stop is featurized) or
-    `SIM_MAX_STEPS`. Featurize the change between the two `_sim_summary`s."""
+    decision, any other opponent decision (the next priority of either
+    player always stops the engine, `Game.sim_viewer`), the end of the game,
+    hidden information (`_hidden_touched`: then only the stop is featurized)
+    or `SIM_MAX_STEPS`. Featurize the change between the two
+    `_sim_summary`s."""
     g = game.copy()
     g.sim_viewer = player
     g.step(i)
     steps = 1
     while True:
-        if _hidden_touched(game, g):
+        if _hidden_touched(game, g, player):
             return ["pv:sim:stop:hidden_info"]
         if g.over:
             stop = "game_over"

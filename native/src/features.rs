@@ -196,7 +196,7 @@ fn ready(c: &Card, active: bool) -> bool {
 /// encode.py `_board_features`: ready power, the part of it the defender's
 /// untapped creatures cannot block, potential blockers, lethal flags and
 /// untapped mana sources, per side.
-pub(crate) fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
+fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
     let d = db();
     let (fly, reach) = (d.kw("flying"), d.kw("reach"));
     // (controller, untapped, ready-if-its-controller-is-active, ready otherwise, power, keywords)
@@ -248,7 +248,7 @@ fn unblocked_power(st: &State, skip: Option<u32>) -> i64 {
 }
 
 /// encode.py `_combat_features` (set 4).
-pub(crate) fn combat_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
+fn combat_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
     if attackers(st).next().is_none() {
         return;
     }

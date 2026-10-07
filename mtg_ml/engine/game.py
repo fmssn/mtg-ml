@@ -238,9 +238,10 @@ class Game:
         self.paying: tuple | None = None
         # Simulated option previews (encode, feature set 6): on a throwaway
         # copy, the player whose option is simulated. Every decision of the
-        # other player is then asked even with one option (and its priority is
-        # never auto-passed): whether it has a choice can depend on its hidden
-        # hand. Never set on a game that is played.
+        # other player is then asked even with one option (whether it has a
+        # choice can depend on its hidden hand), and the next priority of
+        # either player stops the engine before its options are listed. Never
+        # set on a game that is played.
         self.sim_viewer: int | None = None
         self.shuffles = 0  # library shuffles so far (the simulation stops at hidden information)
         self.winner: int | None = None
@@ -577,8 +578,14 @@ class Game:
         passes = 0
         while True:
             yield from self._sba_and_triggers()
+            if self.sim_viewer is not None:
+                # A simulation stops at the next priority of either player, so
+                # its options are never listed (the other player's would read
+                # its hidden hand; the decider's are not needed).
+                yield Decision(p, O.PRIORITY, f"Priority ({self.step_name})", [])
+                raise RulesError("a simulation copy cannot continue past a priority")
             options = self._priority_options(p)
-            if self.auto_pass and self.sim_viewer in (None, p) and self._uneventful_priority(p, options):
+            if self.auto_pass and self._uneventful_priority(p, options):
                 act = options[0].value  # pass
             else:
                 act = yield from self.ask(p, O.PRIORITY, f"Priority ({self.step_name})", options)

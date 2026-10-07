@@ -516,7 +516,7 @@ pub struct State {
     pub mulligans_taken: [i32; 2],
     /// `Game.sim_viewer`: on a simulation copy (feature set 6), the player
     /// whose option is simulated; the other player's decisions are asked
-    /// even with one option and its priority is never auto-passed.
+    /// even with one option, and the next priority stops the engine.
     pub sim_viewer: Option<u8>,
     /// `Game.shuffles`: library shuffles so far.
     pub shuffles: u32,
