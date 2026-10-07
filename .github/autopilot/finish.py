@@ -1,8 +1,10 @@
 """Guard, commit, push and decide after a model run.
 
-Usage: finish.py <fix|escalate> <pr> <head-branch> <round>
-Reads $RUNNER_TEMP/claude.json (claude --output-format json) and $RUNNER_TEMP/conflicts.txt.
-Writes `outcome` (automerge | escalate | human | retry | error) and `reason` to $GITHUB_OUTPUT.
+Usage: finish.py <fix|escalate> <pr> <head-branch> <round> [<base-branch>]
+Reads $RUNNER_TEMP/claude.json (claude --output-format json), $RUNNER_TEMP/conflicts.txt
+and $RUNNER_TEMP/start_head (written by prepare.sh).
+Writes `outcome` (automerge | escalate | human | retry | superseded | error) and `reason`
+to $GITHUB_OUTPUT.
 """
 
 import json
@@ -47,6 +49,13 @@ def parse_result(tmp):
         return None
 
 
+def ran_out_of_turns(tmp):
+    try:
+        return json.loads((tmp / "claude.json").read_text()).get("subtype") == "error_max_turns"
+    except (OSError, ValueError):
+        return False
+
+
 def comment(pr, title, result, extra=""):
     lines = [f"**Autopilot: {title}**", "", result.get("summary", "")]
     for f in result.get("findings", []):
@@ -58,17 +67,58 @@ def comment(pr, title, result, extra=""):
     gh("pr", "comment", pr, "--body", "\n".join(lines))
 
 
+def push(head, base):
+    """Push HEAD to the PR branch. Returns None on success, else the outcome to report.
+
+    If the branch moved during the run only because the base branch was merged in
+    (update-branch after something landed on the default branch), merge that in and
+    push again instead of throwing the whole review away.
+    """
+    try:
+        sh("git", "push", "origin", f"HEAD:refs/heads/{head}")
+        return None
+    except subprocess.CalledProcessError:
+        pass
+    sh("git", "fetch", "-q", "origin", head, base)
+    if not subprocess.run(("git", "merge-base", "--is-ancestor", f"origin/{head}", "HEAD")).returncode:
+        raise RuntimeError("push failed although the branch did not move")
+    start = (Path(os.environ["RUNNER_TEMP"]) / "start_head").read_text().strip()
+    # Non-merge commits on the remote branch that are neither ours nor from the base.
+    foreign = sh("git", "rev-list", "--no-merges", f"origin/{head}", f"^{start}", f"^origin/{base}").strip()
+    if foreign:
+        return "superseded"   # the developer pushed; that push triggered its own review
+    if subprocess.run(("git", "merge", "--no-edit", f"origin/{head}"), capture_output=True).returncode:
+        sh("git", "merge", "--abort", check=False)
+        return "retry"
+    try:
+        sh("git", "push", "origin", f"HEAD:refs/heads/{head}")
+        return None
+    except subprocess.CalledProcessError:
+        return "retry"
+
+
 def main():
     stage, pr, head, rnd = sys.argv[1:5]
+    base = sys.argv[5] if len(sys.argv) > 5 else os.environ["BASE_REF"]
     tmp = Path(os.environ["RUNNER_TEMP"])
     conflicts = set((tmp / "conflicts.txt").read_text().split())
     if stage == "fix":
         gh("pr", "edit", pr, "--add-label", f"autopilot:round-{rnd}")
 
     result = parse_result(tmp)
+    if result is None and stage == "fix" and ran_out_of_turns(tmp):
+        result = {"verdict": "escalate", "summary": "The cheap model hit its turn cap without a verdict.",
+                  "findings": [], "escalation_reason": "cheap model hit its turn cap"}
     if result is None:
         output(outcome="error", reason="model run produced no parsable result")
         print("no parsable result; nothing pushed", file=sys.stderr)
+        if stage == "escalate":
+            # e.g. an expired CLAUDE_CODE_OAUTH_TOKEN (401): don't leave the PR in limbo.
+            gh("pr", "merge", pr, "--disable-auto")
+            gh("pr", "edit", pr, "--add-label", "needs-human")
+            gh("pr", "edit", pr, "--remove-label", "needs-opus")
+            run = f"{os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
+            gh("pr", "comment", pr, "--body", f"**Autopilot:** the Opus run failed without a result (auth or API error?), nothing pushed. Over to you. Log: {run}")
         return 1
 
     # Files the model touched: unstaged edits and new files. The merge's own
@@ -113,19 +163,16 @@ def main():
         msg = f"autopilot ({stage}): {result.get('summary', 'fixes')}"[:200]
         sh("git", "commit", "--no-verify", "-m", msg)
     if sh("git", "rev-list", f"origin/{head}..HEAD").strip():
-        try:
-            sh("git", "push", "origin", f"HEAD:refs/heads/{head}")
-        except subprocess.CalledProcessError:
-            sh("git", "fetch", "-q", "origin", head)
-            if not subprocess.run(("git", "merge-base", "--is-ancestor", f"origin/{head}", "HEAD")).returncode:
-                raise
-            # The developer pushed while we worked. Drop this round and run again on the new head.
+        moved = push(head, base)
+        if moved:
+            # Drop this round. A developer push starts its own review run; anything
+            # else (a base update we couldn't merge cleanly) is re-dispatched.
             if stage == "fix":
                 gh("pr", "edit", pr, "--remove-label", f"autopilot:round-{rnd}")
             else:
                 gh("pr", "edit", pr, "--remove-label", "autopilot:opus-used")
-            output(outcome="retry", reason=f"{head} moved during the run")
-            print(f"{head} moved during the run; nothing pushed, retrying", file=sys.stderr)
+            output(outcome=moved, reason=f"{head} moved during the run")
+            print(f"{head} moved during the run; nothing pushed ({moved})", file=sys.stderr)
             return 0
 
     if result.get("findings") or result.get("verdict") == "fixed":

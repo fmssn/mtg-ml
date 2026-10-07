@@ -8,6 +8,7 @@ ctx=$RUNNER_TEMP/context.md
 conflicts=$RUNNER_TEMP/conflicts.txt
 
 git fetch -q origin "$base"
+git rev-parse HEAD > "$RUNNER_TEMP/start_head"   # finish.py: did the branch move during the run?
 mb=$(git merge-base HEAD "origin/$base")
 {
   echo "# PR #$pr (autopilot mode: $mode)"
@@ -15,8 +16,13 @@ mb=$(git merge-base HEAD "origin/$base")
   gh pr view "$pr" --json title,body --jq '"## " + .title + "\n\n" + (.body // "")'
   echo
   echo "## Diff against $base"
+  echo '```'
+  git diff --stat=120 "$mb" HEAD
+  echo '```'
   echo '```diff'
-  git diff "$mb" HEAD -- . ':(exclude)data/*.json' | head -c 200000
+  # Generated data stays out of the prompt: it is re-sent on every model turn.
+  git diff "$mb" HEAD -- . ':(exclude)data/*.json' ':(exclude)*.lock' ':(exclude)tests/data/**' \
+    ':(exclude)docs/experiments/ledger.jsonl' | head -c 120000
   echo '```'
 } > "$ctx"
 
