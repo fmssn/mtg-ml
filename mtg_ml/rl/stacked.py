@@ -355,6 +355,8 @@ def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | 
             hn = torch.cat([hn, hvn], 1)
     else:
         values = grouped_linear(c, D["value_head.weight"], D["value_head.bias"], pol)[:, 0]
+    if cfg.get("value_bound", "none") == "tanh":
+        values = torch.tanh(values)
     if hn is not None:
         if write_hidden:
             hidden_table.index_copy_(0, x.gslot, hn)

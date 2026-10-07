@@ -7,7 +7,9 @@ A job plays games (`GameSpec`). Each game has a policy per seat:
     <path>      a frozen checkpoint from the opponent pool.
 Each (game, seat) carries its own recurrent state and the events it saw
 since its last decision. Every recorded player trajectory gets terminal reward +1 / -1 / 0 plus
-optional potential-based life shaping, then GAE.
+optional potential-based life shaping, then GAE (`_finish`): per decision
+(gamma, lam), or per game turn (`Job.gamma_turn`, `Job.lam_turn`), with the
+recorded values clamped to the reachable return range first.
 
 A worker advances all its live games by one policy decision per step, with
 one forward pass per policy present. On a Xeon core a pass of the h128
@@ -146,6 +148,14 @@ class Job:
     gamma: float = 0.995
     lam: float = 0.95
     shaping: float = 0.0
+    # GAE bootstraps from values clamped to +-(value_clamp + |shaping|), the
+    # range of the returns (0 = off). An unbounded value head drifts past +-1.
+    value_clamp: float = 1.0
+    # > 0: discount per game turn instead of per decision: between consecutive
+    # decisions gamma_turn ** (turns elapsed) (lam_turn likewise), so a line's
+    # cost no longer depends on how many clicks (passes, mana payments) it takes.
+    gamma_turn: float = 0.0
+    lam_turn: float = 0.0
     max_turns: int = 100
     engine: str | None = None  # None: $MTG_ENGINE, else python
     inference: str = "local"  # "local": CPU torch in the worker; "server": the central inference server
@@ -162,6 +172,7 @@ class Trajectory:
     logps: list = field(default_factory=list)
     values: list = field(default_factory=list)
     potentials: list = field(default_factory=list)
+    turns: list = field(default_factory=list)  # the game's turn counter at each decision (each player's turn counts)
 
 
 @dataclass
@@ -186,29 +197,50 @@ def _potential(game: Game, p: int) -> float:
     return (game.players[p].life - game.players[1 - p].life) / 20.0
 
 
+def _discounts(traj: Trajectory, job: Job) -> tuple[list[float], list[float]]:
+    """(gamma, lam) between decision t and t + 1, per t: job.gamma / job.lam
+    per decision, or gamma_turn / lam_turn to the power of the game turns
+    between the two decisions when those are set (decisions within one
+    turn: 1). The last entry (to the terminal state) is 1 per turn: the
+    terminal value and potential are 0, so only the bootstrapping matters."""
+    n = len(traj.actions)
+    turns = traj.turns
+    if (job.gamma_turn > 0 or job.lam_turn > 0) and len(turns) != n:
+        raise ValueError("per-turn discounting needs the turn of every recorded decision")
+    gaps = [turns[t + 1] - turns[t] for t in range(n - 1)] + [0] if turns else None
+    gam = [job.gamma_turn**d for d in gaps] if job.gamma_turn > 0 else [job.gamma] * n
+    lam = [job.lam_turn**d for d in gaps] if job.lam_turn > 0 else [job.lam] * n
+    return gam, lam
+
+
 def _finish(traj: Trajectory, outcome: float, job: Job, out: Result) -> None:
     n = len(traj.actions)
     if n == 0:
         return
+    gam, lam = _discounts(traj, job)
     rewards = [0.0] * n
     rewards[-1] = outcome
     if job.shaping:
         phis = traj.potentials + [0.0]  # terminal potential 0, so shaping telescopes to -phi(s0)
         for t in range(n):
-            rewards[t] += job.shaping * (job.gamma * phis[t + 1] - phis[t])
+            rewards[t] += job.shaping * (gam[t] * phis[t + 1] - phis[t])
+    values = traj.values  # raw, as the network said them (traj.values stays untouched)
+    if job.value_clamp > 0:
+        hi = job.value_clamp + abs(job.shaping)
+        values = [min(hi, max(-hi, v)) for v in values]
     adv = [0.0] * n
     last = 0.0
     for t in reversed(range(n)):
-        next_v = traj.values[t + 1] if t + 1 < n else 0.0
-        delta = rewards[t] + job.gamma * next_v - traj.values[t]
-        last = delta + job.gamma * job.lam * last
+        next_v = values[t + 1] if t + 1 < n else 0.0
+        delta = rewards[t] + gam[t] * next_v - values[t]
+        last = delta + gam[t] * lam[t] * last
         adv[t] = last
     out.lengths.append(n)
     out.samples += traj.samples
     out.actions += traj.actions
     out.logps += traj.logps
     out.advantages += adv
-    out.returns += [a + v for a, v in zip(adv, traj.values)]
+    out.returns += [a + v for a, v in zip(adv, values)]
 
 
 class _Seat:
@@ -464,7 +496,7 @@ def _play(job: Job) -> Result:
                 x = (array("i", state), array("i", o_len), array("i", o_flat), array("i", encode_event_hashes(seat.events)))
                 seat.events = []
                 pot = _potential(g, p) if job.record and pol == LEARNER else 0.0
-                items.append((pol, 2 * lv.slot + p, seat.fresh, x, lv, p, pot))
+                items.append((pol, 2 * lv.slot + p, seat.fresh, x, lv, p, pot, g.turn))
                 seat.fresh = False
             todo = [start(i) for i in claim(min(room - len(live), len(free)))]
             if not todo:
@@ -481,7 +513,7 @@ def _play(job: Job) -> Result:
         tw = time.perf_counter()
         acts, logps, values = ev.collect(handle)
         waited += time.perf_counter() - tw
-        for (pol, _, _, x, lv, p, pot), a, lp, v in zip(items, acts, logps, values):
+        for (pol, _, _, x, lv, p, pot, turn), a, lp, v in zip(items, acts, logps, values):
             if job.record and pol == LEARNER:
                 tr = lv.trajs[p]
                 tr.samples.append(x)
@@ -489,6 +521,7 @@ def _play(job: Job) -> Result:
                 tr.logps.append(lp)
                 tr.values.append(v)
                 tr.potentials.append(pot)
+                tr.turns.append(turn)
             _step(lv.game, lv.seats, a)
         inflight[k] = None
 
