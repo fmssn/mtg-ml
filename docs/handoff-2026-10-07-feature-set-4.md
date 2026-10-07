@@ -14,7 +14,7 @@ Read this first. Task: **one PR that adds feature set 4** and fixes the observat
 
 ## Base branch
 
-Feature set 3 (`opp:deck:`) lives in PR fmssn/mtg-ml#28 (`claude/multi-matchup`), which is not merged yet. Build on it: branch from `claude/multi-matchup`, or rebase once it merges. `encode.FEATURES` must become 4, with `FEATURE_VERSIONS = (1, 2, 3, 4)`.
+Feature set 3 (`opp:deck:`) came in with PR fmssn/mtg-ml#28, now merged. Branch from the default branch (`git remote set-head origin -a`, then `origin/HEAD`). `encode.FEATURES` must become 4, with `FEATURE_VERSIONS = (1, 2, 3, 4)`. `mtg_ml.review` (used for the fixtures) is in PR fmssn/mtg-ml#31. If that isn't merged yet, rebuild fixture games by stepping the recorded `chosen` indices on a fresh `Game` with the constructor args from `meta.review.game`; no agents are needed for that.
 
 ## Ground rules (from CLAUDE.md and docs/features.md)
 
