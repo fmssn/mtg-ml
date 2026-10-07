@@ -133,6 +133,9 @@ jobs:
     timeout-minutes: 45
     concurrency:
       group: autopilot-pr-${{ needs.plan.outputs.pr }}
+      # A developer push (mode review) makes any running round stale: cancel it
+      # instead of finishing a 15-minute review of code that no longer exists.
+      cancel-in-progress: ${{ needs.plan.outputs.mode == 'review' }}
     permissions:
       actions: write   # failed CI logs; re-dispatch on retry
     env:
@@ -180,7 +183,8 @@ jobs:
         working-directory: pr
         run: |
           uv pip install -e '.[dev]' numpy ruff && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-          npm install -g @anthropic-ai/claude-code
+          # Pinned: CLI flags and permission behaviour change between releases.
+          npm install -g @anthropic-ai/claude-code@2.1.293
 
       - name: "Fix: prepare"
         if: env.MODE != 'escalate'
@@ -196,15 +200,24 @@ jobs:
           # Scoped to this step: a DeepSeek key, routed to DeepSeek. No Anthropic key exists in this workflow.
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
           ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        # "sonnet" is mapped to deepseek-flash by DeepSeek's endpoint.
-        run: bash "$AP/run-claude.sh" "$AP/fix.md" sonnet 3 25m
+          # Repo variable naming the DeepSeek model. Unset: Claude Code asks for its
+          # Sonnet/Haiku ids and DeepSeek maps them to its default model.
+          DEEPSEEK_MODEL: ${{ vars.AUTOPILOT_DEEPSEEK_MODEL }}
+        # The turn cap is the real limit: --max-budget-usd is counted at Anthropic
+        # prices for the requested model and means nothing for a DeepSeek model id.
+        run: |
+          if [[ -n $DEEPSEEK_MODEL ]]; then
+            export ANTHROPIC_DEFAULT_SONNET_MODEL=$DEEPSEEK_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL=$DEEPSEEK_MODEL \
+              ANTHROPIC_SMALL_FAST_MODEL=$DEEPSEEK_MODEL CLAUDE_CODE_SUBAGENT_MODEL=$DEEPSEEK_MODEL
+          fi
+          bash "$AP/run-claude.sh" "$AP/fix.md" sonnet 3 15m 30
       - name: "Fix: guard, push, decide"
         id: fix
         if: env.MODE != 'escalate'
         working-directory: pr
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-        run: python "$AP/finish.py" fix "$PR" "$HEAD_REF" "$ROUND"
+        run: python "$AP/finish.py" fix "$PR" "$HEAD_REF" "$ROUND" "$BASE_REF"
       - name: "Fix: retry on the new head"
         if: steps.fix.outputs.outcome == 'retry'
         env:
@@ -231,14 +244,14 @@ jobs:
         working-directory: pr
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: bash "$AP/run-claude.sh" "$AP/escalate.md" opus 10 30m
+        run: bash "$AP/run-claude.sh" "$AP/escalate.md" opus 10 25m 40
       - name: "Escalate: guard, push, decide"
         id: escalate
         if: steps.esc.outcome == 'success'
         working-directory: pr
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-        run: python "$AP/finish.py" escalate "$PR" "$HEAD_REF" "$ROUND"
+        run: python "$AP/finish.py" escalate "$PR" "$HEAD_REF" "$ROUND" "$BASE_REF"
       - name: "Escalate: retry on the new head"
         if: steps.escalate.outputs.outcome == 'retry'
         env:
