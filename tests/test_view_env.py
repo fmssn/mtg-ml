@@ -259,6 +259,115 @@ def test_feature_set_2_adds_to_set_1():
     assert entity_features(g, 0, features=1)[1] == entity_features(g, 0, features=2)[1]
 
 
+def _fixtures() -> dict:
+    """{(seed, decision): game at that decision} for tests/data/feature_fixtures.json:
+    decisions from the r4-control game review (docs/features.md, set 4),
+    rebuilt by stepping the recorded actions."""
+    import json
+    import os
+
+    from mtg_ml.match import game_args
+
+    with open(os.path.join(os.path.dirname(__file__), "data", "feature_fixtures.json")) as f:
+        out = {}
+        for x in json.load(f):
+            g = new_game(**game_args(x["match_game"], x["matchup"]), seed=x["seed"], starting_player=x["starting_player"])
+            for a in x["actions"]:
+                g.step(a)
+            assert [o.label for o in g.legal_options()] == x["options"], (x["seed"], x["decision"])
+            out[x["seed"], x["decision"]] = g
+    return out
+
+
+def _option_signature(g, label: str, features: int):
+    """What the network sees of one option: its hashed tokens and the hashed
+    token set of every entity it points at (`featurize`)."""
+    from mtg_ml.rl.features import OPTION_DIM, STATE_DIM, featurize
+
+    state, opts = featurize(g, g.decision.player, features=features)
+    ents, cur = [], None
+    for t in state:
+        if t == STATE_DIM:
+            cur = set()
+            ents.append(cur)
+        elif cur is not None:
+            cur.add(t)
+    i = [o.label for o in g.legal_options()].index(label)
+    return frozenset(t for t in opts[i] if t < OPTION_DIM), sorted(sorted(ents[t - OPTION_DIM]) for t in opts[i] if t >= OPTION_DIM)
+
+
+# Block decisions where the policy split 0.50 / 0.50 between two same-name
+# attackers (one already blocked), and s1010 d359, a second 3-power blocker
+# put on a 6/7 that it cannot kill.
+BLOCK_FIXTURES = {
+    (1000, 153): ("Nyxborn Hydra#218 blocks Tolarian Terror#166", "Nyxborn Hydra#218 blocks Tolarian Terror#180"),
+    (1035, 102): ("Eldrazi Spawn#268 blocks Tolarian Terror#247", "Eldrazi Spawn#268 blocks Tolarian Terror#249"),
+    (1047, 229): ("Eldrazi Spawn#253 blocks Cryptic Serpent#227", "Eldrazi Spawn#253 blocks Cryptic Serpent#234"),
+    (1047, 279): ("Eldrazi Spawn#272 blocks Cryptic Serpent#227", "Eldrazi Spawn#272 blocks Cryptic Serpent#234"),
+    (1010, 359): ("Insectile Aberration#259 blocks Writhing Chrysalis#218", "Insectile Aberration#259 blocks Refurbished Familiar#220"),
+}
+
+
+def _pv(g, label: str, features: int = 4) -> set[str]:
+    from mtg_ml.encode import option_preview
+
+    labels = [o.label for o in g.legal_options()]
+    return set(option_preview(g, g.decision.player, labels.index(label), features))
+
+
+def test_feature_set_4_tells_block_options_apart():
+    games = _fixtures()
+    for (seed, d), (blocked, other) in BLOCK_FIXTURES.items():
+        g = games[seed, d]
+        if seed != 1010:  # same-name attackers: identical inputs in set 3 (the gap set 4 closes)
+            assert _option_signature(g, blocked, 3) == _option_signature(g, other, 3), (seed, d)
+        assert _option_signature(g, blocked, 4) != _option_signature(g, other, 4), (seed, d)
+        assert "pv:attacker_already_blocked" in _pv(g, blocked) and "pv:attacker_already_blocked" not in _pv(g, other)
+    # s1010 d359: 3 + 3 power does not kill the 6/7 Chrysalis; blocking the 2/2 Familiar kills it
+    g = games[1010, 359]
+    assert "pv:attacker_dies" not in _pv(g, BLOCK_FIXTURES[1010, 359][0]) and "pv:attacker_dies" in _pv(g, BLOCK_FIXTURES[1010, 359][1])
+    # s1000 d153 at 5 life: stacking the Hydra on the blocked Terror leaves 8 unblocked, lethal
+    g = games[1000, 153]
+    assert "pv:lethal_left" in _pv(g, BLOCK_FIXTURES[1000, 153][0]) and "pv:lethal_left" not in _pv(g, BLOCK_FIXTURES[1000, 153][1])
+
+
+def test_feature_set_4_incoming_damage():
+    from mtg_ml.encode import entity_features
+
+    games = _fixtures()
+    for key in ((1000, 153), (1049, 306)):
+        g = games[key]
+        f3, f4 = state_features(g, g.decision.player, 3), state_features(g, g.decision.player, 4)
+        assert "opponent:incoming_lethal" in f4 and set(f3) < set(f4), key
+        e3, e4 = entity_features(g, g.decision.player, 3), entity_features(g, g.decision.player, 4)
+        assert e3[1] == e4[1] and all(set(a) <= set(b) for a, b in zip(e3[0], e4[0]))
+    # s1011 d216 (cited as lethal in the review): 12 + 4 unblocked against 18 life
+    # is not lethal, but it leaves 2 life, and set 4 says so
+    f4 = state_features(games[1011, 216], 1, 4)
+    assert {"opponent:attacking_power>=15", "opponent:unblocked_power>=15", "self:life_after_unblocked>=2"} <= set(f4)
+    assert "opponent:incoming_lethal" not in f4 and "self:life_after_unblocked>=3" not in f4
+
+
+def test_feature_set_4_x_and_colour_previews():
+    games = _fixtures()
+    # Nyxborn Hydra, X = 0..7 with 8 sources: an ordered X, the largest X, the mana left and the Hydra's size
+    g = games[1003, 250]
+    assert "pv:mana_left_after:7" in _pv(g, "X=0") and not any(t.startswith("pv:x") for t in _pv(g, "X=0"))
+    assert {"pv:x>=7", "pv:x_is_max", "pv:mana_left_after:0", "pv:enters_power>=7"} <= _pv(g, "X=7")
+    assert _pv(g, "X=7", 3) == set()
+    # every X option points at the Hydra on the stack (set 4 only)
+    assert _option_signature(g, "X=3", 3)[1] == [] and len(_option_signature(g, "X=3", 4)[1]) == 1
+    # paying a generic with the only Swamp strands black; a Forest keeps B and R
+    g = games[1008, 333]
+    assert "pv:colors_left:B" not in _pv(g, "Tap Swamp#191 for B")
+    assert {"pv:colors_left:B", "pv:colors_left:R"} <= _pv(g, "Tap Forest#208 for G")
+    # basic-land searches: the colour each basic adds, and the one the hand misses
+    g = games[1033, 60]
+    assert "self:hand_missing:G" in state_features(g, 0, 4)
+    assert _pv(g, "Find Forest") == {"pv:adds_color:G", "pv:adds_missing_color"} and _pv(g, "Find Swamp") == {"pv:adds_color:B"}
+    assert _pv(games[1048, 71], "Find Mountain") == {"pv:adds_color:R", "pv:adds_missing_color"}
+
+
 # (matchup, game number, seed) of the games behind tests/data/features_v3_digests.json.
 V3_DIGEST_GAMES = [(m, n, s) for s, (m, n) in enumerate((m, n) for m in ("jund_blue", "jund_madness", "blue_madness") for n in (1, 2) for _ in range(3))]
 

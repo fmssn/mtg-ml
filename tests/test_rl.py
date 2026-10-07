@@ -198,9 +198,9 @@ def test_feature_set_version_travels_with_the_model(tmp_path):
     assert checkpoint_config(new_path) == new.config and checkpoint_config(old_path) == old.config
     assert (policy_features(old_path), policy_features(new_path)) == (1, 2)
     assert load_net(new_path).features == 2 and load_net(old_path).features == 1
-    assert FEATURES == 3 and TrainConfig().features == 0  # 0: new runs train on the latest set (--init / resume: the source's)
+    assert FEATURES == 4 and TrainConfig().features == 0  # 0: new runs train on the latest set (--init / resume: the source's)
     with pytest.raises(ValueError):
-        PolicyNet(hidden=16, features=4)
+        PolicyNet(hidden=16, features=5)
 
 
 def test_each_seat_is_featurized_with_its_own_policys_version(tmp_path, monkeypatch):

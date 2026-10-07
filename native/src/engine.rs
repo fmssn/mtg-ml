@@ -435,7 +435,12 @@ impl Eng {
                     }
                     options.into_iter().nth(i).unwrap().value
                 }
-                None => self.ask(p, Kind::PayMana, || format!("Pay {rem_s} for {what}"), options)?,
+                None => {
+                    st.paying = Some((rem.clone(), sac_filter, exclude.to_vec()));
+                    let v = self.ask(p, Kind::PayMana, || format!("Pay {rem_s} for {what}"), options)?;
+                    self.s().paying = None;
+                    v
+                }
             };
             match choice {
                 Val::Pool(c) => {
