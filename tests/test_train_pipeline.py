@@ -371,3 +371,28 @@ def test_request_ints_for_sizes_the_server_slot_from_the_games_per_request():
     assert request_ints_for(2048, 13) == 1 << 22  # the overnight run: 79 decisions per request, 1.3M ints seen
     assert request_ints_for(256, 63) == 1 << 18  # many workers: the floor
     assert request_ints_for(2048, 1, groups=1) >= 2048 * (1 << 15)
+
+
+def test_new_deck_against_a_fixed_opponent_from_its_weights(tmp_path):
+    """--matchup/--learner-seat/--opponent/--init-from: the learner plays only
+    Red Madness (seat 1) against a frozen checkpoint, starting from its weights."""
+    src = tmp_path / "src"
+    Trainer(_cfg(src, "--iterations", "1", *NO_EVAL, *IN_PROCESS)).train()
+    jund = str(src / "pool" / "iter_00000.pt")
+    run = tmp_path / "red"
+    cfg = _cfg(run, "--iterations", "2", "--matchup", "jund_madness", "--learner-seat", "1", "--opponent", jund, "--init-from", jund,
+               "--self-play-frac", "0", "--hidden", "32", "--snapshot-every", "1", *IN_PROCESS, *SMALL_EVAL, "--eval-every", "2")  # fmt: skip
+    t = Trainer(cfg)
+    init = torch.load(jund, weights_only=False)
+    assert t.net.config == init["config"]  # the checkpoint's network, not --hidden 32
+    assert all(torch.equal(a, b) for a, b in zip(t.net.state_dict().values(), init["model"].values()))
+    specs = t._train_specs(0)
+    assert all(sp.seats == (jund, LEARNER) and sp.matchup == "jund_madness" for sp in specs)
+    t.train()
+    rows = _rows(run)
+    assert [r["iteration"] for r in rows] == [1, 2]
+    assert "eval/opponent/red" in rows[1] and "eval/random/red" in rows[1] and "eval/random/jund" not in rows[1]
+    assert rows[1]["bench/red_vs_bot_n"] == 4
+    assert sorted(p.name for p in (run / "pool").iterdir()) == ["iter_00000.pt"]  # no snapshots against a fixed opponent
+    with pytest.raises(ValueError):
+        Trainer(_cfg(tmp_path / "bad", "--learner-seat", "1"))  # self-play needs both seats
