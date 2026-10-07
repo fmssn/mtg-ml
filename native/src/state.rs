@@ -518,6 +518,8 @@ pub struct State {
     /// whose option is simulated; the other player's decisions are asked
     /// even with one option, and the next priority stops the engine.
     pub sim_viewer: Option<u8>,
+    /// `Game.sim_assume_pass`: ... and the other player passes at every priority.
+    pub sim_assume_pass: bool,
     /// `Game.shuffles`: library shuffles so far.
     pub shuffles: u32,
 }
@@ -590,6 +592,7 @@ impl State {
             mulligan_phase: false,
             mulligans_taken: [0, 0],
             sim_viewer: None,
+            sim_assume_pass: false,
             shuffles: 0,
             snapshots: false,
             snap: None,

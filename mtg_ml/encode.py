@@ -800,91 +800,111 @@ def sim_previews(game, player: int) -> list[list[str]]:
     """`sim_preview` of every option of the current decision."""
     n = len(game.legal_options())
     if n > SIM_MAX_OPTIONS or not _sim_ready(game):
-        return [["pv:sim:skipped"] for _ in range(n)]
+        return [["pv:sim:skipped", "pv:simp:skipped"] for _ in range(n)]
     before = _sim_summary(game, player)
     return [_simulate(game, player, i, before) for i in range(n)]
 
 
 def sim_preview(game, player: int, i: int) -> list[str]:
     """Feature set 6: what taking option `i` changes, simulated on a copy of
-    the game (docs/features.md, "Simulated option previews")."""
+    the game (docs/features.md, "Simulated option previews"): `pv:sim:` if
+    the opponent may respond, `pv:simp:` if it passes."""
     if len(game.legal_options()) > SIM_MAX_OPTIONS or not _sim_ready(game):
-        return ["pv:sim:skipped"]
+        return ["pv:sim:skipped", "pv:simp:skipped"]
     return _simulate(game, player, i, _sim_summary(game, player))
 
 
 def _simulate(game, player: int, i: int, before: dict) -> list[str]:
+    """Both simulations of option `i`: `pv:sim:` stops at the opponent's
+    next priority, `pv:simp:` assumes the opponent passes there. The second
+    is run only when the first stopped at the opponent's priority; otherwise
+    passing never came up and it would be the same simulation, so the first
+    one's result is repeated under `pv:simp:` (each prefix always means the
+    same thing, and nothing is simulated twice)."""
+    stop, g = _run(game, player, i, False)
+    f = _delta("pv:sim", stop, g, before, player)
+    if stop == "opponent_decision" and g.decision.kind == "priority":
+        stop, g = _run(game, player, i, True)
+    return f + _delta("pv:simp", stop, g, before, player)
+
+
+def _run(game, player: int, i: int, assume_pass: bool):
     """Step a copy with option `i`, take the opponent's forced decisions
-    (one option, `SIM_FORCED_KINDS`), and stop at the decider's next
-    decision, any other opponent decision (the next priority of either
-    player always stops the engine, `Game.sim_viewer`), the end of the game,
-    hidden information (`_hidden_touched`: then only the stop is featurized)
-    or `SIM_MAX_STEPS`. Featurize the change between the two
-    `_sim_summary`s."""
+    (one option, `SIM_FORCED_KINDS`) and, with `assume_pass`, pass for it at
+    every priority (without listing its options); stop at the decider's next
+    decision, any other opponent decision (without `assume_pass` the
+    opponent's priority always stops the engine, `Game.sim_viewer`), the end
+    of the game, hidden information (`_hidden_touched`) or `SIM_MAX_STEPS`.
+    Returns (stop reason, the copy)."""
     g = game.copy()
     g.sim_viewer = player
+    g.sim_assume_pass = assume_pass
     g.step(i)
     steps = 1
     while True:
         if _hidden_touched(game, g, player):
-            return ["pv:sim:stop:hidden_info"]
+            return "hidden_info", g
         if g.over:
-            stop = "game_over"
-            break
+            return "game_over", g
         d = g.decision
         if d.player == player:
-            stop = "own_decision"
-            break
+            return "own_decision", g
         if d.kind not in SIM_FORCED_KINDS or len(d.options) != 1:
-            stop = "opponent_decision"
-            break
+            return "opponent_decision", g
         if steps >= SIM_MAX_STEPS:
-            stop = "step_cap"
-            break
+            return "step_cap", g
         g.step(0)
         steps += 1
-    f = [f"pv:sim:stop:{stop}"]
+
+
+def _delta(pre: str, stop: str, g, before: dict, player: int) -> list[str]:
+    """The tokens of one simulation under prefix `pre`: the stop, and unless
+    hidden information was touched, the change between the two
+    `_sim_summary`s."""
+    f = [f"{pre}:stop:{stop}"]
+    if stop == "hidden_info":
+        return f
     if g.over:
-        f.append("pv:sim:draw_game" if g.winner is None else "pv:sim:won" if g.winner == player else "pv:sim:lost")
+        f.append(f"{pre}:draw_game" if g.winner is None else f"{pre}:won" if g.winner == player else f"{pre}:lost")
     else:
-        f.append(f"pv:sim:next:{'self' if g.decision.player == player else 'opponent'}:{g.decision.kind}")
+        f.append(f"{pre}:next:{'self' if g.decision.player == player else 'opponent'}:{g.decision.kind}")
     after = _sim_summary(g, player)
     if after["turn"] != before["turn"]:
-        f.append("pv:sim:new_turn")
+        f.append(f"{pre}:new_turn")
     if after["turn"] != before["turn"] or after["step"] != before["step"]:
-        f.append(f"pv:sim:step:{after['step']}")
+        f.append(f"{pre}:step:{after['step']}")
     now = {p[0] for p in after["perms"]}
     was = {p[0]: p for p in before["perms"]}
     for k, side in enumerate(("self", "opponent")):
         mine = k == 0
-        f += _signed(f"pv:sim:{side}:life", after["life"][k] - before["life"][k], LIFE_STEPS)
+        f += _signed(f"{pre}:{side}:life", after["life"][k] - before["life"][k], LIFE_STEPS)
         lost = [p for p in before["perms"] if p[1] == mine and p[0] not in now]
         gained = [p for p in after["perms"] if p[1] == mine and p[0] not in was]
         kept = [(was[p[0]], p) for p in after["perms"] if p[1] == mine and p[0] in was]
         lost_cr = [p for p in lost if p[2]]
         gained_cr = [p for p in gained if p[2]]
-        f += _thermo(f"pv:sim:{side}:creatures_lost", len(lost_cr))
-        f += _thermo(f"pv:sim:{side}:power_lost", sum(p[3] for p in lost_cr), POWER_STEPS)
-        f += _counted([f"pv:sim:{side}:lost_power_tier:{min(p[3], SIM_TIER_CAP)}" for p in lost_cr])
-        f += _thermo(f"pv:sim:{side}:creatures_gained", len(gained_cr))
-        f += _thermo(f"pv:sim:{side}:power_gained", sum(p[3] for p in gained_cr), POWER_STEPS)
-        f += _thermo(f"pv:sim:{side}:perms_lost", len(lost))
-        f += _thermo(f"pv:sim:{side}:perms_gained", len(gained))
-        f += _thermo(f"pv:sim:{side}:tapped", sum(1 for a, b in kept if b[4] and not a[4]))
-        f += _thermo(f"pv:sim:{side}:untapped", sum(1 for a, b in kept if a[4] and not b[4]))
-        f += _thermo(f"pv:sim:{side}:damage", sum(max(b[5] - a[5], 0) for a, b in kept), POWER_STEPS)
+        f += _thermo(f"{pre}:{side}:creatures_lost", len(lost_cr))
+        f += _thermo(f"{pre}:{side}:power_lost", sum(p[3] for p in lost_cr), POWER_STEPS)
+        f += _counted([f"{pre}:{side}:lost_power_tier:{min(p[3], SIM_TIER_CAP)}" for p in lost_cr])
+        f += _thermo(f"{pre}:{side}:creatures_gained", len(gained_cr))
+        f += _thermo(f"{pre}:{side}:power_gained", sum(p[3] for p in gained_cr), POWER_STEPS)
+        f += _thermo(f"{pre}:{side}:perms_lost", len(lost))
+        f += _thermo(f"{pre}:{side}:perms_gained", len(gained))
+        f += _thermo(f"{pre}:{side}:tapped", sum(1 for a, b in kept if b[4] and not a[4]))
+        f += _thermo(f"{pre}:{side}:untapped", sum(1 for a, b in kept if a[4] and not b[4]))
+        f += _thermo(f"{pre}:{side}:damage", sum(max(b[5] - a[5], 0) for a, b in kept), POWER_STEPS)
         for z, zone in enumerate(("hand", "graveyard", "exile", "library")):
-            f += _signed(f"pv:sim:{side}:{zone}", after["zones"][k][z] - before["zones"][k][z])
-    f += _signed("pv:sim:stack", after["stack"] - before["stack"])
-    f += _thermo("pv:sim:mana_left", min(after["mana"], MANA_LEFT_CAP))
-    f += [f"pv:sim:color:{col}" for col in PREVIEW_COLORS if col in after["colors"]]
+            f += _signed(f"{pre}:{side}:{zone}", after["zones"][k][z] - before["zones"][k][z])
+    f += _signed(f"{pre}:stack", after["stack"] - before["stack"])
+    f += _thermo(f"{pre}:mana_left", min(after["mana"], MANA_LEFT_CAP))
+    f += [f"{pre}:color:{col}" for col in PREVIEW_COLORS if col in after["colors"]]
     for flag in SIM_FLAGS:
         if flag in after["flags"]:
-            f.append(f"pv:sim:{flag}")
+            f.append(f"{pre}:{flag}")
             if flag not in before["flags"]:
-                f.append(f"pv:sim:gained:{flag}")
+                f.append(f"{pre}:gained:{flag}")
         elif flag in before["flags"]:
-            f.append(f"pv:sim:lost:{flag}")
+            f.append(f"{pre}:lost:{flag}")
     return f
 
 

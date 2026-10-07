@@ -232,22 +232,27 @@ impl Eng {
         let mut passes = 0;
         loop {
             self.sba_and_triggers()?;
-            if self.s().sim_viewer.is_some() {
-                // game.py: a simulation stops at the next priority of either
-                // player, so its options are never listed.
-                let step = self.s().step_name;
-                self.s().decision = Some(Decision { player: p, kind: Kind::Priority, prompt: format!("Priority ({step})"), options: vec![] });
-                if unsafe { (*self.y).suspend(()) } == ABORT {
-                    return Err(Stop::Abort);
-                }
-                return rules("a simulation copy cannot continue past a priority");
-            }
-            let options = self.s().priority_options(p);
             let step = self.s().step_name;
-            let act = if self.s().auto_pass && self.s().uneventful_priority(p, &options) {
-                Val::Pass
+            let act = if let Some(v) = self.s().sim_viewer {
+                // game.py: a simulation never lists priority options; the
+                // "assume the opponent passes" simulation passes for the
+                // other player, any other priority stops it.
+                if self.s().sim_assume_pass && p != v {
+                    Val::Pass
+                } else {
+                    self.s().decision = Some(Decision { player: p, kind: Kind::Priority, prompt: format!("Priority ({step})"), options: vec![] });
+                    if unsafe { (*self.y).suspend(()) } == ABORT {
+                        return Err(Stop::Abort);
+                    }
+                    return rules("a simulation copy cannot continue past a priority");
+                }
             } else {
-                self.ask(p, Kind::Priority, || format!("Priority ({step})"), options)?
+                let options = self.s().priority_options(p);
+                if self.s().auto_pass && self.s().uneventful_priority(p, &options) {
+                    Val::Pass
+                } else {
+                    self.ask(p, Kind::Priority, || format!("Priority ({step})"), options)?
+                }
             };
             if let Val::Pass = act {
                 passes += 1;

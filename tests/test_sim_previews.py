@@ -17,11 +17,16 @@ from mtg_ml.engine.view import observe
 from mtg_ml.match import match_decks
 
 
-def _sim(g, label: str | None = None, i: int | None = None) -> list[str]:
-    """The `pv:sim:` tokens of the option with this label (or index)."""
+def _sim(g, label: str | None = None, i: int | None = None, prefix: str = "pv:sim:") -> list[str]:
+    """The `pv:sim:` (or `pv:simp:`) tokens of the option with this label (or index)."""
     if i is None:
         i = next(k for k, o in enumerate(g.legal_options()) if o.label == label)
-    return [t for t in option_preview(g, g.decision.player, i, 6) if t.startswith("pv:sim:")]
+    return [t for t in option_preview(g, g.decision.player, i, 6) if t.startswith(prefix)]
+
+
+def _simp(g, label: str) -> list[str]:
+    """The "if the opponent passes" simulation of the option, prefix stripped to `pv:sim:`."""
+    return ["pv:sim:" + t.removeprefix("pv:simp:") for t in _sim(g, label, prefix="pv:simp:")]
 
 
 def _pass_until(g, step: str, player: int) -> None:
@@ -77,13 +82,14 @@ def _dealt_game(seed: int, hidden_seed: int, decks: tuple[list[str], list[str]],
 def test_hidden_cards_never_change_sim_tokens(matchup, own_library):
     """Pairs of games that differ only in hidden cards are played with the
     same choices while the decider's observation stays the same; at every
-    decision of the decider every option's previews (set 6) must agree.
+    decision of the decider every option's previews (set 6, both `pv:sim:`
+    and the "if the opponent passes" `pv:simp:`) must agree.
     The opponent takes its first option (passes); its choices may differ
     between the games without the decider seeing a difference. With the
     decider's own library order differing too, the games part at its first
     draw."""
     decks = match_decks(1, matchup)
-    compared = stops = 0
+    compared = stops = passes = 0
     for seed in range(25):
         a, b = (_dealt_game(seed, h, decks, own_library) for h in (1000 + seed, 2000 + seed))
         r = random.Random(seed)
@@ -99,10 +105,11 @@ def test_hidden_cards_never_change_sim_tokens(matchup, own_library):
             assert pa == pb, (seed, a.decision.kind, [o.label for o in a.legal_options()])
             compared += len(pa)
             stops += sum("pv:sim:stop:opponent_decision" in p for p in pa)
+            passes += sum(any(t.startswith("pv:simp:") for t in p) and [t[7:] for t in p if t.startswith("pv:sim:")] != [t[8:] for t in p if t.startswith("pv:simp:")] for p in pa)
             i = r.randrange(len(a.legal_options()))
             a.step(i)
             b.step(i)
-    assert compared >= 150 and stops > 0
+    assert compared >= 150 and stops > 0 and passes > 0
 
 
 def _bolt_on_the_stack(p1_hand: list[str]):
@@ -127,6 +134,10 @@ def test_an_opponent_without_a_response_is_not_revealed():
     sims = [_sim(g, "Pass priority") for g in (counter, land)]
     assert sims[0] == sims[1]
     assert sims[0][:2] == ["pv:sim:stop:opponent_decision", "pv:sim:next:opponent:priority"]
+    # "if the opponent passes": the Bolt resolves in both, whatever the hand holds
+    simps = [_simp(g, "Pass priority") for g in (counter, land)]
+    assert simps[0] == simps[1] and "pv:sim:opponent:creatures_lost>=1" in simps[0]
+    assert option_preview(counter, 0, 0, 6) == option_preview(land, 0, 0, 6)
     # the real games do differ: without a response the Bolt resolves at once
     for g in (counter, land):
         choose(g, "Pass priority")
@@ -209,12 +220,71 @@ def test_skipped_without_a_snapshot_and_above_the_option_cap(monkeypatch, engine
 
     g = new_game(match_decks(1, "jund_blue"), seed=3)
     assert g.decision.kind == O.MULLIGAN  # no step has begun: nothing to copy from
-    assert all(p[-1] == "pv:sim:skipped" for p in option_previews(g, g.decision.player, 6))
+    assert all(p[-2:] == ["pv:sim:skipped", "pv:simp:skipped"] for p in option_previews(g, g.decision.player, 6))
     if engine == "python":  # the cap is a constant in the native engine
         while g.decision.kind == O.MULLIGAN or len(g.legal_options()) < 2:
             g.step(0)
         monkeypatch.setattr(enc, "SIM_MAX_OPTIONS", 1)
-        assert all(p[-1] == "pv:sim:skipped" for p in option_previews(g, g.decision.player, 6))
+        assert all(p[-2:] == ["pv:sim:skipped", "pv:simp:skipped"] for p in option_previews(g, g.decision.player, 6))
+
+
+# ---------------------------------------------------------------------------
+# "If the opponent passes" (pv:simp:)
+# ---------------------------------------------------------------------------
+
+
+def test_own_bolt_on_a_creature_kills_it_if_unanswered():
+    g = _bolt_on_the_stack(["Island"])
+    sim, simp = _sim(g, "Pass priority"), _simp(g, "Pass priority")
+    assert not any("creatures_lost" in t for t in sim)  # the opponent may still respond
+    assert simp[:2] == ["pv:sim:stop:own_decision", "pv:sim:next:self:priority"]
+    assert {
+        "pv:sim:opponent:creatures_lost>=1",
+        "pv:sim:opponent:lost_power_tier:1",
+        "pv:sim:opponent:graveyard+>=1",
+        "pv:sim:self:graveyard+>=1",
+        "pv:sim:stack->=1",
+    } <= set(simp)
+
+
+def test_own_counterspell_counters_the_spell_if_unanswered():
+    g = scenario(
+        p0={"hand": ["Counterspell"], "battlefield": ["Island", "Island", "Delver of Secrets"]},
+        p1={"hand": ["Lightning Bolt"], "battlefield": ["Mountain"]},
+        active=1,
+    )
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target Delver of Secrets")
+    pay(g)
+    choose(g, "Pass priority")
+    choose(g, "Cast Counterspell")  # its only target, the Bolt, is chosen by settle()
+    pay(g)
+    assert g.decision.player == 0 and g.decision.kind == O.PRIORITY and len(g.stack) == 2
+    simp = _simp(g, "Pass priority")
+    # both spells leave the stack, the Delver lives; the opponent (active) passes on, so p0 decides again
+    assert {"pv:sim:stack->=2", "pv:sim:self:graveyard+>=1", "pv:sim:opponent:graveyard+>=1"} <= set(simp)
+    assert simp[:2] == ["pv:sim:stop:own_decision", "pv:sim:next:self:priority"]
+    assert not any("creatures_lost" in t or "life-" in t for t in simp)
+    assert _sim(g, "Pass priority")[:2] == ["pv:sim:stop:opponent_decision", "pv:sim:next:opponent:priority"]
+
+
+def test_own_creature_spell_resolves_if_unanswered():
+    g = scenario(p0={"hand": ["Gixian Infiltrator"], "battlefield": ["Swamp", "Swamp"]})
+    choose(g, "Cast Gixian Infiltrator")
+    pay(g)
+    assert g.decision.player == 0 and g.decision.kind == O.PRIORITY and len(g.stack) == 1
+    simp = _simp(g, "Pass priority")
+    assert {"pv:sim:self:creatures_gained>=1", "pv:sim:self:power_gained>=2", "pv:sim:self:perms_gained>=1", "pv:sim:stack->=1"} <= set(simp)
+    assert not any("creatures_gained" in t for t in _sim(g, "Pass priority"))
+
+
+def test_simp_repeats_sim_when_no_opponent_priority_comes_up():
+    """Paying mana stops at the decider's next decision: passing never comes
+    up, so `pv:simp:` is `pv:sim:` under the other prefix."""
+    g = scenario(p0={"hand": ["Ichor Wellspring"], "battlefield": ["Mountain", "Island"]})
+    choose(g, "Cast Ichor Wellspring")
+    for i in range(len(g.legal_options())):
+        assert _sim(g, i=i) == ["pv:sim:" + t.removeprefix("pv:simp:") for t in _sim(g, i=i, prefix="pv:simp:")]
 
 
 def test_sets_before_6_have_no_sim_tokens():

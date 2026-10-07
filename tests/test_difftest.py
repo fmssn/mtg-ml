@@ -144,6 +144,12 @@ SET6_TOKENS = (
     "pv:sim:color:",
     "pv:sim:gained:",
     "pv:sim:lost:",
+    "pv:simp:skipped",
+    "pv:simp:stop:own_decision",
+    "pv:simp:stop:opponent_decision",
+    "pv:simp:stop:hidden_info",
+    "pv:simp:stack-",
+    "pv:simp:self:creatures_gained>=",
 )
 
 
