@@ -1,4 +1,5 @@
-from .decks import DECKS, JUND_WILDFIRE, MONO_BLUE_TERROR, RED_MADNESS, SIDEBOARD_PLANS, SIDEBOARDS, expand, postboard
+from .decks import DECKS, JUND_WILDFIRE, MONO_BLUE_TERROR, RED_MADNESS, SIDEBOARDS, expand
+from .sideboard import PLANS, SIDEBOARD_PLANS, SideboardPlan, plan_for, postboard
 from .game import STEPS, Game, GameOver, RulesError
 from .objects import Decision, Option
 
@@ -11,6 +12,9 @@ __all__ = [
     "SIDEBOARD_PLANS",
     "expand",
     "postboard",
+    "PLANS",
+    "SideboardPlan",
+    "plan_for",
     "STEPS",
     "Game",
     "GameOver",
