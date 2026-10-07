@@ -40,6 +40,7 @@ STATS = ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac")
 @dataclass
 class PPOConfig:
     lr: float = 3e-4
+    lr_final: float = 3e-5  # where the learning rate anneals to when the trainer's --lr-anneal-games is set
     epochs: int = 4
     minibatch: int = 2048
     clip: float = 0.2
@@ -50,14 +51,36 @@ class PPOConfig:
     capture: int = 2  # on CUDA: 1 every step a CUDA graph replay over padded minibatches, 2 also the forward and losses compiled by Inductor (~15% faster, ~10-30 s of compiling per process), 0 plain eager steps
 
 
-def make_optimizer(params, lr: float, device) -> torch.optim.Optimizer:
+def make_optimizer(params, lr: float, device, tensor_lr: bool = False) -> torch.optim.Optimizer:
     """Adam with eps 1e-5; on CUDA fused (one kernel for all parameters
-    instead of a few per tensor), elsewhere plain. `Optimizer.load_state_dict`
+    instead of a few per tensor), elsewhere plain. `tensor_lr`: the learning
+    rate is a one-element tensor on `device` that `set_lr` changes in place,
+    so the CUDA graphs of the update (which read it from device memory) stay
+    valid while it anneals; a float lr is baked into each graph and a new
+    value means recapturing them all. `Optimizer.load_state_dict`
     restores the `fused` flag from the checkpoint's param groups, so after
     resuming callers must set `group["fused"]` again, and for a checkpoint
     of an unfused optimizer also move every `state["step"]` to its
     parameter's device (plain Adam keeps it on the CPU; fused Adam fails on that)."""
+    if tensor_lr:
+        lr = torch.tensor(float(lr), dtype=torch.float32, device=device)
     return torch.optim.Adam(params, lr=lr, eps=1e-5, fused=torch.device(device).type == "cuda")
+
+
+def set_lr(opt: torch.optim.Optimizer, lr: float) -> None:
+    """Set the learning rate of every param group: in place for a tensor lr
+    (`make_optimizer(tensor_lr=True)`; captured step graphs keep replaying),
+    else by replacing the float (the step graphs are then recaptured)."""
+    for g in opt.param_groups:
+        if torch.is_tensor(g["lr"]):
+            g["lr"].fill_(lr)
+        else:
+            g["lr"] = lr
+
+
+def get_lr(opt: torch.optim.Optimizer) -> float:
+    lr = opt.param_groups[0]["lr"]
+    return float(lr.item()) if torch.is_tensor(lr) else float(lr)
 
 
 def load_optimizer_state(opt: torch.optim.Optimizer, state_dict: dict) -> None:
@@ -67,7 +90,8 @@ def load_optimizer_state(opt: torch.optim.Optimizer, state_dict: dict) -> None:
     parameter's device (plain Adam keeps it on the CPU, which fused Adam
     rejects). The steps are the same either way. Also keeps this optimizer's
     learning rates: the checkpoint's groups would bring the lr it was saved
-    with, silently overriding a changed --ppo-lr on resume."""
+    with, silently overriding a changed --ppo-lr on resume. A tensor lr stays
+    the same tensor object (its value is the caller's to set: `set_lr`)."""
     fused = opt.param_groups[0].get("fused")
     lrs = [g["lr"] for g in opt.param_groups]
     opt.load_state_dict(state_dict)
@@ -218,8 +242,9 @@ class _StepGraphs:
     graphs need); epochs whose minibatches fit a captured shape reuse its
     graphs. The graphs hold the addresses of the weights, Adam state and the
     hyperparameters, so `fingerprint` covers these, and `_graphs_for` drops
-    the graphs when it changes (a reloaded optimizer state, a new learning
-    rate)."""
+    the graphs when it changes (a reloaded optimizer state, a new float
+    learning rate). A tensor learning rate enters by its address, not its
+    value: the graphs read it, so `set_lr` changes it without a recapture."""
 
     MAX_SHAPES = 3  # each with a graph per GRU batch (~16)
     MARGIN = 1.05  # a new shape has room for 5% more than the epoch that needed it: a shape is ~16 captures
@@ -236,7 +261,8 @@ class _StepGraphs:
     def fingerprint_of(net, opt, cfg) -> tuple:
         params = [p for g in opt.param_groups for p in g["params"]]
         state = tuple(t.data_ptr() for p in params for t in opt.state.get(p, {}).values() if torch.is_tensor(t))
-        groups = tuple((g["lr"], g["betas"], g["eps"], g["weight_decay"], g.get("amsgrad"), g.get("maximize")) for g in opt.param_groups)
+        lr = lambda x: ("tensor", x.data_ptr(), x.device) if torch.is_tensor(x) else x  # noqa: E731
+        groups = tuple((lr(g["lr"]), g["betas"], g["eps"], g["weight_decay"], g.get("amsgrad"), g.get("maximize")) for g in opt.param_groups)
         return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm, cfg.capture)
 
     def choose(self, counts: dict, extra: dict) -> dict:
