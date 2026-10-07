@@ -66,12 +66,13 @@ def score(games: list) -> dict:
     return out
 
 
-def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False) -> dict:
+def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
     specs = paired_specs(opponent, games, jund_only=jund_only)
-    return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference), n_jobs).games)
+    job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, auto_mana=auto_mana, auto_pass=auto_pass)
+    return score(play(procs, specs, job, n_jobs).games)
 
 
-def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False) -> dict:
+def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
     """Best-of-three matches on paired seeds (`jund_only`: one match per seed,
     learner on Jund). Each round plays the next game of every unfinished match
     as one batch. Returns match scores like `score`."""
@@ -87,28 +88,28 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
                 todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n))
         if not todo:
             break
-        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference)
+        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, auto_mana=auto_mana, auto_pass=auto_pass)
         for seats, winner, reason, _, _, seed in play(procs, [sp for _, sp in todo.values()], job, n_jobs).games:
             res, spec = todo[(seed, seats)]
             res.games.append((spec.starting_player, winner, reason))
     return score([(seats, res.winner) for _, seats, res in live])
 
 
-def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local") -> dict:
+def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", auto_mana: bool = False, auto_pass: bool = False) -> dict:
     """The fixed benchmark: the learner plays Jund Wildfire against the scripted
     Mono Blue Terror (Delver) bot. Game-1 decks on paired seeds (each seed once
     per starting player), plus best-of-three matches. Same seeds every call."""
     out = {}
     if games:
-        s, ci, n = head_to_head(procs, learner_path, BOT, games, n_jobs, version, max_turns, inference, jund_only=True)["jund"]
+        s, ci, n = head_to_head(procs, learner_path, BOT, games, n_jobs, version, max_turns, inference, True, auto_mana, auto_pass)["jund"]
         out.update({"bench/jund_vs_bot": s, "bench/jund_vs_bot_ci": ci, "bench/jund_vs_bot_n": n})
     if bo3_matches:
-        s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, jund_only=True)["jund"]
+        s, ci, n = head_to_head_bo3(procs, learner_path, BOT, bo3_matches, n_jobs, version, max_turns, inference, True, auto_mana, auto_pass)["jund"]
         out.update({"bench/jund_vs_bot_bo3": s, "bench/jund_vs_bot_bo3_ci": ci, "bench/jund_vs_bot_bo3_n": n})
     return out
 
 
-def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, eval_games: int, eval_bo3_matches: int, bench_games: int, bench_bo3_matches: int, max_turns: int = 100, inference: str = "local") -> dict:
+def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, eval_games: int, eval_bo3_matches: int, bench_games: int, bench_bo3_matches: int, max_turns: int = 100, inference: str = "local", auto_mana: bool = False, auto_pass: bool = False) -> dict:
     """The trainer's evaluation of a policy file: learner vs the random agent,
     the scripted bots and the oldest pool snapshot `pool0` on paired seeds
     (game 1 decks), best-of-three matches against the bots, and the
@@ -116,14 +117,14 @@ def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, e
     any pool (`rl.collect` calls it as `fn(pool, *args)`)."""
     out = {}
     for name, opp in (("random", RANDOM), ("bot", BOT), ("pool0", pool0)):
-        res = head_to_head(procs, policy, opp, eval_games, n_jobs, version, max_turns, inference)
+        res = head_to_head(procs, policy, opp, eval_games, n_jobs, version, max_turns, inference, False, auto_mana, auto_pass)
         for deck in ("jund", "blue"):
             out[f"eval/{name}/{deck}"], out[f"eval/{name}/{deck}_ci"], _ = res[deck]
     if eval_bo3_matches:
-        res = head_to_head_bo3(procs, policy, BOT, eval_bo3_matches, n_jobs, version, max_turns, inference)
+        res = head_to_head_bo3(procs, policy, BOT, eval_bo3_matches, n_jobs, version, max_turns, inference, False, auto_mana, auto_pass)
         for deck in ("jund", "blue"):
             out[f"eval/bot_bo3/{deck}"], out[f"eval/bot_bo3/{deck}_ci"], _ = res[deck]
-    out.update(benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference))
+    out.update(benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference, auto_mana, auto_pass))
     return out
 
 
@@ -136,12 +137,14 @@ def main(argv=None) -> None:
     ap.add_argument("--jund", action="store_true", help="learner always plays Jund (seat 0); with 'bot' this is the benchmark")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")
+    ap.add_argument("--auto-mana", action="store_true", help="games with Game(auto_mana=True), for policies trained with it")
+    ap.add_argument("--auto-pass", action="store_true", help="games with Game(auto_pass=True), for policies trained with it")
     args = ap.parse_args(argv)
     if args.engine:
         os.environ[ENV_VAR] = engine_name(args.engine)
     with create_pool(args.workers) as procs:
         fn = head_to_head_bo3 if args.bo3 else head_to_head
-        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund)
+        res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund, auto_mana=args.auto_mana, auto_pass=args.auto_pass)
     for k, (s, ci, n) in res.items():
         print(f"{k:5s} {s:.3f}  95% CI {ci}  ({n} games)")
 

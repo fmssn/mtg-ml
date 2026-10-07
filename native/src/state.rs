@@ -414,6 +414,8 @@ pub struct Args {
     pub start_step: String,
     pub mulligans: bool,
     pub match_game: i32,
+    pub auto_mana: bool,
+    pub auto_pass: bool,
 }
 
 pub struct State {
@@ -421,6 +423,9 @@ pub struct State {
     pub match_game: i32,
     pub rng: PyRandom,
     pub auto_single: bool,
+    /// `Game.auto_mana` / `Game.auto_pass` (action decomposition, opt-in).
+    pub auto_mana: bool,
+    pub auto_pass: bool,
     pub max_turns: i32,
     pub logging: bool,
     pub log: Vec<String>,
@@ -487,6 +492,8 @@ impl State {
             match_game: args.match_game,
             rng: PyRandom::new(args.seed),
             auto_single: args.auto_single,
+            auto_mana: args.auto_mana,
+            auto_pass: args.auto_pass,
             max_turns: args.max_turns,
             logging: args.log,
             log: vec![],
@@ -1436,6 +1443,75 @@ impl State {
     // ------------------------------------------------------------------
     // Priority options
     // ------------------------------------------------------------------
+
+    /// `Game._uneventful_priority` (auto_pass): the stack is empty and every
+    /// non-pass option is a sacrifice-for-mana ability without side effects.
+    pub fn uneventful_priority(&self, p: u8, options: &[Opt]) -> bool {
+        if !self.stack.is_empty() || options.len() < 2 {
+            return false;
+        }
+        for &ci in &self.battlefield {
+            let c = self.c(ci);
+            if c.controller == p && c.face().triggers.iter().any(|t| t.event == Event::YouSacrificeAnother) {
+                return false;
+            }
+        }
+        for o in &options[1..] {
+            let Val::Mana(card, _) = o.value else { return false };
+            let c = self.c(card);
+            let in_combat = self.attackers.contains(&c.oid) || self.blocks.iter().any(|&(b, a)| b == c.oid || a == c.oid);
+            if !c.face().triggers.is_empty() || in_combat {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// `Game._colour_needs`: coloured pips of the non-land cards in hand,
+    /// instants doubled. Indexed by mana-type byte.
+    fn colour_needs(&self, p: u8) -> [i32; 256] {
+        let mut need = [0i32; 256];
+        for &ci in &self.players[p as usize].hand {
+            let f = self.c(ci).face();
+            if f.is_type(T_LAND) {
+                continue;
+            }
+            let w = if f.is_type(T_INSTANT) { 2 } else { 1 };
+            for &(col, n) in &f.cost.colored {
+                need[col as usize] += w * n;
+            }
+        }
+        need
+    }
+
+    /// `Game._auto_pay_index` (auto_mana): the pay_mana option the
+    /// colour-preserving payer takes, or None when the player decides.
+    pub fn auto_pay_index(&self, p: u8, rem: &Remaining, options: &[Opt]) -> Option<usize> {
+        let mut need: Option<[i32; 256]> = None;
+        let mut best: Option<(usize, (i32, i32, usize, i32))> = None;
+        for (i, o) in options.iter().enumerate() {
+            let (card, color) = match o.value {
+                Val::Pool(_) => return Some(i),
+                Val::Source(card, color) => (card, color),
+                _ => unreachable!("pay_mana option"),
+            };
+            let face = self.c(card).face();
+            let ai = face.abilities.iter().position(|a| a.mana.is_some()).unwrap();
+            let ab = &face.abilities[ai];
+            if ab.sac_self {
+                return None;
+            }
+            let nd = need.get_or_insert_with(|| self.colour_needs(p));
+            let mana = ab.mana.as_ref().unwrap();
+            let hurt: i32 = mana.iter().map(|&c| nd[c as usize]).sum();
+            let other_tap = face.abilities.iter().enumerate().any(|(j, a)| j != ai && !a.zone_hand && a.tap);
+            let key = (hurt, other_tap as i32, mana.len(), if rem.colored_get(color) > 0 { 0 } else { 1 });
+            if best.as_ref().map_or(true, |(_, k)| key < *k) {
+                best = Some((i, key));
+            }
+        }
+        best.map(|(i, _)| i)
+    }
 
     pub fn priority_options(&self, p: u8) -> Vec<Opt> {
         let pl = &self.players[p as usize];

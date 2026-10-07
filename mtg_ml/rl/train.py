@@ -130,6 +130,8 @@ class TrainConfig:
     bench_games: int = 1000  # benchmark games at each evaluation: learner Jund vs blue bot (0 = off)
     bench_bo3_matches: int = 200  # benchmark best-of-three matches at each evaluation (0 = off)
     max_turns: int = 100
+    auto_mana: int = 0  # 1: pay non-strategic mana costs automatically (colour-preserving payer; docs/action-decomposition.md)
+    auto_pass: int = 0  # 1: auto-pass priority when the only other options are side-effect-free sacrifice-for-mana abilities
     seed: int = 0
     device: str = "cpu"
     engine: str = "python"  # rules engine for rollouts: python (reference) or native (Rust, mtg_ml_native)
@@ -326,7 +328,7 @@ class Trainer:
         drawn here, in the main thread (`self.rng`)."""
         c, rng = self.cfg, self.rng.getstate()
         shaping = c.shaping * max(0.0, 1 - it / max(c.shaping_anneal_iters, 1))
-        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference)
+        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference, auto_mana=bool(c.auto_mana), auto_pass=bool(c.auto_pass))
         specs = self._train_specs(it)
         return _Rollout(self.collector.call(play, specs, job, c.workers), shaping, it - self.iteration, rng)
 
@@ -350,7 +352,7 @@ class Trainer:
 
     def _eval_args(self, e: _Eval, n_jobs: int, inference: str) -> tuple:
         c = self.cfg
-        return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference)
+        return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference, bool(c.auto_mana), bool(c.auto_pass))
 
     def _request_eval(self) -> dict:
         """Evaluate the newest policy file. Inline (`--eval-process 0`): on the

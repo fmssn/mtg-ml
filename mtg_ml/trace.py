@@ -31,6 +31,9 @@ class Scenario:
     # (seat, card name, copies): put cards that are in no decklist yet into
     # a deck (replacing its last `copies` cards) to fuzz them.
     extra: tuple[tuple[int, str, int], ...] = ()
+    # Action decomposition options of the game (see Game.auto_mana/auto_pass).
+    auto_mana: bool = False
+    auto_pass: bool = False
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -51,7 +54,7 @@ class Scenario:
         return decks[0], decks[1]
 
 
-def scenarios(n: int, start: int = 0, extra: tuple = ()) -> list[Scenario]:
+def scenarios(n: int, start: int = 0, extra: tuple = (), auto_mana: bool = False, auto_pass: bool = False) -> list[Scenario]:
     """A deterministic mix: random/chaos/bot seats, games 1-3, both starting
     players, occasional short turn limits and mulligan-free games."""
     out = []
@@ -67,6 +70,8 @@ def scenarios(n: int, start: int = 0, extra: tuple = ()) -> list[Scenario]:
                 mulligans=r.random() < 0.9,
                 max_turns=r.choice((100, 100, 100, 12)),
                 extra=tuple(extra),
+                auto_mana=auto_mana,
+                auto_pass=auto_pass,
             )
         )
     return out
@@ -118,6 +123,8 @@ def new_game(sc: Scenario, engine: str | None = None, log: bool = True):
         log=log,
         mulligans=sc.mulligans,
         match_game=sc.match_game,
+        auto_mana=sc.auto_mana,
+        auto_pass=sc.auto_pass,
     )
 
 

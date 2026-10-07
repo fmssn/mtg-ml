@@ -215,7 +215,11 @@ impl Eng {
             self.sba_and_triggers()?;
             let options = self.s().priority_options(p);
             let step = self.s().step_name;
-            let act = self.ask(p, Kind::Priority, || format!("Priority ({step})"), options)?;
+            let act = if self.s().auto_pass && self.s().uneventful_priority(p, &options) {
+                Val::Pass
+            } else {
+                self.ask(p, Kind::Priority, || format!("Priority ({step})"), options)?
+            };
             if let Val::Pass = act {
                 passes += 1;
                 if passes >= 2 {
@@ -416,7 +420,18 @@ impl Eng {
                 }
             }
             let rem_s = rem.to_string();
-            match self.ask(p, Kind::PayMana, || format!("Pay {rem_s} for {what}"), options)? {
+            let auto = if st.auto_mana { st.auto_pay_index(p, &rem, &options) } else { None };
+            let choice = match auto {
+                Some(i) => {
+                    if st.logging {
+                        let m = format!("  p{p} pay_mana: {} (auto)", options[i].label);
+                        st.log.push(m);
+                    }
+                    options.into_iter().nth(i).unwrap().value
+                }
+                None => self.ask(p, Kind::PayMana, || format!("Pay {rem_s} for {what}"), options)?,
+            };
+            match choice {
                 Val::Pool(c) => {
                     self.s().players[p as usize].pool_spend(c);
                     rem.apply(c);
