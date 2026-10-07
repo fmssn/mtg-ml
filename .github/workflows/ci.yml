@@ -29,7 +29,7 @@ jobs:
           python-version: "3.11"
           activate-environment: true
           enable-cache: true
-      - run: uv pip install -e '.[dev]' && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: uv pip install -e '.[dev]' numpy && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: python -m pytest -q -m "not slow and not gpu"
 
   native:
