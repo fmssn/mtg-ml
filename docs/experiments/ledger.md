@@ -14,11 +14,11 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
 | 20261007-red-madness-1m | new deck: Red Madness learner vs frozen r1-control Jund, warm-started from it | 1M | (vs Jund bot) 89.9% | 92.6% | | new-deck baseline⁴ |
-| 20261007-r5-mix-h256 | fresh h256 entity net on the three-deck mix, lr 1.5e-4 → 1.5e-5 | 2.6M (stopped) | 46.3%¹ | 60.4%¹ | -32 ± 13¹ | inconclusive: level with h128 at equal games, slightly behind |
+| 20261007-r5-mix-h256 | fresh h256 entity net on the three-deck mix, lr 1.5e-4 → 1.5e-5 | 2.6M (stopped) | 46.3%⁵ | 60.4%⁵ | -32 ± 13⁵ | inconclusive: level with h128 at equal games, slightly behind |
 | 20261007-r5-mix-h256-lr3e-4 | the same at the h128 lr (3e-4 → 3e-5) | 2.6M | 38.1% at 2.5M | | -69 at 2.5M | abort: steps too large |
-| 20261007-r5-mix-h128 | fresh h128 entity net on the three-deck mix (width control) | 5.8M (stopped) | 56.4%¹ | 65.5%¹ | 40 ± 12¹ | control (49.5% / -14 at 2.5M) |
-| 20261007-r4-mix | r3-postboard + Red Madness: one network on jund_blue, jund_madness, blue_madness (feature set 3) | 10.4M + 10M | 73.4%¹ | 71.7%¹ | 155 ± 13¹ | works, costs the main matchup ~5 pts vs control |
-| 20261007-r4-control | r3-postboard, jund_blue only, same schedule and feature set 3 | 10.4M + 7.2M (stopped) | **78.2%**¹ | 77.6%¹ | **163 ± 13**¹ (173 at 17.0M) | **best parent** |
+| 20261007-r5-mix-h128 | fresh h128 entity net on the three-deck mix (width control) | 5.8M (stopped) | 56.4%⁵ | 65.5%⁵ | 40 ± 12⁵ | control (49.5% / -14 at 2.5M) |
+| 20261007-r4-mix | r3-postboard + Red Madness: one network on jund_blue, jund_madness, blue_madness (feature set 3) | 10.4M + 10M | 73.4%⁵ | 71.7%⁵ | 155 ± 13⁵ | works, costs the main matchup ~5 pts vs control |
+| 20261007-r4-control | r3-postboard, jund_blue only, same schedule and feature set 3 | 10.4M + 7.2M (stopped) | **78.2%**⁵ | 77.6%⁵ | **163 ± 13**⁵ (173 at 17.0M) | **best parent** |
 | 20261007-r3-attn | R3 + 1 entity self-attention layer (identity init) | 9.4M + 1M | 73.3% | 75.0% | 152 ± 13 | reject (no gain, ~10× slower) |
 | 20261007-r3-postboard | R3 + 20% sideboarded games (vs 50%) | 9.4M + 1M | **74.9%** | 74.9% | **154 ± 13** | inconclusive (+) |
 | 20261007-r3-botjund | R3 + 25% games learner Jund vs blue bot | 9.4M + 1M | 74.2% | 75.0% | 143 ± 13 | reject |
@@ -36,7 +36,7 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | 20261006-overnight-selfplay | open-ended self-play + pool | 8.4M | 64.6% | 70.9% | 103 ± 13 | parent |
 | 20261006-overnight-bot10 | + 10% games vs scripted bots | 8.4M | 65.6% | | 75 ± 12 | no effect |
 
-¹ last in-training evaluation (1,000 games), final 2,000-game evals not run yet. Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows.
+Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows. ⁵ last in-training evaluation (1,000 games); the 2,000-game final evals were not run (runs stopped 2026-10-07).
 
 ---
 
