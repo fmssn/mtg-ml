@@ -2,6 +2,7 @@
 
     python -m mtg_ml.rl.train --run runs/ppo1 --iterations 200
     python -m mtg_ml.rl.train --run runs/ppo1 --iterations 400   # resumes
+    python -m mtg_ml.rl.train --run runs/attn1 --trunk entity --entity-attn 1 --init runs/ppo1/latest.pt   # fine-tunes
 
 One deck-conditioned network plays both seats (the seat is a state feature).
 It has a GRU memory over each player's decisions in a game, fed with the
@@ -10,7 +11,9 @@ Each iteration:
   1. collect `games_per_iter` games in parallel workers. A fraction
      `self_play_frac` are learner vs learner (both seats recorded), the rest
      are learner vs a frozen checkpoint from the opponent pool (learner seat
-     random, only the learner recorded), and `bot_frac` vs the scripted bots;
+     random, only the learner recorded), and `bot_frac` vs the scripted bots
+     (`--pool-sampling pfsp`, `--bot-seat jund`, exploiter mode `--exploit`,
+     lr anneal, per-turn discounting: docs/training-options.md);
   2. one PPO update on all recorded decisions;
   3. write the new weights to `policy/vNNNNN.pt` (weights only, what workers,
      the evaluation and the inference server load); every `checkpoint_every`
@@ -30,17 +33,16 @@ Each iteration:
      `--ladder-ratings`, else `<run>/ladder.json`, rated once by the first
      evaluation if missing); logged as `eval/*`, `bench/*` and `ladder/*`.
 
-A new deck against a fixed opponent (`--matchup`, `--learner-seat`,
-`--opponent`, `--init-from`): e.g. Red Madness (seat 1 of `jund_madness`)
-against a frozen Jund checkpoint, warm-started from that checkpoint's
-weights (the network's rules knowledge carries over; the `self:deck:`
-feature tells it which deck it holds). The learner then only plays its
-seat, every non-bot game is against `--opponent`, no pool snapshots are
-taken, and the evaluation scores the learner's deck (`eval/opponent/<deck>`
-in place of pool0, `bench/<deck>_vs_bot*`):
+A new deck against a fixed opponent: `--matchup` picks each seat's deck,
+and exploiter mode puts the learner on one of them, e.g. Red Madness
+(`--exploit-deck red`, seat 1 of `jund_madness`) against a frozen Jund
+checkpoint (`--exploit`), starting from that checkpoint's weights (the
+network's rules knowledge carries over; the `self:deck:` feature tells it
+which deck it holds). The evaluation then scores the learner's deck, with
+the frozen policy in place of pool0 (`eval/opponent/<deck>`,
+`bench/<deck>_vs_bot*`):
 
-    python -m mtg_ml.rl.train --run runs/red --matchup jund_madness --learner-seat 1 \
-        --opponent jund.pt --init-from jund.pt --self-play-frac 0
+    python -m mtg_ml.rl.train --run runs/red --matchup jund_madness --exploit jund.pt --exploit-deck red
 
 Processes (`rl/collect.py`). The trainer's main thread only updates and
 publishes. The rollout workers belong to a collector process, which
@@ -103,6 +105,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import time
@@ -114,9 +117,9 @@ import torch
 from ..backend import ENV_VAR, engine_name
 from ..match import matchup_decks
 from .collect import PoolProcess, PoolThread, cpu_layout, release
-from .evaluate import EVAL_BLOCKS, evaluate_policy
-from .model import PolicyNet
-from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update
+from .evaluate import DECK_KEYS, EVAL_BLOCKS, evaluate_policy
+from .model import PolicyNet, load_partial
+from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update, set_lr
 from .rollout import BOT, KIND_ID, LEARNER, GameSpec, Job, create_pool, play
 
 TRAIN_SEED_BASE = 1 << 40  # training game seeds start here: disjoint from the fixed evaluation/benchmark seeds (EVAL_SEED + s, and 4x that for best-of-three games)
@@ -150,17 +153,31 @@ class TrainConfig:
     trunk: str = "mlp"  # "mlp" or "transformer" (2 layers over the active state features)
     value_net: str = "separate"  # "separate": own embeddings, trunk and memory; "shared": linear head on the policy core
     value_hidden: int = 0  # width of a separate value net (0 = hidden)
+    value_bound: str = "none"  # "tanh": squash the value head into (-1, 1) (new runs and --init only; a resumed run keeps its checkpoint's)
+    value_clamp: float = 1.0  # GAE bootstraps from values clamped to +-(this + shaping); 0 = raw values
+    entity_attn: int = 0  # trunk "entity": self-attention layers over each decision's entities (4 heads, FFN 2x; 0 = none)
     memory: str = "gru"  # "gru" (recurrent over the player's decisions) or "none"
     gamma: float = 0.995
     lam: float = 0.95
+    gamma_turn: float = 0.0  # > 0: discount per game turn (each player's turn counts) instead of per decision; replaces gamma
+    lam_turn: float = 0.0  # > 0: GAE lambda per game turn; replaces lam
     shaping: float = 0.2  # life-difference potential shaping, linearly annealed to 0
     shaping_anneal_iters: int = 100
+    lr_anneal_games: int = 0  # > 0: anneal --ppo-lr to --ppo-lr-final over this many training games (from the run's start or the first resume with annealing on)
+    lr_schedule: str = "linear"  # "linear" or "cosine"
     self_play_frac: float = 0.5
     bot_frac: float = 0.0  # share of games against the scripted bots (taken out of the pool share)
+    bot_seat: str = "both"  # bot games: "both" seats at random, or "jund": the learner always Jund (seat 0) vs the blue bot, the benchmark matchup
     postboard_frac: float = 0.5  # share of training games played with sideboarded decks (match games 2/3)
     eval_bo3_matches: int = 100  # best-of-three matches vs the bots at each evaluation (0 = off)
     snapshot_every: int = 10
     pool_recent_frac: float = 0.5  # share of pool games against the newest snapshot
+    pool_sampling: str = "uniform"  # the other pool games: "uniform" over the pool, or "pfsp": weighted (1 - learner's win rate vs it) ** pfsp_power
+    pfsp_power: float = 2.0
+    pfsp_ema: float = 0.05  # per-game step of the running win rate vs each pool opponent (starts at 0.5)
+    init: str = ""  # a new run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, with --value-bound and --entity-attn on top (new attention layers start as the identity)
+    exploit: str = ""  # exploiter mode: every training game is the learner on --exploit-deck vs this frozen policy file
+    exploit_deck: str = "jund"  # the learner's deck: "jund", "blue" or "red", one of --matchup's (evaluate.DECK_KEYS)
     eval_every: int = 10  # evaluate every this many iterations (0 = only by eval_every_games)
     eval_every_games: int = 0  # also evaluate whenever the training games cross a multiple of this (e.g. 250000)
     eval_process: int = 1  # 1: evaluate in a process of its own, never waiting for it; 0: on the training pool, blocking
@@ -176,9 +193,6 @@ class TrainConfig:
     ladder_greedy: int = 0  # 1: ladder games (and the rating round robin) with greedy play
     max_turns: int = 100
     matchup: str = "jund_blue"  # match.MATCHUPS: the deck in each seat
-    learner_seat: int = -1  # -1: the learner plays both seats; 0 / 1: only that seat (its deck)
-    opponent: str = ""  # a frozen checkpoint every non-bot game is played against (instead of the pool)
-    init_from: str = ""  # start a new run from these weights (its network config wins over --hidden etc.)
     auto_mana: int = 0  # 1: pay non-strategic mana costs automatically (colour-preserving payer; docs/action-decomposition.md)
     auto_pass: int = 0  # 1: auto-pass priority when the only other options are side-effect-free sacrifice-for-mana abilities
     seed: int = 0
@@ -236,6 +250,7 @@ class Trainer:
             os.makedirs(os.path.join(cfg.run, d), exist_ok=True)
         self.latest = os.path.join(cfg.run, "latest.pt")
         self.metrics = os.path.join(cfg.run, "metrics.jsonl")
+        _check(cfg)
         self.blocks = tuple(b for b in cfg.eval_blocks.split(",") if b)
         if set(self.blocks) - set(EVAL_BLOCKS):
             raise ValueError(f"eval blocks must be among {EVAL_BLOCKS}, not {cfg.eval_blocks!r}")
@@ -245,28 +260,33 @@ class Trainer:
                 raise FileNotFoundError(f"ladder file {path} does not exist")
         self.ladder_ratings = cfg.ladder_ratings or os.path.join(cfg.run, "ladder.json")
         self.evaluating = bool(cfg.eval_every or cfg.eval_every_games)
-        if cfg.learner_seat not in (-1, 0, 1):
-            raise ValueError("--learner-seat must be -1, 0 or 1")
-        if cfg.learner_seat >= 0 and cfg.self_play_frac > 0:
-            raise ValueError("--learner-seat: the learner only plays one seat, so --self-play-frac must be 0")
-        matchup_decks(cfg.matchup)  # validates the name
+        self.exploit_seat = exploit_seat(cfg)  # also validates --matchup
         torch.manual_seed(cfg.seed)
         self.rng = random.Random(cfg.seed)
-        init = torch.load(cfg.init_from, map_location="cpu", weights_only=False) if cfg.init_from and not os.path.exists(self.latest) else None
-        net_cfg = init["config"] if init else dict(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden)
-        self.net = PolicyNet(**net_cfg).to(cfg.device)
-        if init:
-            self.net.load_state_dict(init["model"])
-            print(f"initialized from {cfg.init_from}: {net_cfg}", flush=True)
-        self.opt = make_optimizer(self.net.parameters(), cfg.ppo.lr, cfg.device)
+        ck = torch.load(self.latest, map_location=cfg.device, weights_only=False) if os.path.exists(self.latest) else None
+        init = cfg.init or cfg.exploit  # an exploiter starts from the policy it exploits unless --init says otherwise
+        if ck is not None:  # the architecture is the checkpoint's, whatever the flags say
+            if cfg.entity_attn and cfg.entity_attn != ck["config"].get("entity_attn", 0):  # the Adam state would not fit
+                raise ValueError(f"{self.latest} holds a {ck['config']} network, not entity_attn={cfg.entity_attn}: resume without --entity-attn, or start a new --run with --init {self.latest}")
+            self.net = PolicyNet(**ck["config"])
+        elif init:  # the source's architecture, with --value-bound and --entity-attn on top
+            config = {k: v for k, v in torch.load(init, map_location="cpu", weights_only=False)["config"].items() if k != "value_bound"}
+            config["entity_attn"] = cfg.entity_attn or config.get("entity_attn", 0)
+            self.net = PolicyNet(**config, value_bound=cfg.value_bound)
+        else:
+            self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn)
+        self.net.to(cfg.device)
+        # a tensor lr when annealing: the update's CUDA graphs read it, so a new value each iteration costs no recapture
+        self.opt = make_optimizer(self.net.parameters(), cfg.ppo.lr, cfg.device, tensor_lr=cfg.lr_anneal_games > 0)
         self.iteration = 0
         self.games_total = 0
+        self.lr_origin = None  # games_total where the lr anneal starts
+        self.pfsp: dict[str, float] = {}  # pool file name -> running win rate of the learner against it
         self.checkpointed = -1  # iteration of the newest latest.pt
         self.saver = ThreadPoolExecutor(1, thread_name_prefix="checkpoint")
         self.saving = None  # the latest.pt write in flight
         self.pinned: dict[str, int] = {}  # policy files an evaluation still needs
-        if os.path.exists(self.latest):
-            ck = torch.load(self.latest, map_location=cfg.device, weights_only=False)
+        if ck is not None:
             self.net.load_state_dict(ck["model"])
             load_optimizer_state(self.opt, ck["optim"])
             self.iteration = self.checkpointed = ck["iteration"]
@@ -276,14 +296,21 @@ class Trainer:
                 torch.set_rng_state(ck["torch_rng"])
                 if ck.get("cuda_rng") is not None and torch.cuda.is_available():
                     torch.cuda.set_rng_state_all(ck["cuda_rng"])
+            self.lr_origin = ck.get("lr_anneal_origin")
+            self.pfsp = dict(ck.get("pfsp") or {})
             self._drop_lost_iterations()
             print(f"resumed {self.latest} at iteration {self.iteration}")
+        elif init:
+            self._init_from(init)
+        if cfg.lr_anneal_games and self.lr_origin is None:
+            self.lr_origin = self.games_total
+        set_lr(self.opt, self._lr())
         self._remove_partial_writes()
         pool_dir = os.path.join(cfg.run, "pool")
         self.pool: list[str] = sorted(os.path.join(pool_dir, f) for f in os.listdir(pool_dir) if f.startswith("iter_") and f.endswith(".pt"))
         weights = self._weights()
         self._publish(weights)
-        if not self.pool:  # also with --opponent: the initial snapshot is the evaluation's pool0
+        if not self.pool:
             self._snapshot(weights)
             self._checkpoint(weights, self.rng.getstate())
         self.layout = cpu_layout(cfg.workers, cfg.device, cfg.inference == "server", bool(self.evaluating and cfg.eval_process),
@@ -297,6 +324,22 @@ class Trainer:
             self.eval_workers = cfg.eval_workers or (4 if self.layout.shared_eval else max(1, min(8, len(ev))))
             self.evaluator = PoolProcess(self.eval_workers, "local", worker_cpus=ev or None, cpus=ev or None, nice=10, name="evaluator")
         self.evals: list[_Eval] = []  # running first, then at most one waiting
+
+    def _init_from(self, path: str) -> None:
+        """Start from the weights of checkpoint `path` (a policy file or
+        latest.pt; not its optimizer or counters). Its network must have this
+        config except for layers that start as the identity (`entity_attn`),
+        which keep their initialisation: the first rollouts play like the
+        checkpoint."""
+        ck = torch.load(path, map_location=self.cfg.device, weights_only=False)
+        with torch.device("meta"):  # its config with today's defaults filled in
+            config = PolicyNet(**ck["config"]).config
+        own = {k: v for k, v in self.net.config.items() if k not in ("entity_attn", "value_bound")}  # value_bound has no weights
+        theirs = {k: v for k, v in config.items() if k not in ("entity_attn", "value_bound")}
+        if own != theirs or config.get("entity_attn", 0) > self.net.config.get("entity_attn", 0):
+            raise ValueError(f"--init {path}: its network {ck['config']} does not fit {self.net.config}")
+        new = load_partial(self.net, ck["model"])
+        print(f"initialised from {path}" + (f"; new layers at their identity init: {', '.join(new)}" if new else ""), flush=True)
 
     def _collector(self):
         c, lay = self.cfg, self.layout
@@ -353,6 +396,8 @@ class Trainer:
             "rng": rng,
             "torch_rng": torch.get_rng_state(),  # the update's minibatch shuffles
             "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            "lr_anneal_origin": self.lr_origin,
+            "pfsp": dict(self.pfsp),
             "train_config": asdict(self.cfg),
         }
         self.saving = self.saver.submit(_save, ck, self.latest)
@@ -398,29 +443,74 @@ class Trainer:
         drawn here, in the main thread (`self.rng`)."""
         c, rng = self.cfg, self.rng.getstate()
         shaping = c.shaping * max(0.0, 1 - it / max(c.shaping_anneal_iters, 1))
-        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference, auto_mana=bool(c.auto_mana), auto_pass=bool(c.auto_pass))
+        job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference,
+                  value_clamp=c.value_clamp, gamma_turn=c.gamma_turn, lam_turn=c.lam_turn, auto_mana=bool(c.auto_mana), auto_pass=bool(c.auto_pass))
         specs = self._train_specs(it)
         return _Rollout(self.collector.call(play, specs, job, c.workers), shaping, it - self.iteration, rng)
 
     def _train_specs(self, it: int) -> list[GameSpec]:
+        """The games of a training rollout. Exploiter mode: the learner on
+        --exploit-deck against the frozen --exploit policy, every game.
+        Otherwise self-play, bot games (--bot-seat) and pool games: the
+        newest snapshot with probability pool_recent_frac, else one drawn
+        uniformly or by PFSP weight (`_pfsp_weights`)."""
         c, specs = self.cfg, []
         base = TRAIN_SEED_BASE + (it + 1) * 1_000_003 + c.seed * 7919
+        weights = self._pfsp_weights() if c.pool_sampling == "pfsp" else None
         for k in range(c.games_per_iter):
-            r = self.rng.random()
-            if r < c.self_play_frac:
-                seats = (LEARNER, LEARNER)
+            if c.exploit:
+                main = os.path.abspath(c.exploit)
+                seats = (LEARNER, main) if self.exploit_seat == 0 else (main, LEARNER)
             else:
-                if r < c.self_play_frac + c.bot_frac:
-                    opp = BOT
-                elif c.opponent:
-                    opp = c.opponent
+                r = self.rng.random()
+                if r < c.self_play_frac:
+                    seats = (LEARNER, LEARNER)
+                elif r < c.self_play_frac + c.bot_frac:
+                    if c.bot_seat == "jund":
+                        seats = (LEARNER, BOT)
+                    else:
+                        seats = (LEARNER, BOT) if self.rng.random() < 0.5 else (BOT, LEARNER)
                 else:
-                    opp = self.pool[-1] if self.rng.random() < c.pool_recent_frac else self.rng.choice(self.pool)
-                seat = c.learner_seat if c.learner_seat >= 0 else (0 if self.rng.random() < 0.5 else 1)
-                seats = (LEARNER, opp) if seat == 0 else (opp, LEARNER)
+                    if self.rng.random() < c.pool_recent_frac:
+                        opp = self.pool[-1]
+                    else:
+                        opp = self.rng.choices(self.pool, weights)[0] if weights else self.rng.choice(self.pool)
+                    seats = (LEARNER, opp) if self.rng.random() < 0.5 else (opp, LEARNER)
             game_no = 2 if self.rng.random() < c.postboard_frac else 1
             specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no, matchup=c.matchup))
         return specs
+
+    def _pfsp_weights(self) -> list[float] | None:
+        """Prioritised fictitious self-play: pool snapshot i weighted (1 -
+        p_i) ** pfsp_power, p_i the learner's running win rate against it
+        (draws half; 0.5 until it has played it), so opponents that still beat
+        the learner come up most. None (uniform) if every weight is 0."""
+        w = [(1.0 - self.pfsp.get(os.path.basename(p), 0.5)) ** self.cfg.pfsp_power for p in self.pool]
+        return w if sum(w) > 0 else None
+
+    def _update_pfsp(self, games: list) -> None:
+        """Move the running win rates toward the results of the learner's games
+        against pool snapshots (step pfsp_ema per game)."""
+        pool = {p: os.path.basename(p) for p in self.pool}
+        for seats, winner, *_ in games:
+            for s in (0, 1):
+                if seats[s] == LEARNER and seats[1 - s] in pool:
+                    name = pool[seats[1 - s]]
+                    result = 0.5 if winner is None else float(winner == s)
+                    p = self.pfsp.get(name, 0.5)
+                    self.pfsp[name] = p + self.cfg.pfsp_ema * (result - p)
+
+    def _lr(self) -> float:
+        """The learning rate of the next update: --ppo-lr, or annealed to
+        --ppo-lr-final over --lr-anneal-games training games counted from
+        `lr_origin` (linear or cosine), then held."""
+        c = self.cfg
+        if not c.lr_anneal_games:
+            return c.ppo.lr
+        f = min(1.0, max(0.0, (self.games_total - self.lr_origin) / c.lr_anneal_games))
+        if c.lr_schedule == "cosine":
+            f = 0.5 * (1 - math.cos(math.pi * f))
+        return c.ppo.lr + (c.ppo.lr_final - c.ppo.lr) * f
 
     # -- evaluation ----------------------------------------------------------
 
@@ -428,7 +518,7 @@ class Trainer:
         c = self.cfg
         return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference,
                 self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass),
-                c.matchup, None if c.learner_seat < 0 else c.learner_seat, c.opponent)
+                c.matchup, self.exploit_seat, os.path.abspath(c.exploit) if c.exploit else "")
 
     def _request_eval(self) -> dict:
         """Evaluate the newest policy file. Inline (`--eval-process 0`): on the
@@ -497,17 +587,21 @@ class Trainer:
                 if roll is None:
                     roll = self._submit(self.iteration).wait()
                 data = roll.data
+                if c.pool_sampling == "pfsp":  # before the next games are drawn, so a resume draws the same ones
+                    self._update_pfsp(data.games)
                 nxt = None
                 if c.pipeline and self._more(self.iteration + 1, self.games_total + len(data.games)):
                     nxt = self._submit(self.iteration + 1)  # plays with the current weights during the update
                 t1 = time.monotonic()
+                lr = self._lr()
+                set_lr(self.opt, lr)
                 stats = ppo_update(self.net, self.opt, data, c.ppo, device=c.device)
                 release(data)  # unmaps the shared block of the samples
                 self.iteration += 1
                 self.games_total += len(data.games)
                 weights = self._weights()
                 self._publish(weights)
-                if self.iteration % c.snapshot_every == 0 and not c.opponent:
+                if self.iteration % c.snapshot_every == 0:
                     self._snapshot(weights)
                 if c.checkpoint_every and self.iteration % c.checkpoint_every == 0:
                     self._checkpoint(weights, nxt.rng if nxt else self.rng.getstate())
@@ -523,6 +617,7 @@ class Trainer:
                     "jund_wins_selfplay": _rate([g for g in data.games if g[0] == (LEARNER, LEARNER)], 0),
                     **rollout_stats(data.games, data.kinds),
                     "shaping": roll.shaping,
+                    "lr": lr,
                     "pool_size": len(self.pool),
                     "rollout_s": round(roll.rollout_s, 2),
                     "update_s": round(t2 - t1, 2),
@@ -530,6 +625,8 @@ class Trainer:
                     "decisions_per_s": round(len(data.actions) / max(roll.rollout_s, 1e-9)),
                     **{k: round(v, 4) if isinstance(v, float) else v for k, v in stats.items()},
                 }
+                if c.exploit:  # every training game is against the frozen main policy
+                    row["win_vs_main"] = row["win_vs_pool"]
                 if self._eval_due(len(data.games)):
                     row.update(self._request_eval())
                 if nxt:
@@ -649,8 +746,31 @@ def _rate(games, seat: int) -> float:
     return sum(g[1] == seat for g in games) / len(games) if games else float("nan")
 
 
+CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "exploit_deck": tuple(DECK_KEYS.values()), "lr_schedule": ("linear", "cosine"), "value_bound": ("none", "tanh")}
+
+
+def exploit_seat(cfg: TrainConfig) -> int | None:
+    """The learner's seat in exploiter mode (where --exploit-deck sits in --matchup), else None."""
+    decks = [DECK_KEYS[d] for d in matchup_decks(cfg.matchup)]
+    if not cfg.exploit:
+        return None
+    if cfg.exploit_deck not in decks:
+        raise ValueError(f"--exploit-deck {cfg.exploit_deck} is not in --matchup {cfg.matchup} ({', '.join(decks)})")
+    return decks.index(cfg.exploit_deck)
+
+
+def _check(cfg: TrainConfig) -> None:
+    for name, allowed in CHOICES.items():
+        if getattr(cfg, name) not in allowed:
+            raise ValueError(f"{name} must be one of {allowed}, not {getattr(cfg, name)!r}")
+    if cfg.exploit and not os.path.exists(cfg.exploit):
+        raise FileNotFoundError(f"--exploit {cfg.exploit}: no such policy file")
+    if cfg.lr_anneal_games < 0 or cfg.gamma_turn < 0 or cfg.lam_turn < 0 or cfg.value_clamp < 0:
+        raise ValueError("lr_anneal_games, gamma_turn, lam_turn and value_clamp must be >= 0")
+
+
 def _fmt(row: dict) -> str:
-    keys = ["iteration", "decisions", "game_turns", "draws", "jund_wins_selfplay", "win_vs_pool", "entropy", "approx_kl", "explained_var", "decisions_per_s", "wall_s"]
+    keys = ["iteration", "decisions", "game_turns", "draws", "jund_wins_selfplay", "win_vs_pool", "win_vs_main", "entropy", "approx_kl", "explained_var", "decisions_per_s", "wall_s"]
     s = " ".join(f"{k}={row[k]:.3f}" if isinstance(row[k], float) else f"{k}={row[k]}" for k in keys if k in row)
     ev = {k.split("/", 1)[1]: v for k, v in row.items() if k.startswith(("eval/", "bench/")) and not k.endswith(("_ci", "_n"))}
     return s + (" | eval " + " ".join(f"{k}={v:.2f}" for k, v in ev.items()) if ev else "")
@@ -665,7 +785,7 @@ def parse_args(argv=None) -> TrainConfig:
                 continue
             v = getattr(obj, f.name)
             typ = float if f.name == "target_kl" else type(v)
-            ap.add_argument(f"--{prefix}{f.name.replace('_', '-')}", type=typ, default=v)
+            ap.add_argument(f"--{prefix}{f.name.replace('_', '-')}", type=typ, default=v, choices=CHOICES.get(f.name) if obj is cfg else None)
     a = vars(ap.parse_args(argv))
     for f in fields(ppo):
         setattr(ppo, f.name, a.pop("ppo_" + f.name))

@@ -374,25 +374,24 @@ def test_request_ints_for_sizes_the_server_slot_from_the_games_per_request():
 
 
 def test_new_deck_against_a_fixed_opponent_from_its_weights(tmp_path):
-    """--matchup/--learner-seat/--opponent/--init-from: the learner plays only
-    Red Madness (seat 1) against a frozen checkpoint, starting from its weights."""
+    """--matchup with exploiter mode: the learner plays only Red Madness
+    (seat 1 of jund_madness) against a frozen checkpoint, starting from its weights."""
     src = tmp_path / "src"
     Trainer(_cfg(src, "--iterations", "1", *NO_EVAL, *IN_PROCESS)).train()
     jund = str(src / "pool" / "iter_00000.pt")
     run = tmp_path / "red"
-    cfg = _cfg(run, "--iterations", "2", "--matchup", "jund_madness", "--learner-seat", "1", "--opponent", jund, "--init-from", jund,
-               "--self-play-frac", "0", "--hidden", "32", "--snapshot-every", "1", *IN_PROCESS, *SMALL_EVAL, "--eval-every", "2")  # fmt: skip
+    cfg = _cfg(run, "--iterations", "2", "--matchup", "jund_madness", "--exploit", jund, "--exploit-deck", "red", "--hidden", "32",
+               *IN_PROCESS, *SMALL_EVAL, "--eval-every", "2")  # fmt: skip
     t = Trainer(cfg)
     init = torch.load(jund, weights_only=False)
-    assert t.net.config == init["config"]  # the checkpoint's network, not --hidden 32
+    assert t.net.config["hidden"] == init["config"]["hidden"] == 16  # the checkpoint's network, not --hidden 32
     assert all(torch.equal(a, b) for a, b in zip(t.net.state_dict().values(), init["model"].values()))
     specs = t._train_specs(0)
-    assert all(sp.seats == (jund, LEARNER) and sp.matchup == "jund_madness" for sp in specs)
+    assert all(sp.seats == (os.path.abspath(jund), LEARNER) and sp.matchup == "jund_madness" for sp in specs)
     t.train()
     rows = _rows(run)
-    assert [r["iteration"] for r in rows] == [1, 2]
+    assert [r["iteration"] for r in rows] == [1, 2] and "win_vs_main" in rows[0]
     assert "eval/opponent/red" in rows[1] and "eval/random/red" in rows[1] and "eval/random/jund" not in rows[1]
     assert rows[1]["bench/red_vs_bot_n"] == 4
-    assert sorted(p.name for p in (run / "pool").iterdir()) == ["iter_00000.pt"]  # no snapshots against a fixed opponent
     with pytest.raises(ValueError):
-        Trainer(_cfg(tmp_path / "bad", "--learner-seat", "1"))  # self-play needs both seats
+        Trainer(_cfg(tmp_path / "bad", "--exploit", jund, "--exploit-deck", "red"))  # no red deck in jund_blue

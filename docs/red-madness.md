@@ -66,10 +66,11 @@ game-1 games (200 games, Python engine) and the random agent in all of 100.
 
 ## Training a new deck against a fixed opponent
 
-    python -m mtg_ml.rl.train --run runs/red --matchup jund_madness --learner-seat 1 \
-        --opponent jund.pt --init-from jund.pt --self-play-frac 0
+    python -m mtg_ml.rl.train --run runs/red --matchup jund_madness --exploit jund.pt --exploit-deck red
 
-The learner only plays Red Madness, every non-bot game is against the frozen
-Jund checkpoint, and it starts from that checkpoint's weights. Evaluation:
-`eval/opponent/red`, `eval/random/red`, `eval/bot/red`, `bench/red_vs_bot*`
-(learner Red vs the Jund bot).
+Exploiter mode (`rl/train.py`) with a matchup: the learner only plays Red
+Madness, every training game is against the frozen Jund checkpoint, and it
+starts from that checkpoint's weights (`--init` to start elsewhere).
+Evaluation: `eval/opponent/red` (the frozen checkpoint, in place of pool0),
+`eval/random/red`, `bench/red_vs_bot*` (learner Red vs the Jund bot);
+`evaluate.py --matchup jund_madness --seat 1` for one-off evaluations.

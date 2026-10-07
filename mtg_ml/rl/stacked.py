@@ -143,8 +143,8 @@ class PolicyStack:
     (CUDA graphs captured over the stack stay valid)."""
 
     def __init__(self, config: dict, capacity: int, device):
-        if config["trunk"] not in STACKABLE_TRUNKS:
-            raise ValueError(f"trunk {config['trunk']!r} is not stackable (only {STACKABLE_TRUNKS})")
+        if not PolicyStack.supports(config):
+            raise ValueError(f"config {config} is not stackable (trunks {STACKABLE_TRUNKS}, no entity attention)")
         from .model import PolicyNet
 
         self.config = dict(config)
@@ -168,7 +168,10 @@ class PolicyStack:
 
     @staticmethod
     def supports(config: dict) -> bool:
-        return config.get("trunk") in STACKABLE_TRUNKS
+        """Entity self-attention needs a (rows, entities per row) layout whose
+        width the server's padded shapes do not carry yet: those policies
+        run on the server's eager per-policy path."""
+        return config.get("trunk") in STACKABLE_TRUNKS and not config.get("entity_attn")
 
     def load(self, slot: int, net) -> None:
         if net.config != self.config:
@@ -355,6 +358,8 @@ def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | 
             hn = torch.cat([hn, hvn], 1)
     else:
         values = grouped_linear(c, D["value_head.weight"], D["value_head.bias"], pol)[:, 0]
+    if cfg.get("value_bound", "none") == "tanh":
+        values = torch.tanh(values)
     if hn is not None:
         if write_hidden:
             hidden_table.index_copy_(0, x.gslot, hn)

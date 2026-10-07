@@ -149,6 +149,9 @@ def test_split_minibatches_equal_collate(data, device, seed):
         for f in fields(Batch):
             if f.name == "bag_t":  # padded pieces only
                 continue
+            if f.name == "ent_width":  # a bound: the whole epoch's (tests/test_entity_attention.py)
+                assert b.ent_width >= direct.ent_width
+                continue
             want = getattr(ref if f.name in SHARED else direct, f.name)
             assert torch.equal(getattr(b, f.name).cpu(), want), f.name
 

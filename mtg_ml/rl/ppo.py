@@ -47,6 +47,7 @@ _LOG_TRIVIAL_P = math.log(TRIVIAL_P)
 @dataclass
 class PPOConfig:
     lr: float = 3e-4
+    lr_final: float = 3e-5  # where the learning rate anneals to when the trainer's --lr-anneal-games is set
     epochs: int = 4
     minibatch: int = 2048
     clip: float = 0.2
@@ -57,14 +58,36 @@ class PPOConfig:
     capture: int = 2  # on CUDA: 1 every step a CUDA graph replay over padded minibatches, 2 also the forward and losses compiled by Inductor (~15% faster, ~10-30 s of compiling per process), 0 plain eager steps
 
 
-def make_optimizer(params, lr: float, device) -> torch.optim.Optimizer:
+def make_optimizer(params, lr: float, device, tensor_lr: bool = False) -> torch.optim.Optimizer:
     """Adam with eps 1e-5; on CUDA fused (one kernel for all parameters
-    instead of a few per tensor), elsewhere plain. `Optimizer.load_state_dict`
+    instead of a few per tensor), elsewhere plain. `tensor_lr`: the learning
+    rate is a one-element tensor on `device` that `set_lr` changes in place,
+    so the CUDA graphs of the update (which read it from device memory) stay
+    valid while it anneals; a float lr is baked into each graph and a new
+    value means recapturing them all. `Optimizer.load_state_dict`
     restores the `fused` flag from the checkpoint's param groups, so after
     resuming callers must set `group["fused"]` again, and for a checkpoint
     of an unfused optimizer also move every `state["step"]` to its
     parameter's device (plain Adam keeps it on the CPU; fused Adam fails on that)."""
+    if tensor_lr:
+        lr = torch.tensor(float(lr), dtype=torch.float32, device=device)
     return torch.optim.Adam(params, lr=lr, eps=1e-5, fused=torch.device(device).type == "cuda")
+
+
+def set_lr(opt: torch.optim.Optimizer, lr: float) -> None:
+    """Set the learning rate of every param group: in place for a tensor lr
+    (`make_optimizer(tensor_lr=True)`; captured step graphs keep replaying),
+    else by replacing the float (the step graphs are then recaptured)."""
+    for g in opt.param_groups:
+        if torch.is_tensor(g["lr"]):
+            g["lr"].fill_(lr)
+        else:
+            g["lr"] = lr
+
+
+def get_lr(opt: torch.optim.Optimizer) -> float:
+    lr = opt.param_groups[0]["lr"]
+    return float(lr.item()) if torch.is_tensor(lr) else float(lr)
 
 
 def load_optimizer_state(opt: torch.optim.Optimizer, state_dict: dict) -> None:
@@ -74,7 +97,8 @@ def load_optimizer_state(opt: torch.optim.Optimizer, state_dict: dict) -> None:
     parameter's device (plain Adam keeps it on the CPU, which fused Adam
     rejects). The steps are the same either way. Also keeps this optimizer's
     learning rates: the checkpoint's groups would bring the lr it was saved
-    with, silently overriding a changed --ppo-lr on resume."""
+    with, silently overriding a changed --ppo-lr on resume. A tensor lr stays
+    the same tensor object (its value is the caller's to set: `set_lr`)."""
     fused = opt.param_groups[0].get("fused")
     lrs = [g["lr"] for g in opt.param_groups]
     opt.load_state_dict(state_dict)
@@ -180,6 +204,7 @@ def _inputs(shapes: dict) -> list[tuple[str, str, int]]:
     out = [(name, "i", shapes[lvl]) for name, (lvl, _, _) in PAD_FIELDS.items()]
     out += [(f"t_{k}_{x}", "i", shapes[k] if x == "bag" else shapes[f"u_{k}"]) for k in keys for x in ("bag", "off", "uid")]
     out += [(name, "i", R) for name in ("pos_in", "pos_out", "action", "kind")] + [(name, "f", R) for name in ("old_logp", "adv", "ret", "weight")]
+    out += [("e_pos", "i", shapes["ent"])] if "entw" in shapes else []  # entity attention
     return out + [("n", "f", 1)] + ([("t_e_w", "f", shapes["e"])] if "e" in keys else [])
 
 
@@ -198,7 +223,7 @@ def _padded_losses(net, cfg, shapes, gru, ints, flts):
     its GRU batch of shape gru = (sequences, steps)."""
     v = {k: (ints if buf == "i" else flts).narrow(0, at, size) for k, (buf, at, size) in _layout(shapes).items()}
     seq = SequenceLayout(v["pos_in"], v["pos_out"], *gru)
-    return _losses(net, cfg, padded_batch(v), seq, shapes["width"], v["action"], v["old_logp"], v["adv"], v["ret"], v["weight"], v["n"][0], v["kind"])
+    return _losses(net, cfg, padded_batch(v, shapes.get("entw")), seq, shapes["width"], v["action"], v["old_logp"], v["adv"], v["ret"], v["weight"], v["n"][0], v["kind"])
 
 
 def _need(counts: dict, extra: dict) -> dict:
@@ -207,16 +232,17 @@ def _need(counts: dict, extra: dict) -> dict:
     return pad_sizes(counts) | {"width": extra["width"]}
 
 
-def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None, choose_gru=None, kinds=None):
+def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None, choose_gru=None, kinds=None, ent_width=False):
     """The minibatches of an epoch padded to one set of shapes, packed as
     (pieces, ·) int64 and float32 tensors in `_layout` order, and the GRU
     batch of each, (trajectories, longest), rounded to 4 sizes per octave:
     the GRU's time is ~linear in both. `choose(counts, extra)` picks the
     shapes (`_need` or a cached one they fit), `choose_gru(shapes, gru)`
-    may pick a bigger GRU batch; `transpose` goes to `pad_split`."""
+    may pick a bigger GRU batch; `transpose` and `ent_width` (entity
+    attention) go to `pad_split`."""
     dev = acts.device
     extra = {"width": int(width.max())}
-    fields, shapes, counts = pad_split(big, bounds, lambda counts: choose(counts, extra), transpose)
+    fields, shapes, counts = pad_split(big, bounds, lambda counts: choose(counts, extra), transpose, ent_width)
     M, R = len(chunks), shapes["row"]
     gru = [(bucket(len(c), 4), bucket(max(c), 4)) for c in chunks]
     if choose_gru:
@@ -244,8 +270,9 @@ class _StepGraphs:
     graphs need); epochs whose minibatches fit a captured shape reuse its
     graphs. The graphs hold the addresses of the weights, Adam state and the
     hyperparameters, so `fingerprint` covers these, and `_graphs_for` drops
-    the graphs when it changes (a reloaded optimizer state, a new learning
-    rate)."""
+    the graphs when it changes (a reloaded optimizer state, a new float
+    learning rate). A tensor learning rate enters by its address, not its
+    value: the graphs read it, so `set_lr` changes it without a recapture."""
 
     MAX_SHAPES = 3  # each with a graph per GRU batch (~16)
     MARGIN = 1.25  # a new shape has room for 25% more than the epoch that needed it: a shape is ~16-50 captures (seconds), and games grow over a long run (1.05 recaptured every few iterations: 1.7 -> 6 s per update)
@@ -262,7 +289,8 @@ class _StepGraphs:
     def fingerprint_of(net, opt, cfg) -> tuple:
         params = [p for g in opt.param_groups for p in g["params"]]
         state = tuple(t.data_ptr() for p in params for t in opt.state.get(p, {}).values() if torch.is_tensor(t))
-        groups = tuple((g["lr"], g["betas"], g["eps"], g["weight_decay"], g.get("amsgrad"), g.get("maximize")) for g in opt.param_groups)
+        lr = lambda x: ("tensor", x.data_ptr(), x.device) if torch.is_tensor(x) else x  # noqa: E731
+        groups = tuple((lr(g["lr"]), g["betas"], g["eps"], g["weight_decay"], g.get("amsgrad"), g.get("maximize")) for g in opt.param_groups)
         return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm, cfg.capture)
 
     def choose(self, counts: dict, extra: dict) -> dict:
@@ -455,7 +483,10 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
                 _step(net, opt, cfg, loss)
                 acc += stats
         else:
-            shapes, gru, ints, flts = _padded_epoch(big, bounds, chunks, acts, rec, width, graphs.choose if graphs else _need, transpose, graphs and graphs.choose_gru, knd)
+            shapes, gru, ints, flts = _padded_epoch(
+                big, bounds, chunks, acts, rec, width, graphs.choose if graphs else _need, transpose, graphs and graphs.choose_gru,
+                kinds=knd, ent_width=bool(net.config.get("entity_attn")),
+            )
             del big
             if graphs:
                 graphs.run(net, opt, cfg, shapes, gru, ints, flts)
