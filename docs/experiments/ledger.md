@@ -5,6 +5,7 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 ## Open (handoff 2026-10-07)
 
 - Round 4 is training on h100-private (`~/mtg-ml-r4`, `launch_r4.sh`, code PR fmssn/mtg-ml#28): `r4-mix` (cores 0-31, GPUs 0+1) learns all three decks, `r4-control` (cores 32-63, GPUs 4+5) only jund_blue, same schedule. When they end (20.4M games total): archive both, `final_evals.sh` with `H2H="20261007-r4-mix 20261007-r4-control;20261007-r4-control 20261007-r3-postboard"`, ladder L1, and the mix's per-matchup benchmarks (`evaluate --matchup jund_madness|blue_madness --seat 0|1`).
+- Round 5 is training alongside (same box copy, `launch_fresh.sh`): `r5-mix-h128` (GPUs 2+3) and `r5-mix-h256` (GPUs 6+7), fresh three-deck mixes to 10M games, all 64 cores shared by four runs. When they end: archive, final evals, ladder, per-matchup benchmarks, and the h256 vs h128 head to head.
 - Still open: settle postboard with a 5,000-game head to head; ladder L2 (rungs: L1 + `r1-lranneal` + `r3-control`).
 - Scripts: `tools/experiments/`.
 
@@ -13,6 +14,8 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
 | 20261007-red-madness-1m | new deck: Red Madness learner vs frozen r1-control Jund, warm-started from it | 1M | (vs Jund bot) 89.9% | 92.6% | | new-deck baseline⁴ |
+| 20261007-r5-mix-h256 | fresh h256 entity net on the three-deck mix (feature set 3) | 10M | running | | | |
+| 20261007-r5-mix-h128 | fresh h128 entity net on the three-deck mix, same flags (width control) | 10M | running | | | |
 | 20261007-r4-mix | r3-postboard + Red Madness: one network on jund_blue, jund_madness, blue_madness (feature set 3) | 10.4M + 10M | running | | | |
 | 20261007-r4-control | r3-postboard, jund_blue only, same schedule and feature set 3 | 10.4M + 10M | running | | | |
 | 20261007-r3-attn | R3 + 1 entity self-attention layer (identity init) | 9.4M + 1M | 73.3% | 75.0% | 152 ± 13 | reject (no gain, ~10× slower) |
@@ -35,6 +38,14 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows.
 
 ---
+
+## 20261007-r5 · width test on the three-deck mix
+
+- **Question**: r4-mix lost ~5 points on Jund vs Blue against its control. Is that model size? Same mix from scratch at h128 and h256; if h256 is clearly better on Jund vs Blue (and on the new pairings), scale width before adding decks.
+- **Parent**: none (fresh). A trained h128 cannot be widened, so both arms start from zero.
+- **Code**: PR fmssn/mtg-ml#28 (matchup mix, feature set 3, stack fix), box copy `~/mtg-ml-r4`.
+- **Flags** (both arms): `--hidden {128|256} --trunk entity --value-net shared --engine native --device cuda --inference server --server-device cuda:1 --workers 20 --games-per-iter 2048 --total-games 10000000 --seed 5 --features 3 --postboard-frac 0.2 --matchup jund_blue,jund_madness,blue_madness --ppo-lr 3e-4 --ppo-lr-final 3e-5 --lr-anneal-games 10000000 --eval-every-games 500000 --bench-games 1000 --bench-greedy-games 1000 --ladder <L1>`; cores 0-63 shared with r4 (speeds not comparable to other rounds).
+- **Result**: running.
 
 ## 20261007-r4 · one network for three decks
 
