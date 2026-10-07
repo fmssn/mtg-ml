@@ -228,7 +228,9 @@ def test_ppo_update_matches_the_reference(data, monkeypatch, trunk, value_net, m
     assert ref["clip_frac"] > 0.1 and ref["approx_kl"] > 1e-3
     for k in ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac", "explained_var"):
         assert stats[k] == pytest.approx(ref[k], rel=1e-5, abs=1e-7), k
-    assert all(torch.allclose(p, q, atol=1e-6) for p, q in zip(net.parameters(), ref_net.parameters()))
+    # the scorer's final bias shifts every option's logit alike: its true gradient is 0, so Adam walks it on rounding noise alone
+    for (name, p), q in zip(net.named_parameters(), ref_net.parameters()):
+        assert torch.allclose(p, q, atol=1e-5 if name == "scorer.2.bias" else 1e-6), name
 
 
 def test_make_optimizer_fuses_on_cuda_only():
