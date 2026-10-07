@@ -2190,6 +2190,8 @@ def _take_initiative_effect(g: Game, item: StackItem):
     yield from g.take_initiative(item.controller)
 
 
+_take_initiative_effect.ops = ({"op": "take_initiative"},)  # read by encode.option_preview, as Rust's Op::TakeInitiative
+
 # The initiative's inherent triggers (725.2), with the Undercity as their source.
 VENTURE_TRIGGER = TriggerDef("venture into Undercity", "initiative", _venture_effect)
 INITIATIVE_TRIGGER = TriggerDef("take the initiative", "initiative", _take_initiative_effect)

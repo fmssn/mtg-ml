@@ -322,6 +322,21 @@ def test_combat_damage_to_the_initiative_holder_takes_it():
     assert g.players[0].life == 19 and g.players[1].dungeon_room == "Secret Entrance"
 
 
+def test_the_initiative_steal_trigger_shows_its_op():
+    """On the stack, the inherent take-the-initiative trigger reads as the
+    take_initiative op in both engines (set 5 `e:res:op:`)."""
+    from mtg_ml.encode import entity_features
+
+    g = scenario(p1={"battlefield": ["Llanowar Elves"]}, active=1, step="declare_attackers")
+    g.initiative = 0
+    choose(g, "Attack with Llanowar Elves")
+    seen = False
+    while g.initiative != 1:
+        seen |= any("e:res:op:take_initiative" in e for e in entity_features(g, 0)[0])
+        g.step(0)
+    assert seen
+
+
 # ---------------------------------------------------------------------------
 # Tokens: Treasure, Skeleton (menace)
 # ---------------------------------------------------------------------------
