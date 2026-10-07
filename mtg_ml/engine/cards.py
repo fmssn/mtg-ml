@@ -168,6 +168,13 @@ def _op_damage_target(g, item, op):
         g.deal_damage(_source(item), item.targets[i], n)
 
 
+def _op_damage_target_controller(g, item, op):
+    """The source deals n damage to the controller of the targeted permanent (Smash to Smithereens)."""
+    t = g.target(item)
+    if t is not None:
+        g.deal_damage(_source(item), ("player", t.controller), op["n"])
+
+
 def _op_damage_each_opponent(g, item, op):
     """if_discarded_nonland: only if the card discarded to cast it was not a land (Grab the Prize)."""
     if op.get("if_discarded_nonland") and item.data.get("discarded_land", True):
@@ -198,6 +205,30 @@ def _op_return_to_battlefield(g, item, op):
     c = item.data["card"]
     if c.zone == "graveyard" and c.oid == item.data["oid"]:
         g.put_onto_battlefield(c, c.owner, tapped=op.get("tapped", False))
+
+
+def _op_exile_target(g, item, op):
+    t = g.target(item)
+    if t is not None:
+        g._move(t, "exile")
+
+
+def _op_exile_from_graveyards(g, item, op):
+    """Exile up to n cards from any graveyards, chosen one at a time as the
+    effect resolves (Faerie Macabre; the engine has no graveyard targets)."""
+    p = item.controller
+    n = op["n"]
+    for i in range(n):
+        options = [Option("Exile nothing more", ("exile_any_gy", None), None)]
+        for q in (p, 1 - p):
+            rel = "self" if q == p else "opponent"
+            options += [Option(f"Exile {c.name} ({rel} graveyard)", ("exile_any_gy", rel, c.name), c) for c in g._dedupe_by_name(g.players[q].graveyard)]
+        if len(options) == 1:
+            return
+        c = yield from g.ask(p, EXILE_FROM_GY, f"{item.name}: exile a card from a graveyard ({i + 1}/{n})", options)
+        if c is None:
+            return
+        g._move(c, "exile")
 
 
 def _op_exile_all_graveyards(g, item, op):
@@ -280,11 +311,14 @@ OPS = {
     "lose_life": _op_lose_life,
     "counter_on_source": _op_counter_on_source,
     "damage_target": _op_damage_target,
+    "damage_target_controller": _op_damage_target_controller,
     "damage_each_opponent": _op_damage_each_opponent,
     "damage_each_creature": _op_damage_each_creature,
     "discard": _op_discard,
     "return_to_battlefield": _op_return_to_battlefield,
     "exile_graveyard": _op_exile_graveyard,
+    "exile_target": _op_exile_target,
+    "exile_from_graveyards": _op_exile_from_graveyards,
     "exile_all_graveyards": _op_exile_all_graveyards,
     "search_library": _op_search_library,
     "optional_payment": _op_optional_payment,
@@ -489,6 +523,8 @@ def _condition(spec: dict | None):
     if set(spec) == {"spell"}:  # you_cast: the kind of spell cast
         flt = CAST_FILTERS[spec["spell"]]
         return lambda g, src, card: flt(card)
+    if spec == {"bargained": True}:  # etb: the permanent was cast bargained
+        return lambda g, src, method: method == "bargain"
     raise ValueError(f"unsupported trigger condition {spec!r}")
 
 
@@ -521,7 +557,7 @@ def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:
 SHAPE_CARD_FIELDS = frozenset({
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow",
     "plot", "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect",
-    "modes", "overload_effect", "abilities", "triggers",
+    "modes", "overload_effect", "abilities", "triggers", "bargain",
 })  # fmt: skip
 # Shown on entities otherwise (name, printed types, keywords, P/T) or not at all.
 NON_SHAPE_CARD_FIELDS = frozenset({"name", "types", "subtypes", "supertypes", "text", "power", "toughness", "keywords", "escape_exile"})
@@ -530,7 +566,7 @@ SHAPE_ABILITY_FIELDS = frozenset({
     "sorcery_speed", "mana", "targets",
 })  # fmt: skip
 NON_SHAPE_ABILITY_FIELDS = frozenset({"name"})
-SHAPE_TRIGGER_FIELDS = frozenset({"event", "effect", "condition"})
+SHAPE_TRIGGER_FIELDS = frozenset({"event", "effect", "condition", "targets"})
 NON_SHAPE_TRIGGER_FIELDS = frozenset({"name"})
 
 
@@ -568,7 +604,7 @@ def _ability(a: dict) -> AbilityDef:
 
 def _trigger(t: dict) -> TriggerDef:
     _check_fields(t, "trigger", SHAPE_TRIGGER_FIELDS, NON_SHAPE_TRIGGER_FIELDS, t.get("name", "?"))
-    return TriggerDef(t["name"], t["event"], make_effect(t["effect"]), _condition(t.get("condition")))
+    return TriggerDef(t["name"], t["event"], make_effect(t["effect"]), _condition(t.get("condition")), _targets(t.get("targets")))
 
 
 def colors_of(spec: dict) -> frozenset[str]:
@@ -577,7 +613,7 @@ def colors_of(spec: dict) -> frozenset[str]:
     cost = spec.get("cost")
     if spec.get("devoid") or not cost:
         return frozenset()
-    return frozenset(c for c in "WUBRG" if "{%s}" % c in cost)
+    return frozenset(c for c in "WUBRG" if "{%s}" % c in cost or "{%s/P}" % c in cost)
 
 
 def _land_sac(spec: dict | None) -> tuple[str, int] | None:
@@ -641,6 +677,8 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
     t = [f"e:mv>={k}" for k in SHAPE_MV_STEPS if d.cost.mana_value >= k]
     if "{X}" in spec.get("cost", ""):
         t.append("e:cost:x")
+    if "/P}" in spec.get("cost", ""):
+        t.append("e:cost:phyrexian")
     t += [f"e:color:{c}" for c in "WUBRG" if c in d.colors]
     if "cost_reduction" in spec:
         t.append(f"e:cost:reduction:{spec['cost_reduction']}")
@@ -648,6 +686,8 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t += ["e:cost:additional_sac", f"e:cost:additional_sac:{spec['additional_sac']}"]
     if spec.get("additional_discard"):
         t.append("e:cost:additional_discard")
+    if spec.get("bargain"):
+        t.append("e:cost:bargain")
     t += [f"e:cost:{k}" for k in SHAPE_COST_KEYS if k in spec]
     if "flashback_cost" in spec:
         t += ["e:cost:flashback", "e:cost:sac_lands"]
@@ -688,7 +728,8 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t += _op_tokens("e:ab:op:", a.get("effect"))
     for tr in spec.get("triggers", ()):
         t.append(f"e:trig:{tr['event']}")
-        t += [f"e:trig:cond:{k}:{v}" for k, v in tr.get("condition", {}).items()]
+        t += [f"e:trig:cond:{k}:{v if isinstance(v, str) else str(v).lower()}" for k, v in tr.get("condition", {}).items()]
+        t += _target_tokens("e:trig:target:", tr.get("targets", ()))
         t += _op_tokens("e:trig:op:", tr["effect"])
     return tuple(dict.fromkeys(t))
 
@@ -696,6 +737,7 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
 def card_def(spec: dict) -> CardDef:
     _check_fields(spec, "card", SHAPE_CARD_FIELDS, NON_SHAPE_CARD_FIELDS, spec.get("name", "?"))
     cr = spec.get("cost_reduction")
+    phy = ManaCost.phyrexian(spec.get("cost"))
     d = CardDef(
         name=spec["name"],
         cost=M(spec.get("cost")),
@@ -723,6 +765,9 @@ def card_def(spec: dict) -> CardDef:
         additional_discard=spec.get("additional_discard", False),
         alternative_sac=_land_sac(spec.get("alternative_cost")),
         flashback_sac=_land_sac(spec.get("flashback_cost")),
+        phyrexian_cost=M(spec.get("cost")).minus_colored(phy) if phy.colored else None,
+        phyrexian_life=2 * phy.mana_value,
+        bargain=spec.get("bargain", False),
         abilities=tuple(_ability(a) for a in spec.get("abilities", ())),
         triggers=tuple(_trigger(t) for t in spec.get("triggers", ())),
         enters_tapped=spec.get("enters_tapped", False),
