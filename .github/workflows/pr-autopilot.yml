@@ -233,11 +233,18 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: bash "$AP/run-claude.sh" "$AP/escalate.md" opus 10 30m
       - name: "Escalate: guard, push, decide"
+        id: escalate
         if: steps.esc.outcome == 'success'
         working-directory: pr
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: python "$AP/finish.py" escalate "$PR" "$HEAD_REF" "$ROUND"
+      - name: "Escalate: retry on the new head"
+        if: steps.escalate.outputs.outcome == 'retry'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run pr-autopilot.yml -f pr="$PR" -f reason=escalate
 
   # Something landed on the default branch (or the half-hourly sweep): bring every
   # ready PR up to date so the required checks run against the new base. Conflicts

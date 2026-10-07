@@ -122,6 +122,8 @@ def main():
             # The developer pushed while we worked. Drop this round and run again on the new head.
             if stage == "fix":
                 gh("pr", "edit", pr, "--remove-label", f"autopilot:round-{rnd}")
+            else:
+                gh("pr", "edit", pr, "--remove-label", "autopilot:opus-used")
             output(outcome="retry", reason=f"{head} moved during the run")
             print(f"{head} moved during the run; nothing pushed, retrying", file=sys.stderr)
             return 0
