@@ -8,10 +8,10 @@
       "port": 8765
     },
     {
-      "name": "r4-tracker",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8790", "--directory", "/private/tmp/claude-501/-Users-fabsi-repos-mtg-ml--claude-worktrees-h128-encoder-optimization-c3d152/3d76caf6-aa08-4dfb-a997-08406b98ba4c/scratchpad"],
-      "port": 8790
+      "name": "live-play",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--no-sync", "python", "-m", "mtg_ml.replay", "serve", "--models", "runs/", "--engine", "native", "--port", "8766"],
+      "port": 8766
     }
   ]
 }
