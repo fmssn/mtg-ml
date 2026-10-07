@@ -289,13 +289,16 @@ def _mana_preview(game, player: int, cost, sac_filter, exclude: set[int]) -> lis
 
 
 def _kills_preview(game, player: int, ops, source) -> list[str]:
-    """Creatures the `damage_each_creature` ops would destroy, per side."""
+    """Creatures the `damage_each_creature` ops would destroy, per side (an
+    op whose amount is X, chosen later, is left out)."""
     dmg: dict[int, int] = {}
     for op in ops:
-        if op["op"] != "damage_each_creature":
+        if op["op"] != "damage_each_creature" or op.get("x"):
             continue
         without = op.get("without")
         for c in game.battlefield:
+            if op.get("whose") == "opponent" and c.controller == player:
+                continue
             if game.is_creature(c) and not (without and game.has(c, without)):
                 dmg[c.oid] = dmg.get(c.oid, 0) + op["n"]
     if not dmg:
@@ -342,13 +345,15 @@ def _target_preview(game, player: int, ref) -> list[str]:
             if game._cost_feasible(player, RemainingCost.of(cost.plus(ManaCost(c.face.ward))), sac, exclude):
                 f.append("pv:ward_payable")
     source = item.card if item.kind == "spell" else item.source
+    landfall = game.players[item.controller].landfall_turn == game.turn
     for op in _ops(item.effect):
-        if op["op"] != "damage_target":
+        if op["op"] != "damage_target" or op.get("index", 0) != len(item.targets):  # the target being chosen
             continue
+        n = op["n_landfall"] if "n_landfall" in op and landfall else op["n"]
         if ref[0] == "player":
-            lethal = op["n"] >= game.players[ref[1]].life
+            lethal = n >= game.players[ref[1]].life
         else:
-            lethal = game.is_creature(c) and _dies_to(game, c, op["n"], source is not None and game.has(game.live(source) or source, "deathtouch"))
+            lethal = game.is_creature(c) and _dies_to(game, c, n, source is not None and game.has(game.live(source) or source, "deathtouch"))
         if lethal:
             f.append("pv:damage_lethal_to_target")
     return f
@@ -381,7 +386,7 @@ def option_preview(game, player: int, i: int) -> list[str]:
     base = game._mode_cost(card, mode)
     if base is None or (choice is not None and choice >= len(d.modes)):
         return []
-    effect = d.effect if choice is None else d.modes[choice].effect
+    effect = d.overload_effect if mode == "overload" else d.effect if choice is None else d.modes[choice].effect
     cost = base.with_x(0).reduced(game._cost_reduction(player, card))
     return _kills_preview(game, player, _ops(effect), card) + _mana_preview(game, player, cost, d.additional_sac, set())
 
