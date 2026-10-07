@@ -35,7 +35,7 @@ No Anthropic API key exists anywhere in the workflow. `--max-budget-usd` (3 for 
 
 ## One-time setup
 
-1. Create a GitHub App (Settings → Developer settings → GitHub Apps): no webhook; repository permissions Contents, Pull requests and Issues read/write, Actions read. Install it on this repo. Store its App ID as repo **variable** `AUTOPILOT_APP_ID` and a generated private key as secret `AUTOPILOT_APP_PRIVATE_KEY`.
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps): no webhook; repository permissions Contents, Pull requests, Issues and Workflows read/write, Actions read (Workflows because merging the base branch in can carry workflow changes, which GitHub rejects from an App without it). Install it on this repo. Store its App ID as repo **variable** `AUTOPILOT_APP_ID` and a generated private key as secret `AUTOPILOT_APP_PRIVATE_KEY`.
 2. `gh secret set DEEPSEEK_API_KEY` and `gh secret set CLAUDE_CODE_OAUTH_TOKEN` (value from `claude setup-token`).
 3. `bash .github/autopilot/setup-repo.sh`: enables auto-merge and update-branch, adds the ruleset (PR + required checks, admins can bypass), creates the labels. Run it **before** merging this workflow: without the ruleset, `gh pr merge --auto` merges immediately.
 4. Turn off automatic Copilot code review (repo Settings → Rules / Copilot).
