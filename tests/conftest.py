@@ -6,6 +6,9 @@ marked `@pytest.mark.python_only`. Without a built `mtg_ml_native` the
 native variants are skipped.
 """
 
+import os
+import zlib
+
 import pytest
 
 from mtg_ml.backend import ENV_VAR, native_available
@@ -18,13 +21,21 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "native: needs the Rust engine (applied automatically, see below)")
 
 
-def pytest_collection_modifyitems(items):
+def pytest_collection_modifyitems(config, items):
     # CI's native job runs only `-m native`; the python job covers the rest. A test
     # that needs mtg_ml_native must have "native" in its id, live in test_difftest,
     # or carry @pytest.mark.native itself.
     for item in items:
         if "native" in item.nodeid.rsplit("::", 1)[-1] or item.module.__name__.endswith("test_difftest"):
             item.add_marker(pytest.mark.native)
+    # PYTEST_SHARD=i/n keeps a stable 1/n of the tests, so CI can run the suite as n jobs.
+    if shard := os.environ.get("PYTEST_SHARD"):
+        i, n = map(int, shard.split("/"))
+        keep, drop = [], []
+        for item in items:
+            (keep if zlib.crc32(item.nodeid.encode()) % n == i else drop).append(item)
+        config.hook.pytest_deselected(items=drop)
+        items[:] = keep
 
 
 def is_engine_module(name: str) -> bool:

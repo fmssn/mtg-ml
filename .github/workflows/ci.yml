@@ -44,12 +44,17 @@ jobs:
 
   python-tests:
     # Reference engine only: rules, cards, bots, golden digests, RL on CPU torch.
-    # Native variants skip here; native-tests runs them.
+    # Native variants skip here; native-tests runs them. Two shards (tests/conftest.py).
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     env:
       OMP_NUM_THREADS: "1"  # one torch thread per xdist worker
+      PYTEST_SHARD: ${{ matrix.shard }}/2
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
