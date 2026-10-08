@@ -204,6 +204,13 @@ def in_process(monkeypatch):
             record(jobs)
             return super().map(func, jobs, *args, **kwargs)
 
+        def terminate(self):
+            # Forced trainer failures can leave PoolThread waiting in map().
+            # ThreadPool.terminate drops queued work without resolving that
+            # result; drain these tiny test jobs so interpreter shutdown joins.
+            self.close()
+            self.join()
+
     monkeypatch.setattr(train_mod, "create_pool", lambda workers, inference="local", server=None, **kw: Pool(1))
     threads = torch.get_num_threads()
     torch.set_num_threads(1)

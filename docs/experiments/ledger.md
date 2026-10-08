@@ -5,7 +5,7 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 
 ## 20261008-r7-fs7-h256 · fresh full-matrix LR comparison
 
-- **Status:** prepared for unattended launch on `h100-private2`; target 20M games
+- **Status:** running since 22:47 Berlin October 8 on `h100-private2`; target 20M games
   per arm; 08:00 Berlin October 9 report, then healthy training continues.
 - **Parent:** none. Both arms initialize with seed 8 and parameter hash
   `c9b2d973e06e1c1050566c274ecd608dc8ddaafd41b6a44fd774de907baa4847`.

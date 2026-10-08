@@ -11,7 +11,8 @@ commits do not change the deployed runtime. Keep its checkout clean and frozen.
 
 Host: `h100-private2`, login `taiga-support`; checkout `~/mtg-ml-r7/code`.
 Campaign: `~/mtg-ml-r7/campaigns/overnight-20261008`.
-After preparation, run on the server:
+Launched at 22:47 Berlin on October 8. The following are the recorded commands;
+do not start duplicates while the sessions already exist:
 
 ```bash
 cd ~/mtg-ml-r7/code
@@ -85,6 +86,14 @@ missing, and every result records checkpoint/game count. Evaluator failure is
 recorded without affecting trainers or erasing completed results.
 
 ## Validation evidence
+
+The full fast suite passed 1,462 assertions with 26 skipped and 19 deselected
+in 1,272 seconds. Its interpreter then hung on an abandoned in-process test
+rollout and an inspection-only trainer. The stack was captured and only that
+pytest process tree was terminated. Test-only cleanup fixes drain tiny fixture
+jobs and close the inspection trainer; the deployed process-based collector is
+unchanged and its simultaneous smoke/resume exited cleanly. The six targeted
+cleanup/resume/crash checks passed and exited cleanly after the test-only fixes.
 
 Raw logs are under `h100-private2:~/mtg-ml-r7/validation/`.
 

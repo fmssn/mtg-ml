@@ -415,5 +415,8 @@
       "created_at": 1791492002.6871974,
       "smoke": false
     }
-  ]
+  ],
+  "launched_at": "2026-10-08T22:47:04+02:00",
+  "smoke_code_ref": "5937c3d162e92b134adbf09ec3f79b79d2b7f252",
+  "smoke_to_runtime_changes": "Paired-seed evaluation summaries, dashboard cadence, expanded GPU test; trainer/model/engine unchanged."
 }

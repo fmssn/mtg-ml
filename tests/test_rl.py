@@ -126,7 +126,9 @@ def test_trainer_stops_at_total_games(tmp_path):
     t = Trainer(cfg)
     t.train()
     assert t.iteration == 2 and t.games_total == 8
-    assert Trainer(cfg).games_total == 8  # restored from the checkpoint
+    restored = Trainer(cfg)
+    assert restored.games_total == 8
+    restored.train()  # already at the limit; close its newly started collector
 
 
 class _InProcess:
