@@ -199,6 +199,7 @@ fn ready(c: &Card, active: bool) -> bool {
 fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
     let d = db();
     let (fly, reach) = (d.kw("flying"), d.kw("reach"));
+    let unblockable = d.keyword_names.iter().position(|k| k == "unblockable").map_or(0, |i| 1u32 << i);
     // (controller, untapped, ready-if-its-controller-is-active, ready otherwise, power, keywords)
     let creatures: Vec<(u8, bool, bool, bool, i64, u32)> = st
         .battlefield
@@ -213,7 +214,7 @@ fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
         let (mut ready_power, mut evasive) = (0i64, 0i64);
         for c in creatures.iter().filter(|c| c.0 == p && if active { c.2 } else { c.3 }) {
             ready_power += c.4;
-            let blockable = blockers.iter().any(|&b| c.5 & fly == 0 || b & (fly | reach) != 0);
+            let blockable = c.5 & unblockable == 0 && blockers.iter().any(|&b| c.5 & fly == 0 || b & (fly | reach) != 0);
             if !blockable {
                 evasive += c.4;
             }
@@ -628,7 +629,7 @@ fn mana_preview(st: &State, player: u8, cost: &ManaCost, sac: Option<SacFilter>,
     out(format_args!("pv:mana_left_after:{}", (avail - cost.mana_value()).clamp(0, MANA_LEFT_CAP)));
     // Colours nothing can make are never left (skips the feasibility search).
     let mut makes = pl.pool.iter().filter(|(_, n)| *n > 0).fold(0u8, |m, (c, _)| m | bit(*c));
-    for &(ci, ai) in &sources {
+    for &(ci, ai) in sources.iter().chain(st.mana_filters(player, exclude).iter()) {
         makes |= st.c(ci).face().abilities[ai].mana.as_ref().map_or(0, |v| v.iter().fold(0, |m, c| m | bit(*c)));
     }
     for col in PREVIEW_COLORS {
@@ -739,7 +740,7 @@ fn target_preview(st: &State, player: u8, r: Ref, out: &mut impl FnMut(std::fmt:
     let landfall = st.players[item.controller as usize].landfall_turn == st.turn;
     for op in item.effect.unwrap_or(&[]) {
         // Only the op for the target being chosen.
-        if let Op::DamageTarget { n, index, n_landfall } = op {
+        if let Op::DamageTarget { n, index, n_landfall, .. } = op {
             if *index != item.targets.len() {
                 continue;
             }

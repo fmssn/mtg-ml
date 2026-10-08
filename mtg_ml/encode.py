@@ -175,6 +175,8 @@ def _ready(p: dict, active: bool) -> bool:
 
 def _can_block(blocker: dict, attacker: dict) -> bool:
     """`Game._can_block` on observed permanents."""
+    if "unblockable" in attacker["keywords"]:
+        return False
     return "flying" not in attacker["keywords"] or "flying" in blocker["keywords"] or "reach" in blocker["keywords"]
 
 
@@ -611,6 +613,8 @@ def _pay_preview(game, player: int, v) -> list[str]:
         r2.apply(v[1])
         pool = dict(game.players[player].pool)
         pool[v[1]] -= 1
+    elif v[0] != "source":  # a mana filter (Tron): no preview, as in native/src/features.rs
+        return []
     else:
         card, color = v[1], v[2]
         r2.apply(color)

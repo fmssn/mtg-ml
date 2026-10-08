@@ -62,6 +62,7 @@ pub struct Summary {
 fn flags(st: &State, v: u8) -> u8 {
     let d = crate::cards::db();
     let (fly, reach) = (d.kw("flying"), d.kw("reach"));
+    let unblockable = d.keyword_names.iter().position(|k| k == "unblockable").map_or(0, |i| 1u32 << i);
     let mut out = 0u8;
     for (k, p) in [v, 1 - v].into_iter().enumerate() {
         let active = st.active == p;
@@ -78,7 +79,8 @@ fn flags(st: &State, v: u8) -> u8 {
             let pw = st.power(c).max(0) as i64;
             ready += pw;
             let kw = st.keywords(c);
-            let blockable = st.battlefield.iter().map(|&b| st.c(b)).any(|b| b.controller != p && !b.tapped && st.is_creature(b) && (kw & fly == 0 || st.keywords(b) & (fly | reach) != 0));
+            let blockable = kw & unblockable == 0
+                && st.battlefield.iter().map(|&b| st.c(b)).any(|b| b.controller != p && !b.tapped && st.is_creature(b) && (kw & fly == 0 || st.keywords(b) & (fly | reach) != 0));
             if !blockable {
                 evasive += pw;
             }

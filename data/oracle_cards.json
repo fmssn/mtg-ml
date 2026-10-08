@@ -676,5 +676,773 @@
    "Storm"
   ],
   "cmc": 2.0
+ },
+ {
+  "name": "Hydroblast",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Choose one \u2014\n\u2022 Counter target spell if it's red.\n\u2022 Destroy target permanent if it's red.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Envelop",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Counter target sorcery spell.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Annul",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Counter target artifact or enchantment spell.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Gut Shot",
+  "mana_cost": "{R/P}",
+  "type_line": "Instant",
+  "oracle_text": "({R/P} can be paid with either {R} or 2 life.)\nGut Shot deals 1 damage to any target.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Troublemaker Ouphe",
+  "mana_cost": "{1}{G}",
+  "type_line": "Creature \u2014 Ouphe",
+  "oracle_text": "Bargain (You may sacrifice an artifact, enchantment, or token as you cast this spell.)\nWhen this creature enters, if it was bargained, exile target artifact or enchantment an opponent controls.",
+  "power": "2",
+  "toughness": "2",
+  "keywords": [
+   "Bargain"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Breath Weapon",
+  "mana_cost": "{2}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Breath Weapon deals 2 damage to each non-Dragon creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 3.0
+ },
+ {
+  "name": "Faerie Macabre",
+  "mana_cost": "{1}{B}{B}",
+  "type_line": "Creature \u2014 Faerie Rogue",
+  "oracle_text": "Flying\nDiscard this card: Exile up to two target cards from graveyards.",
+  "power": "2",
+  "toughness": "2",
+  "keywords": [
+   "Flying"
+  ],
+  "cmc": 3.0
+ },
+ {
+  "name": "Terminate",
+  "mana_cost": "{B}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Destroy target creature. It can't be regenerated.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Cast into the Fire",
+  "mana_cost": "{1}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Choose one \u2014\n\u2022 Cast into the Fire deals 1 damage to each of up to two target creatures.\n\u2022 Exile target artifact.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "End the Festivities",
+  "mana_cost": "{R}",
+  "type_line": "Sorcery",
+  "oracle_text": "End the Festivities deals 1 damage to each opponent and each creature and planeswalker they control.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Smash to Smithereens",
+  "mana_cost": "{1}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Destroy target artifact. Smash to Smithereens deals 3 damage to that artifact's controller.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Ancient Grudge",
+  "mana_cost": "{1}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Destroy target artifact.\nFlashback {G} (You may cast this card from your graveyard for its flashback cost. Then exile it.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flashback"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Myr Enforcer",
+  "mana_cost": "{7}",
+  "type_line": "Artifact Creature \u2014 Myr",
+  "oracle_text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)",
+  "power": "4",
+  "toughness": "4",
+  "keywords": [
+   "Affinity"
+  ],
+  "cmc": 7.0
+ },
+ {
+  "name": "Thoughtcast",
+  "mana_cost": "{4}{U}",
+  "type_line": "Sorcery",
+  "oracle_text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)\nDraw two cards.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Affinity"
+  ],
+  "cmc": 5.0
+ },
+ {
+  "name": "Galvanic Blast",
+  "mana_cost": "{R}",
+  "type_line": "Instant",
+  "oracle_text": "Galvanic Blast deals 2 damage to any target.\nMetalcraft \u2014 Galvanic Blast deals 4 damage instead if you control three or more artifacts.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Metalcraft"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Reckoner's Bargain",
+  "mana_cost": "{1}{B}",
+  "type_line": "Instant",
+  "oracle_text": "As an additional cost to cast this spell, sacrifice an artifact or creature.\nYou gain life equal to the sacrificed permanent's mana value. Draw two cards.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Mistvault Bridge",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "This land enters tapped.\nIndestructible\n{T}: Add {U} or {B}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Indestructible"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Utrom Monitor",
+  "mana_cost": "{4}{U}",
+  "type_line": "Artifact Creature \u2014 Utrom Scientist",
+  "oracle_text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)\nFlying (This creature can't be blocked except by creatures with flying or reach.)",
+  "power": "3",
+  "toughness": "3",
+  "keywords": [
+   "Flying",
+   "Affinity"
+  ],
+  "cmc": 5.0
+ },
+ {
+  "name": "Seat of the Synod",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "{T}: Add {U}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Silverbluff Bridge",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "This land enters tapped.\nIndestructible\n{T}: Add {U} or {R}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Indestructible"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Great Furnace",
+  "mana_cost": "",
+  "type_line": "Artifact Land",
+  "oracle_text": "{T}: Add {R}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Blood Fountain",
+  "mana_cost": "{B}",
+  "type_line": "Artifact",
+  "oracle_text": "When this artifact enters, create a Blood token. (It's an artifact with \"{1}, {T}, Discard a card, Sacrifice this token: Draw a card.\")\n{3}{B}, {T}, Sacrifice this artifact: Return up to two target creature cards from your graveyard to your hand.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Sewer-veillance Cam",
+  "mana_cost": "{U}",
+  "type_line": "Artifact",
+  "oracle_text": "Flash\nWhen this artifact enters or leaves the battlefield, you may tap or untap target creature.\n{3}{U}, Sacrifice this artifact: Draw two cards.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flash"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Black Mage's Rod",
+  "mana_cost": "{1}{B}",
+  "type_line": "Artifact \u2014 Equipment",
+  "oracle_text": "Job select (When this Equipment enters, create a 1/1 colorless Hero creature token, then attach this to it.)\nEquipped creature gets +1/+0, has \"Whenever you cast a noncreature spell, this creature deals 1 damage to each opponent,\" and is a Wizard in addition to its other types.\nEquip {3}",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Job select",
+   "Equip"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Kenku Artificer",
+  "mana_cost": "{2}{U}",
+  "type_line": "Creature \u2014 Bird Artificer",
+  "oracle_text": "Homunculus Servant \u2014 When this creature enters, put three +1/+1 counters on up to one target noncreature artifact. That artifact becomes a 0/0 Homunculus artifact creature with flying.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [
+   "Homunculus Servant"
+  ],
+  "cmc": 3.0
+ },
+ {
+  "name": "Extract a Confession",
+  "mana_cost": "{1}{B}",
+  "type_line": "Sorcery",
+  "oracle_text": "As an additional cost to cast this spell, you may collect evidence 6. (Exile cards with total mana value 6 or greater from your graveyard.)\nEach opponent sacrifices a creature of their choice. If evidence was collected, instead each opponent sacrifices a creature with the greatest power among creatures they control.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Collect evidence"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Unexpected Fangs",
+  "mana_cost": "{1}{B}",
+  "type_line": "Instant",
+  "oracle_text": "Put a +1/+1 counter and a lifelink counter on target creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Generous Ent",
+  "mana_cost": "{5}{G}",
+  "type_line": "Creature \u2014 Treefolk",
+  "oracle_text": "Reach\nWhen this creature enters, create a Food token. (It's an artifact with \"{2}, {T}, Sacrifice this token: You gain 3 life.\")\nForestcycling {1} ({1}, Discard this card: Search your library for a Forest card, reveal it, put it into your hand, then shuffle.)",
+  "power": "5",
+  "toughness": "7",
+  "keywords": [
+   "Reach",
+   "Landcycling",
+   "Food",
+   "Forestcycling",
+   "Typecycling",
+   "Cycling"
+  ],
+  "cmc": 6.0
+ },
+ {
+  "name": "Llanowar Elves",
+  "mana_cost": "{G}",
+  "type_line": "Creature \u2014 Elf Druid",
+  "oracle_text": "{T}: Add {G}.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Fyndhorn Elves",
+  "mana_cost": "{G}",
+  "type_line": "Creature \u2014 Elf Druid",
+  "oracle_text": "{T}: Add {G}.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Elvish Mystic",
+  "mana_cost": "{G}",
+  "type_line": "Creature \u2014 Elf Druid",
+  "oracle_text": "{T}: Add {G}.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Priest of Titania",
+  "mana_cost": "{1}{G}",
+  "type_line": "Creature \u2014 Elf Druid",
+  "oracle_text": "{T}: Add {G} for each Elf on the battlefield.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Quirion Ranger",
+  "mana_cost": "{G}",
+  "type_line": "Creature \u2014 Elf Ranger",
+  "oracle_text": "Return a Forest you control to its owner's hand: Untap target creature. Activate only once each turn.",
+  "power": "1",
+  "toughness": "1",
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Timberwatch Elf",
+  "mana_cost": "{2}{G}",
+  "type_line": "Creature \u2014 Elf",
+  "oracle_text": "{T}: Target creature gets +X/+X until end of turn, where X is the number of Elves on the battlefield.",
+  "power": "1",
+  "toughness": "2",
+  "keywords": [],
+  "cmc": 3.0
+ },
+ {
+  "name": "Winding Way",
+  "mana_cost": "{1}{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "Choose creature or land. Reveal the top four cards of your library. Put all cards of the chosen type revealed this way into your hand and the rest into your graveyard.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Lead the Stampede",
+  "mana_cost": "{2}{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "Look at the top five cards of your library. You may reveal any number of creature cards from among them and put the revealed cards into your hand. Put the rest on the bottom of your library in any order.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 3.0
+ },
+ {
+  "name": "Masked Vandal",
+  "mana_cost": "{1}{G}",
+  "type_line": "Creature \u2014 Shapeshifter",
+  "oracle_text": "Changeling (This card is every creature type.)\nWhen this creature enters, you may exile a creature card from your graveyard. If you do, exile target artifact or enchantment an opponent controls.",
+  "power": "1",
+  "toughness": "3",
+  "keywords": [
+   "Changeling"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Avenging Hunter",
+  "mana_cost": "{4}{G}",
+  "type_line": "Creature \u2014 Dragon Ranger",
+  "oracle_text": "Trample\nWhen this creature enters, you take the initiative.",
+  "power": "5",
+  "toughness": "4",
+  "keywords": [
+   "Trample"
+  ],
+  "cmc": 5.0
+ },
+ {
+  "name": "Sagu Wildling // Roost Seek",
+  "mana_cost": "{4}{G} // {G}",
+  "type_line": "Creature \u2014 Dragon // Sorcery \u2014 Omen",
+  "oracle_text": null,
+  "power": "3",
+  "toughness": "3",
+  "keywords": [
+   "Flying"
+  ],
+  "cmc": 5.0,
+  "faces": [
+   {
+    "name": "Sagu Wildling",
+    "mana_cost": "{4}{G}",
+    "type_line": "Creature \u2014 Dragon",
+    "oracle_text": "Flying\nWhen this creature enters, you gain 3 life.",
+    "power": "3",
+    "toughness": "3",
+    "keywords": null
+   },
+   {
+    "name": "Roost Seek",
+    "mana_cost": "{G}",
+    "type_line": "Sorcery \u2014 Omen",
+    "oracle_text": "Search your library for a basic land card, reveal it, put it into your hand, then shuffle. (Also shuffle this card.)",
+    "power": null,
+    "toughness": null,
+    "keywords": null
+   }
+  ]
+ },
+ {
+  "name": "Gingerbread Cabin",
+  "mana_cost": "",
+  "type_line": "Land \u2014 Forest",
+  "oracle_text": "({T}: Add {G}.)\nThis land enters tapped unless you control three or more other Forests.\nWhen this land enters untapped, create a Food token. (It's an artifact with \"{2}, {T}, Sacrifice this token: You gain 3 life.\")",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Food"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Monstrous Emergence",
+  "mana_cost": "{1}{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "As an additional cost to cast this spell, choose a creature you control or reveal a creature card from your hand.\nMonstrous Emergence deals damage equal to the power of the creature you chose or the card you revealed to target creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Vitu-Ghazi Inspector",
+  "mana_cost": "{1}{G}",
+  "type_line": "Creature \u2014 Elf Detective",
+  "oracle_text": "As an additional cost to cast this spell, you may collect evidence 6. (Exile cards with total mana value 6 or greater from your graveyard.)\nReach\nWhen this creature enters, if evidence was collected, put a +1/+1 counter on target creature and you gain 2 life.",
+  "power": "1",
+  "toughness": "3",
+  "keywords": [
+   "Collect evidence",
+   "Reach"
+  ],
+  "cmc": 2.0
+ },
+ {
+  "name": "Spinewoods Paladin",
+  "mana_cost": "{4}{G}",
+  "type_line": "Creature \u2014 Human Knight",
+  "oracle_text": "Trample\nWhen this creature enters, you gain 3 life.\nPlot {3}{G} (You may pay {3}{G} and exile this card from your hand. Cast it as a sorcery on a later turn without paying its mana cost. Plot only as a sorcery.)",
+  "power": "5",
+  "toughness": "4",
+  "keywords": [
+   "Plot",
+   "Trample"
+  ],
+  "cmc": 5.0
+ },
+ {
+  "name": "Deglamer",
+  "mana_cost": "{1}{G}",
+  "type_line": "Instant",
+  "oracle_text": "Choose target artifact or enchantment. Its owner shuffles it into their library.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Land Grant",
+  "mana_cost": "{1}{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "If you have no land cards in hand, you may reveal your hand rather than pay this spell's mana cost.\nSearch your library for a Forest card, reveal that card, put it into your hand, then shuffle.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Urza's Mine",
+  "mana_cost": "",
+  "type_line": "Land \u2014 Urza's Mine",
+  "oracle_text": "{T}: Add {C}. If you control an Urza's Power-Plant and an Urza's Tower, add {C}{C} instead.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Urza's Power Plant",
+  "mana_cost": "",
+  "type_line": "Land \u2014 Urza's Power-Plant",
+  "oracle_text": "{T}: Add {C}. If you control an Urza's Mine and an Urza's Tower, add {C}{C} instead.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Urza's Tower",
+  "mana_cost": "",
+  "type_line": "Land \u2014 Urza's Tower",
+  "oracle_text": "{T}: Add {C}. If you control an Urza's Mine and an Urza's Power-Plant, add {C}{C}{C} instead.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Expedition Map",
+  "mana_cost": "{1}",
+  "type_line": "Artifact",
+  "oracle_text": "{2}, {T}, Sacrifice this artifact: Search your library for a land card, reveal it, put it into your hand, then shuffle.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Bramble Wurm",
+  "mana_cost": "{6}{G}",
+  "type_line": "Creature \u2014 Wurm",
+  "oracle_text": "Reach, trample\nWhen this creature enters, you gain 5 life.\n{2}{G}, Exile this card from your graveyard: You gain 5 life.",
+  "power": "7",
+  "toughness": "6",
+  "keywords": [
+   "Reach",
+   "Trample"
+  ],
+  "cmc": 7.0
+ },
+ {
+  "name": "Ancient Stirrings",
+  "mana_cost": "{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "Look at the top five cards of your library. You may reveal a colorless card from among them and put it into your hand. Then put the rest on the bottom of your library in any order.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Crop Rotation",
+  "mana_cost": "{G}",
+  "type_line": "Instant",
+  "oracle_text": "As an additional cost to cast this spell, sacrifice a land.\nSearch your library for a land card, put that card onto the battlefield, then shuffle.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Barrels of Blasting Jelly",
+  "mana_cost": "{1}",
+  "type_line": "Artifact",
+  "oracle_text": "{1}: Add one mana of any color. Activate only once each turn.\n{5}, {T}, Sacrifice this artifact: It deals 5 damage to target creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Pinnacle Kill-Ship",
+  "mana_cost": "{7}",
+  "type_line": "Artifact \u2014 Spacecraft",
+  "oracle_text": "When this Spacecraft enters, it deals 10 damage to up to one target creature.\nStation (Tap another creature you control: Put charge counters equal to its power on this Spacecraft. Station only as a sorcery. It's an artifact creature at 7+.)\n7+ | Flying",
+  "power": "7",
+  "toughness": "7",
+  "keywords": [
+   "Station"
+  ],
+  "cmc": 7.0
+ },
+ {
+  "name": "Bonder's Ornament",
+  "mana_cost": "{3}",
+  "type_line": "Artifact",
+  "oracle_text": "{T}: Add one mana of any color.\n{4}, {T}: Each player who controls a permanent named Bonder's Ornament draws a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 3.0
+ },
+ {
+  "name": "Maelstrom Colossus",
+  "mana_cost": "{8}",
+  "type_line": "Artifact Creature \u2014 Golem",
+  "oracle_text": "Cascade (When you cast this spell, exile cards from the top of your library until you exile a nonland card that costs less. You may cast it without paying its mana cost. Put the exiled cards on the bottom in a random order.)",
+  "power": "7",
+  "toughness": "7",
+  "keywords": [
+   "Cascade"
+  ],
+  "cmc": 8.0
+ },
+ {
+  "name": "Boulderbranch Golem",
+  "mana_cost": "{7}",
+  "type_line": "Artifact Creature \u2014 Golem",
+  "oracle_text": "Prototype {3}{G} \u2014 3/3 (You may cast this spell with different mana cost, color, and size. It keeps its abilities and types.)\nWhen this creature enters, you gain life equal to its power.",
+  "power": "6",
+  "toughness": "5",
+  "keywords": [
+   "Prototype"
+  ],
+  "cmc": 7.0
+ },
+ {
+  "name": "Unfathomable Truths",
+  "mana_cost": "{4}{U}",
+  "type_line": "Instant",
+  "oracle_text": "Devoid (This card has no color.)\nDraw three cards and create a 0/1 colorless Eldrazi Spawn creature token with \"Sacrifice this token: Add {C}.\"",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Devoid"
+  ],
+  "cmc": 5.0
+ },
+ {
+  "name": "Candy Trail",
+  "mana_cost": "{1}",
+  "type_line": "Artifact \u2014 Food Clue",
+  "oracle_text": "When this artifact enters, scry 2.\n{2}, {T}, Sacrifice this artifact: You gain 3 life and draw a card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Scry"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Conduit Pylons",
+  "mana_cost": "",
+  "type_line": "Land \u2014 Desert",
+  "oracle_text": "When this land enters, surveil 1. (Look at the top card of your library. You may put it into your graveyard.)\n{T}: Add {C}.\n{1}, {T}: Add one mana of any color.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Surveil"
+  ],
+  "cmc": 0.0
+ },
+ {
+  "name": "Bojuka Bog",
+  "mana_cost": "",
+  "type_line": "Land",
+  "oracle_text": "This land enters tapped.\nWhen this land enters, exile target player's graveyard.\n{T}: Add {B}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Haunted Fengraf",
+  "mana_cost": "",
+  "type_line": "Land",
+  "oracle_text": "{T}: Add {C}.\n{3}, {T}, Sacrifice this land: Return a creature card at random from your graveyard to your hand.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 0.0
+ },
+ {
+  "name": "Call Damage Control",
+  "mana_cost": "{1}{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "Choose up to two. Return those cards from your graveyard to your hand.\n\u2022 Target artifact card.\n\u2022 Target creature card.\n\u2022 Target enchantment card.\n\u2022 Target land card.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Scour from Existence",
+  "mana_cost": "{7}",
+  "type_line": "Instant",
+  "oracle_text": "Exile target permanent.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 7.0
+ },
+ {
+  "name": "Kaervek's Torch",
+  "mana_cost": "{X}{R}",
+  "type_line": "Sorcery",
+  "oracle_text": "As long as Kaervek's Torch is on the stack, spells that target it cost {2} more to cast.\nKaervek's Torch deals X damage to any target.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Pulse of Murasa",
+  "mana_cost": "{2}{G}",
+  "type_line": "Instant",
+  "oracle_text": "Return target creature or land card from a graveyard to its owner's hand. You gain 6 life.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 3.0
+ },
+ {
+  "name": "Giant's Boulder",
+  "mana_cost": "{1}",
+  "type_line": "Artifact",
+  "oracle_text": "When this artifact enters, scry 2. (Look at the top two cards of your library, then put any number of them on the bottom and the rest on top in any order.)\n{1}, {T}: Add one mana of any color.\n{7}, {T}, Sacrifice this artifact: Destroy target permanent.",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Scry"
+  ],
+  "cmc": 1.0
+ },
+ {
+  "name": "Whispersilk Cloak",
+  "mana_cost": "{3}",
+  "type_line": "Artifact \u2014 Equipment",
+  "oracle_text": "Equipped creature can't be blocked and has shroud. (It can't be the target of spells or abilities.)\nEquip {2}",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Equip"
+  ],
+  "cmc": 3.0
  }
 ]

@@ -46,14 +46,15 @@ def _card(c) -> tuple:
     return (
         c.uid, c.oid, c.name, c.defn.name, c.owner, c.controller, c.zone, c.is_token, c.transformed, c.tapped, c.damage,
         c.deathtouch_damage, c.counters, c.sick, c.attached_to, c.skip_untap,
-        [(sorted(t.keywords), t.power, t.toughness) for t in c.temp], sorted(c.known_to),
+        [(sorted(t.keywords), t.power, t.toughness) for t in c.temp], sorted(c.known_to), c.animated, sorted(c.granted), c.prototyped, c.charge,
+        c.mana_used_turn,
     )  # fmt: skip
 
 
 def _data(d: dict) -> list:
     out = []
     for k, v in sorted(d.items()):
-        out.append((k, _card(v) if k in ("card", "sacrificed") else v))
+        out.append((k, _card(v) if k in ("card", "sacrificed", "chosen") else v))
     return out
 
 
@@ -73,6 +74,7 @@ def dump_state(g) -> dict:
         "winner": g.winner,
         "end_reason": g.end_reason,
         "match_game": g.match_game,
+        "initiative": g.initiative,
         "players": [
             {
                 "life": p.life,
@@ -83,6 +85,7 @@ def dump_state(g) -> dict:
                 "pool": list(p.pool.items()),
                 "drew_from_empty": p.drew_from_empty,
                 "cards_drawn_this_turn": p.cards_drawn_this_turn,
+                "dungeon_room": p.dungeon_room,
             }
             for p in g.players
         ],
@@ -397,7 +400,7 @@ def main(argv=None) -> None:
     )
     f.add_argument("--auto-mana", action="store_true", help="play with Game(auto_mana=True): colour-preserving auto payment")
     f.add_argument("--auto-pass", action="store_true", help="play with Game(auto_pass=True): collapse uneventful priority passes")
-    f.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue, jund_madness or blue_madness")
+    f.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue, jund_madness, blue_madness, jund_elves, blue_elves or madness_elves")
     r = sub.add_parser("repro", help="replay a saved divergence")
     r.add_argument("file")
     args = ap.parse_args(argv)
