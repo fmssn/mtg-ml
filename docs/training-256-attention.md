@@ -32,6 +32,10 @@ full training comparison. Existing r6 training processes were preserved.
   DDP hooks inside local CUDA capture. Forward/backward graphs share stable
   gradient storage; communication, clipping and Adam run outside capture.
   The first optimizer step matches ordinary PPO's uncompiled initialization.
+  A separate Gloo group coordinates host readiness before CUDA reductions so
+  a cold compile/capture on one rank does not leave another rank's NCCL reads
+  outstanding. Host preparation has a bounded ten-minute timeout; GPU
+  communication retains its ninety-second timeout.
 - `--pipeline 2` keeps two future rollouts queued. Checkpoints retain their exact
   games, behavior-policy versions and post-draw RNG, with durable policy-file
   pins until a replacement checkpoint succeeds. `--duration-seconds` stops at
@@ -128,6 +132,57 @@ wave overhead and charged/timed GPU-hours. Metrics retain queue delay separately
 from actual collection time, and distributed learners report memory by rank.
 Keep both successful and failed screens in the experiment ledger.
 
+A proposed allocation was prepared on the server at
+`/home/taiga-support/mtg-ml-256-opt/campaigns/screens-aed2ee8-proposed/campaign.json`.
+It uses buses 18, 0A, 87, 90, C7 and CPU cores 48–63 as a **template**, not a
+reservation. The read-only resource check correctly rejected overlap with the
+live r6 trainer and its descendants. Reprepare in a new directory with the
+actual dedicated CPU allocation and final deployed ref before launching. Prefer
+cores local to the learner/inference GPUs' NUMA nodes. No waiting launcher or
+training continuation has been armed.
+
+## Preliminary stage measurements
+
+These checks use `05103c4` on `h100-private`, buses 18/0A, one nice-19 thread on
+shared CPU core 63, PyTorch 2.14.1 / CUDA 13.0,
+`OMP_NUM_THREADS=MKL_NUM_THREADS=1`, and one compilation thread. They do **not**
+establish an end-to-end training speedup.
+
+Inference replay uses the frozen feature-6 parent, 26 policy copies, 19 requests
+of 32 real decisions, the six-deck matchup mixture, five warm-up and twenty
+timed batches. Eager attention took 447.53 ms/batch. Stacked attention took
+6.20 ms/batch in one run and 64.69 ms/batch in a repeat as host scheduling varied;
+CUDA-event graph replay remained 2.436–2.438 ms. The corrected padding counter
+reports 1,488 padded rows for 608 real decisions. Peak process allocation was
+4.80 GiB (4.51 GB for the 32-slot weight stack). FP32 attention selected
+PyTorch's memory-efficient CUTLASS kernel. These are random legal decisions and
+copies of the parent, rather than a completed mature-pool training rollout.
+
+Learner timing uses 21,475 real decisions / 192 trajectories collected from 128
+six-deck games with the frozen parent; identical saved data feeds both arms.
+Each uses minibatch 2048, four PPO epochs, five warm-up updates of four epochs,
+and twenty timed updates, with KL stopping disabled for the timing tool.
+
+| Precision | Time for 858 optimizer steps | Mean step | Peak process allocation |
+|---|---:|---:|---:|
+| FP32 | 44.76 s | 52.17 ms | 5.0 GiB |
+| BF16 dense/attention | 42.27 s | 49.26 ms | 4.0 GiB |
+
+Both timed regions captured 27 additional recurrent shapes; capture time was
+7.07 s / 2.38 s, respectively. CPU contention and overlapping isolated checks
+prevent treating the small wall-time difference as a reliable BF16 gain. Keep
+FP32 as the default pending dedicated-resource measurement.
+
+Profiling one actual learner graph (`gru=(20,512)`, entity-width 48, padded rows
+2816) confirmed FP32 CUTLASS memory-efficient SDPA and BF16 cuDNN flash SDPA.
+Both still launch 512 recurrent matrix products in each direction, plus the
+recurrent elementwise kernels. The width-256 GRU remains a substantial learner
+cost; the attention-only synthetic gain did not translate into a comparable
+complete-update gain here. Raw logs and the replay profiler are retained in the
+isolated deployment. A large full-update trace was stopped after its timed work
+completed because aggregation consumed excessive host time; the timing table
+above comes from separate runs without a profiler.
+
 ## Validation and current limits
 
 Local validation passed 1,228 fast CPU tests, plus the focused slow tests for
@@ -136,9 +191,14 @@ training/inference/attention suite passed 138 tests. CUDA checks cover compiled
 and uncompiled mixed-policy attention, trained nonzero weights, pointers,
 recurrent reset, zero-entity decisions, wide buckets, sparse policy IDs, and
 small→large→small backward graphs with stable gradient addresses and allocator
-cache flushing. Nine CUDA checks passed on buses 18/0A, including two-GPU NCCL
-eager/graph parity against single-GPU updates with unequal/empty shards and Adam
-state comparison. Four-rank CUDA correctness and scaling still require the
+cache flushing. Ten final CUDA checks passed on buses 18/0A at `aed2ee8`,
+including two-GPU NCCL eager/graph parity and compiled BF16 against single-GPU
+updates with unequal/empty shards. FP32 Adam moments use strict comparison;
+BF16 moment errors are bounded to 1% in both norm and largest entry because
+sharded dense GEMMs round gradients separately. Observed maximum relative norm
+error was 0.59%; loss and parameter checks keep their original tolerances.
+The final coordination/campaign CPU checks passed 22 tests. Four-rank CUDA
+correctness and scaling still require the
 dedicated resources. Campaign validation also covers occupied compute contexts,
 excluded GPUs, invalid allocations, and refusing to overwrite manifests.
 
