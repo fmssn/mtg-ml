@@ -6,7 +6,6 @@ import pytest
 from mtg_ml.match import EXPLICIT_ONLY, MATCHUPS, parse_matchups
 from mtg_ml.rl.evaluate import DECK_KEYS, score
 from mtg_ml.rl.rollout import BOT, LEARNER
-from mtg_ml.rl.train import TrainConfig, Trainer
 from tools.overnight_campaign import matrix_mix
 
 
@@ -43,6 +42,8 @@ def test_cross_deck_counts_stay_distinct():
 
 
 def test_frequent_evaluation_can_omit_extra_matchups():
+    pytest.importorskip('torch')
+    from mtg_ml.rl.train import TrainConfig, Trainer
     trainer = object.__new__(Trainer)
     trainer.cfg = TrainConfig(eval_extra_matchups=0)
     trainer.pool = ['parent.pt']

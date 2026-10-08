@@ -89,17 +89,19 @@ def handler(monitor):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--host', default='h100-private')
+    ap.add_argument('--host')
     ap.add_argument('--source', choices=('ssh', 'local'), default='ssh')
     ap.add_argument('--python', default=None)
-    ap.add_argument('--campaign', default='/home/taiga-support/mtg-ml-256-opt/campaigns/screens-20261008-dedicated')
-    ap.add_argument('--remote-script', default='/home/taiga-support/mtg-ml-256-opt/dashboard_snapshot.py')
+    ap.add_argument('--campaign', required=True)
+    ap.add_argument('--remote-script')
     ap.add_argument('--port', type=int, default=8767)
     ap.add_argument('--interval', type=int, default=15)
     ap.add_argument('--cache', default='.context/training-dashboard/state.json')
     args = ap.parse_args()
     if args.interval < 5:
         ap.error('Refresh interval must be at least five seconds')
+    if args.source == 'ssh' and not (args.host and args.remote_script):
+        ap.error('SSH mode requires --host and --remote-script')
     script = str(HERE / 'snapshot.py') if args.source == 'local' else args.remote_script
     interpreter = args.python or (sys.executable if args.source == 'local' else 'python3')
     monitor = Monitor(args.host, script, args.campaign, args.cache, args.interval, args.source, interpreter)

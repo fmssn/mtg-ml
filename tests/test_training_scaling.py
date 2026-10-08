@@ -369,6 +369,7 @@ def test_h256_set7_residency_crosses_64_policy_boundary(tmp_path):
         with pytest.raises(ValueError, match='not selected'):
             srv.register_key((paths[1], 0))
         keys = [learner, (paths[64], 0)]
+        cl.generation = int(srv.c[3])
         cl.ids = {k: srv.register_key(k) for k in keys}
         rows = [(k, i, 1 | GREEDY_FLAG, *_decision(73)) for i, k in enumerate(keys)]
         rows.sort(key=lambda r:r[0])

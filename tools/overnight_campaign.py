@@ -154,9 +154,13 @@ def run_arm(args):
     import fcntl
     with (run / 'supervisor.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        preflight(entry)
-        if (run / 'latest.pt').exists() and not args.resume:
-            raise ValueError('Use --resume explicitly for a previous run')
+        try:
+            preflight(entry)
+            if (run / 'latest.pt').exists() and not args.resume:
+                raise ValueError('Use --resume explicitly for a previous run')
+        except Exception as exc:
+            atomic(run / 'process.json', dict(status='failed', error=str(exc), finished_at=time.time(), code_ref=entry['code_ref']))
+            raise
         command = ['taskset', '-c', ','.join(map(str, entry['cpus'])), *entry['command']]
         p = subprocess.Popen(command, cwd=entry['code'], env=os.environ | entry['environment'],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
@@ -240,6 +244,8 @@ def panel(args):
     checkpoint = args.checkpoint or choose_common(arms)
     if not checkpoint:
         return
+    if state.get('completed_checkpoint') == checkpoint:
+        return
     import shutil
     frozen = Path(args.root) / 'evaluation-checkpoints' / checkpoint.removesuffix('.pt')
     frozen.mkdir(parents=True, exist_ok=True)
@@ -253,8 +259,6 @@ def panel(args):
     state.update(checkpoint=checkpoint, games=iteration*2048, status='running', updated_at=time.time())
     atomic(path, state)
     # Resume exact cells from the pinned common checkpoint, never silently mix snapshots.
-    if state.get('completed_checkpoint') == checkpoint:
-        return
     existing = {(r['arm'], r['matchup'], r['seat'], r['greedy']) for r in state['cells'] if r['checkpoint'] == checkpoint}
     for entry in arms:
         policy = str(frozen / (entry['name'] + '.pt'))
@@ -316,19 +320,35 @@ def report(root):
         rows = records(Path(entry['run']) / 'metrics.jsonl')
         last = rows[-1] if rows else {}
         evaluated = [r for r in rows if 'ladder/elo' in r]
-        outcome = dict(arm=entry['name'], latest=last, evaluation=evaluated[-1] if evaluated else None)
+        recent = rows[-20:]
+        wall = sum(r.get('wall_s', 0) for r in recent)
+        speed = sum(r.get('games', 0) for r in recent)*3600/wall if wall else None
+        process_file = Path(entry['run']) / 'process.json'
+        process = json.loads(process_file.read_text()) if process_file.exists() else {'status': 'queued'}
+        outcome = dict(arm=entry['name'], latest=last, evaluation=evaluated[-1] if evaluated else None,
+                       games_per_hour=speed, process=process, code_ref=entry['code_ref'])
         result['arms'].append(outcome)
         lines += [f"## {entry['name']}", f"Games: {last.get('games_total', 0):,}; learning rate: {last.get('lr', 'pending')}"]
+        lines += [f"Status: {process['status']}; rolling games/hour: {round(speed) if speed else 'pending'}; elapsed hours: {last.get('elapsed_s', 0)/3600:.2f}.",
+                  f"Policy loss: {last.get('pg_loss')}; value loss: {last.get('v_loss')}; entropy: {last.get('entropy')}; KL: {last.get('approx_kl')}; clipping: {last.get('clip_frac')}."]
         if evaluated:
             e = evaluated[-1]
             lines += [f"Evaluated at {e['games_total']:,} games: sampled {e.get('bench/jund_vs_bot')}; greedy {e.get('bench/jund_vs_bot_greedy')}; L1 Elo {e['ladder/elo']}."]
+            lines += [f"Sampled 95% CI: {e.get('bench/jund_vs_bot_ci')}; greedy 95% CI: {e.get('bench/jund_vs_bot_greedy_ci')}; L1 SE: {e.get('ladder/elo_se')}."]
         else:
             lines += ['Routine evaluation pending.']
         lines += ['']
     if (root / 'evaluation.json').exists():
         panel_state = json.loads((root / 'evaluation.json').read_text())
         result['matrix'] = panel_state
-        lines += [f"Matrix: {panel_state.get('status')}; {len(panel_state.get('cells', []))}/144 cells; {len(panel_state.get('h2h', []))}/21 head-to-head pairings."]
+        checkpoint = panel_state.get('checkpoint')
+        cells = [c for c in panel_state.get('cells', []) if c['checkpoint'] == checkpoint]
+        h2h = [c for c in panel_state.get('h2h', []) if c['checkpoint'] == checkpoint]
+        lines += [f"Matrix: {panel_state.get('status')}; checkpoint {checkpoint} ({panel_state.get('games')} games); {len(cells)}/144 cells; {len(h2h)}/21 head-to-head pairings."]
+        if h2h:
+            weight = sum(c['weight'] for c in h2h)
+            lines += [f"Descriptive weighted A score: {sum(c['weight']*c['score'] for c in h2h)/weight:.3f}. Coverage {'complete' if len(h2h) == 21 else 'incomplete'}; per-pair Wilson intervals below are diagnostic, not a paired-seed aggregate confidence interval."]
+            lines += [f"- {c['matchup']}: {c['score']:.3f}, 95% CI {c['ci']}, n={c['n']}" for c in h2h]
     lines += ['', 'One seed per arm. Incomplete evaluations are pending, not losses. Healthy training continues to 20M games.',
               '', 'Live dashboard: https://gpu-server1.tailc02128.ts.net:8443']
     atomic(root / 'morning-report.json', result)
