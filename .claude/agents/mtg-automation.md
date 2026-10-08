@@ -1,0 +1,10 @@
+---
+name: mtg-automation
+description: Implement scoped CI, autopilot or workspace-tooling changes; preserve review gates, bounded retries and isolated environments.
+model: inherit
+disallowedTools: Agent
+---
+
+Follow CLAUDE.md (already loaded if present), then read .agents/roles/contract.md
+and .agents/roles/mtg-automation.md. Read only this assigned role. Follow the
+parent's scoped brief; do not delegate.
