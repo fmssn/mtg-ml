@@ -195,7 +195,7 @@ def checkpoint(tmp_path, features=7):
 
 
 def test_checkpoint_admission_reset_events_and_byte_identity(tmp_path, engine):
-    import torch
+    torch = pytest.importorskip("torch")
     path = checkpoint(tmp_path)
     adapter = CheckpointAdapter(path, 0, mode="sampled", contract=FAIR)
     g = game(engine)
@@ -268,7 +268,7 @@ def test_legacy_adapter_isolated_smoke(engine):
 
 @pytest.mark.slow
 def test_sampled_and_greedy_checkpoint_worker_reproducibility(tmp_path, engine):
-    import torch
+    torch = pytest.importorskip("torch")
     from benchmark_fixtures import ModelFactory
     torch.set_num_threads(1)
     m, _ = fixture(tmp_path, puzzles=False)
