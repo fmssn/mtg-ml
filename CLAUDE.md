@@ -50,6 +50,24 @@ New user-facing apps (replay viewer, dashboards) go under `apps/<name>/` and sho
 - Don't commit checkpoints, `runs/`, or large binaries.
 - Benchmark numbers in docs should say which machine they were measured on.
 
+## Delegation
+
+Use focused `mtg-*` agents for independent, substantial subtasks or noisy
+investigations; do straightforward work directly. Default to one or two
+children, at most three active per coordinator (or the runtime's lower limit).
+Children do not delegate. Use fresh task briefs and the shared
+[handoff contract](.agents/roles/contract.md); load only the assigned role.
+Inherit the selected model and reasoning settings; avoid generic quality
+pipelines and duplicate reviews. The parent integrates, verifies, commits and
+handles PRs. Give each file one writer, including paired Python/Rust changes;
+serialize shared ledger, golden-digest and test-registration edits.
+Independent deliverables use separate existing workspaces; same-deliverable
+children may share a checkout with disjoint ownership. Check current ownership
+through `docs/context.md` before assigning writes. Runtime permissions still
+apply. The calibrated game-review skill/Workflow keeps its own protocol and
+model choices; these development roles do not replace it.
+See [agent usage and validation](docs/agents.md) for routing and host fallbacks.
+
 ## Training experiments
 
 Every training run meant to answer a question is recorded in `docs/experiments/` (how: its README): an entry in `ledger.md` and `ledger.jsonl` with parent checkpoint, code ref, exact flags, benchmark (sampled and greedy) and ladder L1 Elo (`ladder.md` says how it is computed), and a verdict, failed ideas included. Finished runs are archived on h100-private with `~/mtg-ml-checkpoints/archive_run.sh`; that directory is append-only.
