@@ -52,8 +52,7 @@ def test_legacy_and_structured_contracts_and_coverage(modules):
 @pytest.fixture
 def fake_cli(tmp_path, monkeypatch):
     script = tmp_path / "claude"
-    script.write_text("""#!/usr/bin/env python3
-import json, os, sys
+    script.write_text(f"#!{sys.executable}\n" + """import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
 resumed = '--resume' in args
@@ -65,6 +64,9 @@ scenario = os.environ['SCENARIO']
 if scenario == 'api':
     print(json.dumps({'type':'result','subtype':'error_during_execution','is_error':True,'session_id':'same-session','api_error_status':401}))
     sys.exit(1)
+if scenario == 'malformed' and not resumed:
+    print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':'same-session','result':'not JSON'}))
+    sys.exit(0)
 if not resumed and scenario in ('cap', 'unfinished', 'repeat-cap'):
     print(json.dumps({'type':'result','subtype':'error_max_turns','is_error':True,'session_id':'same-session','total_cost_usd':1}))
     sys.exit(1)
@@ -84,7 +86,7 @@ print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_
     return tmp_path
 
 
-@pytest.mark.parametrize("scenario,status,continued", [("cap", "complete", True), ("unfinished", "incomplete", True),
+@pytest.mark.parametrize("scenario,status,continued", [("cap", "complete", True), ("malformed", "complete", True), ("unfinished", "incomplete", True),
                                                         ("repeat-cap", "incomplete", True), ("api", "incomplete", False)])
 def test_runner_continuation_and_failures(modules, fake_cli, monkeypatch, scenario, status, continued):
     _, runner, *_ = modules
@@ -114,11 +116,38 @@ def test_opus_keeps_oauth_configuration_and_legacy_arguments(modules, fake_cli, 
     assert "--bare" not in args and "--effort" not in args and "--max-budget-usd" in args
 
 
+def test_resumed_telemetry_uses_conversation_totals_once(modules, fake_cli, monkeypatch):
+    _, runner, *_ = modules
+    phases = iter([
+        {"exit_code": 1, "timed_out": False, "session_id": "same", "duration_seconds": 1,
+         "result": envelope(subtype="error_max_turns", is_error=True, total_cost_usd=1,
+                            permission_denials=[{"tool": "Bash"}], modelUsage={"deepseek": {"inputTokens": 100}})},
+        {"exit_code": 0, "timed_out": False, "session_id": "same", "duration_seconds": 1,
+         "result": envelope(total_cost_usd=1.5, modelUsage={"deepseek": {"inputTokens": 150}})},
+    ])
+    monkeypatch.setattr(runner, "run_phase", lambda *args: next(phases))
+    receipt = runner.execute(fake_cli / "prompt.md", "sonnet", "3", "5s")
+    assert receipt["conversation_usage"]["input_tokens"] == 150
+    assert receipt["conversation_cost_estimate_usd"] == 1.5
+    assert receipt["denied_calls"] == 1
+
+
 def test_wall_deadline_terminates_running_process(modules, tmp_path):
     _, runner, *_ = modules
     command = [sys.executable, "-c", "import time; print('started', flush=True); time.sleep(30)"]
     phase = runner.run_phase(command, "", 0.2, tmp_path / "log", dict(os.environ))
     assert phase["timed_out"] and phase["exit_code"] != 0 and phase["duration_seconds"] < 2
+
+
+@pytest.mark.parametrize("code", [
+    "import os,time; os.close(1); os.close(2); time.sleep(30)",
+    "import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'])",
+    "import time; time.sleep(30)",
+])
+def test_deadline_survives_closed_stdout_or_exited_parent(modules, tmp_path, code):
+    _, runner, *_ = modules
+    phase = runner.run_phase([sys.executable, "-c", code], "x" * 200_000, 0.2, tmp_path / "log", dict(os.environ))
+    assert phase["timed_out"] and phase["duration_seconds"] < 2
 
 
 def test_manifest_records_full_patch_exclusions_and_native_need(modules, tmp_path, monkeypatch):
@@ -185,9 +214,10 @@ def test_incomplete_and_api_failure_never_escalate_or_merge(modules, tmp_path, m
     assert not any("--auto" in c or ("--add-label" in c and "needs-opus" in c) for c in calls)
 
 
-def test_sensitive_edit_still_escalates_without_push(modules, tmp_path, monkeypatch):
+@pytest.mark.parametrize("path", ["tests/test_rules.py", ".github/workflows/ci.yml", "mtg_ml/engine/cards.toml"])
+def test_sensitive_edit_still_escalates_without_push(modules, tmp_path, monkeypatch, path):
     finish = modules[3]
-    calls = setup_guard(tmp_path, monkeypatch, finish, report(verdict="fixed"), changed=["tests/test_rules.py"])
+    calls = setup_guard(tmp_path, monkeypatch, finish, report(verdict="fixed"), changed=[path])
     assert finish.main() == 0
     assert any("--add-label" in c and "needs-opus" in c for c in calls)
     assert "outcome<<EOF_AUTOPILOT\nescalate" in (tmp_path / "output").read_text()
@@ -199,6 +229,27 @@ def test_auto_merge_matches_reviewed_head(modules, tmp_path, monkeypatch):
     assert finish.main() == 0
     merge = next(c for c in calls if "--auto" in c)
     assert merge[-2:] == ("--match-head-commit", "reviewed-sha")
+
+
+def test_failed_auto_merge_never_emits_success(modules, tmp_path, monkeypatch):
+    finish = modules[3]
+    calls = setup_guard(tmp_path, monkeypatch, finish, report())
+    def gh(*args):
+        calls.append(args)
+        if "--auto" in args:
+            raise subprocess.CalledProcessError(1, ["gh", *args])
+    monkeypatch.setattr(finish, "gh", gh)
+    with pytest.raises(subprocess.CalledProcessError):
+        finish.main()
+    assert not (tmp_path / "output").exists()
+
+
+def test_missing_coverage_never_auto_merges(modules, tmp_path, monkeypatch):
+    finish = modules[3]
+    calls = setup_guard(tmp_path, monkeypatch, finish, report(reviewed_files=[]))
+    (tmp_path / "manifest.json").write_text(json.dumps({"version": 2, "files": [{"path": "a.py"}]}))
+    assert finish.main() == 0
+    assert any("needs-human" in c for c in calls) and not any("--auto" in c for c in calls)
 
 
 def test_failed_github_mutation_raises(modules, monkeypatch):
@@ -214,9 +265,45 @@ def test_failed_github_mutation_raises(modules, monkeypatch):
 def test_native_failure_is_saved_and_blocks_completion(modules, tmp_path, monkeypatch):
     native = modules[4]
     (tmp_path / "manifest.json").write_text('{"needs_native":true}')
-    monkeypatch.setattr(native.subprocess, "run", lambda args, **kw: subprocess.CompletedProcess(args, 0 if args[0] == "git" else 1, "" if args[0] == "git" else "compiler diagnostic", ""))
+    monkeypatch.setattr(native.subprocess, "run", lambda args, **kw: subprocess.CompletedProcess(args, 0, "", ""))
+    def failed_build(tmp, env):
+        (tmp / "native-build.log").write_text("compiler diagnostic")
+        return {"exit_code": 1, "timed_out": False}
+    monkeypatch.setattr(native, "run_build", failed_build)
     assert native.build(tmp_path)["status"] == "failed"
     assert (tmp_path / "native-build.log").read_text() == "compiler diagnostic"
     calls = setup_guard(tmp_path, monkeypatch, modules[3], report())
     assert modules[3].main() == 0
     assert any("needs-human" in c for c in calls) and not any("--auto" in c for c in calls)
+
+
+@pytest.mark.parametrize("listed,content,staged", [
+    (True, "resolved source\n", True),
+    (True, "<<<<<<< HEAD\nold\n=======\nnew\n>>>>>>> base\n", False),
+    (False, "resolved source\n", False),
+])
+def test_native_helper_stages_only_listed_resolved_conflicts(modules, tmp_path, monkeypatch, listed, content, staged):
+    native = modules[4]
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "manifest.json").write_text('{"needs_native":true}')
+    (tmp_path / "conflicts.txt").write_text("source.py\n" if listed else "other.py\n")
+    (tmp_path / "source.py").write_text(content)
+    calls = []
+    def run(args, **kw):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "source.py\0", "")
+    monkeypatch.setattr(native.subprocess, "run", run)
+    monkeypatch.setattr(native, "run_build", lambda *args: {"exit_code": 0, "timed_out": False})
+    result = native.build(tmp_path)
+    assert (result["status"] == "ready") == staged
+    assert any(args[:2] == ("git", "add") for args in calls) == staged
+
+
+def test_replay_uses_checked_out_pr_not_dispatch_workflow_sha(monkeypatch):
+    monkeypatch.syspath_prepend(str(AP.parents[1] / "tools"))
+    replay = importlib.import_module("autopilot_replay")
+    head, base = "a" * 40, "b" * 40
+    log = f"job\tdate [command]/usr/bin/git log -1 --format=%H\njob\tdate {head}\njob\tdate [command]/usr/bin/git log -1 --format=%H\njob\tdate {base}\n"
+    assert replay.checkout_snapshot(log) == (head, base)
+    with pytest.raises(ValueError, match="checkout SHAs"):
+        replay.checkout_snapshot("No checkout receipt available")

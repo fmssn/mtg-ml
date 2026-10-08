@@ -212,8 +212,7 @@ jobs:
           # Scoped to this step: a DeepSeek key, routed to DeepSeek. No Anthropic key exists in this workflow.
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
           ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          # Repo variable naming the DeepSeek model. Unset: Claude Code asks for its
-          # Sonnet/Haiku ids and DeepSeek maps them to its default model.
+          # Repo variable naming the DeepSeek model; unset uses deepseek-flash.
           DEEPSEEK_MODEL: ${{ vars.AUTOPILOT_DEEPSEEK_MODEL }}
         # The turn cap is the real limit: --max-budget-usd is counted at Anthropic
         # prices for the requested model and means nothing for a DeepSeek model id.
@@ -291,12 +290,14 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           DISPATCH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           base=$(gh api "repos/$GH_REPO" --jq .default_branch)
           prs=$(gh pr list --state open --base "$base" --json number,isDraft,author,headRepositoryOwner,labels --jq '
             .[] | select(.isDraft | not)
                 | select(.author.login == $ENV.OWNER and .headRepositoryOwner.login == $ENV.OWNER)
                 | select([.labels[].name] | (index("needs-human") or index("needs-opus")) | not)
                 | .number')
+          failed=0
           for pr in $prs; do
             # Pushed as the App, so CI runs on the updated branch.
             if out=$(gh api -X PUT "repos/$GH_REPO/pulls/$pr/update-branch" 2>&1); then
@@ -306,5 +307,7 @@ jobs:
               GH_TOKEN=$DISPATCH_TOKEN gh workflow run pr-autopilot.yml -f pr="$pr" -f reason=conflict
             else
               echo "#$pr: $out"
+              failed=1
             fi
           done
+          exit "$failed"

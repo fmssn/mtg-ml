@@ -103,7 +103,7 @@ def main():
     stage, pr, head, rnd = sys.argv[1:5]
     base = sys.argv[5] if len(sys.argv) > 5 else os.environ["BASE_REF"]
     tmp = Path(os.environ["RUNNER_TEMP"])
-    conflicts = set((tmp / "conflicts.txt").read_text().split())
+    conflicts = set((tmp / "conflicts.txt").read_text().splitlines())
     if stage == "fix":
         gh("pr", "edit", pr, "--add-label", f"autopilot:round-{rnd}")
 

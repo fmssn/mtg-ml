@@ -54,19 +54,30 @@ def run_phase(command, prompt, seconds, log_path, env):
 
     thread = threading.Thread(target=drain, daemon=True)
     thread.start()
-    process.stdin.write(prompt)
-    process.stdin.close()
-    result, session_id, timed_out = None, None, False
+    def feed():
+        try:
+            process.stdin.write(prompt)
+            process.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+
+    writer = threading.Thread(target=feed, daemon=True)
+    writer.start()
+    result, session_id, timed_out, eof = None, None, False, False
     with Path(log_path).open("w") as log:
         while True:
             remaining = seconds - (time.monotonic() - started)
-            if remaining <= 0 and process.poll() is None and not timed_out:
+            if eof and process.poll() is not None:
+                break
+            # A child may keep stdout open after its parent exits. The whole
+            # process group still belongs to this phase and its deadline.
+            if remaining <= 0 and not timed_out:
                 timed_out = True
                 try:
                     os.killpg(process.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
-            if timed_out and process.poll() is None and remaining < -3:
+            if timed_out and remaining < -3:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
@@ -76,7 +87,8 @@ def run_phase(command, prompt, seconds, log_path, env):
             except queue.Empty:
                 continue
             if line is None:
-                break
+                eof = True
+                continue
             log.write(line)
             log.flush()
             try:
@@ -92,6 +104,7 @@ def run_phase(command, prompt, seconds, log_path, env):
                 result = event
     code = process.wait()
     thread.join(timeout=1)
+    writer.join(timeout=1)
     return {"exit_code": code, "timed_out": timed_out, "result": result,
             "session_id": session_id, "duration_seconds": round(time.monotonic() - started, 3)}
 
@@ -116,7 +129,7 @@ def execute(prompt_path, model, budget, timeout="15m", turns=None):
     reserve = min(120, total / 4) if deepseek else 0
     started = time.monotonic()
     deadline = started + total
-    allowed = ALLOWED + [f"Bash(python {Path(__file__).with_name('native.py')})"]
+    allowed = ALLOWED + [f"Bash(python {Path(__file__).resolve().with_name('native.py')})"]
     env = dict(os.environ)
     env.update(CLAUDE_CODE_DISABLE_BACKGROUND_TASKS="1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
                BASH_DEFAULT_TIMEOUT_MS="180000", BASH_MAX_TIMEOUT_MS="300000")
@@ -132,7 +145,7 @@ def execute(prompt_path, model, budget, timeout="15m", turns=None):
     context = (tmp / "context.md").read_text()
     first = run_phase(base + ["--max-turns", str(turns), "--tools", *TOOLS, "--allowedTools", *allowed],
                       "Review and complete the PR below according to the supplied review instructions.\n\n" + context,
-                      max(0.1, total - reserve), tmp / "claude.initial.jsonl", env)
+                      max(0.1, total - reserve - 3), tmp / "claude.initial.jsonl", env)
     phases = [first]
     envelope = first["result"]
     invalid = None
@@ -142,10 +155,10 @@ def execute(prompt_path, model, budget, timeout="15m", turns=None):
         invalid = str(exc)
     # A malformed successful answer may be repaired from the existing session too.
     resumable = failure_kind(first) != "infrastructure"
-    if deepseek and (invalid or first["timed_out"]) and resumable and first["session_id"] and deadline > time.monotonic():
+    if deepseek and (invalid or first["timed_out"]) and resumable and first["session_id"] and deadline - time.monotonic() > 3:
         print("DeepSeek finalization: resuming the same session, tools disabled", flush=True)
         last = run_phase(base + ["--resume", first["session_id"], "--max-turns", "10", "--tools", ""],
-                         FINISH_PROMPT, min(reserve, deadline - time.monotonic()), tmp / "claude.finish.jsonl", env)
+                         FINISH_PROMPT, min(reserve, deadline - time.monotonic() - 3), tmp / "claude.finish.jsonl", env)
         phases.append(last)
         envelope = last["result"]
     last = phases[-1]
@@ -161,17 +174,27 @@ def execute(prompt_path, model, budget, timeout="15m", turns=None):
     except InvalidResult as exc:
         error = str(exc)
     status = "complete" if not error and verdict in {"clean", "fixed"} else "blocker" if not error and verdict == "escalate" else "incomplete"
-    kind = "capacity" if verdict == "incomplete" else failure_kind(last) if error else None
+    kind = None
+    if status == "incomplete":
+        kind = "capacity" if any(failure_kind(p) == "capacity" for p in phases) else "unfinished" if verdict == "incomplete" else failure_kind(last)
     # Keep the old receipt location for finish.py and older workflow callers.
     (tmp / "claude.json").write_text(json.dumps(envelope or {}) + "\n")
     # SDK costs on resume are conversation totals. Report the final total once, not a sum.
+    usage_envelope = next((p["result"] for p in reversed(phases) if (p["result"] or {}).get("modelUsage")), envelope or {})
+    models = usage_envelope.get("modelUsage", {})
+    usage = {field: sum(m.get(key, 0) for m in models.values()) for field, key in
+             (("input_tokens", "inputTokens"), ("output_tokens", "outputTokens"),
+              ("cache_read_input_tokens", "cacheReadInputTokens"), ("cache_creation_input_tokens", "cacheCreationInputTokens"))}
     receipt = {"status": status, "failure_kind": kind, "reason": error,
+               "escalation_reason": result.get("escalation_reason", "") if verdict == "escalate" else None,
                "continued": len(phases) > 1, "model": model, "effort": "max" if deepseek else None,
                "duration_seconds": round(time.monotonic() - started, 3),
-               "phases": [{k: v for k, v in p.items() if k != "result"} for p in phases],
-               "conversation_cost_estimate_usd": (envelope or {}).get("total_cost_usd"),
-               "usage": (envelope or {}).get("usage", {}), "models": (envelope or {}).get("modelUsage", {}),
-               "denied_calls": len((envelope or {}).get("permission_denials", []))}
+               "phases": [{**{k: v for k, v in p.items() if k != "result"},
+                           "turns": (p["result"] or {}).get("num_turns"),
+                           "invocation_usage": (p["result"] or {}).get("usage", {})} for p in phases],
+               "conversation_cost_estimate_usd": usage_envelope.get("total_cost_usd"),
+               "conversation_usage": usage if models else None, "models": models,
+               "denied_calls": sum(len((p["result"] or {}).get("permission_denials", [])) for p in phases)}
     (tmp / "runner.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print("review receipt:", json.dumps(receipt), flush=True)
     return receipt

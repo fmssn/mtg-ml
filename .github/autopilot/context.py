@@ -74,7 +74,8 @@ Read omitted review hunks from pr.diff before claiming their files reviewed.
 """
     if ci_log:
         (tmp / "ci-failed.log").write_text(ci_log)
-        context += f"\n## Failed CI\nFull failed log: {tmp / 'ci-failed.log'}\n```\n" + "\n".join(ci_log.splitlines()[-300:]) + "\n```\n"
+        ci_lines = ci_log.splitlines()
+        context += f"\n## Failed CI\nFull failed log: {tmp / 'ci-failed.log'}\n" + ("TRUNCATED excerpt: last 300 lines only.\n" if len(ci_lines) > 300 else "Complete failed log:\n") + "```\n" + "\n".join(ci_lines[-300:]) + "\n```\n"
     if mode == "escalate":
         context += "\n## Specific blocker\n" + os.environ.get("ESCALATION", "Escalated explicitly by the developer.") + "\n"
     (tmp / "context.md").write_text(context)
