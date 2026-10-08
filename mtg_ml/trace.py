@@ -120,12 +120,12 @@ def make_agents(sc: Scenario):
 
 def new_game(sc: Scenario, engine: str | None = None, log: bool = True):
     from .backend import game_class
-    from .match import deck_names
+    from .match import game_args
 
     cls = game_class(engine)
     return cls(
         sc.decks(),
-        deck_names=deck_names(sc.matchup),
+        **{k: v for k, v in game_args(sc.match_game, sc.matchup).items() if k not in ("decks", "match_game")},
         seed=sc.seed,
         starting_player=sc.starting_player,
         max_turns=sc.max_turns,
