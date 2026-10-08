@@ -2372,6 +2372,61 @@ pub enum Tgt {
     Player(u8),
 }
 
+/// An ASSIGN_DAMAGE decision with more splits offers the lethal splits instead (`damage_splits`).
+pub const MAX_DAMAGE_SPLITS: u64 = 1024;
+/// The lethal splits choose among the first this many blockers.
+pub const LETHAL_SPLIT_BLOCKERS: usize = 10;
+
+/// C(n, k), saturating at MAX_DAMAGE_SPLITS + 1 (as game.py's `_comb`).
+fn comb_capped(n: u64, k: u64) -> u64 {
+    let mut r: u64 = 1;
+    for i in 0..k.min(n - k) {
+        r = r * (n - i) / (i + 1);
+        if r > MAX_DAMAGE_SPLITS {
+            return MAX_DAMAGE_SPLITS + 1;
+        }
+    }
+    r
+}
+
+/// game.py's `_damage_splits`: every division of `pw` combat damage among the
+/// blockers (plus the player last with trample, after lethal damage to every
+/// blocker) while there are at most MAX_DAMAGE_SPLITS, else the lethal splits:
+/// for each subset of the first LETHAL_SPLIT_BLOCKERS blockers whose lethal
+/// damage fits, lethal to each, the rest to the player (trample, every blocker
+/// chosen) or to the first chosen blocker (the first blocker if none).
+pub fn damage_splits(pw: i32, lethal: &[i32], trample: bool) -> Vec<Vec<i32>> {
+    let slots = lethal.len() + usize::from(trample);
+    if comb_capped((pw as u64) + slots as u64 - 1, slots as u64 - 1) <= MAX_DAMAGE_SPLITS {
+        return compositions(pw, slots)
+            .into_iter()
+            .filter(|split| !(trample && *split.last().unwrap() > 0 && split.iter().zip(lethal).any(|(s, l)| s < l)))
+            .collect();
+    }
+    let b = lethal.len().min(LETHAL_SPLIT_BLOCKERS);
+    let mut out: Vec<Vec<i32>> = vec![];
+    for mask in 0u32..(1u32 << b) {
+        let chosen: Vec<usize> = (0..b).filter(|i| mask >> i & 1 == 1).collect();
+        let rest = pw - chosen.iter().map(|&i| lethal[i]).sum::<i32>();
+        if rest < 0 {
+            continue;
+        }
+        let mut split = vec![0; slots];
+        for &i in &chosen {
+            split[i] = lethal[i];
+        }
+        if trample && chosen.len() == lethal.len() {
+            split[slots - 1] += rest;
+        } else {
+            split[chosen.first().copied().unwrap_or(0)] += rest;
+        }
+        if !out.contains(&split) {
+            out.push(split);
+        }
+    }
+    out
+}
+
 /// All tuples of `parts` non-negative ints summing to `total`, in the order
 /// of game.py's `_compositions`.
 pub fn compositions(total: i32, parts: usize) -> Vec<Vec<i32>> {

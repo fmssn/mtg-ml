@@ -2392,11 +2392,8 @@ class Game:
                 assignments.append((a, ("perm", blockers[0].oid), pw))
                 continue
             options = []
-            slots = len(blockers) + (1 if trample else 0)
             lethal = [self._lethal(a, b) for b in blockers]
-            for split in _compositions(pw, slots):
-                if trample and split[-1] > 0 and any(s < l for s, l in zip(split, lethal)):
-                    continue
+            for split in _damage_splits(pw, lethal, trample):
                 parts = [f"{s} to {b.name}#{b.oid}" for s, b in zip(split, blockers)]
                 if trample:
                     parts.append(f"{split[-1]} to player")
@@ -2422,6 +2419,60 @@ class Game:
             self.pending.append(PendingTrigger(self.active, self._dungeon_card(self.active), INITIATIVE_TRIGGER))
         if False:
             yield
+
+
+MAX_DAMAGE_SPLITS = 1024  # an ASSIGN_DAMAGE decision with more splits offers the lethal splits instead (`_damage_splits`)
+LETHAL_SPLIT_BLOCKERS = 10  # the lethal splits choose among the first this many blockers (at most 2^10 = MAX_DAMAGE_SPLITS options)
+
+
+def _damage_splits(pw: int, lethal: list[int], trample: bool) -> list[tuple]:
+    """The ways an attacker with power `pw` blocked by blockers needing
+    `lethal` damage may divide its combat damage: one int per blocker, plus
+    the player's share last with trample (which takes lethal damage on every
+    blocker first, 702.19c).
+
+    Every division while there are at most MAX_DAMAGE_SPLITS of them (C(pw +
+    slots - 1, slots - 1) before the trample filter). Past that the full set
+    explodes (a 28-power attacker blocked by seven creatures: 1.3M options,
+    one 19M-int inference request), and the decision offers the lethal splits
+    instead: for every subset S of the first LETHAL_SPLIT_BLOCKERS blockers
+    whose lethal damage fits, exactly lethal damage to each blocker of S and
+    the rest to the player (trample, S = every blocker) or else to the first
+    blocker of S (to the first blocker when S is empty). Deduplicated, in
+    subset order (bit i = blocker i). Both engines (state.rs `damage_splits`)."""
+    slots = len(lethal) + (1 if trample else 0)
+    if _comb(pw + slots - 1, slots - 1) <= MAX_DAMAGE_SPLITS:
+        return [split for split in _compositions(pw, slots) if not (trample and split[-1] > 0 and any(s < l for s, l in zip(split, lethal)))]
+    out: list[tuple] = []
+    seen = set()
+    b = min(len(lethal), LETHAL_SPLIT_BLOCKERS)
+    for mask in range(1 << b):
+        chosen = [i for i in range(b) if mask >> i & 1]
+        rest = pw - sum(lethal[i] for i in chosen)
+        if rest < 0:
+            continue
+        split = [0] * slots
+        for i in chosen:
+            split[i] = lethal[i]
+        if trample and len(chosen) == len(lethal):
+            split[-1] += rest
+        else:
+            split[chosen[0] if chosen else 0] += rest
+        t = tuple(split)
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+def _comb(n: int, k: int) -> int:
+    """C(n, k), saturating at MAX_DAMAGE_SPLITS + 1 (as state.rs)."""
+    r = 1
+    for i in range(min(k, n - k)):
+        r = r * (n - i) // (i + 1)
+        if r > MAX_DAMAGE_SPLITS:
+            return MAX_DAMAGE_SPLITS + 1
+    return r
 
 
 def _compositions(total: int, parts: int):
