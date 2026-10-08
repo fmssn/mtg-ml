@@ -312,6 +312,10 @@ impl PyGame {
     fn turn(&self) -> i32 {
         self.st().turn
     }
+    #[setter]
+    fn set_turn(&mut self, v: i32) {
+        self.mutate().turn = v;
+    }
     #[getter]
     fn step_name(&self) -> &str {
         self.st().step_name
@@ -361,6 +365,18 @@ impl PyGame {
     #[getter]
     fn lands_played(&self) -> i32 {
         self.st().lands_played
+    }
+    #[setter]
+    fn set_lands_played(&mut self, v: i32) {
+        self.mutate().lands_played = v;
+    }
+    #[getter]
+    fn spells_cast_this_turn(&self) -> i32 {
+        self.st().spells_cast_this_turn
+    }
+    #[setter]
+    fn set_spells_cast_this_turn(&mut self, v: i32) {
+        self.mutate().spells_cast_this_turn = v;
     }
     #[getter]
     fn match_game(&self) -> i32 {
