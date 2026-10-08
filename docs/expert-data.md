@@ -3,6 +3,9 @@
 `python -m mtg_ml.expert` implements the extraction → review → legal scenario →
 expert-feature pipeline. Media dependencies are optional and isolated from RL.
 See [the measured pilot](expert-pilot.md) for actual yield and remaining work.
+The follow-up [checkpoint reconstruction pipeline](expert-reconstruction.md)
+tracks compatible legal paths, reviewed occurrence corrections and separate
+evidence/replay coverage.
 
 ## Files and knowledge boundaries
 

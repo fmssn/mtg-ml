@@ -53,8 +53,11 @@ choices have explicit generic handlers.
   cards valued at least 3.5, or draw beyond the remaining library. Thought Scour
   can target the opponent when self-mill would cause decking.
 - Counterspell's minimum threat value is 2.5; Force Spike's is 1.5. Choose actual
-  stack IDs, account for higher counters and cumulative ward payments, and
-  prefer a live cheaper Spike. Shaman plus Toxin is a wipe threat to ground
+  stack IDs and reduce the existing public counter chain with memoization.
+  Ward and Spike use one pending-payment total; counter protection reserves
+  those fees for the protected spell, including protection through a lower
+  counter. Decline optional fees that cannot leave the complete bill funded,
+  and prefer a live cheaper Spike. Shaman plus Toxin is a wipe threat to ground
   creatures, including damage already on the stack; it does not threaten a board
   consisting only of flyers.
 - Use bounce and tap for lethal, survival or productive pressure. Include ward
@@ -85,7 +88,7 @@ non-Blue Hydra deliberately checks the protocol's generic combat handler.
 |---|---|
 | Opening and mana | Supported and unsupported one-land keeps; excess lands; colored reservation versus deployment; floating payment before another source; Lorien cycling and drawing |
 | Library choices | Distinct Brainstorm put-backs, witnessed second-card-on-top order and subsequent milling; Ponder ordering and shuffling; Delver reveal; known-top preservation; safe versus fatal self-mill |
-| Stack interaction | Harmless artifacts; payable and unpayable ward/Spike; combined taxes; duplicate-name counter wars; Shaman–Toxin ground wipe versus unaffected flying Delver |
+| Stack interaction | Harmless artifacts; payable and unpayable ward/Spike; cumulative Spike taxes; duplicate-name counter wars and a restored counter preserving the third copy; direct/indirect protection retaining ward funds; Shaman–Toxin ground wipe versus unaffected flying Delver |
 | Resources and tempo | Discounted deployment; escape preserving fuel versus taking lethal; Plunder normal and flashback outcomes; own Deem placement; tap duration and evasive lethal |
 | Combat and protocol | Combined lethal through a blocker; defensive blocking; eleven-blocker allocation; cumulative trample prevention and a second block that prevents lethal without killing the attacker; hidden resampling, metadata/label independence, reset isolation, map ordering, stable ties and explicit unsupported behavior |
 
@@ -143,10 +146,12 @@ no cell with an interval upper bound below −0.03. A single block has no interv
 
 ## Validation results
 
-Measured on 2026-10-08 on Apple M3, macOS 26.6.2, Python 3.11.11, with native
+Measured on 2026-10-09 (Europe/Berlin) on Apple M3, macOS 26.6.2, Python 3.11.11, with native
 execution and four workers. The final implementation freeze is
-`90dacdbdc02982efe615180f683188fe6340a5f9`; subsequent changes add validation
-fixtures and this report. Legacy sources remain frozen at
+`1044b238ff4eb2e7025a5db0617c2940beb9a536`. Subsequent integration adds
+unrelated expert-reconstruction modules and test registration; the bot, adapter,
+engine, legacy pilots and benchmark tool remain byte-identical. PR64 merged
+during development, so PR65 now targets the default branch. Legacy sources remain frozen at
 `66345da4c5bff4a1a31ab0047ff8b1abf3869c49`. The parameter digest is
 `f80cb31cad22feaa42a5d1488356151fa4ce4f36f9b02a27922212a156b4c68c`.
 Exact deck maps, native/card/source hashes, planned/completed identity hashes,
@@ -161,9 +166,9 @@ legal action and selected index across engines; sampled/greedy choices matched.
 
 | Opponent | Candidate score | Legacy Blue score | Paired difference | 95% interval |
 |---|---:|---:|---:|---:|
-| Legacy Blue | 72.13% | 50.00% | +22.13 pp | +19.88 to +24.31 pp |
+| Legacy Blue | 72.06% | 50.00% | +22.06 pp | +19.88 to +24.25 pp |
 | Legacy Jund | 80.00% | 68.44% | +11.56 pp | +8.94 to +14.25 pp |
-| Equal-weight mean | 76.06% | 59.22% | **+16.84 pp** | **+15.06 to +18.63 pp** |
+| Equal-weight mean | 76.03% | 59.22% | **+16.81 pp** | **+15.03 to +18.59 pp** |
 
 Each cell has 400 blocks and 1,600 games per arm. An independent strict rejoin
 and 10,000-replicate shared-index bootstrap reproduced the report exactly. The
@@ -171,25 +176,25 @@ development strength gate passed: the mean's lower bound exceeds zero and both
 cell intervals are positive. This supports stronger play against these fixed
 legacy opponents; it does not certify final puzzles or the release benchmark.
 
-The smoke took 56.07 seconds and the comparison 1,049.56 seconds. Candidate
-adapter decision latency during comparison was 0.422 ms median and 1.652 ms at
+The smoke took 55.73 seconds and the comparison 887.18 seconds. Candidate
+adapter decision latency during comparison was 0.400 ms median and 1.164 ms at
 the 95th percentile. These are local measurements, including view translation;
 the project test suite ran concurrently.
 
-- Focused specialist/comparison validation: **114 passed, 1 expected skip**,
+- Focused specialist/comparison validation: **132 passed, 1 expected skip**,
   including slow complete-game checks.
-- Full `make test-fast` on the final implementation: **1,590 passed, 16 skipped,
-  21 slow tests deselected**. The additional crowded-allocation and complete
-  view/choice fixtures were also checked in the focused suite above.
+- Full `make test-fast` on the final implementation: **1,664 passed, 16 skipped,
+  23 slow tests deselected**. Current-branch CI also covers the subsequent
+  unrelated expert integration.
 - Workspace native extension rebuilt; `make lint` and `git diff --check` passed.
-  No engine rules, existing golden digests, legacy pilots or evaluation behavior
-  changed. CI runs both 300-game differential-fuzz panels as well.
+  This PR changes no engine rules, existing golden digests, legacy pilots or
+  evaluation behavior. CI includes 600 differential games across both matchups.
 
-Final raw artifacts are `.context/blue-acceptance-{parity,smoke,comparison}/`;
-logs are `.context/blue-acceptance-{focused,fast}.log`. Earlier campaigns,
-including the completed `b2eeffb` panel, are superseded and excluded from these
-statistics. The final correction covers an additional trample block needed for
-survival; its regression demonstrably fails on the previous rule. All retained
-results use the corrected source. PR65 remains draft until the user confirms
+Final raw artifacts are `.context/blue-release-{parity,smoke,comparison}/`;
+logs are `.context/blue-release-{focused,fast}.log`. Earlier campaigns,
+including `b2eeffb`, `90dacdb` and the pre-final integration panels, are
+superseded and excluded from these statistics. Complete regressions reject
+prior rules for the second trample block, restored counter chains and pending
+ward/Spike budgets. All reported results use the final corrected source. PR65 remains draft until the user confirms
 readiness. Shared view and test-registration reconciliation with Jund belongs
 to the foundation integration owner.
