@@ -110,8 +110,8 @@ def test_search_bot_identical_on_both_engines():
     assert picks["python"] == picks["native"]
 
 
-# Set-4 strings that `test_entity_and_preview_strings_identical` must see at
-# least once, so the comparison covers every new code path.
+# Set-4 strings the games of `test_entity_and_preview_strings_identical` must
+# reach at least once (`test_preview_runs_cover_new_strings`), so the comparison covers every new code path.
 SET4_TOKENS = (
     "attacking_power>=",
     "unblocked_power>=",
@@ -180,25 +180,42 @@ SET6_TOKENS = (
 )
 
 
-def test_entity_and_preview_strings_identical():
+def preview_runs() -> list[tuple[int, str]]:
+    """(seed, matchup) of the games behind the two tests below, over every matchup."""
+    from mtg_ml.match import EXPLICIT_ONLY, MATCHUPS
+
+    first = ("blue_madness", "jund_blue", "jund_madness")  # the token coverage below was found on these (15 games since the fidelity sideboards changed game 2)
+    later = sorted(set(MATCHUPS) - set(first) - EXPLICIT_ONLY)
+    runs = [(seed, first[seed % 3]) for seed in range(15)] + [(15 + i, later[i % len(later)]) for i in range(2 * len(later))]
+    runs += [(100 + i, m) for m in sorted(EXPLICIT_ONLY) for i in range(2)]  # appended, so the runs above are unchanged
+    return runs
+
+
+def play_preview_run(seed: int, matchup: str, engines: tuple[str, ...]):
+    """Yields the games at each decision, then steps them all with the same random choice."""
+    from mtg_ml.match import game_args
+
+    args = game_args(1 + seed // 3 % 2, matchup)
+    games = [game_class(e)(seed=seed, max_turns=30, **args) for e in engines]
+    r = random.Random(seed)
+    while not games[0].over:
+        yield games
+        a = r.randrange(len(games[0].legal_options()))
+        for g in games:
+            g.step(a)
+
+
+@pytest.mark.parametrize("chunk", range(4))  # a quarter of the games each, so xdist can spread them
+def test_entity_and_preview_strings_identical(chunk):
     """`featurize` hashes are compared in lockstep; this compares the strings
     behind them (state, entities, option previews) so a mismatch is
     readable, in sets 3 and up, over every matchup. Entities of both
     seats (set 5 adds the viewer's own hand), the ids options point at, and
     the simulated previews of set 6 (`option_previews` too)."""
     from mtg_ml.encode import FEATURE_VERSIONS, entity_features, option_object_ids, option_preview, option_previews, state_features
-    from mtg_ml.match import EXPLICIT_ONLY, MATCHUPS, game_args
 
-    first = ("blue_madness", "jund_blue", "jund_madness")  # the token coverage below was found on these (15 games since the fidelity sideboards changed game 2)
-    later = sorted(set(MATCHUPS) - set(first) - EXPLICIT_ONLY)
-    runs = [(seed, first[seed % 3]) for seed in range(15)] + [(15 + i, later[i % len(later)]) for i in range(2 * len(later))]
-    runs += [(100 + i, m) for m in sorted(EXPLICIT_ONLY) for i in range(2)]  # appended, so the runs above are unchanged
-    seen = set()
-    for seed, matchup in runs:
-        args = game_args(1 + seed // 3 % 2, matchup)
-        py, nat = (game_class(e)(seed=seed, max_turns=30, **args) for e in ("python", "native"))
-        r = random.Random(seed)
-        while not py.over:
+    for seed, matchup in preview_runs()[chunk::4]:
+        for py, nat in play_preview_run(seed, matchup, ("python", "native")):
             p = py.decision.player
             for f in FEATURE_VERSIONS[2:]:
                 for v in (0, 1):
@@ -208,13 +225,23 @@ def test_entity_and_preview_strings_identical():
                     assert option_preview(py, p, i, f) == option_preview(nat, p, i, f), o.label
                     assert option_object_ids(o, py, py.decision.kind, f) == option_object_ids(no, nat, nat.decision.kind, f), o.label
                 assert option_previews(py, p, f) == option_previews(nat, p, f) == [option_preview(py, p, i, f) for i in range(len(py.legal_options()))]
+
+
+def test_preview_runs_cover_new_strings():
+    """The games compared above reach every SET4/SET6 token. Python only: the
+    comparison above makes the native strings identical."""
+    from mtg_ml.encode import entity_features, option_preview, state_features
+
+    want, seen = set(SET4_TOKENS + SET6_TOKENS), set()
+    for seed, matchup in preview_runs():
+        for (py,) in play_preview_run(seed, matchup, ("python",)):
+            p = py.decision.player
             strings = state_features(py, p) + [t for e in entity_features(py, p)[0] for t in e]
             strings += [t for i in range(len(py.legal_options())) for t in option_preview(py, p, i)]
-            seen |= {k for k in SET4_TOKENS + SET6_TOKENS if any(k in t for t in strings)}
-            a = r.randrange(len(py.legal_options()))
-            py.step(a)
-            nat.step(a)
-    assert seen == set(SET4_TOKENS + SET6_TOKENS), sorted(set(SET4_TOKENS + SET6_TOKENS) - seen)
+            seen |= {k for k in want - seen if any(k in t for t in strings)}
+            if seen == want:
+                return
+    assert seen == want, sorted(want - seen)
 
 
 def test_spec_field_sets_identical():

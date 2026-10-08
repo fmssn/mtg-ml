@@ -194,6 +194,7 @@ def test_replay_is_viewer_compatible_and_hides_synthetic_opponent_hand():
     assert result["frames"][0]["state"]["players"][1]["hand"][0]["name"] == ""
 
 
+@pytest.mark.native  # verify() replays on the Rust engine
 def test_verification_checks_declared_actions_and_outcome():
     from mtg_ml.backend import native_available
 
