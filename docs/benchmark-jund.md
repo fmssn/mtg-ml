@@ -52,7 +52,9 @@ opponent list. An exhausted own basic supply suppresses Wildfire ramp.
 
 Payments assess remaining colored feasibility and a concrete useful Cast Down
 reserve. Sacrifice feasibility removes a self-sacrificing mana source from the
-payment supply before treating it as fodder. Wellspring draws, optional Spellbomb
+payment supply before treating it as fodder. Munitions partitions available
+Spawns between payment and fodder, allowing two Spawns to fund one shot without
+counting either token twice. Wellspring draws, optional Spellbomb
 payment, Lembas recycling and Infiltrator/Chrysalis growth affect fodder values.
 Removal checks the target and ward before casting, and ignores a target already
 covered by pending Cast Down. Munitions distinguishes lethal face damage from a
@@ -138,7 +140,7 @@ OMP_NUM_THREADS=1 .venv/bin/python -m pytest -q tests/test_benchmark_jund.py \
 ```
 
 The tool uses PR64's episode scheduler, adapters and process runner. The default
-legacy source freeze is PR64 `66345da4c5bff4a1a31ab0047ff8b1abf3869c49`; bot and
+legacy source freeze is PR64 `ac7e95ad583122e8031f051d0ffcac515540d9b2`; bot and
 deck sources must match that commit. Both pilots use the same corrected engine
 and identical fixed legacy Jund/Blue opponents. Runtime/tool source must be
 committed and the installed native build must match checkout sources.

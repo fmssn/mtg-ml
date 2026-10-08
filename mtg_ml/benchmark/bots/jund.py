@@ -137,6 +137,18 @@ class Position:
             out.append(c)
         return sorted(out, key=lambda c: (self.sacrifice_cost(c), c["oid"]))
 
+    def munitions_budget(self):
+        """Maximum one-mana shots with cheap fodder, without double-use.
+
+        A Spawn used as fodder removes one potential mana unit. Other cheap
+        artifacts may tap for mana before being sacrificed. For k shots the
+        necessary Spawn fodder is max(0, k - other), so k + that <= mana.
+        """
+        cheap = [c for c in self.fodder(payment=cost("{1}")) if self.sacrifice_cost(c) <= T["cheap_fodder"]]
+        other = sum(c["name"] != "Eldrazi Spawn" for c in cheap)
+        mana = len(self.mana())
+        return min(len(cheap), mana, (mana + other) // 2)
+
     def pending_damage(self, oid):
         return sum(1 for it in self.stack if it["source"] and it["source"]["name"] == "Makeshift Munitions"
                    and it["controller"] == "self" and ("perm", oid) in it["targets"])
@@ -402,9 +414,7 @@ class BenchmarkJundBot:
         if name == "Makeshift Munitions":
             fodder = p.fodder(payment=cost("{1}"))
             cheap = [c for c in fodder if p.sacrifice_cost(c) <= T["cheap_fodder"]]
-            # Fodder Spawns are unavailable as mana for this line.
-            units = p.mana([c["oid"] for c in cheap if c["name"] == "Eldrazi Spawn"])
-            budget = min(len(cheap), len(units))
+            budget = p.munitions_budget()
             pending = sum(it["source"] and it["source"]["name"] == name and ("player", "opponent") in it["targets"] for it in p.stack)
             if budget and 0 < p.opp["life"] - pending <= budget:
                 return C["lethal"]
@@ -429,11 +439,9 @@ class BenchmarkJundBot:
         raise UnsupportedDecision(f"unsupported preboard activation {a.key}")
 
     def face_lethal(self, p):
-        cheap = [c for c in p.fodder(payment=cost("{1}")) if p.sacrifice_cost(c) <= T["cheap_fodder"]]
-        units = p.mana([c["oid"] for c in cheap if c["name"] == "Eldrazi Spawn"])
         pending = sum(it["source"] and it["source"]["name"] == "Makeshift Munitions" and
                       ("player", "opponent") in it["targets"] for it in p.stack)
-        return 0 < p.opp["life"] - pending <= min(len(cheap), len(units))
+        return 0 < p.opp["life"] - pending <= p.munitions_budget()
 
     def choose_target(self, p, actions):
         def score(a):

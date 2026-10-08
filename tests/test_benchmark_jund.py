@@ -239,6 +239,13 @@ def test_munitions_repeated_face_lethal():
     assert g.over and g.winner == 0
 
 
+def test_munitions_splits_spawns_between_mana_and_fodder():
+    """Four Spawns pay for two lethal shots: each physical token is used once."""
+    g = scenario(p0={"battlefield": ["Makeshift Munitions"] + ["Eldrazi Spawn"] * 4}, p1={"life": 2})
+    drive(g)
+    assert g.over and g.winner == 0 and "Eldrazi Spawn" not in bf(g)
+
+
 def test_spawn_growth_produces_combat_lethal():
     g = scenario(p0={"battlefield": [("Writhing Chrysalis", {"sick": False}), "Eldrazi Spawn"]}, p1={"life": 3})
     drive(g)

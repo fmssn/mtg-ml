@@ -25,7 +25,7 @@ from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR
 from mtg_ml.engine.cards import SPEC_PATH
 
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE = "66345da4c5bff4a1a31ab0047ff8b1abf3869c49"
+BASELINE = "ac7e95ad583122e8031f051d0ffcac515540d9b2"
 SETTINGS = dict(max_turns=100, max_decisions=10000, auto_single=False, auto_mana=False, auto_pass=False)
 STREAM = "benchmark-v1/dev"
 
