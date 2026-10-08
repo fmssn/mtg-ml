@@ -1,0 +1,501 @@
+{
+  "format": "BlueSpecialistDevelopmentSummary",
+  "version": 1,
+  "freeze": {
+    "code_revision": "90dacdbdc02982efe615180f683188fe6340a5f9",
+    "native_build": {
+      "source_sha256": "67db98ff0e67a090c8ce78e6e92386c452768c922cb28ac9173a00c6e6f28a05",
+      "extension": "/Users/fabsi/conductor/workspaces/mtg-ml/taipei/.venv/lib/python3.11/site-packages/mtg_ml_native/__init__.py"
+    },
+    "legacy_revision": "66345da4c5bff4a1a31ab0047ff8b1abf3869c49",
+    "legacy_sources": {
+      "mtg_ml/bots/base.py": "30dc0ff7ffcc3459e98c730d4f405d29b9626ebb0a13235b6fda15666731d096",
+      "mtg_ml/bots/blue.py": "58b2b0069fb05b00de3459e9f0c96bcd42219051dc8a3f4ddacc9a00270fa0ec",
+      "mtg_ml/bots/jund.py": "c2d6dd619331c5c6d2b474dfcd99a1b0b5d0242d3a56473864eb151f03624d55"
+    },
+    "card_spec_sha256": "4ad79d116513b02993949cf096848004698568c03990f1de25cfaa4f25b7b211",
+    "decks": {
+      "jund_wildfire": {
+        "cards": {
+          "Refurbished Familiar": 4,
+          "Writhing Chrysalis": 4,
+          "Krark-Clan Shaman": 3,
+          "Nyxborn Hydra": 1,
+          "Gixian Infiltrator": 2,
+          "Cleansing Wildfire": 4,
+          "Cast Down": 4,
+          "Fanatical Offering": 4,
+          "Eviscerator's Insight": 2,
+          "Toxin Analysis": 2,
+          "Makeshift Munitions": 1,
+          "Ichor Wellspring": 4,
+          "Lembas": 2,
+          "Nihil Spellbomb": 3,
+          "Drossforge Bridge": 4,
+          "Slagwoods Bridge": 4,
+          "Twisted Landscape": 4,
+          "Vault of Whispers": 2,
+          "Swamp": 3,
+          "Mountain": 1,
+          "Forest": 2
+        },
+        "sha256": "998d97f37438776c175fe75ca50926eaa2490df3b869e627ea88b2391bc4b6bd"
+      },
+      "mono_blue_terror": {
+        "cards": {
+          "Island": 16,
+          "Delver of Secrets": 4,
+          "Tolarian Terror": 4,
+          "Cryptic Serpent": 4,
+          "Brainstorm": 4,
+          "Ponder": 3,
+          "Thought Scour": 4,
+          "Mental Note": 4,
+          "Counterspell": 4,
+          "Lorien Revealed": 4,
+          "Force Spike": 3,
+          "Deem Inferior": 3,
+          "Sleep of the Dead": 2,
+          "Plunder the Trollshaws": 1
+        },
+        "sha256": "7d7681cf282f5cf7d79ca2cc8629e3562d43af70078d13b23835afcc02fd17c8"
+      }
+    },
+    "candidate": {
+      "id": "benchmark-blue@1",
+      "rules_revision": 1,
+      "parameters_sha256": "f80cb31cad22feaa42a5d1488356151fa4ce4f36f9b02a27922212a156b4c68c",
+      "information_contract": "own-list-hidden-opponent-v1"
+    },
+    "baseline_contract": "privileged-diagnostic",
+    "opponent_contract": "privileged-diagnostic",
+    "runtime": {
+      "python": "3.11.11",
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "machine": "Apple M3",
+      "workers": 4
+    }
+  },
+  "source_files_manifest_sha256": "63b867772efa10fe71eb2be9c7a7689412869976ee73fe47f418919dcf5d0132",
+  "specialist_source_sha256": "3bd552d25dfe6bb5ed621f1a8036c28044e204edcc2d5719dcfbe1a2c1aaa48c",
+  "protocol_source_sha256": "56118cf77f5ce2aada0d539884363927a5506c7e5902e168a92545801a08e0af",
+  "tool_source_sha256": "14137bb1a058677f0cd1e4f76404ee7d1b8c380f6ba051413a7c1fd48acbbf67",
+  "settings": {
+    "max_turns": 100,
+    "max_decisions": 10000,
+    "auto_single": false,
+    "auto_mana": false,
+    "auto_pass": false
+  },
+  "stream": "benchmark-v1/dev",
+  "mode": "greedy",
+  "identity_fields": [
+    "mode",
+    "cell",
+    "block",
+    "slot"
+  ],
+  "slot_seat_start": [
+    [
+      0,
+      0
+    ],
+    [
+      0,
+      1
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      0
+    ]
+  ],
+  "seed_derivation": "mtg_ml.benchmark.schedule simulator_seed/actor_seed; exact seeds in planned.json",
+  "bootstrap_seed": 1349861844,
+  "reports": {
+    "verify": {
+      "raw_directory": ".context/blue-acceptance-parity",
+      "artifacts": {
+        "report.json": "59e3284dd6d4be383e32574d7f1f2152119e786f59968b8b193d589a760ca1ae",
+        "freeze.json": "cd19ec9035a14fca6f12805fcec4b4213ef003a73bce4309130d11e224bd7b0d",
+        "planned.json": "2c73bd7aacda68c72287817094638da6ef31a6fb920e51a2cb76dd1f7dc34161"
+      },
+      "planned_per_arm": 8,
+      "planned_identities_sha256": "c521f520ffda13400ee78d444c4a8f54adeecd4a84098129cd6e3dbc0800ecfc",
+      "arms": {
+        "candidate": {
+          "completed": 8,
+          "errors": 0,
+          "completed_identities_sha256": "c521f520ffda13400ee78d444c4a8f54adeecd4a84098129cd6e3dbc0800ecfc",
+          "outcomes": {
+            "blue_vs_blue": {
+              "loss": 2,
+              "win": 2
+            },
+            "blue_vs_jund": {
+              "win": 4
+            }
+          },
+          "episode_seconds": {
+            "median": 0.4569846874801442,
+            "p95": 0.49682699955592396
+          },
+          "decision_count_range": [
+            329,
+            496
+          ]
+        }
+      },
+      "status": "complete",
+      "elapsed_seconds": 9.254782125004567,
+      "candidate_latency_seconds": {
+        "median": 0.00035843747900798917,
+        "p95": 0.0008120518818031978
+      },
+      "comparison": null,
+      "verification": {
+        "worker_repeatable": true,
+        "engine_parity": true
+      },
+      "failure_replays": [],
+      "row_files": [
+        {
+          "path": "rows/candidate-blue_vs_blue-0000.json",
+          "sha256": "ef653833b0588f942c115fed27aa8e8145b8d32a2a4cbe15452d3e78550c6df4"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-0000.json",
+          "sha256": "d083ae03bf80cfdb57c6feaaf3f101ed97a4a9c7783a9401923fe729e52a6b77"
+        }
+      ]
+    },
+    "smoke": {
+      "raw_directory": ".context/blue-acceptance-smoke",
+      "artifacts": {
+        "report.json": "11a7b81dadc4438763afcbac1841a141fe082929966fa6c89d9e7e839d23f7f8",
+        "freeze.json": "cd19ec9035a14fca6f12805fcec4b4213ef003a73bce4309130d11e224bd7b0d",
+        "planned.json": "2490d3d73e86d62ad6185b0e8b4ad415b3c5bb739a954bfa43adc7b6ffcbb00a"
+      },
+      "planned_per_arm": 320,
+      "planned_identities_sha256": "7d3ce5e126d78be23a2810a1129cd2dd14652d5bf75d8b75e845d52634491286",
+      "arms": {
+        "candidate": {
+          "completed": 320,
+          "errors": 0,
+          "completed_identities_sha256": "7d3ce5e126d78be23a2810a1129cd2dd14652d5bf75d8b75e845d52634491286",
+          "outcomes": {
+            "blue_vs_blue": {
+              "loss": 46,
+              "win": 114
+            },
+            "blue_vs_jund": {
+              "win": 122,
+              "loss": 38
+            }
+          },
+          "episode_seconds": {
+            "median": 0.4910039374954067,
+            "p95": 1.5388745395437586
+          },
+          "decision_count_range": [
+            242,
+            1220
+          ]
+        }
+      },
+      "status": "complete",
+      "elapsed_seconds": 56.07202600000892,
+      "candidate_latency_seconds": {
+        "median": 0.0003914580447599292,
+        "p95": 0.0010654375073499978
+      },
+      "comparison": null,
+      "verification": null,
+      "failure_replays": [],
+      "row_files": [
+        {
+          "path": "rows/candidate-blue_vs_blue-0000.json",
+          "sha256": "38cc8bee9d598e15d1f40a78293456e1c6ed7bc88aff73038bac1efc24b24662"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-0000.json",
+          "sha256": "fce9af6de9f7e95f1314c4ac0371099288162cf7e06b60bef0ec18857704baea"
+        }
+      ]
+    },
+    "compare": {
+      "raw_directory": ".context/blue-acceptance-comparison",
+      "artifacts": {
+        "report.json": "6db312cbb256e9b7e8bed8a6ef8922f4144e28daf5535bef5d9a8f0eb4f9ee07",
+        "freeze.json": "cd19ec9035a14fca6f12805fcec4b4213ef003a73bce4309130d11e224bd7b0d",
+        "planned.json": "743e30557b237d478b04f55048e452f7ccc5cb3247a0131e96032052bc41b6bf"
+      },
+      "planned_per_arm": 3200,
+      "planned_identities_sha256": "058428971b5d746417760c9e76bf395a433a2ec9cb0378305848f8c362cb2bcd",
+      "arms": {
+        "candidate": {
+          "completed": 3200,
+          "errors": 0,
+          "completed_identities_sha256": "058428971b5d746417760c9e76bf395a433a2ec9cb0378305848f8c362cb2bcd",
+          "outcomes": {
+            "blue_vs_blue": {
+              "loss": 446,
+              "win": 1154
+            },
+            "blue_vs_jund": {
+              "win": 1280,
+              "loss": 320
+            }
+          },
+          "episode_seconds": {
+            "median": 0.5879399375116918,
+            "p95": 2.474788189239916
+          },
+          "decision_count_range": [
+            206,
+            1220
+          ]
+        },
+        "baseline": {
+          "completed": 3200,
+          "errors": 0,
+          "completed_identities_sha256": "058428971b5d746417760c9e76bf395a433a2ec9cb0378305848f8c362cb2bcd",
+          "outcomes": {
+            "blue_vs_blue": {
+              "loss": 800,
+              "win": 800
+            },
+            "blue_vs_jund": {
+              "win": 1095,
+              "loss": 505
+            }
+          },
+          "episode_seconds": {
+            "median": 0.25443358352640644,
+            "p95": 0.7299689226027113
+          },
+          "decision_count_range": [
+            182,
+            1613
+          ]
+        }
+      },
+      "status": "complete",
+      "elapsed_seconds": 1049.5635989590082,
+      "candidate_latency_seconds": {
+        "median": 0.0004218749818392098,
+        "p95": 0.0016523749800398946
+      },
+      "comparison": {
+        "per_cell": {
+          "blue_vs_blue": {
+            "blocks": 400,
+            "games_per_arm": 1600,
+            "candidate_score": 0.72125,
+            "baseline_score": 0.5,
+            "difference": 0.22125,
+            "ci95": [
+              0.19875,
+              0.243125
+            ]
+          },
+          "blue_vs_jund": {
+            "blocks": 400,
+            "games_per_arm": 1600,
+            "candidate_score": 0.8,
+            "baseline_score": 0.684375,
+            "difference": 0.115625,
+            "ci95": [
+              0.089375,
+              0.1425
+            ]
+          }
+        },
+        "equal_weight_mean_difference": 0.16843750000000002,
+        "ci95": [
+          0.150625,
+          0.18625
+        ],
+        "bootstrap": {
+          "replicates": 10000,
+          "unit": "four-slot-block",
+          "shared_indices_across_cells": true,
+          "confidence": 0.95,
+          "method": "percentile"
+        },
+        "strength_gate_passed": true
+      },
+      "verification": null,
+      "failure_replays": [],
+      "row_files": [
+        {
+          "path": "rows/baseline-blue_vs_blue-0000.json",
+          "sha256": "d2827ee0406787d1f3995b5ef65033a82a525e43fa2ceefbbc7df4f77f026237"
+        },
+        {
+          "path": "rows/baseline-blue_vs_blue-0160.json",
+          "sha256": "9750250d361177de678897bd9083bee90c33685b5a015a654e2a0f159dfebfdb"
+        },
+        {
+          "path": "rows/baseline-blue_vs_blue-0320.json",
+          "sha256": "9414088fb12e9a7dd08d8df00befb56b885f6588acd66fe149053e8c9812f0c7"
+        },
+        {
+          "path": "rows/baseline-blue_vs_blue-0480.json",
+          "sha256": "c551feb8dd77e18b838c1cec9ca63d7f5fe45d27db92ff097d02c0434442efd8"
+        },
+        {
+          "path": "rows/baseline-blue_vs_blue-0640.json",
+          "sha256": "2a33402472a4f54994060cf5fb7088b04f481ad5880dd1d0a3c604ef273566da"
+        },
+        {
+          "path": "rows/baseline-blue_vs_blue-0800.json",
+          "sha256": "36fb31f94bf5c76b3e7e6948b1a0b7fa99b350735f8a86df2ec18a4a72dcd8b0"
+        },
+        {
+          "path": "rows/baseline-blue_vs_blue-0960.json",
+          "sha256": "74d32a5dea977c2f7ad3669bb253848d08074ead5adc0453eefa45afd42854ad"
+        },
+        {
+          "path": "rows/baseline-blue_vs_blue-1120.json",
+          "sha256": "5f47f7de95baee0b72b0821d46a4f6622fc892453753a9e8407ea492cc772c77"
+        },
+        {
+          "path": "rows/baseline-blue_vs_blue-1280.json",
+          "sha256": "55117ed9f234e8680692726dd469e8088aa9aa0b084db84583be501345023c9d"
+        },
+        {
+          "path": "rows/baseline-blue_vs_blue-1440.json",
+          "sha256": "176b0c47ef93ef18aed4c2b72be3fcb6776aafe49e7330d37a897569d527b388"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-0000.json",
+          "sha256": "990833e775cf42d89952523e3009b62c963e27705b145e887c0cd10c3088c3f0"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-0160.json",
+          "sha256": "05139187cd9cc7da45d1c376e12380bbe2818882bede601d80a726042588088b"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-0320.json",
+          "sha256": "416c9e52b3b6eaf6f7b91ffb311db91037fb25c96ffd71a6cb4f236057b788d9"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-0480.json",
+          "sha256": "1b11a21dc524eba2a80a7616a9526d4a40b6a802a2cd14c9f56b70a8ea8a81ac"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-0640.json",
+          "sha256": "b985ad98e9ce4ee7b34feff52311b9afc8986f6d5a812479a02b1d7de6fcce45"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-0800.json",
+          "sha256": "a2635a3dc2365040db16c404f142ce6bf6980bd9eb59fa54489c5389311af28c"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-0960.json",
+          "sha256": "8980a12d569d7980a95d7e7e305baea13fc35b467ca8aa333eb887766fba0036"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-1120.json",
+          "sha256": "23aa99b9c731e614f957cbc434ca54abf102cc93b77b5f2b4cead932df02a870"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-1280.json",
+          "sha256": "4360e36ca1d9f6b62973e42679fb84e689cd339f86ab3b0c42f2d8818a95565d"
+        },
+        {
+          "path": "rows/baseline-blue_vs_jund-1440.json",
+          "sha256": "0902387359dacb8faed8209c10d7f9114cbcbbf0c1bc1fcd6e9225014865262c"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-0000.json",
+          "sha256": "0e58cfb777790335ed5659164b56efa15a71eba6e3c4130d2465022828ec51ec"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-0160.json",
+          "sha256": "799a80c3345990e12bad4e8e99181e8473ab6d0a75639c7eac6ed2af20fa8620"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-0320.json",
+          "sha256": "e383deaeb8d03327ac99e61ed8551082372952931b8fb0dff747b3ec79342e69"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-0480.json",
+          "sha256": "ba0169337066636a123b64a1b96acd5ba3253b9af2a9ecd83b51b6808abd0778"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-0640.json",
+          "sha256": "38ec34f90a0e5dd8f3f81b02a1afdce76bbfe1d28540eb597136e6826d412c2c"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-0800.json",
+          "sha256": "ea2b030b15f1886cbd10a15022821126875d19c50ed73d9fe4f31c8eb2d737ec"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-0960.json",
+          "sha256": "16c96ab6bd3f81f1c1d43f159be4a5c19a9ab8cde84a13cc6d8e3a2bfd7415a9"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-1120.json",
+          "sha256": "fccfeed5c3de019369ef599738d3a0180abb82f08aad131b101966b308e8525c"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-1280.json",
+          "sha256": "f6cb3613324a8226b359cbe617e3b5de560f587023eb8b434cf2fd5dae3bbd85"
+        },
+        {
+          "path": "rows/candidate-blue_vs_blue-1440.json",
+          "sha256": "3430ebde2e28de4e6ccf9fc3ebb01c8786e51d6956e65ade8a3981f87fa8f299"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-0000.json",
+          "sha256": "9c0e5780d2df4768a40fe3d675ea52dd5d70391c4c9a0eb6802d72805ae02bbb"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-0160.json",
+          "sha256": "ba07a9fa6f974082d5f6c0234c03857cd5b46db7aef73c7b0a1d8626ef3e9cad"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-0320.json",
+          "sha256": "5ca942a047c996c911d207a6e07c87250720e6d5f28d4ae337a6a95bd8bad2ae"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-0480.json",
+          "sha256": "bef98f0e9c412859e3db88216a2dfbb5669cac3c33292abf58078955df575979"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-0640.json",
+          "sha256": "674a0fac606448e14e3329ec0917e7951d305173758a53fe17e83f06e115412d"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-0800.json",
+          "sha256": "5ed2cfaf18ebfba36f163c1e8efd359b3c8ac831822232a29551d5d4f6230b48"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-0960.json",
+          "sha256": "5269effe5b38bef0bc3e3e74401ff9d61f08f9dfdda8ee6efbee99d3f089208e"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-1120.json",
+          "sha256": "deac7bd9ed08854a8f37db36c640bbd6862a39b26692796efd804e202da95521"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-1280.json",
+          "sha256": "5b014184ad4f831d900913a678c23b6c214ee3cf761b3c5484680e1b6a837d89"
+        },
+        {
+          "path": "rows/candidate-blue_vs_jund-1440.json",
+          "sha256": "c84461d9b43aa46b6b9ea283b4ea3117be78fb1cdd25b93e3674bda5c30c1a4b"
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Development panel against frozen privileged diagnostic legacy opponents; no release puzzle certification.",
+    "Only final acceptance rows are scored; earlier local campaigns are superseded."
+  ]
+}

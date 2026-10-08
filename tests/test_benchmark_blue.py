@@ -312,13 +312,16 @@ def test_survival_blocks_and_multiblock():
     assert "Krark-Clan Shaman" in names(g.players[1].graveyard)
 
 
-def test_crowded_damage_takes_lethal(engine):
-    # PR63's eleven-blocker exact allocation: ten 1/1s and one 2/2, 12 damage.
+@pytest.mark.parametrize("power,win", [(11,False), (12,True)])
+def test_crowded_damage_takes_lethal_when_available(engine, power, win):
+    # PR63's eleven-blocker allocation: ten 0/1s and one 2/1 need 11 damage.
+    # The twelfth point must trample for lethal rather than be overassigned.
     from mtg_ml.engine import objects as O
     def setup(g):
-        g.add_card("Nyxborn Hydra", 0, "battlefield", sick=False, counters=12)
+        g.add_card("Nyxborn Hydra", 0, "battlefield", sick=False, counters=power)
         for _ in range(10): g.add_card("Eldrazi Spawn", 1, "battlefield")
         g.add_card("Refurbished Familiar", 1, "battlefield")
+        g.players[1].life = 1
         for p in (0, 1):
             for _ in range(20): g.add_card("Island", p, "library")
     g = game_class(engine)(([],[]), setup=setup, starting_player=0, start_step="declare_attackers", auto_single=False, log=True)
@@ -329,8 +332,15 @@ def test_crowded_damage_takes_lethal(engine):
         g.step(1)
     while g.decision.kind != O.ASSIGN_DAMAGE_AMOUNT: g.step(0)
     assert key(g)[0] == "damage_amount"
-    while g.step_name != "main2": g.step(choice(g) if g.decision.player == 0 else 0)
-    assert not [c for c in g.battlefield if c.controller == 1]
+    while not g.over and g.step_name != "main2": g.step(choice(g) if g.decision.player == 0 else 0)
+    assert g.over == win
+    assert g.winner == (0 if win else None)
+    if win:
+        # The engine ends a lethal game before the following state-based sweep.
+        from mtg_ml.engine.view import observe
+        assert all(c["damage"] >= c["toughness"] for c in observe(g, 0)["battlefield"] if c["controller"] == "opponent")
+    else:
+        assert not [c for c in g.battlefield if c.controller == 1]
 
 
 def test_hidden_world_labels_resets_and_ties(engine):
@@ -376,6 +386,42 @@ def test_complete_games_and_mode_identity(engine):
                     assert other.act(g) == agents[seat].act(g)
                 take(g, agents, agents[g.decision.player].act(g))
             assert g.end_reason in {"life", "decked", "turn_limit"}
+
+
+@pytest.mark.slow
+def test_complete_specialist_views_and_choices_match_engines(engine):
+    if engine != "native":
+        pytest.skip("cross-engine line runs once with the native extension")
+    for opponent in ("jund_wildfire", "mono_blue_terror"):
+        for seat in (0, 1):
+            own = MONO_BLUE_TERROR
+            other = JUND_WILDFIRE if opponent == "jund_wildfire" else MONO_BLUE_TERROR
+            maps = [own, other] if seat == 0 else [other, own]
+            games = [game_class(e)([expand(d) for d in maps], seed=2, starting_player=1-seat,
+                                   max_turns=100, auto_single=False, auto_mana=False, auto_pass=False, log=True)
+                     for e in ("python", "native")]
+            pilots = [bot(), bot()]
+            enemies = [make_bot(1-seat, opponent), make_bot(1-seat, opponent)]
+            count = 0
+            while not games[0].over:
+                assert not games[1].over and count < 10000
+                assert games[0].decision.player == games[1].decision.player
+                if games[0].decision.player == seat:
+                    pairs = [inputs(g, seat, own) for g in games]
+                    assert pairs[0][0] == pairs[1][0]
+                    # Display wording is outside the specialist protocol.
+                    assert tuple(replace(a, label="") for a in pairs[0][1]) == tuple(
+                        replace(a, label="") for a in pairs[1][1])
+                    selected = [p.choose(*pair) for p, pair in zip(pilots, pairs)]
+                else:
+                    selected = [p.act(g) for p, g in zip(enemies, games)]
+                assert selected[0] == selected[1]
+                for g, index in zip(games, selected):
+                    g.step(index)
+                count += 1
+            assert games[1].over
+            assert (games[0].winner, games[0].end_reason, games[0].turn) == (
+                games[1].winner, games[1].end_reason, games[1].turn)
 
 
 def test_mana_budget_and_damage_assignment_arithmetic():
