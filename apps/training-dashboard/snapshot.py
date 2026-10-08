@@ -81,6 +81,8 @@ def snapshot(root, active=None, supervisor=None, gpus=None):
     entries = json.loads((root / 'campaign.json').read_text())
     if active is None:
         active, supervisor = process_inventory()
+    if entries and entries[0].get('mode') == 'training':
+        return training_snapshot(root, entries, active, gpus)
     outcomes = {r['name']: r for r in jsonl(root / 'outcomes.jsonl')}
     arms, alerts = [], []
     for e in entries:
@@ -150,6 +152,56 @@ def clean(value):
     if isinstance(value, list):
         return [clean(v) for v in value]
     return value
+
+
+
+
+def training_snapshot(root, entries, active, gpus):
+    """Version-1 training view; historical computational screen views stay valid."""
+    import shutil
+    now = time.time()
+    arms = []
+    fields = set(FIELDS) | {'lr', 'pg_loss', 'v_loss', 'clip_frac', 'game_turns', 'draws', 'pool_size', 'update_s', 'features'}
+    for e in entries:
+        run = Path(e['run'])
+        if run.parent.resolve() != root:
+            raise ValueError('Run directory outside campaign')
+        rows = jsonl(run / 'metrics.jsonl')
+        process_path = run / 'process.json'
+        process = json.loads(process_path.read_text()) if process_path.exists() else {}
+        running = str(run) in active
+        status = 'running' if running else process.get('status', 'queued')
+        if status == 'running' and not running:
+            status = 'interrupted'
+        recent = rows[-20:]
+        wall = sum(r.get('wall_s', 0) for r in recent)
+        speed = sum(r.get('games', 0) for r in recent)*3600/wall if wall else None
+        last = rows[-1] if rows else {}
+        metrics = [{k: v for k, v in r.items() if k in fields} for r in rows[-1000:]]
+        evaluations = [{k: v for k, v in r.items() if k.startswith(('bench/', 'ladder/')) or k in ('iteration', 'games_total', 'elapsed_s', 'eval_lag', 'eval_s')} for r in rows if 'ladder/elo' in r]
+        checkpoint = run / 'latest.pt'
+        flags = dict(zip(e['command'][3::2], e['command'][4::2]))
+        arms.append(dict(name=e['name'], label='LR '+flags['--ppo-lr'], status=status, pid=active.get(str(run)),
+                         games=last.get('games_total', 0), target_games=e['target_games'], elapsed_s=last.get('elapsed_s', 0),
+                         games_per_hour=speed, decisions_per_s=sum(r.get('decisions', 0) for r in recent)/wall if wall else None,
+                         eta_s=(e['target_games']-last.get('games_total', 0))*3600/speed if speed and running else None,
+                         latest=last, metrics=metrics, evaluations=evaluations, gpus=e['gpus'], cpus=e['cpus'],
+                         code_ref=e['code_ref'], seed=e['seed'], features=e['features'], configuration=flags,
+                         initial_tensor_sha256=e['initial_tensor_sha256'], process=process,
+                         checkpoint_age_s=now-checkpoint.stat().st_mtime if checkpoint.exists() else None,
+                         metrics_age_s=now-(run/'metrics.jsonl').stat().st_mtime if rows else None,
+                         log=tail(run/'train.log')))
+    evaluation = root / 'evaluation.json'
+    ev = json.loads(evaluation.read_text()) if evaluation.exists() else {'status':'pending','cells':[],'h2h':[]}
+    failure = root / 'evaluation-failure.json'
+    alerts = [e['name']+': '+e['status'] for e in arms if e['status'] in ('failed','interrupted')]
+    if failure.exists():
+        alerts.append('Matrix evaluator failed; recorded results are retained')
+    disk = shutil.disk_usage(root)
+    return clean(dict(schema_version=1, mode='training', observed_at=now, host='h100-private2', directory=str(root),
+                      campaign=root.name, arms=arms, alerts=alerts, evaluation=ev,
+                      gpus=gpu_inventory() if gpus is None else gpus, load=list(os.getloadavg()),
+                      disk=dict(free=disk.free,total=disk.total), report_ready=(root/'morning-report.json').exists()))
 
 
 if __name__ == '__main__':
