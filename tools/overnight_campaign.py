@@ -157,7 +157,8 @@ def run_arm(args):
         preflight(entry)
         if (run / 'latest.pt').exists() and not args.resume:
             raise ValueError('Use --resume explicitly for a previous run')
-        p = subprocess.Popen(entry['command'], cwd=entry['code'], env=os.environ | entry['environment'],
+        command = ['taskset', '-c', ','.join(map(str, entry['cpus'])), *entry['command']]
+        p = subprocess.Popen(command, cwd=entry['code'], env=os.environ | entry['environment'],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
         state = dict(status='running', pid=p.pid, started_at=time.time(), code_ref=entry['code_ref'])
         atomic(run / 'process.json', state)
@@ -239,6 +240,15 @@ def panel(args):
     checkpoint = args.checkpoint or choose_common(arms)
     if not checkpoint:
         return
+    import shutil
+    frozen = Path(args.root) / 'evaluation-checkpoints' / checkpoint.removesuffix('.pt')
+    frozen.mkdir(parents=True, exist_ok=True)
+    for arm in arms:
+        dest = frozen / (arm['name'] + '.pt')
+        if not dest.exists():
+            tmp = dest.with_suffix('.tmp')
+            shutil.copy2(Path(arm['run']) / 'pool' / checkpoint, tmp)
+            tmp.replace(dest)
     iteration = int(Path(checkpoint).stem.split('_')[1])
     state.update(checkpoint=checkpoint, games=iteration*2048, status='running', updated_at=time.time())
     atomic(path, state)
@@ -247,7 +257,7 @@ def panel(args):
         return
     existing = {(r['arm'], r['matchup'], r['seat'], r['greedy']) for r in state['cells'] if r['checkpoint'] == checkpoint}
     for entry in arms:
-        policy = str(Path(entry['run']) / 'pool' / checkpoint)
+        policy = str(frozen / (entry['name'] + '.pt'))
         cpus = tuple(entry['eval_cpus'])
         os.sched_setaffinity(0, set(cpus))
         pool = PoolProcess(len(cpus), 'local', worker_cpus=cpus, cpus=cpus, nice=10, name='matrix')
@@ -278,11 +288,11 @@ def panel(args):
             if any(r['matchup'] == matchup and r['checkpoint'] == checkpoint for r in state['h2h']):
                 continue
             with evaluation_lock(str(Path(arms[0]['run']) / 'evaluation.lock')):
-                result = pool.call(head_to_head, str(Path(arms[0]['run']) / 'pool' / checkpoint),
-                                   str(Path(arms[1]['run']) / 'pool' / checkpoint), args.h2h_games, len(cpus),
+                result = pool.call(head_to_head, str(frozen / (arms[0]['name'] + '.pt')),
+                                   str(frozen / (arms[1]['name'] + '.pt')), args.h2h_games, len(cpus),
                                    0, 100, 'local', False, False).wait() if matchup == 'jund_blue' else pool.call(
-                                       h2h_cell, str(Path(arms[0]['run']) / 'pool' / checkpoint),
-                                       str(Path(arms[1]['run']) / 'pool' / checkpoint), args.h2h_games, len(cpus), matchup).wait()
+                                       h2h_cell, str(frozen / (arms[0]['name'] + '.pt')),
+                                       str(frozen / (arms[1]['name'] + '.pt')), args.h2h_games, len(cpus), matchup).wait()
             state['h2h'].append(dict(matchup=matchup, score=result['all'][0], ci=result['all'][1], n=result['all'][2],
                                      weight=1 if a == b else 2, checkpoint=checkpoint))
             state['updated_at'] = time.time()
