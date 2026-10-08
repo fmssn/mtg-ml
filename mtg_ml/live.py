@@ -32,13 +32,19 @@ from concurrent.futures import ThreadPoolExecutor
 from .agents import take
 from .backend import engine_name, game_class
 from .match import MATCHUPS, game_args, matchup_decks
-from .live_proto import option_ref, option_refs, parse_events, visible_ids
+from .live_proto import add_tap_previews, auto_pay_index, option_ref, option_refs, parse_events, visible_ids
 from .replay import DECK_TITLES, FORMAT, snapshot, visible_events
 from .rl.features import PUBLIC_KINDS
 
 SCRIPTED = "scripted-bot"  # the deck's hand-written bot, offered with --scripted-bot (dev, no checkpoint needed)
 MAX_GAMES = 8  # games held at once; the oldest idle one makes room
 IDLE_SECONDS = 3600  # a game nobody touched for this long is dropped
+
+
+def live_dev_options() -> dict[str, str]:
+    from .live_dev import options
+
+    return options()
 
 
 class LiveError(ValueError):
@@ -58,8 +64,14 @@ def find_models(directory: pathlib.Path) -> dict[str, pathlib.Path]:
 
 
 class LiveGame:
-    def __init__(self, gid: str, model_name: str, model_path: pathlib.Path | None, seat: int, matchup: str, greedy: bool, seed: int, engine: str | None):
-        """`model_path` None: the deck's scripted bot plays instead (`SCRIPTED`)."""
+    def __init__(self, gid: str, model_name: str, model_path: pathlib.Path | None, seat: int, matchup: str, greedy: bool, seed: int, engine: str | None, scenario: str | None = None):
+        """`model_path` None: the deck's scripted bot plays instead (`SCRIPTED`).
+        `scenario`: a `live_dev` scenario (dev servers only); it sets the matchup and seat."""
+        game = None
+        if scenario is not None:
+            from . import live_dev
+
+            game, matchup, seat = live_dev.new_game(scenario, seed, engine)
         self.id, self.seat, self.matchup, self.engine = gid, seat, matchup, engine
         self.touched = time.monotonic()
         if model_path is None:
@@ -74,7 +86,7 @@ class LiveGame:
         self.agents[seat], self.agents[1 - seat] = Human(), self.model
         self.names = ["", ""]
         self.names[seat], self.names[1 - seat] = "you", f"model:{model_name}" + (" (greedy)" if greedy else "")
-        self.g = game_class(engine)(**game_args(1, matchup), seed=seed, log=True)
+        self.g = game if game is not None else game_class(engine)(**game_args(1, matchup), seed=seed, log=True)
         self.seed = seed
         self.full_info: dict = {}  # card data for the saved replay
         self.view_info: dict = {}  # card data the player has seen
@@ -114,6 +126,10 @@ class LiveGame:
         if not g.over:
             d = g.decision
             decision = {"player": d.player, "kind": d.kind, "prompt": d.prompt, "options": [o.label for o in d.options], "refs": option_refs(d, state), "chosen": None}
+            if d.kind == "pay_mana":
+                decision["auto"] = auto_pay_index(g, d)
+            elif d.kind == "priority":
+                add_tap_previews(g, decision["refs"], self.seat, visible_ids(state))
         self._view_frame(state, decision)
 
     def _view_state(self) -> dict:
@@ -196,6 +212,7 @@ class LiveManager:
     def options(self) -> dict:
         return {
             "models": sorted(self._models()) + ([SCRIPTED] if self.scripted else []),
+            "scenarios": live_dev_options() if self.scripted else {},
             "matchups": {k: [DECK_TITLES[d] for d in v] for k, v in MATCHUPS.items()},
         }
 
@@ -229,6 +246,9 @@ class LiveManager:
         if self.scripted:
             models[SCRIPTED] = None
         name, seat, matchup = req.get("model"), req.get("seat", 0), req.get("matchup", "jund_blue")
+        scenario = req.get("scenario") or None
+        if scenario is not None and (not self.scripted or scenario not in live_dev_options()):
+            raise LiveError(f"unknown scenario {scenario!r}")
         if name not in models:
             raise LiveError(f"unknown model {name!r}")
         if seat not in (0, 1):
@@ -239,7 +259,7 @@ class LiveManager:
         seed = secrets.randbelow(2**31) if seed is None else int(seed)
         gid = secrets.token_urlsafe(9)
         try:
-            game = LiveGame(gid, name, models[name], seat, matchup, bool(req.get("greedy")), seed, self.engine)
+            game = LiveGame(gid, name, models[name], seat, matchup, bool(req.get("greedy")), seed, self.engine, scenario)
         except LiveError:
             raise
         except Exception as e:  # a checkpoint this code cannot run (old features, other config)

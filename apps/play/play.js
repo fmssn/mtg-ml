@@ -141,10 +141,10 @@ function applyView(view) {
 
 function resetGame(id) {
   // Every auto-pass mode and plan resets at a game boundary (Forge bug: End Turn carried over).
-  Object.assign(S, {gid: id, raw: [], shown: -1, prev: null, queue: [], plan: null, ui: null, lastMine: -1, passMode: null,
+  Object.assign(S, {gid: id, raw: [], shown: -1, prev: null, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
     fullControl: false, feed: [], logDone: 0, error: null, skip: false});
   $('#log').innerHTML = '';
-  $('#feed').innerHTML = '';
+  renderFeed();
 }
 
 async function send(index) {
@@ -277,6 +277,7 @@ function planAnswer(d) {
 // keeps the most options open (basic lands, single-colour sources, lands
 // before artifacts before creatures); sacrifices and filters last.
 function autoPay(d) {
+  if (Number.isInteger(d.auto) && d.auto >= 0 && d.auto < d.options.length) return d.auto;  // live_proto.auto_pay_index
   const s = stateAt(last());
   const perm = oid => s.battlefield.find(c => c.oid === oid);
   const count = new Map();
@@ -351,6 +352,10 @@ function hideSpot() { $('#spot').classList.remove('on'); }
 const oppLabel = () => S.meta ? 'Opponent' : 'Opponent';
 
 // The opponent's actions as chips (each can be flagged), held until you act.
+function mine(label) {  // my own choices: "(opponent)" is theirs, "(self)" is mine
+  return label.replace(/player (\d) \((self|opponent)\)/, (_, p) => +p === S.seat ? 'yourself' : 'the opponent')
+    .replace(/ \(opponent\)/, ' (theirs)').replace(/ \(self\)/, ' (yours)');
+}
 function humanize(label) {
   return clean(label)
     .replace(/player (\d) \((self|opponent)\)/, (_, p) => +p === S.seat ? 'you' : 'themselves')
@@ -370,7 +375,8 @@ function quietText(a) {
 }
 function pushFeed(text, fi, quiet) {
   S.feed.push({text, fi, quiet});
-  if (S.feed.length > 6) S.feed.shift();
+  if (!quiet) S.lastOpp = text;
+  if (S.feed.length > 12) S.feed.shift();
   renderFeed();
 }
 const FLAGS = () => loadJSON('mtgml-play-flags', []);
@@ -385,9 +391,10 @@ function toggleFlag(fi, text) {
   $$(`#log .flag[data-fi="${fi}"]`).forEach(b => b.classList.toggle('on', isFlagged(fi)));
 }
 function renderFeed() {
-  $('#feed').innerHTML = S.feed.slice(-4).reverse().map(c => `<span class="fchip ${c.quiet ? 'quiet' : ''}" title="${esc(c.text)}"><span class="txt">Opp: ${esc(c.text)}</span><button class="flag ${isFlagged(c.fi) ? 'on' : ''}" data-flag="${c.fi}" title="Flag this play as odd">⚑</button></span>`).join('');
-  const box = $('#feed').getBoundingClientRect();
-  for (const chip of $$('#feed .fchip').slice(1)) if (chip.getBoundingClientRect().left < box.left) chip.remove();  // no half chips
+  $('#feed').innerHTML = S.feed.length ? [...S.feed].reverse().map(c => `<div class="fchip ${c.quiet ? 'quiet' : ''}"><span class="txt">${esc(c.text)}</span><button class="flag ${isFlagged(c.fi) ? 'on' : ''}" data-flag="${c.fi}" title="Flag this play as odd">⚑</button></div>`).join('')
+    : '<div class="none">Nothing yet</div>';
+  const la = $('#plate1 .lastact');
+  if (la) la.innerHTML = S.lastOpp ? `<span>Last:</span> ${esc(S.lastOpp)}` : '';
 }
 
 // ---------------------------------------------------------------- log
@@ -409,7 +416,7 @@ function appendLog(i) {
     }
     const pm = /^\s*p(\d) /.exec(line);
     const who = pm ? (+pm[1] === S.seat ? 'me' : 'opp') : '';
-    const text = clean(line.trim()).replace(/^p(\d) /, (_, p) => +p === S.seat ? 'You: ' : 'Opp: ')
+    const text = (who === 'me' ? mine(clean(line.trim())) : clean(line.trim())).replace(/^p(\d) /, (_, p) => +p === S.seat ? 'You: ' : 'Opp: ')
       .replace(/^(\w+): (Pass priority|Done declaring attackers)$/, '$1: $2');
     out.push(`<div class="${who} ${/^\s/.test(line) ? 'sub' : ''}">${esc(text)}</div>`);
   }
@@ -530,17 +537,20 @@ function renderPlate(p, s, prev) {
       <div class="zone clickable ${gyCast}" data-zone="graveyard" data-p="${p}" title="Click to see the graveyard">Grave <b>${P.graveyard.length}</b></div>
       <div class="zone clickable ${exCast}" data-zone="exile" data-p="${p}" title="Click to see exiled cards">Exile <b>${P.exile.length}</b></div>
     </div>
-    ${pool ? `<div class="mana" title="Floating mana">${pool}</div>` : ''}`;
+    ${pool ? `<div class="mana" title="Floating mana">${pool}</div>` : ''}
+    ${isMe ? '' : `<div class="lastact" title="The opponent's latest action">${S.lastOpp ? `<span>Last:</span> ${esc(S.lastOpp)}` : ''}</div>`}`;
   void d;
 }
 
 function groupPerms(perms, s) {
   const hosts = new Set(s.battlefield.filter(c => c.attached_to != null).map(c => c.attached_to));
+  // While declaring attackers or blockers each creature is its own card.
+  const combat = S.ui && (S.ui.kind === 'declare_attacker' || S.ui.kind === 'declare_blocker');
   const out = [], by = new Map();
   for (const c of perms) {
     const creature = c.power != null;
-    if (creature || c.attacking || c.blocking != null || c.damage || c.counters || hosts.has(c.oid) || !(c.types.includes('Land') || c.token)) { out.push([c]); continue; }
-    const k = [c.name, !!c.tapped].join('|');
+    if ((creature && combat) || c.attacking || c.blocking != null || c.damage || c.counters || hosts.has(c.oid)) { out.push([c]); continue; }
+    const k = [c.name, !!c.tapped, !!c.sick, c.power, c.toughness].join('|');
     if (by.has(k)) by.get(k).push(c); else { const g = [c]; by.set(k, g); out.push(g); }
   }
   return out;
@@ -628,17 +638,51 @@ function fitHand() {
   });
 }
 
+// Card size per row from the space it has: as big as fits (up to a cap),
+// in one to three lines, never overlapping. Rows split the field's height,
+// creatures getting the larger share.
+const AR = 1.3934, GAP = 8;
 function fitRows() {
-  for (const row of $$('.row')) {
-    row.style.setProperty('--ov', '0px');
-    const kids = [...row.children];
-    if (kids.length < 2) continue;
-    const avail = row.clientWidth, need = row.scrollWidth;
-    if (need > avail) {
-      const w = kids.reduce((a, k) => a + k.offsetWidth, 0) / kids.length;
-      const ov = Math.min(w * 0.7, (need - avail) / (kids.length - 1) + 2);
-      row.style.setProperty('--ov', `${ov}px`);
-    }
+  const u = Math.min(innerHeight * 0.01, innerWidth * 0.006);
+  for (const k of [0, 1]) {
+    const field = $('#field' + k), front = $('#crea' + k), back = $('#lands' + k);
+    const cs = getComputedStyle(field);
+    const H = field.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - GAP;
+    const W = field.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const nf = front.children.length, nb = back.children.length;
+    const hf = nf ? H * (nb ? 0.6 : 0.8) : H * 0.25, hb = H - hf;
+    layoutRow(front, Math.min(W, front.clientWidth), hf, u * 18);
+    layoutRow(back, Math.min(W, back.clientWidth), hb, u * 11.5);
+  }
+}
+function layoutRow(row, W, h, maxW) {
+  row.style.height = `${Math.max(0, h)}px`;
+  const kids = [...row.children];
+  if (!kids.length) return;
+  const unit = el => el.classList.contains('tapped') ? AR : 1;
+  const units = kids.reduce((a, el) => a + unit(el), 0);
+  let best = {w: 0, L: 1};
+  for (let L = 1; L <= 3; L++) {
+    const perLine = units / L + (L > 1 ? 0.6 : 0);
+    const wH = (h - (L - 1) * GAP) / L / AR;
+    const wW = (W - (Math.ceil(kids.length / L) - 1) * GAP) / perLine;
+    const w = Math.min(wH, wW, maxW);
+    if (w > best.w * 1.1) best = {w, L};
+  }
+  let w = Math.max(24, best.w);
+  row.classList.toggle('wrap', best.L > 1);
+  row.style.setProperty('--rw', `${w}px`);
+  // Measured, not guessed; offsets ignore transforms (hover, entry and attack animations).
+  const extent = () => {
+    let bottom = 0, right = 0;
+    for (const el of kids) { bottom = Math.max(bottom, el.offsetTop + el.offsetHeight); right = Math.max(right, el.offsetLeft + el.offsetWidth); }
+    return [bottom - row.offsetTop, right - row.offsetLeft];
+  };
+  for (let i = 0; i < 8 && w > 24; i++) {
+    const [eh, ew] = extent();
+    if (eh <= h + 1 && ew <= W + 1) break;
+    w *= 0.92;
+    row.style.setProperty('--rw', `${w}px`);
   }
 }
 
@@ -800,12 +844,25 @@ function passLabel(s) {
   return `Pass → ${NEXT[s.step] || 'next step'}`;
 }
 
+const HINTS = {
+  priority: '<kbd>R</kbd> pass till they act · <kbd>F</kbd> full control',
+  declare_attacker: 'undo: <kbd>right-click</kbd> · <kbd>Esc</kbd> clears',
+  declare_blocker: 'undo: <kbd>right-click</kbd> · <kbd>Esc</kbd> clears',
+  target: 'the spell is being cast: pick a target',
+  pay_mana: '<kbd>Space</kbd> pays automatically',
+};
+function modeHint(d, ui) {
+  if (!d || !ui || S.busy || S.pumping) return S.queue.length ? '<kbd>click</kbd> or <kbd>Space</kbd> skips the replay' : '';
+  return HINTS[d.kind] || '<kbd>O</kbd> lists every option';
+}
+
 function renderDock() {
   const d = myDecision(), ui = S.ui, P = $('#primary'), pr = $('#prompt'), ch = $('#choices');
   const pill = $('#pill');
   pill.className = S.passMode || S.fullControl ? 'on' : '';
   pill.textContent = S.fullControl ? 'Full control: no auto-pass · F' : S.passMode === 'opp' ? 'Passing until the opponent acts · Esc' : '';
   P.className = 'primary'; P.disabled = true; ch.innerHTML = ''; pr.className = '';
+  $('#modehint').innerHTML = modeHint(d, ui);
   $('#bAll').style.visibility = d && ui ? 'visible' : 'hidden';
   if (S.error) {
     pr.innerHTML = `<span class="k">Problem</span><span class="err">${esc(S.error)}</span>`;
@@ -909,8 +966,11 @@ function renderOverlay() {
       <button class="btn" data-dmg="${j}:-1">−</button><div class="n">${ui.dmg[j]}</div><button class="btn" data-dmg="${j}:1">+</button></div>`).join('')
       + (r.player ? `<div class="dmgrow"><div>Defending player<div class="l">trample</div></div><button class="btn" data-dmg="${names.length}:-1">−</button><div class="n">${ui.dmg[names.length]}</div><button class="btn" data-dmg="${names.length}:1">+</button></div>` : '');
     const ok = splitIndex(d, ui.dmg) >= 0;
-    el.innerHTML = `<div class="obox"><h2>${esc(clean(d.prompt))}</h2><div class="sub">Starts from a legal split; adjust with − and +. Space confirms.</div>${rows}
-      <div class="orow"><button class="primary" ${ok ? '' : 'disabled'} data-opt="${splitIndex(d, ui.dmg)}">${ok ? 'Assign damage' : 'Not a legal split'}</button></div></div>`;
+    const why = ok ? '' : r.player ? 'Each blocker must get lethal damage before any tramples over.' : 'Not a split the rules allow.';
+    const total = ui.dmg.reduce((a, b) => a + b, 0);
+    el.innerHTML = `<div class="obox"><h2>${esc(clean(d.prompt))}</h2><div class="sub">Starts from a legal split (lethal to each blocker in order). + and − move a point between recipients · Space confirms.</div>${rows}
+      <div class="dmgsum">${total} assigned${why ? ` · <span class="err">${esc(why)}</span>` : ''}</div>
+      <div class="orow"><button class="primary" ${ok ? '' : 'disabled'} data-opt="${splitIndex(d, ui.dmg)}">${ok ? 'Assign damage' : 'Not legal yet'}</button></div></div>`;
   } else {
     const isCard = r => r.name && S.cards[r.name];
     const tiles = d.refs.map((r, i) => isCard(r) ? `<button class="tile" data-opt="${i}">${cardHtml(r.name)}<span>${esc(clean(d.options[i]))}</span></button>` : '').join('');
@@ -942,8 +1002,9 @@ function defaultSplit(d, s) {
   let best = r0.split, bestKey = null;
   for (const r of d.refs) {
     const kills = r.split.reduce((n, v, j) => n + (blockers[j] && v >= blockers[j].toughness - (blockers[j].damage || 0) ? 1 : 0), 0);
-    const key = [kills, r.player ? r.split[r.split.length - 1] : 0];
-    if (!bestKey || key[0] > bestKey[0] || (key[0] === bestKey[0] && key[1] > bestKey[1])) { best = r.split; bestKey = key; }
+    // most blockers killed, then most to the player, then earlier blockers first
+    const key = [kills, r.player ? r.split[r.split.length - 1] : 0, ...r.split];
+    if (!bestKey || lexLess(bestKey, key)) { best = r.split; bestKey = key; }
   }
   return [...best];
 }
@@ -1029,6 +1090,7 @@ document.addEventListener('pointerup', e => {
 });
 
 function startHandDrag(e) {
+  showTaps(tapsFor(handOpts(drag.el.dataset.name)));
   const g = $('#ghost');
   g.innerHTML = drag.el.outerHTML.replace(/class="card [^"]*"/, 'class="card"');
   g.style.display = 'block';
@@ -1056,6 +1118,7 @@ function endHandDrag(dg, e) {
   const inPlay = e.clientY < r.bottom - r.height * 0.22 && e.clientX < r.right && e.clientX > r.left;
   field.classList.remove('drop', 'hot');
   clearHot();
+  showTaps(null);
   const idxs = handOpts(dg.el.dataset.name);
   if (inPlay && idxs.length) {
     g.style.display = 'none';
@@ -1148,11 +1211,49 @@ document.addEventListener('dblclick', e => {
   if (hc && handOpts(hc.dataset.name).length) return chooseFromCard(hc, handOpts(hc.dataset.name));
   if (pm && permOpts(pm).length) return chooseFromCard(pm, permOpts(pm));
 });
-document.addEventListener('contextmenu', e => { const c = e.target.closest('.card[data-name]'); if (c) { e.preventDefault(); showPreview(c.dataset.name, true); } });
+document.addEventListener('contextmenu', e => {
+  const ui = S.ui, pm = e.target.closest('#board .perm');
+  if (ui && pm && canAct()) {  // undo a selection that has not been sent yet
+    const oid = +pm.dataset.oid;
+    if (ui.kind === 'declare_attacker' && ui.sel.has(oid)) { e.preventDefault(); return toggleAttacker(oid); }
+    if (ui.kind === 'declare_blocker' && (ui.blocks.has(oid) || ui.blockSel === oid)) {
+      e.preventDefault(); ui.blocks.delete(oid); ui.blockSel = null; render(S.shown, {noAnim: true}); renderDock(); return;
+    }
+    if (ui.kind === 'declare_blocker' && [...ui.blocks.values()].includes(oid)) {  // right-click an attacker: drop its blockers
+      e.preventDefault(); for (const [b, a] of [...ui.blocks]) if (a === oid) ui.blocks.delete(b); render(S.shown, {noAnim: true}); renderDock(); return;
+    }
+  }
+  const c = e.target.closest('.card[data-name]');
+  if (c) { e.preventDefault(); showPreview(c.dataset.name, true); }
+});
+
+// Auto-pay preview: the server simulated each cast with the auto-pay choice
+// (live_proto.tap_preview); light up those sources while a card is in hand.
+function tapsFor(idxs) {
+  const d = myDecision();
+  if (!d || !S.ui || S.ui.kind !== 'priority') return null;
+  for (const i of idxs || []) if (d.refs[i]?.taps) return d.refs[i].taps;
+  return null;
+}
+function showTaps(taps) {
+  $$('#board .will-tap').forEach(el => { el.classList.remove('will-tap'); el.querySelector('.b.tap')?.remove(); });
+  if (!taps || !taps.length) return;
+  const want = new Set(taps);
+  for (const el of $$('#board .perm')) {
+    const n = el.dataset.oids.split(' ').filter(o => want.has(+o)).length;
+    if (!n) continue;
+    el.classList.add('will-tap');
+    el.querySelector('.badges').insertAdjacentHTML('beforeend', `<span class="b tap">${n > 1 ? `tap ×${n}` : 'tap'}</span>`);
+  }
+}
 
 // Hover: hand lift with neighbours spreading, and the preview panel.
 let hoverTimer = null, pinned = false;
 document.addEventListener('pointerover', e => {
+  if (!drag) {
+    const hcard = e.target.closest('#hand .card'), pcard = e.target.closest('#board .perm.activatable'), mitem = e.target.closest('#pop [data-opt]');
+    showTaps(hcard ? tapsFor(handOpts(hcard.dataset.name)) : pcard ? tapsFor(permOpts(pcard)) : mitem ? tapsFor([+mitem.dataset.opt]) : null);
+  }
   const c = e.target.closest('.card[data-name], .sitem[data-name]');
   const hc = e.target.closest('#hand .card');
   $$('#hand .card').forEach(x => { x.classList.toggle('hover', x === hc && !drag); });
@@ -1244,7 +1345,20 @@ $('#bAll').addEventListener('click', e => { e.stopPropagation(); openDrawer(); }
 $('#bNew').addEventListener('click', () => openNewGame());
 $('#bSettings').addEventListener('click', () => openSettings());
 $('#bLog').addEventListener('click', () => { const l = $('#log'); l.classList.toggle('hide'); $('#bLog').textContent = l.classList.contains('hide') ? 'Show' : 'Hide'; });
-$('#overlay').addEventListener('click', e => { if (e.target.dataset.dmg) { const [j, dv] = e.target.dataset.dmg.split(':').map(Number); const ui = S.ui; ui.dmg[j] = Math.max(0, ui.dmg[j] + dv); renderOverlay(); renderDock(); } });
+$('#overlay').addEventListener('click', e => { if (e.target.dataset.dmg) { const [j, dv] = e.target.dataset.dmg.split(':').map(Number); moveDamage(S.ui.dmg, j, dv); renderOverlay(); renderDock(); } });
+// + takes a point from another recipient (the last one that has some), − gives
+// it to the next one, so the split always adds up to the attacker's power.
+function moveDamage(dmg, j, dv) {
+  const n = dmg.length;
+  if (dv > 0) {
+    let k = -1;
+    for (let i = n - 1; i >= 0; i--) if (i !== j && dmg[i] > 0) { k = i; break; }
+    if (k < 0) return;
+    dmg[k]--; dmg[j]++;
+  } else if (dmg[j] > 0) {
+    dmg[j]--; dmg[(j + 1) % n]++;
+  }
+}
 
 // The fallback: every option of the current decision as a plain list.
 function openDrawer() {
@@ -1303,6 +1417,7 @@ async function openNewGame() {
   const last = loadJSON('mtgml-play-last', {});
   const mus = Object.entries(opt.matchups);
   m.innerHTML = `<div class="mbox"><h2>Play against a model</h2><form id="fNew">
+    ${Object.keys(opt.scenarios || {}).length ? `<label>Dev scenario</label><select name="scenario"><option value="">none (a normal game)</option>${Object.entries(opt.scenarios).map(([k, t]) => `<option value="${esc(k)}">${esc(t)}</option>`).join('')}</select>` : ''}
     <label>Opponent</label><select name="model">${opt.models.map(n => `<option ${n === last.model ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
     <label>Matchup</label><select name="matchup">${mus.map(([k, v]) => `<option value="${esc(k)}" ${k === (last.matchup || 'jund_blue') ? 'selected' : ''}>${esc(v[0])} vs ${esc(v[1])}</option>`).join('')}</select>
     <label>You play</label><span class="seg" id="segSeat"></span>
@@ -1317,6 +1432,7 @@ async function openNewGame() {
   f.onsubmit = async e => {
     e.preventDefault();
     const req = {model: f.model.value, matchup: f.matchup.value, seat: +(f.seat.value || 0), greedy: f.greedy.checked};
+    if (f.scenario && f.scenario.value) req.scenario = f.scenario.value;
     saveJSON('mtgml-play-last', req);
     const b = f.querySelector('button[type=submit]'); b.disabled = true; b.textContent = 'Starting…';
     try {

@@ -170,3 +170,61 @@ def test_play_app_is_served_and_contained(tmp_path):
         assert get("/play/missing.js")[0] == 404
     finally:
         srv.shutdown()
+
+
+@pytest.mark.parametrize("scenario,seed", [("crowded", 1), ("floating", 2), (None, 4), (None, 7)])
+def test_tap_preview_is_what_auto_pay_taps(manager, scenario, seed):
+    """Each cast's `taps` preview equals the sources the client's automatic
+    payment (decision["auto"]) really taps, other choices taking option 0
+    as the preview does."""
+    req = {"model": SCRIPTED, "seed": seed, "seat": 1, "matchup": "madness_elves"}
+    if scenario:
+        req["scenario"] = scenario
+    view = manager.new(req)
+    seat, gid, frames = view["live"]["seat"], view["live"]["id"], list(view["frames"])
+    pending, checked = [], 0
+    while not view["live"]["over"] and checked < 12 and len(frames) < 1500:
+        f = len(frames) - 1
+        d = frames[-1]["decision"]
+        if d["kind"] == "priority":
+            land = next((k for k, r in enumerate(d["refs"]) if r["type"] == "play_land"), 0)
+            i = land or next((k for k, r in enumerate(d["refs"]) if r.get("taps")), 0)
+            if i and not land:
+                untapped = {c["oid"] for c in frames[-1]["state"]["battlefield"] if c["controller"] == seat and not c.get("tapped")}
+                pending.append((f, set(d["refs"][i]["taps"]), untapped))
+        elif d["kind"] == "pay_mana":
+            assert 0 <= d["auto"] < len(d["options"])
+            i = d["auto"]
+        else:
+            i = 0
+        view = manager.choose(gid, {"frame": f, "index": i, "since": f})
+        frames[view["live"]["since"] :] = view["frames"]
+        while pending:  # the first frame after the cast's own decisions shows what was tapped
+            start, taps, untapped = pending[0]
+            after = next((g for g in range(start + 1, len(frames)) if not frames[g]["decision"] or frames[g]["decision"]["player"] != seat or frames[g]["decision"]["kind"] == "priority"), None)
+            if after is None:
+                break
+            tapped = {c["oid"] for c in frames[after]["state"]["battlefield"] if c["oid"] in untapped and c.get("tapped")}
+            assert tapped == taps, (frames[start]["decision"]["options"], taps, tapped)
+            pending.pop(0)
+            checked += 1
+    assert checked
+
+
+def test_dev_scenarios_only_on_dev_servers(tmp_path):
+    from mtg_ml.live_dev import SCENARIOS
+
+    m = LiveManager(None, tmp_path, scripted=False)
+    try:
+        assert m.options()["scenarios"] == {}
+        with pytest.raises(LiveError):
+            m.new({"model": SCRIPTED, "scenario": "crowded"})
+    finally:
+        m.close()
+    m = LiveManager(None, tmp_path, scripted=True)
+    try:
+        for name in SCENARIOS:
+            view = m.new({"model": SCRIPTED, "scenario": name, "seed": 0})
+            assert view["frames"][-1]["decision"]["player"] == view["live"]["seat"]
+    finally:
+        m.close()

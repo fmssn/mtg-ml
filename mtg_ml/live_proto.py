@@ -199,3 +199,72 @@ def parse_event(line: str) -> dict | None:
 def parse_events(lines: list[str]) -> list[dict]:
     """The visible log lines of a frame as structured events, in order."""
     return [ev for ev in map(parse_event, lines) if ev is not None]
+
+
+# ---------------------------------------------------------------------------
+# Mana: the auto-pay choice, and which sources a cast would tap
+# ---------------------------------------------------------------------------
+
+BASICS = frozenset({"Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"})
+
+
+def auto_pay_index(g, d) -> int:
+    """The pay_mana option the play client takes when paying automatically:
+    floating mana first; then the source that keeps the most options open
+    (lands before artifacts before creatures, single-colour sources, basics);
+    sacrifices and filters last; ties in option order. The engine offers only
+    options that keep the payment completable, so greedy is safe."""
+    counts: dict[int, int] = {}
+    for o in d.options:
+        if o.value[0] != "pool":
+            counts[o.value[1].oid] = counts.get(o.value[1].oid, 0) + 1
+    best, best_key = 0, None
+    for i, o in enumerate(d.options):
+        v = o.value
+        if v[0] == "pool":
+            key = (0, 0, 0, 0, 0, 0, i)
+        else:
+            card = v[1]
+            types = g.types(card)
+            kind = 2 if "Creature" in types else 0 if "Land" in types else 1
+            key = (1, int(o.label.startswith("Sacrifice")), int(v[0] == "filter"), kind, counts[card.oid], int(card.name not in BASICS), i)
+        if best_key is None or key < best_key:
+            best, best_key = i, key
+    return best
+
+
+def tap_preview(g, index: int, seat: int, limit: int = 60) -> list[int] | None:
+    """The oids of `seat`'s permanents that taking priority option `index`
+    and paying with `auto_pay_index` would tap (other choices on the way take
+    their first option). Runs on a copy; None if it cannot be simulated."""
+    try:
+        before = {c.oid for c in g.battlefield if c.controller == seat and not c.tapped}
+        c = g.copy()
+        c.step(index)
+        for _ in range(limit):
+            d = c.decision
+            if d is None or d.player != seat or d.kind == "priority":
+                break
+            c.step(auto_pay_index(c, d) if d.kind == "pay_mana" else 0)
+        return sorted(x.oid for x in c.battlefield if x.oid in before and x.tapped)
+    except Exception:  # a preview must never break the game
+        return None
+
+
+PREVIEWED = frozenset({"cast", "activate", "plot"})
+
+
+def add_tap_previews(g, refs: list[dict], seat: int, vis: dict, max_options: int = 16) -> None:
+    """Give each cast/activate/plot ref `taps`: the sources auto-pay would use."""
+    import gc
+
+    done = 0
+    for i, r in enumerate(refs):
+        if r["type"] not in PREVIEWED or done >= max_options:
+            continue
+        done += 1
+        taps = tap_preview(g, i, seat)
+        if taps is not None:
+            r["taps"] = [o for o in taps if o in vis["oid"]]
+    if done:
+        gc.collect()  # the copies hold reference cycles; native objects must die on this (the game's) thread

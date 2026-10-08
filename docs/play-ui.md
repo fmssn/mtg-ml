@@ -7,6 +7,8 @@ python -m mtg_ml.replay serve --models runs/          # then open http://127.0.0
 python -m mtg_ml.replay serve --scripted-bot          # no checkpoint: play the decks' scripted bots (dev)
 ```
 
+`--scripted-bot` marks a development server: the new-game dialog then also offers **dev scenarios** (`mtg_ml/live_dev.py`), games that start in a set position: a crowded Elves board, a trampling Hydra that must be chump-blocked (damage assignment), Tron lands that float mana. Players on a normal server never see them.
+
 The replay viewer (`/`) and its own live mode are unchanged. A finished game is written to the replay directory as before; the game-over dialog links to it.
 
 ## Controls
@@ -18,8 +20,11 @@ The replay viewer (`/`) and its own live mode are unchanged. A finished game is 
 | activate an ability | click the permanent (blue glow) → menu; double-click if it has one ability |
 | flashback, plotted cards | click the glowing Grave / Exile counter on your plate |
 | choose a target | click a glowing (cyan) permanent, player plate or stack item; the arrow follows the pointer |
+| see what a spell will tap | hover or drag a castable card: the lands and sources auto-pay will use light up ("tap", "tap ×2" on a stack) |
 | attack | click creatures (or drag them forward), **A** all attack, then **Space** "Attack with N" |
-| block | drag your creature onto an attacker (or click yours, then theirs); click again to undo; **Space** "Block (N)" |
+| block | drag your creature onto an attacker (or click yours, then theirs); **Space** "Block (N)" |
+| undo before confirming | right-click a selected attacker or assigned blocker (right-click an attacker drops all its blockers); **Esc** clears every selection. Nothing is undone once sent: no server-side undo |
+| assign combat damage | the panel opens on a legal split; + and − move a point between recipients (the total stays the attacker's power), it says why a split is not allowed |
 | pass priority | **Space**: the button says what happens ("Pass → Combat", "Resolve Lightning Bolt", "End turn") |
 | pass until the opponent acts | **R** or **Enter**; **Esc** cancels |
 | full control (never auto-pass) | **F** |
@@ -46,11 +51,13 @@ The live server's frames keep the replay format, with two additions.
 | card choices | `{type: <kind>, name, uid}` when the card is in plain view |
 | mulligan | `{type: keep}` / `{type: mulligan}` |
 
+Two more fields for the player's own decisions: a `pay_mana` decision carries `auto`, the option the client takes when paying automatically (`live_proto.auto_pay_index`), and each cast / activate / plot ref at priority carries `taps`, the oids of the player's sources that this option plus automatic payment would tap. `taps` comes from simulating the option on a `Game.copy()` with the same `auto_pay_index` (other choices on the way take their first option), so the preview and the real payment cannot drift apart; `tests/test_live_proto.py` checks they are equal in played games on both engines.
+
 **`actions`**: the frame's visible log lines parsed into events (`turn`, `step`, `play`, `cast`, `activate`, `trigger`, `resolve`, `enter`, `leave`, `dies`, `attack` with oids, `block` with pairs, `discard`, `sacrifice`, `mulligan`, `countered`, `game_over`, else `note`).
 
 **No leaks.** Every uid, oid and stack id in a ref is checked against the snapshot the player gets in the same frame; anything not in it (a library card, the model's face-down hand) is dropped and only the name the label already shows stays. The model's frames carry one ref for the chosen option of public kinds (`rl.features.PUBLIC_KINDS`) and `{type: hidden}` otherwise. `actions` are parsed from lines `replay.visible_events` already let through. `tests/test_live_proto.py` plays games on both engines and checks this for every frame.
 
-The engine's per-step decisions stay as they are. The client batches: an attack is a set of creatures, sent as the engine's one-at-a-time `declare_attacker` decisions; blocks are a blocker → attacker map, sent per blocker; mana is paid by a client heuristic (floating mana first, then sources that keep the most colours open; basics before other lands before artifacts before creatures; sacrifices and filters last). Equivalent permanents are deduplicated by the engine, so an attack plan picks the exact creature when offered and an interchangeable one otherwise.
+The engine's per-step decisions stay as they are. The client batches: an attack is a set of creatures, sent as the engine's one-at-a-time `declare_attacker` decisions; blocks are a blocker → attacker map, sent per blocker; mana is paid with the server's `auto` choice (floating mana first, then sources that keep the most colours open; basics before other lands before artifacts before creatures; sacrifices and filters last). Equivalent permanents are deduplicated by the engine, so an attack plan picks the exact creature when offered and an interchangeable one otherwise.
 
 ## Design
 
@@ -95,10 +102,16 @@ Your own spell on top of the stack passes (it resolves unless they respond, and 
 | yes_no, choose_mode, choose_x, order, order_triggers | option buttons above the primary button |
 | mulligan | "Keep 7" as the primary button, "Mulligan to 6" beside it |
 
-### Known gaps (v1)
+### Board layout
 
-- No land-tap preview before casting (the engine pays per pip; the client would have to simulate it).
-- No undo, no "always yes/no", no smart stops per card, no manual-mana pool undo.
+Each battlefield row (creatures in front, lands and other permanents behind) gets its share of the side's height and picks the largest card size that fits in one to three lines, up to a cap, measured after layout. Cards never overlap. Identical permanents stack with a ×N count (lands, tokens, and creatures outside combat declarations; while declaring attackers or blockers every creature is its own card). Opponent actions since your last move are listed in full in the side panel, each with a ⚑; the latest also shows on the opponent's plate.
+
+### Known gaps
+
+- The tap preview assumes the first choice for anything decided while casting (targets, X, additional costs), so an X spell is previewed at its smallest X.
+- No server-side undo, no "always yes/no", no smart stops per card, no manual-mana undo.
 - The combat preview ignores first strike and tricks; it is a hint.
 - Motion covers zone changes on the board and hand (FLIP); draws, deaths and damage get simple effects, not full flights to the graveyard.
+- A board of 25+ different permanents on one side gets small cards (three lines); hover still shows the full card on the right.
+- Card art comes from Scryfall on first sight; until it arrives a card shows a text face.
 - Phone layout is not done; the target is desktop 1280×800 and up.
