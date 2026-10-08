@@ -152,23 +152,32 @@ def damage_floor(attackers, defenders):
     if tramplers:
         t = tramplers[0]
         ordinary = [a for i, a in enumerate(attackers) if i != t]
-        ps = [max(0, a["power"]) for a in ordinary]
-        # State is (which ordinary attacks were blocked, trample damage stopped).
-        dp = {(0, 0): 0}
-        for b in defenders:
-            out = dict(dp)
-            for (mask, stopped), value in dp.items():
-                if blocks(b, attackers[t]):
-                    new = min(powers[t], stopped + lethal(attackers[t], b))
-                    out[mask, new] = max(out.get((mask, new), -1), value + new - stopped)
-                for i, a in enumerate(ordinary):
-                    if not mask & (1 << i) and blocks(b, a):
-                        key = mask | (1 << i), stopped
-                        out[key] = max(out.get(key, -1), value + ps[i])
-            dp = out
-        return sum(powers) - max(dp.values())
+        ps = tuple(max(0, a["power"]) for a in ordinary)
+        choices = tuple((sum(1 << i for i, a in enumerate(ordinary) if blocks(b, a)),
+                         lethal(attackers[t], b) if blocks(b, attackers[t]) else 0) for b in defenders)
+        return sum(powers) - _trample_prevented(ps, powers[t], choices)
     legal = tuple(sum(1 << i for i, a in enumerate(attackers) if blocks(b, a)) for b in defenders)
     return sum(powers) - _prevented(powers, legal)
+
+
+@lru_cache(maxsize=512)
+def _trample_prevented(powers, trample_power, choices):
+    # State is (which ordinary attacks were blocked, trample damage stopped).
+    dp = {(0, 0): 0}
+    for legal, capacity in choices:
+        out = dict(dp)
+        for (mask, stopped), value in dp.items():
+            if capacity:
+                new = min(trample_power, stopped + capacity)
+                out[mask, new] = max(out.get((mask, new), -1), value + new - stopped)
+            free = legal & ~mask
+            while free:
+                bit = free & -free
+                free -= bit
+                key = mask | bit, stopped
+                out[key] = max(out.get(key, -1), value + powers[bit.bit_length() - 1])
+        dp = out
+    return max(dp.values())
 
 
 def _suffix_scores(weights, lethals, remaining, start, force_lethal):
@@ -298,9 +307,12 @@ class BenchmarkBlue:
     def _counter_target(self, view, spike=False):
         candidates = [s for s in view.context["stack"] if s["kind"] == "spell" and s["controller"] == "opponent"]
         if spike:
-            candidates = [s for s in candidates if available(view, "opponent") < 1 + sum(
-                w["ward"]["amount"] for w in view.context["stack"] if w.get("ward", {}).get("sid") == s["sid"])]
+            candidates = [s for s in candidates if self._spike_live(view, s)]
         return max(candidates, key=lambda s: self._spell_value(view, s), default=None)
+
+    def _spike_live(self, view, item):
+        return available(view, item["controller"]) < 1 + sum(
+            w["ward"]["amount"] for w in view.context["stack"] if w.get("ward", {}).get("sid") == item["sid"])
 
     def _reserve(self, view, cost):
         protecting = any(c["power"] >= 3 or c["name"] == "Delver of Secrets" for c in creatures(view, "self"))
@@ -370,6 +382,9 @@ class BenchmarkBlue:
             if tag != "cast":
                 self._bad(a)
             mode, cost = a.data["mode"], ManaCost.parse(a.data["cost"]).mana_value
+            allowed = {"normal", "escape"} if name == "Sleep of the Dead" else {"normal", "flashback"} if name == "Plunder the Trollshaws" else {"normal"}
+            if mode not in allowed:
+                self._bad(a)
             if name in {"Counterspell", "Force Spike"}:
                 target = self._counter_target(view, name == "Force Spike")
                 threshold = PARAMETERS["spike_min_value" if name == "Force Spike" else "counter_min_value"]
@@ -398,12 +413,17 @@ class BenchmarkBlue:
                     scores.append(self._tempo(view, c, name == "Sleep of the Dead", mode == "escape"))
                 out.append(max(scores, default=NEG) if main else NEG)
             elif name == "Lorien Revealed":
-                out.append(20.0 if main and not self._reserve(view, cost) else NEG)
+                out.append(20.0 if main and view.state["self"]["library_count"] >= 3 and not self._reserve(view, cost) else NEG)
             elif name == "Plunder the Trollshaws":
                 if mode not in {"normal", "flashback"}:
                     self._bad(a)
-                out.append(21.0 if end or (main and not self._reserve(view, cost)) else NEG)
+                enough = view.state["self"]["library_count"] >= (2 if mode == "flashback" else 1)
+                out.append(21.0 if enough and (end or (main and not self._reserve(view, cost))) else NEG)
             elif name in CANTRIPS:
+                minimum = 3 if name in {"Brainstorm", "Mental Note"} else 1
+                if view.state["self"]["library_count"] < minimum:
+                    out.append(NEG)
+                    continue
                 if name in {"Thought Scour", "Mental Note"} and self._mill_loss(view) >= PARAMETERS["known_top_keep_value"]:
                     out.append(NEG)
                     continue
@@ -429,10 +449,12 @@ class BenchmarkBlue:
                 out.append(NEG)
             elif "sid" in t:
                 item = self._stack(view, t["sid"])
-                out.append(self._spell_value(view, item) if item is not None else NEG)
+                out.append(self._spell_value(view, item) if item is not None and
+                           (spell != "Force Spike" or self._spike_live(view, item)) else NEG)
             elif "player" in t:
                 if spell == "Thought Scour":
-                    out.append(10.0 if t["player"] == "self" else NEG)
+                    side = "opponent" if view.state["self"]["library_count"] < 3 else "self"
+                    out.append(10.0 if t["player"] == side else NEG)
                 else:  # public dungeon traps target the opponent
                     out.append(10.0 if t["player"] == "opponent" else NEG)
             else:
@@ -507,6 +529,9 @@ class BenchmarkBlue:
         known = dict(view.state["self"]["library_known"])
         for a in actions:
             tag, answer = a.key
+            allowed = {"keep", "graveyard"} if tag == "explore" else {"yes", "no"}
+            if answer not in allowed:
+                self._bad(a)
             if tag == "reveal":
                 name = known.get(0)
                 want = name is not None and bool(set(view.cards[name]["types"]) & {"Instant", "Sorcery"})
@@ -551,6 +576,8 @@ class BenchmarkBlue:
         for a in actions:
             tag, answer = a.key
             if tag == "deem":
+                if answer not in {"bottom", "second"}:
+                    self._bad(a)
                 # The deciding player owns the bounced card. Recover threats
                 # cheaply rather than burying them; bottom unwanted mana.
                 stack = view.context["stack"]
@@ -559,6 +586,8 @@ class BenchmarkBlue:
                 want_second = c is not None and ("Creature" in c["types"] or self._value(view, c["name"]) >= 3)
                 out.append(float((answer == "second") == want_second))
             elif tag == "scry":
+                if answer not in {"top", "bottom"}:
+                    self._bad(a)
                 known = dict(view.state["self"]["library_known"])
                 keep = self._value(view, known.get(0)) >= 2
                 out.append(float((answer == "top") == keep))

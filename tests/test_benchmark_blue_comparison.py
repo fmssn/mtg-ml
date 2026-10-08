@@ -53,3 +53,11 @@ def test_worker_comparison_excludes_timing_only():
     assert strip_timing(a) == strip_timing(b)
     b[0]["attempted_action"]["index"] = 0
     assert strip_timing(a) != strip_timing(b)
+
+
+def test_comparison_rejects_invalid_outcome():
+    specs = episodes(development_manifest(2))
+    candidate = rows(specs, lambda s:s.learner_seat)
+    candidate[0]["winner"] = 7
+    with pytest.raises(ValueError, match="invalid outcome"):
+        paired_summary(candidate, rows(specs, lambda s:None), specs, replicates=10)

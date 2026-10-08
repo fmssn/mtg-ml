@@ -408,3 +408,13 @@ def test_trample_floor_and_cumulative_defensive_blocks():
     defenders = [c for c in v.state["battlefield"] if c["controller"] == "self"]
     assert damage_floor(hydra, defenders[:1]) == 5
     assert damage_floor(hydra, defenders) == 0
+
+
+def test_cantrip_avoids_self_decking_and_scour_uses_safe_target():
+    g = scenario(p0={"hand": ["Mental Note"], "battlefield": ISLANDS(1), "library": ["Island"]*2})
+    assert key(g) == ("pass",)
+    g = scenario(p0={"hand": ["Thought Scour"], "battlefield": ISLANDS(1), "library": ["Island"]})
+    choose(g, "Cast Thought Scour")
+    assert key(g) == ("target", "player", "player", "opponent")
+    g.step(choice(g)); pay(g); resolve_stack(g)
+    assert not g.over and len(g.players[0].hand) == 1

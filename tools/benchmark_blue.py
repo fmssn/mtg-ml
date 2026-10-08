@@ -79,6 +79,8 @@ def identity(row):
 def score(row):
     if row["status"] != "completed":
         raise ValueError("technical errors cannot enter paired scores")
+    if row["winner"] is not None and (type(row["winner"]) is not int or row["winner"] not in (0, 1)):
+        raise ValueError("invalid outcome")
     return .5 if row["winner"] is None else float(row["winner"] == row["learner_seat"])
 
 
