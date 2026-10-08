@@ -61,6 +61,10 @@ def validate_evidence(data: dict) -> dict:
         ids.add(record["id"])
         require(record.get("kind") in KINDS and record.get("visibility") in VISIBILITY, "invalid record kind or visibility")
         validate_review(record["review"])
+        require(isinstance(record.get("value"), dict), "record value must be an object")
+        if record["kind"] == "state":
+            require(isinstance(record["value"].get("path"), str) and bool(record["value"]["path"]) and "value" in record["value"],
+                    "state fact needs a path and value")
         finite(record["available_at"], "available_at")
         require(bool(record.get("refs")), f"{record['id']}: source references are required")
         for r in record["refs"]:

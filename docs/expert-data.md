@@ -43,7 +43,7 @@ MTGO log is preferable when available.
 
 ```bash
 make setup
-.venv/bin/python -m pip install -e '.[expert-media]'
+uv pip install --python .venv/bin/python -e '.[expert-media]'
 # ffmpeg must be on PATH
 .venv/bin/python -m mtg_ml.expert acquire \
   'https://www.youtube.com/watch?v=7rs5JfA0gnM' --out .context/expert-pilot/source

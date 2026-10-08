@@ -10,7 +10,7 @@ import time
 import urllib.error
 import urllib.request
 
-from .artifacts import COMMENTARY, KINDS, VISIBILITY, fact, ref, require
+from .artifacts import COMMENTARY, KINDS, VISIBILITY, fact, finite, ref, require
 
 MODEL_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -155,9 +155,12 @@ def import_response(output: dict, source_id: str, viewer: int, frames: list[dict
             locators[r["locator"]] = (r["start"], r["end"], r["kind"])
     if video:
         locators[video] = (start, end, "video")
-    require(isinstance(output.get("records"), list), "model response needs records")
+    require(isinstance(output, dict) and isinstance(output.get("records"), list), "model response needs records")
     records = []
     for i, item in enumerate(output["records"]):
+        require(isinstance(item, dict) and set(MODEL_SCHEMA["properties"]["records"]["items"]["required"]) <= item.keys(), "incomplete model record")
+        finite(item["start"], "model start")
+        finite(item["end"], "model end")
         require(item["kind"] in KINDS and item["visibility"] in VISIBILITY and item["classification"] in COMMENTARY, "invalid model record")
         require(item["locator"] in locators, "model cited an unavailable source locator")
         a, b, kind = locators[item["locator"]]
