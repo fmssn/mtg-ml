@@ -455,6 +455,42 @@ def test_split_draws_from_different_causes_cannot_match_one_draw():
     assert cursor == 0 and not matched
 
 
+def test_replay_root_cannot_borrow_a_later_game_state(engine):
+    evidence, spec = fixture()
+    spec["windows"][0]["start_scenario"]["decision_time"] = 201
+    with pytest.raises(ValueError, match="outside its game"):
+        reconstruct(evidence, spec, engine)
+
+
+def test_countered_chrysalis_keeps_its_cast_trigger(engine, native_parity):
+    evidence, spec = fixture()
+    window = spec["windows"][0]
+    root = window["start_scenario"]
+    root["initial"]["players"][0].update(
+        hand=["Writhing Chrysalis"], hand_count=1, battlefield=["Forest", "Forest", "Mountain", "Mountain"]
+    )
+    root["initial"]["players"][1].update(hand=["Counterspell"], hand_count=1, battlefield=["Island", "Island"])
+    root["expected_after"] = {}
+    rebind(evidence, root)
+    window["event_ids"] = []
+    for rid, text in [
+        ("chrysalis", "Alice casts Writhing Chrysalis."),
+        ("trigger", "Alice puts a triggered ability from Writhing Chrysalis onto the stack."),
+        ("counterspell", "Bob casts Counterspell targeting Writhing Chrysalis."),
+        ("tokens", "Alice's Writhing Chrysalis creates two Eldrazi Spawn Tokens."),
+    ]:
+        add_event(evidence, spec, rid, text)
+    window["end_assertions"] = {
+        "self.graveyard": ["Writhing Chrysalis"],
+        "battlefield.6.name": "Eldrazi Spawn",
+        "battlefield.7.name": "Eldrazi Spawn",
+        "stack": [],
+    }
+    spec["budget"].update(candidates=64, actions=30, expansions=10000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "matched" and result["paths"][0]["verification"]["identical"]
+
+
 @pytest.mark.parametrize(
     "text,kind,cards",
     [

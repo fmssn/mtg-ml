@@ -177,6 +177,9 @@ def validate_spec(spec, evidence):
             require(
                 w.get("start_scenario", {}).get("perspective") == spec["perspective"], "window perspective mismatch"
             )
+            game = next(g for g in spec["games"] if g["id"] == w["game_id"])
+            decision_time = finite(w["start_scenario"].get("decision_time"), "window decision time")
+            require(game["start"] <= decision_time < game["end"], "replay root outside its game")
         for cp_id in w.get("checkpoint_ids", []):
             require(cp_id in ids, "unknown window checkpoint")
     for game_id, decks in spec.get("source_decklists", {}).items():
