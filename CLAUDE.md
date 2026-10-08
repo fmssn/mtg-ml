@@ -45,7 +45,7 @@ New user-facing apps (replay viewer, dashboards) go under `apps/<name>/` and sho
   resuming shared work, read current orchestration status and verify PR state on
   GitHub before acting; old handoffs and agent IDs can be stale.
 - Many sessions run in parallel worktrees. Keep PRs to one component, branch from the default branch (`git remote set-head origin -a`, then `origin/HEAD`), and avoid editing shared hotspots (README.md, `.gitignore`, `play.py`, golden digests) unless the change needs it.
-- CI (`.github/workflows/ci.yml`) runs lint, the Python suite with CPU torch, and the native build + differential fuzz. It must be green before merge.
+- CI (`.github/workflows/ci.yml`) runs lint, the Python suite with CPU torch, and the native build + differential fuzz. It must be green before merge. Its native job runs only tests marked `native`, which `tests/conftest.py` applies to tests with "native" in their id and to `test_difftest.py`; any other test that needs the Rust engine gets `@pytest.mark.native`. PRs touching only `docs/` and top-level `*.md` skip the test jobs.
 - Mark tests that take more than a few seconds `@pytest.mark.slow`; GPU-only tests `@pytest.mark.gpu` (CI runs on CPU and deselects both).
 - Don't commit checkpoints, `runs/`, or large binaries.
 - Benchmark numbers in docs should say which machine they were measured on.

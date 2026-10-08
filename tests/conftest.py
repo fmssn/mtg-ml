@@ -15,6 +15,16 @@ ENGINE_MODULES = {"test_correctness_foundations", "test_set7_rl", "test_action_d
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "python_only: test reads or mutates reference-engine internals")
+    config.addinivalue_line("markers", "native: needs the Rust engine (applied automatically, see below)")
+
+
+def pytest_collection_modifyitems(items):
+    # CI's native job runs only `-m native`; the python job covers the rest. A test
+    # that needs mtg_ml_native must have "native" in its id, live in test_difftest,
+    # or carry @pytest.mark.native itself.
+    for item in items:
+        if "native" in item.nodeid.rsplit("::", 1)[-1] or item.module.__name__.endswith("test_difftest"):
+            item.add_marker(pytest.mark.native)
 
 
 def is_engine_module(name: str) -> bool:

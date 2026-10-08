@@ -10,6 +10,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The ruleset requires the checks `lint`, `python` and `native`. `python` and `native`
+# are gate jobs over the parallel jobs below, so the work can be split without
+# touching the ruleset.
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -19,9 +23,33 @@ jobs:
         with:
           args: check
 
-  python:
-    # Reference engine only: rules, cards, bots, golden digests, RL on CPU torch.
+  changes:
+    # A pull request that only touches docs/ and top-level *.md skips the test jobs.
+    # Pushes to the default branch always run everything.
     runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: diff
+        run: |
+          if [ "${{ github.event_name }}" != pull_request ]; then echo code=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          # HEAD is the PR merged into its base; HEAD^1 is the base.
+          files=$(git diff --name-only HEAD^1 HEAD)
+          echo "$files"
+          if grep -qvE '^docs/|^[^/]+\.md$' <<< "$files"; then code=true; else code=false; fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  python-tests:
+    # Reference engine only: rules, cards, bots, golden digests, RL on CPU torch.
+    # Native variants skip here; native-tests runs them.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    env:
+      OMP_NUM_THREADS: "1"  # one torch thread per xdist worker
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -30,10 +58,12 @@ jobs:
           activate-environment: true
           enable-cache: true
       - run: uv pip install -e '.[dev]' numpy && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: python -m pytest -q -m "not slow and not gpu"
+      - run: python -m pytest -q -n auto --durations=15 -m "not slow and not gpu"
 
-  native:
-    # Rust engine: cargo tests, then the full suite with native variants and differential tests.
+  native-tests:
+    # Rust engine: cargo tests, then the tests marked `native` (tests/conftest.py).
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +81,49 @@ jobs:
         working-directory: native
       - run: maturin develop --release
         working-directory: native
-      - run: python -m pytest -q -m "not slow and not gpu"   # torch tests skip here; the python job covers them
-      - run: python -m mtg_ml.difftest fuzz --games 300 --jobs 4
-      - run: python -m mtg_ml.difftest fuzz --games 300 --jobs 4 --matchup jund_madness
+      - run: python -m pytest -q -n auto --durations=15 -m "native and not slow and not gpu"   # torch tests skip here; python-tests covers them
+
+  difftest:
+    # 600 differential games as four parallel shards of 150.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        matchup: [jund_blue, jund_madness]
+        start: [0, 150]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          save-if: false  # native-tests saves the cache
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          activate-environment: true
+          enable-cache: true
+      - run: uv pip install -e . "maturin>=1.5,<2"
+      - run: maturin develop --release
+        working-directory: native
+      - run: python -m mtg_ml.difftest fuzz --games 150 --start ${{ matrix.start }} --jobs 4 --matchup ${{ matrix.matchup }}
+
+  python:
+    needs: [changes, python-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo ok
+
+  native:
+    needs: [changes, native-tests, difftest]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo ok
