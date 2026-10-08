@@ -19,7 +19,7 @@ def digest(path):
         return hashlib.file_digest(f, "sha256").hexdigest()
 
 
-def freeze(source, out, source_ref):
+def freeze(source, out, source_ref, opponent_pool=None):
     import torch
 
     from mtg_ml.rl.model import PolicyNet, load_partial
@@ -32,7 +32,7 @@ def freeze(source, out, source_ref):
     ck = torch.load(source, map_location="cpu", weights_only=False)
     config = PolicyNet(**ck["config"]).config
     required = dict(hidden=256, trunk="entity", memory="gru", value_net="shared", entity_attn=0, features=6)
-    if any(config[k] != v for k, v in required.items()):
+    if any(config.get(k, 0 if k == "entity_attn" else None) != v for k, v in required.items()):
         raise ValueError(f"expected width-256 GRU shared-value feature-6 parent: {config}")
     torch.manual_seed(0)
     net = PolicyNet(**{**config, "entity_attn": 1})
@@ -40,9 +40,21 @@ def freeze(source, out, source_ref):
     out.mkdir(parents=True)
     shutil.copyfile(source, out / "parent.pt")
     torch.save({"config": net.config, "model": net.state_dict()}, out / "attention.pt")
+    opponents = []
+    if opponent_pool:
+        (out / "pool").mkdir()
+        for path in sorted(Path(opponent_pool).glob("iter_*.pt")):
+            if path.name > source.name:
+                continue
+            old = torch.load(path, map_location="cpu", weights_only=False)
+            opponent = PolicyNet(**{**old["config"], "entity_attn": 1})
+            load_partial(opponent, old["model"])
+            target = out / "pool" / path.name
+            torch.save({"config": opponent.config, "model": opponent.state_dict()}, target)
+            opponents.append(dict(source=str(path), source_sha256=digest(path), file=path.name, sha256=digest(target)))
     manifest = dict(source=str(source), source_ref=source_ref, source_sha256=digest(source),
                     parent_sha256=digest(out / "parent.pt"), attention_sha256=digest(out / "attention.pt"),
-                    config=net.config, new_parameters=new, optimizer="fresh", attention_heads=4, ffn_width=512)
+                    config=net.config, new_parameters=new, optimizer="fresh", attention_heads=4, ffn_width=512, opponents=opponents)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 
@@ -52,8 +64,9 @@ def main():
     ap.add_argument("--source", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--source-ref", required=True)
+    ap.add_argument("--opponent-pool", help="freeze completed historical opponents through the parent snapshot; add identity attention to preserve behavior")
     args = ap.parse_args()
-    print(json.dumps(freeze(args.source, args.out, args.source_ref), indent=2))
+    print(json.dumps(freeze(args.source, args.out, args.source_ref, args.opponent_pool), indent=2))
 
 
 if __name__ == "__main__":

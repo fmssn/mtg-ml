@@ -30,7 +30,7 @@ from mtg_ml.rl.train import Trainer, parse_args  # noqa: E402
 TINY = ["--hidden", "16", "--games-per-iter", "4", "--workers", "2", "--max-turns", "6"]
 NO_EVAL = ["--eval-every", "0"]
 SMALL_EVAL = ["--eval-games", "4", "--eval-bo3-matches", "2", "--bench-games", "4", "--bench-greedy-games", "4", "--bench-bo3-matches", "2", "--eval-workers", "1"]
-TIMING = {"rollout_s", "queue_s", "update_s", "ppo_s", "publish_s", "wait_s", "wall_s", "decisions_per_s", "eval_s", "eval_lag"}
+TIMING = {"rollout_s", "queue_s", "update_s", "ppo_s", "publish_s", "wait_s", "wall_s", "elapsed_s", "decisions_per_s", "eval_s", "eval_lag", "inference_stats", "residency"}
 IN_PROCESS = ["--collector", "thread", "--eval-process", "0"]
 
 
@@ -285,6 +285,26 @@ def test_lag2_durable_checkpoint_pins_and_exact_pfsp_resume(tmp_path, in_process
     replayed = [r for r in in_process[n:] if r.train]
     assert [(r.policy, r.games) for r in replayed[:2]] == [(r.policy, r.games) for r in before[2:4]]
     assert torch.load(run / "latest.pt", weights_only=False)["pending_rollouts"] == []
+
+
+def test_imported_opponents_survive_resume_and_snapshot_name_collisions(tmp_path, in_process):
+    imported = tmp_path / "frozen"
+    imported.mkdir()
+    net = PolicyNet(hidden=16)
+    for k in (1, 999):
+        torch.save({"config": net.config, "model": net.state_dict()}, imported / f"iter_{k:05d}.pt")
+    original = (imported / "iter_00001.pt").read_bytes()
+    run = tmp_path / "run"
+    cfg = _cfg(run, "--opponent-pool", str(imported), "--iterations", "2", "--snapshot-every", "1", *IN_PROCESS, *NO_EVAL)
+    Trainer(cfg).train()
+    assert (imported / "iter_00001.pt").read_bytes() == original
+    cfg.opponent_pool = ""  # resume restores the recorded external pool
+    cfg.iterations = 3
+    t = Trainer(cfg)
+    assert len(t.imported_pool) == 2 and len(t.pool) == 4
+    assert t._pool_name(str(imported / "iter_00001.pt")) != t._pool_name(str(run / "pool" / "iter_00001.pt"))
+    t.train()
+    assert (imported / "iter_00999.pt").exists()
 
 
 @pytest.mark.parametrize("pipeline", [0, 1, 2])

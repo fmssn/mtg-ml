@@ -241,7 +241,7 @@ def test_distributed_cuda_graph_shapes_keep_gradient_addresses(tmp_path, capture
     try:
         for lengths in ((1, 3), (1, 17, 4), (1, 3)):
             data = _training_data(cpu, lengths)
-            ppo_update(ref, opt0, data, cfg, gen=torch.Generator().manual_seed(9), mode="padded")
+            ppo_update(ref, opt0, data, cfg, device="cuda", gen=torch.Generator().manual_seed(9), mode="graph")
             distributed_update(net, opt1, data, cfg, 0, 1, gen=torch.Generator().manual_seed(9), graphs=graphs)
             torch.cuda.synchronize()
             assert pointers == [p.grad.data_ptr() for p in net.parameters()]
@@ -282,3 +282,18 @@ def test_distributed_worker_failure_releases_shared_block(monkeypatch):
             shared_memory.SharedMemory(name=created[0])
     finally:
         learner.close()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
+def test_sparse_residency_policy_ids_grouped_projection():
+    from mtg_ml.rl.stacked import grouped_linear
+
+    torch.manual_seed(3)
+    x = torch.randn(16, 256, device="cuda")
+    w = torch.randn(64, 768, 256, device="cuda")
+    bias = torch.randn(64, 768, device="cuda")
+    policies = torch.tensor([0] * 8 + [63] * 8, device="cuda")
+    got = grouped_linear(x, w, bias, policies)
+    expected = torch.cat([torch.nn.functional.linear(x[:8], w[0], bias[0]), torch.nn.functional.linear(x[8:], w[63], bias[63])])
+    assert torch.allclose(got, expected, atol=3e-5, rtol=1e-5)

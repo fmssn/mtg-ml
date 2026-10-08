@@ -11,10 +11,12 @@ checkpoints (the learner gets half the rows, the pool the rest).
 from __future__ import annotations
 
 import argparse
+import atexit
 import cProfile
 import os
 import pstats
 import random
+import shutil
 import sys
 import tempfile
 import time
@@ -39,6 +41,8 @@ def main(argv=None) -> None:
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--entity-attn", type=int, default=0)
     ap.add_argument("--features", type=int, default=0)
+    ap.add_argument("--matchup", default="jund_blue")
+    ap.add_argument("--min-entities", type=int, default=0, help="wide-board stress screen; 0 keeps all decisions")
     ap.add_argument("--init", help="inherit checkpoint architecture/weights, optionally adding attention")
     ap.add_argument("--legacy-attention", action="store_true", help="same-code eager attention baseline")
     ap.add_argument("--trunk", default="entity")
@@ -53,13 +57,14 @@ def main(argv=None) -> None:
     import torch
 
     from mtg_ml.backend import game_class
-    from mtg_ml.match import match_decks
+    from mtg_ml.match import game_args, parse_matchups
     from mtg_ml.rl.features import encode_event_hashes, featurize_flat
     from mtg_ml.rl.inference import InferenceClient, ServerConfig, _Server
 
     from mtg_ml.rl.model import PolicyNet, load_partial
 
     tmp = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, tmp)
     keys = []
     for k in range(args.policies):
         torch.manual_seed(k)
@@ -75,15 +80,21 @@ def main(argv=None) -> None:
         keys.append((path, 1 if k == 0 else 0))
     G = game_class("native")
     samples, r, s = [], random.Random(0), 0
+    matchups = parse_matchups(args.matchup)
     while len(samples) < args.requests * args.rows:
-        g = G(match_decks(1 + s % 2), seed=s, match_game=1 + s % 2)
+        if s >= 10000:
+            raise RuntimeError("could not collect enough wide-board decisions in 10000 games")
+        matchup = r.choices([m for m, _ in matchups], [w for _, w in matchups])[0]
+        g = G(**game_args(1 + s % 2, matchup), seed=s)
         while not g.over and len(samples) < args.requests * args.rows:
             st, ol, of = featurize_flat(g, g.decision.player, features=net.features)
-            samples.append((st, ol, of, encode_event_hashes([r.randrange(1 << 15) for _ in range(r.randrange(8))])))
+            if list(st).count(net.config["state_dim"]) >= args.min_entities:
+                samples.append((st, ol, of, encode_event_hashes([r.randrange(1 << 15) for _ in range(r.randrange(8))])))
             g.step(r.randrange(len(ol)))
         s += 1
     cfg = ServerConfig(device=args.device, graphs=not args.no_graphs, groups=1, compile=not args.no_compile, stacked_attention=not args.legacy_attention)
     srv = _Server(cfg, args.requests)
+    atexit.register(srv.close)
     srv.resp_qs = [_ListQ() for _ in range(args.requests)]
     t = time.perf_counter()
     ids = {k: srv.register_key(k) for k in keys}
@@ -93,6 +104,7 @@ def main(argv=None) -> None:
         c = InferenceClient(w, None, None, srv.names, srv.layout)
         c.ids = dict(ids)
         clients.append(c)
+        atexit.register(c.close)
     rng = random.Random(1)
 
     def submit_all():

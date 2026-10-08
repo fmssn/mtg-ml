@@ -64,7 +64,8 @@ if triton is not None:
         lo = tl.min(tl.where(valid, pol, 1 << 30))
         hi = tl.max(tl.where(valid, pol, -1))
         acc = tl.zeros((BM, BN), dtype=tl.float32)
-        for q in range(lo, hi + 1):
+        q = lo
+        while q <= hi:
             sel = valid & (pol == q)
             for k0 in range(0, K, BK):
                 kk = k0 + rk
@@ -74,6 +75,8 @@ if triton is not None:
             if HAS_BIAS:
                 bias = tl.load(Bias + q * N + rn, mask=rn < N, other=0.0)
                 acc += tl.where(sel[:, None], bias[None, :], 0.0)
+            # Stable residency slots can be sparse. Do not multiply for absent policies.
+            q = tl.min(tl.where(valid & (pol > q), pol, hi + 1))
         tl.store(Y + rm[:, None] * N + rn[None, :], acc, mask=valid[:, None] & (rn[None, :] < N))
 
 

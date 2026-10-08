@@ -145,6 +145,7 @@ class TrainConfig:
     run: str = "runs/ppo"
     iterations: int = 100
     total_games: int = 0  # stop once this many training games are played (0 = only --iterations)
+    duration_seconds: float = 0.0  # wall-clock budget for this invocation; finish the current update before stopping
     games_per_iter: int = 256  # >= ~32 per worker keeps batched inference cheap next to the engine
     workers: int = max(1, (os.cpu_count() or 2) - 1)
     pipeline: int = 1  # 1: play iteration k+1 with the weights of k during the update of k (one-step policy lag); 0: one after the other
@@ -175,6 +176,7 @@ class TrainConfig:
     snapshot_every: int = 10
     pool_recent_frac: float = 0.5  # share of pool games against the newest snapshot
     pool_sampling: str = "uniform"  # the other pool games: "uniform" over the pool, or "pfsp": weighted (1 - learner's win rate vs it) ** pfsp_power
+    opponent_pool: str = ""  # immutable external *.pt opponents, separate from this run's snapshot namespace
     pfsp_power: float = 2.0
     pfsp_ema: float = 0.05  # per-game step of the running win rate vs each pool opponent (starts at 0.5)
     init: str = ""  # a new run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, with --value-bound, --entity-attn and --features on top (new attention layers start as the identity)
@@ -302,6 +304,8 @@ class Trainer:
         self.checkpoint_policies = []
         self.retiring_checkpoint_policies = []
         self.resume_rollouts = ck.get("pending_rollouts", []) if ck is not None else []
+        self.elapsed_total = ck.get("elapsed_total", 0.0) if ck is not None else 0.0
+        self.started_at = None
         if self.resume_rollouts and cfg.pipeline != 2:
             raise ValueError("checkpoint has queued lag-2 rollouts; resume with --pipeline 2")
         for desc in self.resume_rollouts:
@@ -326,13 +330,21 @@ class Trainer:
         set_lr(self.opt, self._lr())
         self._remove_partial_writes()
         pool_dir = os.path.join(cfg.run, "pool")
-        self.pool: list[str] = sorted(os.path.join(pool_dir, f) for f in os.listdir(pool_dir) if f.startswith("iter_") and f.endswith(".pt"))
+        saved_pool = ck.get("imported_pool", []) if ck is not None else []
+        imported = sorted(os.path.abspath(os.path.join(cfg.opponent_pool, f)) for f in os.listdir(cfg.opponent_pool) if f.endswith(".pt")) if cfg.opponent_pool else saved_pool
+        if saved_pool and imported != saved_pool:
+            raise ValueError("resumed run must retain its original immutable opponent pool")
+        if any(not os.path.isfile(p) for p in imported):
+            raise FileNotFoundError("an imported opponent checkpoint is missing")
+        self.imported_pool = imported
+        self.pool: list[str] = imported + sorted(os.path.join(pool_dir, f) for f in os.listdir(pool_dir) if f.startswith("iter_") and f.endswith(".pt"))
         # a resumed run's snapshots that record no version are the run's own from before --features stamped it (docs/features.md): its version
         self.pool_features = {p: self.net.features for p in self.pool if "features" not in checkpoint_config(p)} if ck is not None and self.net.features != 1 else {}
         weights = self._weights()
         self._publish(weights)
         if not self.pool:
             self._snapshot(weights)
+        if ck is None:
             self._checkpoint(weights, self.rng.getstate())
         self.layout, self.learner_cpus, self.server_cpus = training_cpu_layout(cfg, self.evaluating)
         print(self.layout.describe(), flush=True)
@@ -447,6 +459,8 @@ class Trainer:
             "pfsp": dict(self.pfsp),
             "train_config": asdict(self.cfg),
             "pending_rollouts": list(pending_rollouts),
+            "elapsed_total": self.elapsed_total + (time.monotonic() - self.started_at if self.started_at is not None else 0.0),
+            "imported_pool": self.imported_pool,
         }
         self.saving = self.saver.submit(_save, ck, self.latest)
         self.checkpointed = self.iteration
@@ -563,13 +577,13 @@ class Trainer:
         p_i) ** pfsp_power, p_i the learner's running win rate against it
         (draws half; 0.5 until it has played it), so opponents that still beat
         the learner come up most. None (uniform) if every weight is 0."""
-        w = [(1.0 - self.pfsp.get(os.path.basename(p), 0.5)) ** self.cfg.pfsp_power for p in self.pool]
+        w = [(1.0 - self.pfsp.get(self._pool_name(p), 0.5)) ** self.cfg.pfsp_power for p in self.pool]
         return w if sum(w) > 0 else None
 
     def _update_pfsp(self, games: list) -> None:
         """Move the running win rates toward the results of the learner's games
         against pool snapshots (step pfsp_ema per game)."""
-        pool = {p: os.path.basename(p) for p in self.pool}
+        pool = {p: self._pool_name(p) for p in self.pool}
         for seats, winner, *_ in games:
             for s in (0, 1):
                 if seats[s] == LEARNER and seats[1 - s] in pool:
@@ -577,6 +591,9 @@ class Trainer:
                     result = 0.5 if winner is None else float(winner == s)
                     p = self.pfsp.get(name, 0.5)
                     self.pfsp[name] = p + self.cfg.pfsp_ema * (result - p)
+
+    def _pool_name(self, path):
+        return ("imported/" if path in getattr(self, "imported_pool", ()) else "") + os.path.basename(path)
 
     def _lr(self) -> float:
         """The learning rate of the next update: --ppo-lr, or annealed to
@@ -650,10 +667,12 @@ class Trainer:
     def _more(self, iteration: int, games_total: int) -> bool:
         """Whether an iteration starting at these counters runs."""
         c = self.cfg
-        return iteration < c.iterations and not (c.total_games and games_total >= c.total_games)
+        return (iteration < c.iterations and not (c.total_games and games_total >= c.total_games)
+                and not (c.duration_seconds and self.started_at is not None and time.monotonic() - self.started_at >= c.duration_seconds))
 
     def train(self) -> None:
         c = self.cfg
+        self.started_at = time.monotonic()
         threads = torch.get_num_threads()
         affinity = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else None
         if c.pipeline or c.trainer_cpus:  # the update shares the CPUs with the workers: spinning OMP threads on busy cores slowed it by 60%
@@ -735,6 +754,7 @@ class Trainer:
                 row["wait_s"] = round(roll.waited if c.pipeline == 2 else nxt.waited if nxt else 0.0, 2)
                 row["queue_s"] = round(max(0, roll.pending.t_start - roll.pending.t_submit), 3)
                 row["wall_s"] = round(time.monotonic() - t0, 2)
+                row["elapsed_s"] = round(self.elapsed_total + time.monotonic() - self.started_at, 3)
                 _append(self.metrics, row)
                 print(_fmt(row), flush=True)
                 if self.evaluator is not None:
@@ -742,8 +762,8 @@ class Trainer:
                 if c.pipeline == 2:
                     self._unpin(roll.descriptor["job"].learner_path)
                 roll = nxt
-            if self.checkpointed != self.iteration:
-                self._checkpoint(self._weights(), self.rng.getstate())
+            if self.checkpointed != self.iteration or queue:
+                self._checkpoint(self._weights(), self.rng.getstate(), [r.descriptor for r in queue])
             if self.evaluator is not None:
                 self._collect_evals(block=True)
             ok = True
@@ -926,6 +946,8 @@ def _check(cfg: TrainConfig) -> None:
             raise ValueError(f"{name} must be one of {allowed}, not {getattr(cfg, name)!r}")
     if cfg.exploit and not os.path.exists(cfg.exploit):
         raise FileNotFoundError(f"--exploit {cfg.exploit}: no such policy file")
+    if cfg.duration_seconds < 0:
+        raise ValueError("duration_seconds must be nonnegative")
     if cfg.lr_anneal_games < 0 or cfg.gamma_turn < 0 or cfg.lam_turn < 0 or cfg.value_clamp < 0:
         raise ValueError("lr_anneal_games, gamma_turn, lam_turn and value_clamp must be >= 0")
     if cfg.server_resident_limit < 0:
@@ -972,6 +994,12 @@ def parse_args(argv=None) -> TrainConfig:
 
 
 def main(argv=None) -> None:
+    import signal
+
+    def stop(signum, _frame):
+        raise SystemExit(128 + signum)  # unwind Trainer.train's owned processes/checkpoint writer
+
+    signal.signal(signal.SIGTERM, stop)
     Trainer(parse_args(argv)).train()
 
 

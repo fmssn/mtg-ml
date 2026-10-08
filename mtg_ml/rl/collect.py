@@ -290,11 +290,32 @@ class PoolProcess:
                 self._outgoing.put(None)
             except OSError:
                 pass
-            self.proc.join(timeout)
+            deadline = time.monotonic() + timeout
+            while self.proc.is_alive() and time.monotonic() < deadline:
+                if self.conn.poll(0.1):
+                    try:
+                        self._pump()
+                    except (RuntimeError, EOFError):
+                        break
+                self._discard_replies()
+            self.proc.join(0.1)
         if self.proc.is_alive():
             self.terminate()
         self.conn.close()
         self._writer.join(1)
+
+    def _discard_replies(self):
+        from multiprocessing import shared_memory
+
+        for _, value, _, _ in self._replies.values():
+            if isinstance(value, SharedResult):
+                try:
+                    block = shared_memory.SharedMemory(name=value.name)
+                    block.unlink()
+                    block.close()
+                except FileNotFoundError:
+                    pass
+        self._replies.clear()
 
     def terminate(self) -> None:
         """Stop now, abandoning a call in flight; the process terminates its pool."""
@@ -305,6 +326,7 @@ class PoolProcess:
             self.proc.kill()
             self.proc.join()
         self._outgoing.put(None)
+        self._discard_replies()
         self.conn.close()
         self._writer.join(1)
 

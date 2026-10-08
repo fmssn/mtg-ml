@@ -71,6 +71,7 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", default=None, help="pickled Result to train on (instead of playing games)")
     ap.add_argument("--save-data", default=None, help="write the played Result here")
+    ap.add_argument("--collect-only", action="store_true", help="save representative rollout data without updating")
     ap.add_argument("--games", type=int, default=512)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--engine", default="native")
@@ -119,6 +120,10 @@ def main(argv=None) -> None:
     if args.save_data:
         with open(args.save_data, "wb") as f:
             pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+    if args.collect_only:
+        if not args.save_data:
+            raise ValueError("--collect-only requires --save-data")
+        return
     n, lens = len(data.actions), data.lengths
     print(f"{n} decisions in {len(lens)} trajectories (mean {n / len(lens):.0f}, max {max(lens)}), {len(data.samples.s_idx) / n:.0f} state tokens per decision")
 
