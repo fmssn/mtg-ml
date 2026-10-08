@@ -1,0 +1,15 @@
+{
+  "env": {
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "3",
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
+  },
+  "permissions": {
+    "deny": [
+      "Agent(arch-code-reviewer)",
+      "Agent(unit-test-writer)",
+      "Agent(security-auditor)",
+      "Agent(code-quality-pipeline)",
+      "Agent(doc-commit-push)"
+    ]
+  }
+}
