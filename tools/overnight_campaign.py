@@ -116,7 +116,8 @@ def prepare(args):
         command = [str(code / ".venv/bin/python"), "-m", "mtg_ml.rl.train"]
         command += [part for k, v in flags.items() for part in ("--" + k, str(v))]
         env = dict(CUDA_VISIBLE_DEVICES=",".join(gpu_by_bus[b] for b in buses), OMP_NUM_THREADS="1", MKL_NUM_THREADS="1",
-                   TORCHINDUCTOR_COMPILE_THREADS="1", MTG_EVAL_LOCK=str(run / "evaluation.lock"), PYTHONUNBUFFERED="1")
+                   TORCHINDUCTOR_COMPILE_THREADS="1", MTG_EVAL_LOCK=str(run / "evaluation.lock"), PYTHONUNBUFFERED="1",
+                   PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True")  # varying padded epoch sizes fragmented the learner: OOM with 43 GiB reserved but free (r7 lr075, 2026-10-08)
         entries.append(dict(name=arm, arm=arm, mode="training", run=str(run), code=str(code), code_ref=source,
                             command=command, environment=env, gpus=env["CUDA_VISIBLE_DEVICES"].split(","),
                             cpus=[offset, offset+1, offset+2, *range(offset+4, offset+32)], eval_cpus=list(range(offset+4, offset+8)),

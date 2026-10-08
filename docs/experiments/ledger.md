@@ -30,6 +30,11 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
   server, loopback only behind Tailscale Serve8443; ComfyUI443 retained. Local
   append-only archives are automatic at completion; primary-host transfer remains
   a follow-up after completion.
+- **Incident (23:33 Berlin):** lr075 died at iteration 358 with a CUDA OOM in
+  PPO epoch packing (43 GiB reserved but free: fragmentation). Both arms now run
+  with `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`; source unchanged.
+  lr075 resumed from 350, lr150 was stopped after checkpoint 425 and resumed.
+  Details in [r7-overnight.md](r7-overnight.md#incidents).
 
 ## 20261008-h256-attention-scaling · implementation and completed throughput screens
 

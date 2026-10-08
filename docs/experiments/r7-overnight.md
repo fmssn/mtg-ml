@@ -132,3 +132,24 @@ launch metadata and hashes to append-only
 `h100-private2:~/mtg-ml-checkpoints/20261008-r7-fs7-h256-ARM/`. Completed archives
 must subsequently be transferred to the primary `h100-private` archive without
 overwriting existing IDs, and final results reconciled into both ledgers.
+
+## Incidents
+
+**October 8, 23:33 Berlin: lr075 out of memory.** The trainer exited at iteration
+358 (557k+ games) in `ppo.py` `_padded_epoch` (`torch.cat` of the packed int
+buffer, 5.7 GiB) with `torch.OutOfMemoryError`: 74 GiB in use of 79, of which
+42.9 GiB was reserved by PyTorch but unallocated. One OOM at 21:31 UTC had been
+recovered by the allocator; the second was not. Padded epoch sizes change every
+update and grow with game length, so the caching allocator fragmented; lr150 sat
+at 70 GiB and was exposed to the same failure. No Xid or hardware errors.
+
+Fix: `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` added to both arms'
+`environment` in `campaign.json` (original kept as `campaign.pre-allocconf.json`)
+and to `tools/overnight_campaign.py` for future campaigns. Training math and the
+deployed source revision are unchanged. Before resuming, the CUDA-graph GPU tests
+(`-m gpu` in `test_training_scaling.py`, `test_training_knobs.py`) passed with the
+setting on spare GPU 38. lr075 resumed from checkpoint 350 (8 updates lost). lr150
+was stopped by SIGTERM right after checkpoint 425 and resumed (1 update lost), so
+both arms run identical settings. After the restart learner memory dropped from
+70–74 GiB to ~33–38 GiB at unchanged ~56k decisions/s. Both `process.json` files
+recorded the interruption (`exit_code` 1 and 143) before the resumes overwrote them.
