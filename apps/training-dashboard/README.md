@@ -14,6 +14,8 @@ scp apps/training-dashboard/snapshot.py \
   h100-private:/home/taiga-support/mtg-ml-256-opt/dashboard_snapshot.py
 .venv/bin/python apps/training-dashboard/server.py \
   --port 55012 \
+  --host h100-private \
+  --remote-script /home/taiga-support/mtg-ml-256-opt/dashboard_snapshot.py \
   --campaign /home/taiga-support/mtg-ml-256-opt/campaigns/screens-20261008-dedicated
 ```
 
@@ -21,8 +23,8 @@ Open <http://127.0.0.1:55012>. The server binds only to the local loopback
 interface and uses the existing `h100-private` SSH connection. No credentials
 are stored in the dashboard. `--host`, `--remote-script`, `--campaign`,
 `--interval` and `--cache` can be overridden; the default cache is
-`.context/training-dashboard/state.json`. The remote interpreter is the
-isolated `mtg-ml-256-opt/code/e8662a5/.venv/bin/python` used by this campaign.
+`.context/training-dashboard/state.json`. SSH mode requires explicit host,
+campaign and remote script paths; `--python` defaults to remote `python3`.
 
 Charts use actual recorded learner decisions / iteration wall time. Learner,
 collection and publication stages overlap and must not be added together.
@@ -41,6 +43,14 @@ matrix evaluation and writes the 08:00 Europe/Berlin report independently of the
 agent session. Campaign archives are append-only on the training host under
 `~/mtg-ml-checkpoints/`; transfer completed archives to the primary archive host
 without replacing existing IDs.
+
+Use `bash tools/overnight_host.sh start CAMPAIGN` and then
+`bash tools/overnight_host.sh dashboard CAMPAIGN` to create detached server
+sessions. `status` reports tracked trainer PIDs; `stop` stops only this campaign's
+trainers, leaving monitoring available. `stop-monitoring` stops its dashboard
+and watcher. The optional third argument is the tmux prefix (use `mtg-r7-smoke`
+for smoke runs). Training logs rotate at 2 MB with three backups; service output
+stays in a bounded 2,000-line tmux history. No service automatically respawns.
 
 The dashboard supports both original screen manifests and `mode: training`
 manifests. Training snapshots expose progress, rolling rates, PPO statistics,
