@@ -250,6 +250,7 @@ class Game:
         self.blocked: set[int] = set()
         self.blocks: dict[int, int] = {}  # blocker oid -> attacker oid
         self.damage_allocation: O.DamageAllocation | None = None
+        self.combat_subjects: list[list[int]] = []  # per-option public objects, never parsed from labels
         # (remaining cost, sacrifice filter, excluded sources) of a pending
         # pay_mana decision; read only by encode's payment preview
         self.paying: tuple | None = None
@@ -2342,11 +2343,13 @@ class Game:
         chosen: list[Card] = []
         while True:
             options = [Option("Done declaring attackers", ("attack", None), None)]
+            self.combat_subjects = [[]]
             for gi in range(len(groups)):
                 left = [c for c in groups[gi] if c not in chosen]
                 if left:
                     c = left[0]
                     options.append(Option(f"Attack with {c.name}#{c.oid}", ("attack", c.name), gi))
+                    self.combat_subjects.append([c.oid])
             gi = yield from self.ask(p, O.DECLARE_ATTACKER, "Declare attackers", options)
             if gi is None:
                 break
@@ -2372,6 +2375,7 @@ class Game:
             attackers = [self.perm(a) for a in self.attackers]
             attackers = [a for a in attackers if a is not None and self._can_block(b, a) and self._menace_ok(a, blockers[i + 1 :])]
             options = [Option(f"{b.name}#{b.oid} does not block", ("block", b.name, None), None)]
+            self.combat_subjects = [[b.oid]]
             refs = self._referenced_oids()
             seen = set()
             for a in attackers:
@@ -2380,6 +2384,7 @@ class Game:
                     continue
                 seen.add(k)
                 options.append(Option(f"{b.name}#{b.oid} blocks {a.name}#{a.oid}", ("block", b.name, a.name), a))
+                self.combat_subjects.append([b.oid, a.oid])
             a = yield from self.ask(d, O.DECLARE_BLOCKER, f"Block with {b.name}#{b.oid}?", options)
             if a is not None:
                 self.blocks[b.oid] = a.oid
@@ -2443,6 +2448,7 @@ class Game:
                     if trample:
                         parts.append(f"{split[-1]} to player")
                     options.append(Option(", ".join(parts), ("damage", tuple(split)), split))
+                self.combat_subjects = [[a.oid] + [b.oid for b in blockers] for _ in options]
                 split = yield from self.ask(self.active, O.ASSIGN_DAMAGE, f"Assign {pw} damage from {a.name}#{a.oid}", options)
             for s, b in zip(split, blockers):
                 if s:

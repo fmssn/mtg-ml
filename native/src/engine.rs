@@ -1428,12 +1428,15 @@ impl Eng {
         loop {
             let st = self.s();
             let mut options = vec![opt("Done declaring attackers".into(), vec![s("attack"), KI::N], Val::None)];
+            let mut subjects = vec![vec![]];
             for gi in 0..groups.len() {
                 if let Some(&c) = groups[gi].iter().find(|c| !chosen.contains(c)) {
                     let card = st.c(c);
                     options.push(opt(format!("Attack with {}#{}", card.name(), card.oid), vec![s("attack"), s(card.name())], Val::Group(gi)));
+                    subjects.push(vec![card.oid]);
                 }
             }
+            st.combat_subjects = subjects;
             match self.ask(p, Kind::DeclareAttacker, || "Declare attackers".to_string(), options)? {
                 Val::Group(gi) => {
                     let c = *groups[gi].iter().find(|c| !chosen.contains(c)).unwrap();
@@ -1473,6 +1476,7 @@ impl Eng {
             let later = &blockers[i + 1..];
             let attackers: Vec<CIdx> = st.attackers.iter().filter_map(|&a| st.perm(a)).filter(|&a| st.can_block(bc, st.c(a)) && st.menace_ok(a, later)).collect();
             let mut options = vec![opt(format!("{}#{} does not block", bc.name(), bc.oid), vec![s("block"), s(bc.name()), KI::N], Val::None)];
+            let mut subjects = vec![vec![bc.oid]];
             let refs = st.referenced_oids();
             let mut seen: Vec<EquivKey> = vec![];
             for a in attackers {
@@ -1483,8 +1487,10 @@ impl Eng {
                 seen.push(k);
                 let ac = st.c(a);
                 options.push(opt(format!("{}#{} blocks {}#{}", bc.name(), bc.oid, ac.name(), ac.oid), vec![s("block"), s(bc.name()), s(ac.name())], Val::Card(a)));
+                subjects.push(vec![bc.oid, ac.oid]);
             }
             let (bn, bo) = (bc.name(), bc.oid);
+            st.combat_subjects = subjects;
             if let Val::Card(a) = self.ask(d, Kind::DeclareBlocker, || format!("Block with {bn}#{bo}?"), options)? {
                 let st = self.s();
                 let aoid = st.c(a).oid;
@@ -1556,6 +1562,7 @@ impl Eng {
                     options.push(opt(parts.join(", "), key, Val::Split(split)));
                 }
                 let (an, ao, active) = (st.c(a).name(), st.c(a).oid, st.active);
+                st.combat_subjects = options.iter().map(|_| std::iter::once(ao).chain(blockers.iter().map(|&b| st.c(b).oid)).collect()).collect();
                 match self.ask(active, Kind::AssignDamage, || format!("Assign {pw} damage from {an}#{ao}"), options)? {
                     Val::Split(v) => v, _ => unreachable!(),
                 }
@@ -2451,4 +2458,3 @@ fn permutations(items: &[CIdx]) -> Vec<Vec<CIdx>> {
     }
     out
 }
-
