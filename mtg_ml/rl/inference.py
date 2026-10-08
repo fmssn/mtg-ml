@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import math
 import os
-import queue
 import time
 from array import array
 from dataclasses import dataclass, replace
@@ -1027,7 +1026,8 @@ def _serve_loop(cfg: ServerConfig, srv: _Server, req_q, stats_q) -> None:
                     srv.drain()
                     return
                 if m[0] == "stats":
-                    stats_q.put(dict(srv.stats, policies=len(srv.ids), device=cfg.device))
+                    mem = srv.torch.cuda.max_memory_allocated(srv.device) if srv.device.type == "cuda" else 0
+                    stats_q.put(dict(srv.stats, policies=len(srv.ids), device=cfg.device, peak_bytes=mem))
                 elif m[0] == "select":
                     try:
                         srv.select_policies(m[1])
@@ -1146,9 +1146,9 @@ class InferenceServer:
     def _control_replies(self, timeout=600):
         deadline, replies = time.monotonic() + timeout, []
         while len(replies) < len(self.shards):
-            try:
-                replies.append(self.stats_q.get(timeout=0.1))
-            except queue.Empty:
+            if self.stats_q._reader.poll(0.1):
+                replies.append(self.stats_q.get())
+            else:
                 dead = [(p.pid, p.exitcode) for p in self.procs if not p.is_alive()]
                 if dead:
                     raise RuntimeError(f"inference server died during control request: {dead}")

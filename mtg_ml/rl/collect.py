@@ -67,6 +67,8 @@ class SharedResult:
         shm.close()
         self.lengths, self.games, self.timing = res.lengths, res.games, res.timing
         self.trajectory_ids = getattr(res, "trajectory_ids", [])
+        self.inference_stats = getattr(res, "inference_stats", {})
+        self.residency = getattr(res, "residency", {})
 
     def attach(self, unlink: bool = True) -> Result:
         """The Result, its samples viewing the block. The block's name is
@@ -78,6 +80,7 @@ class SharedResult:
         if unlink:
             shm.unlink()
         out = Result(lengths=self.lengths, games=self.games, timing=self.timing, trajectory_ids=self.trajectory_ids)
+        out.inference_stats, out.residency = self.inference_stats, self.residency
         out.samples = PackedSamples()
         pos, views = 0, []
         names = list(FIELDS) + [n for n, _ in _FLOATS]
@@ -160,6 +163,8 @@ def _serve(conn, workers: int, inference: str, server_cfg, worker_cpus, cpus, ni
             try:
                 value = fn(pool, *args)
                 if isinstance(value, Result):
+                    if server is not None:
+                        value.inference_stats = server.stats()
                     value = SharedResult(value)
                 reply = ("ok", tag, value, time.monotonic(), started)
             except Exception as e:  # noqa: BLE001 - re-raised by the owner

@@ -720,9 +720,13 @@ def run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int
     if server is None or not server.cfg.resident_limit:
         return _run_specs(pool, specs, job, workers, inflight)
     merged = Result()
+    selection_s, waves = 0.0, 0
     for wave in residency_waves(specs, server.cfg.resident_limit):
         keys = {(job.learner_path, job.learner_version)} | {(p, 0) for spec in wave for p in _matchup(spec)}
+        t = time.monotonic()
         server.select_policies(sorted(keys))
+        selection_s += time.monotonic() - t
+        waves += 1
         res = _run_specs(pool, wave, job, workers, inflight)
         for f in fields(Result):
             getattr(merged, f.name).extend(getattr(res, f.name))
@@ -737,6 +741,7 @@ def run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int
         merged.lengths = [merged.lengths[i] for i in order]
         merged.trajectory_ids = [merged.trajectory_ids[i] for i in order]
     merged.games.sort(key=lambda g: g[-1])
+    merged.residency = {"waves": waves, "selection_s": selection_s}
     return merged
 
 

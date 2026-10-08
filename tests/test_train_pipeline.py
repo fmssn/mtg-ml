@@ -89,7 +89,7 @@ def test_smoke_and_resume(tmp_path, monkeypatch, pipeline):
     assert (t.iteration, t.games_total) == (4, 16)
     t.train()
     rows = _rows(run)
-    assert [(r["iteration"], r["games_total"], r["policy_lag"]) for r in rows[4:]] == [(5, 20, 0), (6, 24, int(pipeline))]
+    assert [(r["iteration"], r["games_total"], r["policy_lag"]) for r in rows[4:]] == [(5, 20, 0), (6, 24, int(bool(pipeline)))]
     assert sorted(p.name for p in (run / "policy").iterdir()) == ["v00004.pt", "v00005.pt", "v00006.pt"]
 
 
@@ -121,6 +121,16 @@ def test_failed_update_terminates_the_rollout_in_flight(tmp_path, monkeypatch):
         t.train()
     assert not set(mp.active_children()) - before
     assert torch.load(tmp_path / "run" / "latest.pt", weights_only=False)["iteration"] == 0
+
+
+def test_collector_serialization_failure_is_reported():
+    collector = collect.PoolProcess(1)
+    try:
+        pending = collector.call(lambda pool: None)
+        with pytest.raises(RuntimeError, match="submission failed"):
+            pending.wait()
+    finally:
+        collector.terminate()
 
 
 def test_shared_result_round_trip(tmp_path):
@@ -246,6 +256,35 @@ def test_resume_replays_the_games_of_a_lost_rollout(tmp_path, in_process, monkey
     again = in_process[-1]
     assert lost.policy == ("v00001.pt", 2) and again.policy == ("v00002.pt", 3)
     assert again.games == lost.games and len(lost.games) == 4
+
+
+def test_lag2_durable_checkpoint_pins_and_exact_pfsp_resume(tmp_path, in_process, monkeypatch):
+    run = tmp_path / "run"
+    cfg = _cfg(run, "--pipeline", "2", "--iterations", "6", "--checkpoint-every", "2", "--snapshot-every", "1",
+               "--pool-sampling", "pfsp", "--self-play-frac", "0", "--matchup", "jund_blue,jund_madness", *IN_PROCESS, *NO_EVAL)
+    real_save = train_mod._save
+
+    def fail_successor(obj, path):
+        if path.endswith("latest.pt") and obj["iteration"] == 4:
+            raise RuntimeError("checkpoint disk failure")
+        return real_save(obj, path)
+
+    monkeypatch.setattr(train_mod, "_save", fail_successor)
+    with pytest.raises(RuntimeError, match="checkpoint disk failure"):
+        Trainer(cfg).train()
+    ck = torch.load(run / "latest.pt", weights_only=False)
+    assert ck["iteration"] == 2
+    queued = ck["pending_rollouts"]
+    assert [d["it"] for d in queued] == [2, 3]
+    assert all(os.path.exists(d["job"].learner_path) for d in queued)
+    assert os.path.basename(queued[0]["job"].learner_path) == "v00000.pt"  # older than KEEP_POLICIES
+    before = [r for r in in_process if r.train]
+    monkeypatch.setattr(train_mod, "_save", real_save)
+    n = len(in_process)
+    Trainer(cfg).train()
+    replayed = [r for r in in_process[n:] if r.train]
+    assert [(r.policy, r.games) for r in replayed[:2]] == [(r.policy, r.games) for r in before[2:4]]
+    assert torch.load(run / "latest.pt", weights_only=False)["pending_rollouts"] == []
 
 
 @pytest.mark.parametrize("pipeline", [0, 1, 2])

@@ -18,9 +18,9 @@ def _decision(entities=2):
     return tuple(array("i", x) for x in (state, [1, 1], opts, [10]))
 
 
-def _save(tmp_path, k, attention=1):
+def _save(tmp_path, k, attention=1, memory="none"):
     torch.manual_seed(k)
-    net = PolicyNet(hidden=16, memory="none", trunk="entity", entity_attn=attention)
+    net = PolicyNet(hidden=16, memory=memory, trunk="entity", entity_attn=attention)
     with torch.no_grad():
         for p in net.parameters():
             p.add_(torch.randn_like(p) * 0.02)
@@ -75,6 +75,18 @@ def test_resident_slots_are_stable_and_old_ids_invalidated(tmp_path):
             srv.register_key((paths[1], 0))
         with pytest.raises(ValueError, match="exceed"):
             srv.select_policies([learner, (paths[1], 0), (paths[2], 0)])
+    finally:
+        srv.close()
+
+
+def test_dead_inference_server_during_selection_is_reported(tmp_path):
+    path, _ = _save(tmp_path, 0)
+    srv = InferenceServer(1, ServerConfig(device="cpu", resident_limit=2, threads=1))
+    try:
+        srv.proc.terminate()
+        srv.proc.join(5)
+        with pytest.raises(RuntimeError, match="server died"):
+            srv.select_policies([(path, 1)])
     finally:
         srv.close()
 
@@ -171,3 +183,102 @@ def test_bounded_rollouts_across_multiple_servers(tmp_path):
         assert stats["legacy"] == 0
     finally:
         srv.close()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
+@pytest.mark.parametrize("compile_", [False, True])
+def test_cuda_mixed_attention_graphs_preserve_recurrence_and_resets(tmp_path, compile_):
+    paths, nets = zip(_save(tmp_path, 0, memory="gru"), _save(tmp_path, 1, attention=2, memory="gru"))
+    srv = _Server(ServerConfig(device="cuda", threads=1, compile=compile_, graphs=True), 1)
+    cl = InferenceClient(0, None, None, srv.names, srv.layout)
+    hidden = {}
+    try:
+        keys = [(p, 0) for p in paths]
+        cl.ids = {k: srv.register_key(k) for k in keys}
+        for step in range(3):
+            rows = [(keys[k % 2], k, int(step == 0 or (step == 2 and k == 0)) | GREEDY_FLAG, *_decision(e))
+                    for k, e in enumerate((0, 2, 17) if step == 1 else (0, 2, 5))]
+            rows.sort(key=lambda r: r[0])
+            h = cl.submit(0, rows)
+            srv.process(srv.pending())
+            srv.drain()
+            actions, logps, values = cl.collect(h)
+            for row, a, lp, v in zip(rows, actions, logps, values):
+                net, slot = nets[keys.index(row[0])], row[1]
+                prior = None if row[2] & 1 else hidden[slot]
+                with torch.no_grad():
+                    logits, val, hidden[slot] = net(_batch(torch, [row[3:]])[0], hidden=prior)
+                assert a == logits.argmax(-1).item()
+                assert lp == pytest.approx(torch.log_softmax(logits, -1)[0, a].item(), abs=2e-5)
+                assert v == pytest.approx(val.item(), abs=2e-5)
+        assert srv.stats["graphs"] >= 2 and srv.stats["legacy"] == 3
+    finally:
+        cl.close()
+        srv.close()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
+@pytest.mark.parametrize("capture", [1, 2])
+@pytest.mark.parametrize("precision", ["fp32", "bf16"])
+def test_distributed_cuda_graph_shapes_keep_gradient_addresses(tmp_path, capture, precision):
+    import copy
+
+    import torch.distributed as dist
+
+    from mtg_ml.rl.distributed import _BackwardGraphs, _init_group, distributed_update
+    from mtg_ml.rl.ppo import PPOConfig, make_optimizer, ppo_update
+
+    torch.manual_seed(7)
+    cpu = PolicyNet(hidden=16, trunk="entity", entity_attn=1)
+    ref, net = copy.deepcopy(cpu).cuda(), copy.deepcopy(cpu).cuda()
+    cfg = PPOConfig(epochs=1, minibatch=16, target_kl=None, capture=capture, precision=precision)
+    opt0, opt1 = [make_optimizer(n.parameters(), cfg.lr, "cuda") for n in (ref, net)]
+    _init_group(0, ("cuda:0",), "file://" + str(tmp_path / "group"))
+    graphs = _BackwardGraphs(net, opt1, cfg)
+    pointers = [p.grad.data_ptr() for p in net.parameters()]
+    try:
+        for lengths in ((1, 3), (1, 17, 4), (1, 3)):
+            data = _training_data(cpu, lengths)
+            ppo_update(ref, opt0, data, cfg, gen=torch.Generator().manual_seed(9), mode="padded")
+            distributed_update(net, opt1, data, cfg, 0, 1, gen=torch.Generator().manual_seed(9), graphs=graphs)
+            torch.cuda.synchronize()
+            assert pointers == [p.grad.data_ptr() for p in net.parameters()]
+            for (name, p), (_, q) in zip(ref.named_parameters(), net.named_parameters()):
+                assert torch.allclose(p, q, atol=5e-5 if precision == "bf16" else 2e-5), name
+                assert torch.allclose(opt0.state[p]["exp_avg"], opt1.state[q]["exp_avg"], atol=2e-5), name
+            torch.cuda.empty_cache()
+        assert graphs.captures >= 2
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.slow
+def test_distributed_worker_failure_releases_shared_block(monkeypatch):
+    from multiprocessing import shared_memory
+
+    from mtg_ml.rl import distributed
+    from mtg_ml.rl.ppo import PPOConfig, make_optimizer
+
+    net = PolicyNet(hidden=8, trunk="entity", entity_attn=1)
+    cfg = PPOConfig(capture=0)
+    opt = make_optimizer(net.parameters(), cfg.lr, "cpu")
+    learner = distributed.DistributedLearner(net, opt, cfg, ("cpu", "cpu"))
+    created, real = [], distributed.SharedResult
+
+    def record(data):
+        block = real(data)
+        created.append(block.name)
+        return block
+
+    monkeypatch.setattr(distributed, "SharedResult", record)
+    learner.procs[0].terminate()
+    learner.procs[0].join(5)
+    try:
+        with pytest.raises((RuntimeError, BrokenPipeError, EOFError)):
+            learner.update(net, opt, _training_data(net), cfg, cfg.lr)
+        with pytest.raises(FileNotFoundError):
+            shared_memory.SharedMemory(name=created[0])
+    finally:
+        learner.close()

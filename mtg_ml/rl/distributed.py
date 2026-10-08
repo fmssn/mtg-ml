@@ -20,7 +20,7 @@ import torch.distributed as dist
 
 from .collect import SharedResult, release
 from .model import collate_packed, packed_tensors, split, structure
-from .ppo import N_STATS, STATS, _StepGraphs, _by_kind, _clear_cublas_workspaces, _compiled_losses, _drop_entities, _layout, _losses, _padded_epoch, _padded_losses, load_optimizer_state, make_optimizer, set_lr, trajectory_minibatches
+from .ppo import N_STATS, STATS, TRANSPOSED_BAGS, _StepGraphs, _by_kind, _clear_cublas_workspaces, _compiled_losses, _drop_entities, _layout, _losses, _padded_epoch, _padded_losses, load_optimizer_state, make_optimizer, set_lr, trajectory_minibatches
 from .rollout import KINDS
 
 
@@ -45,6 +45,12 @@ class _BackwardGraphs(_StepGraphs):
         for p in params:
             p.grad = self.grad[off : off + p.numel()].view_as(p)
             off += p.numel()
+        self.fingerprint = self.fingerprint_of(net, opt, cfg)
+
+    @staticmethod
+    def fingerprint_of(net, opt, cfg):
+        return (tuple((p.data_ptr(), p.grad.data_ptr() if p.grad is not None else None) for p in net.parameters()),
+                cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.capture, cfg.precision)
 
     def backward(self, net, cfg, shapes, gru, ints, flts):
         key = tuple(sorted(shapes.items()))
@@ -116,6 +122,8 @@ def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
     totals = torch.zeros(N_STATS, dtype=torch.float64, device=dev)
     steps, stopped, epoch_kl = 0, False, []
     caps0 = graphs.captures if graphs else 0
+    sd, od = net.config["state_dim"], net.config["option_dim"]
+    transpose = {"st": (sd, "bag_off" if net.config["trunk"] == "entity" else "st_off"), "e": (od, "e_off"), "ot": (od, "ot_off")} if TRANSPOSED_BAGS else None
     for _ in range(cfg.epochs):
         schedule = None
         if rank == 0:
@@ -144,7 +152,7 @@ def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
         acc = graphs.acc if graphs else torch.zeros_like(totals)
         acc.zero_()
         if graphs:
-            shapes, gru, ints, flts = _padded_epoch(big, bounds, chunks, acts, records, width, graphs.choose,
+            shapes, gru, ints, flts = _padded_epoch(big, bounds, chunks, acts, records, width, graphs.choose, transpose,
                                                   choose_gru=graphs.choose_gru, kinds=kind, ent_width=bool(net.config.get("entity_attn")))
             layout = _layout(shapes)
             _, n_start, _ = layout["n"]
@@ -153,6 +161,9 @@ def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
                 flts[m, n_start] = sum(length for _, length in batch) / world
                 if not counts[m]:
                     flts[m, w_start : w_start + w_len].zero_()
+                    for name in ("old_logp", "adv", "ret"):
+                        _, start, length = layout[name]
+                        flts[m, start : start + length].zero_()
             del big
         pieces = None if graphs else split(big, bounds)
         params = list(net.parameters())
@@ -169,7 +180,8 @@ def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
                 lo, hi = bounds[m : m + 2]
                 weight = torch.ones(hi - lo, device=dev) if counts[m] else torch.zeros(hi - lo, device=dev)
                 denominator = torch.tensor(sum(length for _, length in batch) / world, device=dev)
-                loss, stats = _losses(net, cfg, pieces[m], chunks[m], int(width[lo:hi].max()), acts[lo:hi], *records[:, lo:hi],
+                local_rec = records[:, lo:hi] if counts[m] else torch.zeros_like(records[:, lo:hi])
+                loss, stats = _losses(net, cfg, pieces[m], chunks[m], int(width[lo:hi].max()), acts[lo:hi], *local_rec,
                                      w=weight, n=denominator, kind=kind[lo:hi])
                 loss.backward()
                 used = torch.tensor([p.grad is not None for p in params], device=dev, dtype=torch.int32)
@@ -243,9 +255,13 @@ def _worker(rank, devices, init, config, state, optimizer, cfg, cpus, conn):
                 break
             shared, cfg, lr = msg
             data = shared.attach(unlink=False)
+            conn.send("ready")
             set_lr(opt, lr)
-            if cfg.capture and next(net.parameters()).is_cuda and graphs is None:
-                graphs = _BackwardGraphs(net, opt, cfg)
+            if cfg.capture and next(net.parameters()).is_cuda:
+                if graphs is None or graphs.fingerprint != _BackwardGraphs.fingerprint_of(net, opt, cfg):
+                    graphs = _BackwardGraphs(net, opt, cfg)
+            else:
+                graphs = None
             distributed_update(net, opt, data, cfg, rank, len(devices), graphs=graphs)
             release(data)
             data = None
@@ -279,6 +295,8 @@ class DistributedLearner:
             raise ValueError("learner devices must all be CPU or all CUDA")
         if kinds == {"cuda"} and len(set(devices)) != len(devices):
             raise ValueError("CUDA learner devices must be distinct")
+        if cpus and len(cpus) != len(devices):
+            raise ValueError("one CPU list is required per learner rank")
         if dist.is_initialized():
             raise RuntimeError("a distributed process group already exists")
         fd, self.path = tempfile.mkstemp(prefix="mtg_ppo_group_")
@@ -308,10 +326,16 @@ class DistributedLearner:
         try:
             for conn in self.conns:
                 conn.send((shared, cfg, lr))
-            if cfg.capture and next(net.parameters()).is_cuda and self.graphs is None:
-                self.graphs = _BackwardGraphs(net, opt, cfg)
+            ready = self._replies(90)
+            if ready != ["ready"] * len(self.procs):
+                raise RuntimeError(f"learner failed before update: {ready}")
+            if cfg.capture and next(net.parameters()).is_cuda:
+                if self.graphs is None or self.graphs.fingerprint != _BackwardGraphs.fingerprint_of(net, opt, cfg):
+                    self.graphs = _BackwardGraphs(net, opt, cfg)
+            else:
+                self.graphs = None
             stats = distributed_update(net, opt, data, cfg, 0, len(self.devices), gen=gen, graphs=self.graphs)
-            errors = [conn.recv() for conn in self.conns]
+            errors = self._replies(90)
             if any(errors):
                 raise RuntimeError(f"learner failed: {errors}")
             return stats
@@ -319,6 +343,20 @@ class DistributedLearner:
             block = shared_memory.SharedMemory(name=shared.name)
             block.unlink()
             block.close()
+
+    def _replies(self, timeout):
+        deadline, out = time.monotonic() + timeout, []
+        for proc, conn in zip(self.procs, self.conns):
+            while not conn.poll(0.1):
+                if not proc.is_alive():
+                    raise RuntimeError(f"learner rank died (PID {proc.pid}, exit {proc.exitcode})")
+                if time.monotonic() > deadline:
+                    raise TimeoutError("learner acknowledgement timed out")
+            try:
+                out.append(conn.recv())
+            except EOFError:
+                raise RuntimeError(f"learner rank died (PID {proc.pid}, exit {proc.exitcode})") from None
+        return out
 
     def close(self):
         for proc, conn in zip(self.procs, self.conns):
@@ -330,6 +368,9 @@ class DistributedLearner:
             proc.join(5)
             if proc.is_alive():
                 proc.terminate()
+                proc.join(5)
+            if proc.is_alive():
+                proc.kill()
                 proc.join(5)
             conn.close()
         if dist.is_initialized():
