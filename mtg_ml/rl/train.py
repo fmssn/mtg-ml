@@ -115,7 +115,7 @@ from dataclasses import asdict, dataclass, field, fields
 import torch
 
 from ..backend import ENV_VAR, engine_name
-from ..encode import FEATURE_VERSIONS, FEATURES
+from ..encode import FEATURES, FEATURE_VERSIONS, information_contract
 from ..match import matchup_decks, parse_matchups
 from .collect import PoolProcess, PoolThread, cpu_layout, release
 from .evaluate import DECK_KEYS, EVAL_BLOCKS, evaluate_policy
@@ -155,7 +155,7 @@ class TrainConfig:
     value_net: str = "separate"  # "separate": own embeddings, trunk and memory; "shared": linear head on the policy core
     value_hidden: int = 0  # width of a separate value net (0 = hidden)
     value_bound: str = "none"  # "tanh": squash the value head into (-1, 1) (new runs and --init only; a resumed run keeps its checkpoint's)
-    value_clamp: float = 1.0  # GAE bootstraps from values clamped to +-(this + shaping); 0 = raw values
+    value_clamp: float = 1.0  # GAE clamps unshaped values to +-this, then subtracts shaping * phi; 0 = raw values
     entity_attn: int = 0  # trunk "entity": self-attention layers over each decision's entities (4 heads, FFN 2x; 0 = none)
     features: int = 0  # feature-set version the policy reads (encode.FEATURE_VERSIONS; docs/features.md). 0: a new run takes the latest, --init / --exploit the source's, a resumed run its checkpoint's; a version overrides it (and is written into the config)
     memory: str = "gru"  # "gru" (recurrent over the player's decisions) or "none"
@@ -281,6 +281,10 @@ class Trainer:
             self.net = PolicyNet(**config, value_bound=cfg.value_bound)
         else:
             self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn, features=cfg.features or FEATURES)
+        start_iteration = ck["iteration"] if ck is not None else 0
+        active_shaping = cfg.shaping * max(0.0, 1 - start_iteration / max(cfg.shaping_anneal_iters, 1))
+        if active_shaping and self.net.value_bound == "tanh":
+            raise ValueError("active shaping requires an unbounded value head")
         self.net.to(cfg.device)
         # a tensor lr when annealing: the update's CUDA graphs read it, so a new value each iteration costs no recapture
         self.opt = make_optimizer(self.net.parameters(), cfg.ppo.lr, cfg.device, tensor_lr=cfg.lr_anneal_games > 0)
@@ -488,7 +492,8 @@ class Trainer:
             if len(self.matchups) > 1:
                 matchup = self.rng.choices([m for m, _ in self.matchups], [w for _, w in self.matchups])[0]
                 self.spec_matchup[base + k] = matchup
-            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no, matchup=matchup))
+            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no, matchup=matchup,
+                                  swap_seats=self.rng.random() < 0.5 if self.net.features >= 7 else False))
         return specs
 
     def _matchup_stats(self, games: list) -> dict:
@@ -630,6 +635,8 @@ class Trainer:
                 t2 = time.monotonic()
 
                 row = {
+                    "features": self.net.features,
+                    "information_contract": information_contract(self.net.features),
                     "iteration": self.iteration,
                     "decisions": len(data.actions),
                     "games": len(data.games),

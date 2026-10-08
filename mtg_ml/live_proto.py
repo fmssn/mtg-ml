@@ -122,6 +122,14 @@ def option_ref(kind: str, label: str, key: tuple, value, vis: dict) -> dict:
             r["attacker"] = oids[1]
             r["attacker_name"] = key[2]
         return r
+    if kind == "assign_damage_amount":
+        r.update(type="damage_amount", amount=value, remaining=key[5], assigned=list(key[6]), player_damage=key[7], player=key[3] == -1)
+        oids = [o for o in _label_oids(label) if o in vis["oid"]]
+        if oids:
+            r["attacker"] = oids[-1]
+            if key[3] >= 0:
+                r["recipient"] = oids[0]
+        return r
     if kind == "assign_damage":
         r["type"] = "damage"
         r["split"] = list(value)

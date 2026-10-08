@@ -169,29 +169,18 @@ def test_trample_requires_lethal_to_blockers_first():
     assert g.players[1].life == 17
 
 
-def test_damage_division_past_the_cap_offers_the_lethal_splits():
-    """A 20-power trampler blocked by seven 1/1s has C(27, 7) = 888k damage
-    divisions: past MAX_DAMAGE_SPLITS the decision offers the lethal splits
-    (lethal to each subset of blockers, the rest to the first of them, or to
-    the player once every blocker has lethal). Such a decision once made a
-    19M-int inference request."""
-    from mtg_ml.engine.game import MAX_DAMAGE_SPLITS
-
+def test_damage_division_past_the_cap_is_sequential_and_exact():
     g = scenario(p0={"battlefield": [("Nyxborn Hydra", {"counters": 20})]}, p1={"battlefield": ["Delver of Secrets"] * 7}, step="declare_attackers")
     attack(g, "Nyxborn Hydra")
     pass_priority(g, 2)
     for _ in range(7):
         choose(g, "blocks Nyxborn Hydra")
     pass_priority(g, 2)
-    assert g.decision.kind == O.ASSIGN_DAMAGE
-    ds = [c.oid for c in g.battlefield if c.name == "Delver of Secrets"]
-    got = labels(g)
-    assert len(got) == 127 <= MAX_DAMAGE_SPLITS  # 2^7 subsets; "lethal to the first, the rest to it" is "all to the first"
-    everyone = ", ".join(f"1 to Delver of Secrets#{d}" for d in ds)
-    assert got[0] == ", ".join([f"20 to Delver of Secrets#{ds[0]}"] + [f"0 to Delver of Secrets#{d}" for d in ds[1:]]) + ", 0 to player"
-    assert got[-1] == everyone + ", 13 to player"
-    choose(g, everyone + ", 13 to player")
-    pass_priority(g)
+    assert g.decision.kind == O.ASSIGN_DAMAGE_AMOUNT
+    assert [o.value for o in g.legal_options()] == list(range(14))
+    choose(g, "13 to player")
+    while g.decision.kind == O.ASSIGN_DAMAGE_AMOUNT:
+        choose(g, "1 to Delver of Secrets")
     assert g.players[1].life == 7 and not any(c.name == "Delver of Secrets" for c in g.battlefield)
 
 

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, Sequence
 
 from .backend import game_class
-from .engine import DECKS, SideboardPlan, expand, plan_for, postboard
+from .engine import DECKS, SIDEBOARDS, SideboardPlan, expand, plan_for, postboard
 from .engine.sideboard import validate_plan
 
 # The deck each seat plays unless a matchup says otherwise. Seat 0 is always
@@ -93,7 +93,10 @@ def deck_names(matchup: str = DEFAULT_MATCHUP) -> tuple[str | None, str | None]:
 
 def game_args(game_no: int, matchup: str = DEFAULT_MATCHUP) -> dict:
     """Decks and deck names of game `game_no` of a match, as Game keyword arguments."""
-    return {"decks": match_decks(game_no, matchup), "match_game": game_no, "deck_names": deck_names(matchup)}
+    names = matchup_decks(matchup)
+    return {"decks": match_decks(game_no, matchup), "match_game": game_no, "deck_names": deck_names(matchup),
+            "registered_main": tuple(expand(DECKS[d]) for d in names),
+            "registered_sideboards": tuple(expand(SIDEBOARDS[d]) for d in names)}
 
 
 def game_seed(match_seed: int, game_no: int) -> int:
@@ -229,7 +232,10 @@ def play_match(agents, seed: int = 0, engine: str | None = None, matchup: str = 
         n, start = res.next_game(seed)
         plans = choose_plans(res, n, matchup, policies)
         decks = tuple(expand(p.apply()) for p in plans)
-        g = Game(decks=decks, match_game=n, deck_names=deck_names(matchup), seed=game_seed(seed, n), starting_player=start, **game_kw)
+        args = game_args(n, matchup)
+        args["decks"] = decks
+        args.update(game_kw)
+        g = Game(**args, seed=game_seed(seed, n), starting_player=start)
         while not g.over:
             take(g, agents, agents[g.decision.player].act(g))
         res.games.append((start, g.winner, g.end_reason))
