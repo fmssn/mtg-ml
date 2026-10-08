@@ -341,7 +341,7 @@ async function playFrame(i) {
   const prevD = i > 0 ? S.raw[i - 1].decision : null;
   if (prevD && prevD.player === opp()) feedFromDecision(prevD, i - 1);
   for (const a of acts) if (a.p === opp() && ['discard', 'mulligan', 'sacrifice'].includes(a.t)) pushFeed(quietText(a), i, true);
-  const notable = acts.some(a => ['cast', 'play', 'activate', 'attack', 'block', 'resolve', 'trigger', 'enter', 'leave', 'dies', 'turn', 'discard'].includes(a.t));
+  const notable = acts.some(a => ['cast', 'play', 'activate', 'attack', 'block', 'resolve', 'trigger', 'enter', 'leave', 'dies', 'turn', 'discard', 'hit', 'life'].includes(a.t));
   const isLast = i === last();
   if (!notable && !isLast && i !== 0) { appendLog(i); return; }
   const cast = theirs.find(a => a.t === 'cast' || a.t === 'activate' || a.t === 'plot');
@@ -352,8 +352,14 @@ async function playFrame(i) {
     await wait(950);
     hideSpot();
   }
+  // Combat and deaths play out on the board as it was, before the new state lands.
+  const fought = await playCombat(acts);
+  await playDeaths(acts);
   render(i);
   appendLog(i);
+  if (theirs.some(a => a.t === 'attack')) nudgeAttackers();
+  if (fought && !S.skip) await wait(300);  // hold the result a moment before input opens
+  if (f.state.players.some(P => P.life <= 0)) await wait(600);  // the lethal blow lands before the result
   if (isLast) return;
   let beat = 0;
   if (theirs.some(a => a.t === 'play')) beat = Math.max(beat, 420);
@@ -362,6 +368,65 @@ async function playFrame(i) {
   if (acts.some(a => a.t === 'dies' || a.t === 'leave')) beat = Math.max(beat, 380);
   if (acts.some(a => a.t === 'turn')) beat = Math.max(beat, 300);
   if (beat) await wait(beat);
+}
+
+// ---- combat on screen: lunges, impacts, damage numbers, deaths
+const sleepFx = ms => wait(ms);
+function floatText(el, text, cls) {
+  const b = $('#board').getBoundingClientRect(), r = el.getBoundingClientRect();
+  const d = document.createElement('div');
+  d.className = 'floatnum ' + (cls || '');
+  d.textContent = text;
+  d.style.left = `${r.left - b.left + r.width / 2}px`;
+  d.style.top = `${r.top - b.top + r.height * 0.35}px`;
+  $('#board').appendChild(d);
+  setTimeout(() => d.remove(), 1100 * Math.max(0.3, beatScale()));
+}
+async function playCombat(acts) {
+  const hits = acts.filter(a => a.t === 'hit');
+  if (!hits.length || S.skip || beatScale() === 0) return false;
+  const k = beatScale();
+  for (const h of hits) {
+    const src = permEl(h.oid);
+    const tgt = h.p != null ? $(`#plate${h.p === S.seat ? 0 : 1}`) : permEl(h.to_oid);
+    if (!src || !tgt) continue;
+    const a = src.getBoundingClientRect(), t = tgt.getBoundingClientRect();
+    const dx = t.left + t.width / 2 - (a.left + a.width / 2), dy = t.top + t.height / 2 - (a.top + a.height / 2);
+    const len = Math.hypot(dx, dy) || 1, ux = dx / len * 34, uy = dy / len * 34;
+    src.animate([{translate: '0 0'}, {translate: `${ux}px ${uy}px`, offset: 0.55}, {translate: '0 0'}], {duration: 320 * k, easing: 'cubic-bezier(.3,.7,.3,1)'});
+    setTimeout(() => {
+      tgt.animate([{translate: '0 0'}, {translate: '-4px 0'}, {translate: '4px 0'}, {translate: '0 0'}], {duration: 120, iterations: 2});
+      floatText(tgt, `-${h.n}`, h.p != null ? 'big' : '');
+      sound('hit', h.n);
+    }, 180 * k);
+  }
+  await sleepFx(560);
+  return true;
+}
+async function playDeaths(acts) {
+  const dead = acts.filter(a => a.t === 'leave' && a.to === 'graveyard').map(a => permEl(a.oid)).filter(Boolean);
+  if (!dead.length || S.skip || beatScale() === 0) return;
+  const k = beatScale(), b = $('#board').getBoundingClientRect();
+  for (const el of dead) {
+    const ctl = +el.dataset.ctl, grave = $(`#plate${ctl === S.seat ? 0 : 1} .zone[data-zone="graveyard"]`);
+    const r = el.getBoundingClientRect(), g = grave ? grave.getBoundingClientRect() : r;
+    const ghost = el.cloneNode(true);
+    ghost.classList.add('dying');
+    Object.assign(ghost.style, {position: 'absolute', left: `${r.left - b.left}px`, top: `${r.top - b.top}px`, margin: 0, zIndex: 140, pointerEvents: 'none'});
+    $('#board').appendChild(ghost);
+    el.style.visibility = 'hidden';
+    ghost.animate([{filter: 'none', scale: 1, opacity: 1}, {filter: 'grayscale(1) brightness(.7)', scale: 0.85, opacity: 1, offset: 0.45},
+      {filter: 'grayscale(1)', scale: 0.25, opacity: 0.2, translate: `${g.left + g.width / 2 - r.left - r.width / 2}px ${g.top + g.height / 2 - r.top - r.height / 2}px`}],
+      {duration: 600 * k, easing: 'cubic-bezier(.5,0,.7,1)', fill: 'forwards'});
+    setTimeout(() => { ghost.remove(); grave?.animate([{scale: 1}, {scale: 1.25}, {scale: 1}], {duration: 260}); }, 600 * k);
+  }
+  sound('death');
+  await sleepFx(620);
+}
+// Freshly declared attackers step forward once.
+function nudgeAttackers() {
+  for (const el of $$('#board .perm.attacking')) el.animate([{translate: '0 0'}, {translate: `0 ${el.closest('#side1') ? 14 : -14}px`}, {translate: '0 0'}], {duration: 380, easing: 'ease-out'});
+  sound('attack');
 }
 
 function showSpot(name, cap) {
@@ -618,7 +683,7 @@ function renderPlate(p, s, prev) {
     <div class="who"><span class="dot"></span>${isMe ? 'You' : esc(agentName(S.meta?.agents[p]))}</div>
     <div class="deck">${esc(S.meta?.decks[p] || '')}</div>
     <div class="life ${P.life <= 5 ? 'low' : ''} ${delta < 0 ? 'hit' : delta > 0 ? 'heal' : ''}"${lf ? fxDelay(lf) : ''}>${P.life}${delta ? `<span class="delta ${delta < 0 ? 'neg' : 'pos'}"${fxDelay(lf)}>${delta > 0 ? '+' : ''}${delta}</span>` : ''}</div>
-    ${preview != null ? `<div class="preview-life">→ ${preview} after combat</div>` : ''}
+    ${preview != null ? (preview <= 0 ? `<div class="lethal" title="This combat would be lethal if nothing changes">LETHAL</div>` : `<div class="preview-life">→ ${preview} after combat</div>`) : ''}
     <div class="zones">
       <div class="zone" title="Cards in hand">Hand <b>${P.hand.length}</b></div>
       <div class="zone" title="Cards in library${P.library_top_known.length ? '; known on top: ' + esc(P.library_top_known.join(', ')) : ''}">Library <b>${P.library}</b></div>
@@ -1529,6 +1594,7 @@ function toast(text) {
   $('#toast').appendChild(el);
   setTimeout(() => el.remove(), 2600);
 }
+function sound() { /* the sound set is added with the polish pass */ }
 let audio = null;
 function ping() {
   if (!PREF.sound) return;

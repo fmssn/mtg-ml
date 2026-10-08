@@ -119,13 +119,14 @@ The page is exactly the viewport (`100dvh`, every grid track `minmax(0, …)`) a
 
 Feedback effects (life change, damage numbers, damage flash, a permanent entering) are recorded when a frame is first shown and kept for 0.45 to 1.4 s across re-renders, resuming their animation instead of restarting.
 
+Combat plays out before the new state lands: each hit lunges its attacker toward the target, the target shakes and a red damage number floats off it; creatures that die turn grey, shrink and fly to their owner's graveyard counter; the result holds 300 ms (600 ms on a lethal blow) before input opens. Freshly declared attackers step forward. When the attack you are declaring (or facing) would bring a player to 0, the plate shows a pulsing LETHAL instead of the life after combat.
+
 Combat damage and life changes are not in the engine's log; the live layer adds `combat: <attacker> deals N damage to <player or blocker>` and `life: pN old -> new` lines (parsed as `hit` and `life` events) to the player's log and the saved replay. Life lines are exact; combat lines use the powers before damage.
 
 ### Known gaps
 
 - The tap preview assumes the first choice for anything decided while casting (targets, X, additional costs), so an X spell is previewed at its smallest X. A playtest saw empty previews for instants on the opponent's turn; not reproduced in 112 checked casts against the model on both engines (`tests/test_live_proto.py` covers an opponent-turn instant).
 - Combat lines are approximate for first strike, pump effects in the damage step and multi-blocks (life lines are exact).
-- Combat and resolution still appear as finished states between decisions (no lunge/impact/death animation timeline yet).
 - No server-side undo, no "always yes/no", no smart stops per card, no manual-mana undo.
 - The combat preview ignores first strike and tricks; it is a hint.
 - Motion covers zone changes on the board and hand (FLIP); draws, deaths and damage get simple effects, not full flights to the graveyard.

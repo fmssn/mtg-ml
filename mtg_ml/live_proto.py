@@ -217,6 +217,8 @@ def status(g) -> dict:
     return {
         "life": [p.life for p in g.players],
         "perms": {c.oid: (c.name, g.power(c) if g.is_creature(c) else 0, c.controller) for c in g.battlefield},
+        # toughness left and trample, for splitting a trampler's damage
+        "body": {c.oid: (g.toughness(c) - c.damage, g.has(c, "trample")) for c in g.battlefield if g.is_creature(c)},
         "attackers": list(g.attackers),
         "blocks": dict(g.blocks),
         "active": g.active,
@@ -248,7 +250,13 @@ def combat_and_life_lines(before: dict, after: dict, new_lines: list[str]) -> li
                 continue
             if len(mine) == 1 and power > 0:
                 bname = perms[mine[0]][0]
-                out.append(f"combat: {name}#{a} deals {power} damage to {bname}#{mine[0]}")
+                trample = before["body"].get(a, (0, False))[1]
+                need = max(0, before["body"].get(mine[0], (power, False))[0])
+                if trample and power > need:  # lethal to the blocker, the rest tramples over (the default split)
+                    out.append(f"combat: {name}#{a} deals {need} damage to {bname}#{mine[0]}")
+                    out.append(f"combat: {name}#{a} deals {power - need} damage to p{defender}")
+                else:
+                    out.append(f"combat: {name}#{a} deals {power} damage to {bname}#{mine[0]}")
             for b in mine:
                 bname, bpower, _ = perms[b]
                 if bpower > 0:

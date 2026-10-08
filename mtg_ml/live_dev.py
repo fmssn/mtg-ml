@@ -43,6 +43,13 @@ SCENARIOS: dict[str, dict] = {
         "me": {"battlefield": ["Masked Vandal", "Forest"], "hand": ["Generous Ent"]},
         "opp": {"battlefield": ["Mountain", "Mountain"], "library": ["Mountain"] * 20},
     },
+    "trade": {
+        "title": "Combat death (attack a 1/1 into their 2/2)",
+        "matchup": "madness_elves",
+        "seat": 1,
+        "me": {"battlefield": ["Elvish Mystic", "Llanowar Elves", "Forest"]},
+        "opp": {"battlefield": ["Guttersnipe", "Mountain"]},
+    },
     "instant": {
         "title": "Instant on their turn (Bolt with mana up, they attack)",
         "matchup": "jund_madness",
