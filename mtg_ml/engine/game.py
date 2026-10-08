@@ -1680,8 +1680,26 @@ class Game:
     def _choose_sacrifice(self, p: int, flt: str, what: str):
         cands = self._dedupe_by_equiv(self.sac_candidates(p, flt))
         options = [Option(f"Sacrifice {c.name}#{c.oid}", ("sacrifice", c.name), c) for c in cands]
+        # CR 601.2g-h: mana abilities are activated before costs are paid, so
+        # an untapped mana source (an artifact land, a mana creature) can be
+        # tapped for mana and then sacrificed to the same cost; the mana
+        # floats. Listed after the plain sacrifices. Self-sacrificing sources
+        # (Eldrazi Spawn, Treasure) can only be sacrificed once.
+        tappable = {c.oid: ab for c, ab in self.mana_sources(p) if not ab.sac_self}
+        for c in cands:
+            ab = tappable.get(c.oid)
+            for color in ab.mana if ab is not None else ():
+                options.append(Option(f"Tap {c.name}#{c.oid} for {color}, then sacrifice it", ("sacrifice", c.name, "tap", color), ("source", c, color)))
         article = "an" if flt[0] in "aeiou" else "a"
         card = yield from self.ask(p, O.SACRIFICE, f"Sacrifice {article} {flt.replace('_', ' ')} for {what}", options)
+        if isinstance(card, tuple):
+            _, card, color = card
+            ab = self.mana_ability(card)
+            n = self.mana_amount(card, ab)
+            self._activate_mana_ability(card, ab)
+            pool = self.players[p].pool
+            pool[color] = pool.get(color, 0) + n
+            self._log(f"p{p} taps {card.name}#{card.oid} for {color}")
         mv = card.defn.mana_value
         self.sacrifice(card)
         return mv
