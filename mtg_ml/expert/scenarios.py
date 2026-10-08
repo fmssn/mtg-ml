@@ -64,6 +64,7 @@ def _validate_initial(initial: dict) -> None:
             for entry in player[zone]:
                 card = {"name": entry} if isinstance(entry, str) else entry
                 require(isinstance(card, dict) and card.get("name") in CARDS.keys() | TOKENS.keys(), f"unsupported card {card}")
+                require(zone == "battlefield" or card["name"] in CARDS, "tokens outside battlefield require legal setup actions")
                 require(set(card) <= {"name", "id", "tapped", "sick", "counters"}, "unsupported card state (use legal setup actions)")
                 if "id" in card:
                     require(bool(card["id"]) and card["id"] not in ids, "duplicate setup object id")
@@ -116,6 +117,9 @@ def validate_scenario(spec: dict, evidence: dict) -> dict:
         require(f"players.{p}.hand" not in synthetic, "expert demonstrations cannot invent the player's hand")
         hidden_fields = {f"players.{p}.library", f"players.{1-p}.library", f"players.{1-p}.hand"}
         require(synthetic.keys() <= hidden_fields, "expert demonstrations cannot invent public state")
+        for path in hidden_fields:
+            require(path in synthetic or not at_path(spec["initial"], path),
+                    "v1 hidden-zone knowledge must be constructed through legal setup actions; initial nonempty hidden zones need explicit completions")
         for step in steps:
             if not step.get("label", False):
                 require(bool(step.get("refs")), "history actions need evidence references")
@@ -184,6 +188,52 @@ def regression(spec: dict, evidence: dict, engine: str | None = None) -> dict:
     require(bool(spec.get("expected_after")) or bool(preferred), "regression needs assertions or preferred actions")
     assert_paths(finish, spec.get("expected_after", {}))
     return {"scenario_id": spec["id"], "start": start, "finish": finish, "preferred_indices": preferred}
+
+
+def verify(spec: dict, evidence: dict) -> dict:
+    """Check the entire declared continuation in Python/Rust lockstep."""
+    games = [compile_scenario(spec, evidence, engine) for engine in ("python", "native")]
+    steps = [s["selector"] for s in spec.get("demonstration", [])] or spec.get("continuation", [])
+    checked = 0
+    for selector in [*steps, None]:
+        views = [observe(g, spec["perspective"]) for g, _ in games]
+        require(views[0] == views[1], f"engine observations diverged after {checked} actions")
+        options = [[(canonical(o.key), o.label) for o in g.legal_options()] if g.decision else [] for g, _ in games]
+        require(options[0] == options[1], f"engine legal actions diverged after {checked} actions")
+        if selector is not None:
+            indices = [select(g, selector, objects) for g, objects in games]
+            require(indices[0] == indices[1], "engine action resolution diverged")
+            for (g, _), index in zip(games, indices):
+                g.step(index)
+            checked += 1
+    for g, objects in games:
+        assert_paths(observe(g, spec["perspective"]), spec.get("expected_after", {}))
+    return {"format": "ScenarioVerification", "version": VERSION, "scenario_id": spec["id"],
+            "engines": ["python", "native"], "actions_checked": checked, "identical": True}
+
+
+def replay(spec: dict, evidence: dict, engine: str | None = None) -> dict:
+    """Existing viewer-compatible frames, explicitly a reconstructed scenario."""
+    from ..replay import snapshot, visible_events
+
+    g, objects = compile_scenario(spec, evidence, engine)
+    info, frames, seen = {}, [], 0
+    steps = [step["selector"] for step in spec.get("demonstration", [])] or spec.get("continuation", [])
+    for selector in steps:
+        index = select(g, selector, objects)
+        d = g.decision
+        frames.append({"state": snapshot(g, info, viewer=spec["perspective"]), "events": visible_events(g.log[seen:], spec["perspective"]),
+                       "decision": {"player": d.player, "kind": d.kind, "prompt": d.prompt,
+                                    "options": [o.label for o in d.options], "chosen": index}})
+        seen = len(g.log)
+        g.step(index)
+    frames.append({"state": snapshot(g, info, viewer=spec["perspective"]), "events": visible_events(g.log[seen:], spec["perspective"]), "decision": None})
+    return {"format": 1, "meta": {"scenario_id": spec["id"], "reconstructed": True, "perspective": spec["perspective"],
+                                   "agents": ["recorded scenario", "recorded scenario"], "decks": spec["initial"].get("deck_names", ["?", "?"]),
+                                   "seed": spec["initial"].get("seed", 0), "starting_player": spec["initial"]["active"],
+                                   "winner": g.winner, "end_reason": g.end_reason, "turns": g.turn,
+                                   "assumptions": spec["assumptions"], "synthetic_fields": spec["synthetic_fields"]},
+            "cards": info, "frames": frames}
 
 
 def selector_for(g, index: int) -> dict:

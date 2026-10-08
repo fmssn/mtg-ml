@@ -29,7 +29,19 @@ MODEL_SCHEMA = {
 
 PROMPT = """Extract observations from these MTGO frames and timestamped commentary.
 Return only records supported by the supplied evidence; empty records is valid.
+Return at most 12 records, prioritizing complete hand/battlefield zones, life,
+zone counts, turn/phase and actual strategic actions. Do not itemize card rules
+text, player names, clocks, decoration, or every old log line in a state window.
 Use original video timestamps and the supplied locator strings exactly.
+For a frame citation, start and end MUST BOTH equal that frame's time. A
+single image never attests an interval. For transcript citations, use only
+times inside that transcript reference's interval. Never use the request's
+start/end as a frame's timestamp. All value_json strings MUST contain valid
+JSON (including null for an unreadable value), never an empty string.
+Examples of outer JSON fields: "value_json":"20" for life,
+"value_json":"[\\"Island\\",\\"Ponder\\"]" for a complete hand,
+"value_json":"\\"main1\\"" for a phase, and "value_json":"null"
+for unknown. A comma-separated list without JSON brackets is invalid.
 For state facts use field paths such as players.0.hand, players.1.life, active,
 step; value_json contains a JSON value, never explanatory prose. Full zones
 may be recorded only when every card is legible. For logs/actions/commentary
@@ -59,12 +71,31 @@ def image_url(path: str) -> str:
     return "data:image/png;base64," + base64.b64encode(Path(path).read_bytes()).decode()
 
 
-def interpret(frames: list[dict], transcript: list[dict], source_id: str, viewer: int, *, backend="local", model=None,
-              endpoint="http://127.0.0.1:8000/v1", video: str | None = None, start=0, end=0) -> tuple[list[dict], dict]:
+class InterpretationError(ValueError):
+    """Failed attempts still report their observed runtime and API usage."""
+
+    def __init__(self, message: str, metrics: dict):
+        super().__init__(message)
+        self.metrics = metrics
+
+
+def interpret(*args, **kwargs) -> tuple[list[dict], dict]:
+    attempt = {"backend": kwargs.get("backend", "local"), "model": kwargs.get("model"), "usage": {}, "accepted": 0}
+    t0 = time.monotonic()
+    try:
+        return _interpret(*args, **kwargs, attempt=attempt)
+    except (ValueError, RuntimeError, KeyError, OSError) as e:
+        attempt.update(wall_seconds=time.monotonic() - t0, review_status="rejected", error=str(e))
+        raise InterpretationError(str(e), attempt) from e
+
+
+def _interpret(frames: list[dict], transcript: list[dict], source_id: str, viewer: int, *, backend="local", model=None,
+               endpoint="http://127.0.0.1:8000/v1", video: str | None = None, start=0, end=0, attempt: dict) -> tuple[list[dict], dict]:
     require(viewer in (0, 1) and 0 <= start < end, "viewer and original time window required")
     require(backend in {"local", "openai", "gemini"}, "unknown vision backend")
     require(frames or (backend == "gemini" and video), "frame interpretation needs frames")
     model = model or {"local": "Qwen/Qwen3-VL-8B-Instruct", "openai": "gpt-6.1-sol", "gemini": "gemini-3.8-flash"}[backend]
+    attempt["model"] = model
     metadata = {"viewer": viewer, "start": start, "end": end, "frames": frames, "transcript": transcript}
     prompt = PROMPT + "\nEvidence manifest:\n" + json.dumps(metadata, ensure_ascii=False)
     t0 = time.monotonic()
@@ -81,9 +112,12 @@ def interpret(frames: list[dict], transcript: list[dict], source_id: str, viewer
             content.append({"type": "image_url", "image_url": {"url": image_url(frame["frame"]), "detail": "original" if backend == "openai" else "auto"}})
         payload = {"model": model, "messages": [{"role": "user", "content": content}],
                    "response_format": {"type": "json_schema", "json_schema": {"name": "mtgo_evidence", "strict": True, "schema": MODEL_SCHEMA}},
-                   "max_completion_tokens": 8192}
+                   "max_completion_tokens": 4096 if backend == "local" else 8192}
+        if backend == "local":
+            payload["temperature"] = 0
         url = "https://api.openai.com/v1/chat/completions" if backend == "openai" else endpoint.rstrip("/") + "/chat/completions"
         response = _post(url, payload, {"Authorization": f"Bearer {key}"} if key else {})
+        attempt["usage"] = response.get("usage", {})
         choice = response["choices"][0]
         require(choice.get("finish_reason") == "stop", "incomplete vision output; reduce the window")
         require(not choice["message"].get("refusal"), "vision request refused")
@@ -103,6 +137,7 @@ def interpret(frames: list[dict], transcript: list[dict], source_id: str, viewer
         response = _post("https://generativelanguage.googleapis.com/v1beta/interactions",
                          {"model": model, "input": parts, "store": False,
                           "response_format": {"type": "text", "mime_type": "application/json", "schema": MODEL_SCHEMA}}, {"x-goog-api-key": key})
+        attempt["usage"] = response.get("usage", {})
         require(response.get("status") == "completed", "incomplete Gemini output")
         output = json.loads("".join(p.get("text", "") for p in response.get("outputs", []) if p.get("type") == "text"))
         usage = response.get("usage", {})
@@ -127,7 +162,10 @@ def import_response(output: dict, source_id: str, viewer: int, frames: list[dict
         require(item["locator"] in locators, "model cited an unavailable source locator")
         a, b, kind = locators[item["locator"]]
         require(start <= item["start"] <= item["end"] <= end and a <= item["start"] <= item["end"] <= b, "model citation outside source interval")
-        value = json.loads(item["value_json"])
+        try:
+            value = json.loads(item["value_json"])
+        except (ValueError, TypeError):
+            raise ValueError(f"model value_json for {item['field']} is invalid JSON; use a smaller window or review manually") from None
         if item["kind"] == "state":
             value = {"path": item["field"], "value": value}
         visibility = item["visibility"]

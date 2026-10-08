@@ -11,7 +11,7 @@ rl = ["torch>=2.2", "numpy"]
 review = ["anthropic"]  # only for `mtg_ml.review --backend claude`
 expert-media = ["yt-dlp>=2026.3", "pillow>=10", "numpy"]
 expert-asr = ["faster-whisper>=1.1"]
-expert-ocr = ["paddleocr>=3,<4", "paddlepaddle>=3,<4"]
+expert-ocr = ["paddleocr>=3,<4", "paddlepaddle>=3,<4", "setuptools>=70"]
 
 [build-system]
 requires = ["setuptools>=68"]

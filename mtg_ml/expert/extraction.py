@@ -44,7 +44,7 @@ def merge_log(windows: list[dict], source_id: str) -> list[dict]:
     happened again. Cuts and windows without overlap are explicit gaps.
     """
     records, previous = [], []
-    for window in windows:
+    for window_index, window in enumerate(windows):
         lines = [clean(x) for x in window["lines"] if clean(x)]
         refs = [ref(source_id, window["time"], window["time"], "frame", window["frame"])]
         overlap = 0
@@ -57,7 +57,8 @@ def merge_log(windows: list[dict], source_id: str) -> list[dict]:
             reason = "occluded" if window.get("occluded") else "cut" if window.get("cut") else "missing_log_overlap"
             records.append(fact(f"gap-{len(records)}", "gap", {"reason": reason}, refs))
         for line in lines[overlap:]:
-            records.append(fact(f"log-{len(records)}", "log", {"text": line}, refs, visibility="public"))
+            records.append(fact(f"log-{len(records)}", "log", {"text": line, "sequence": len(records), "timing": "first_seen"}, refs, visibility="public",
+                                uncertainty="Initial viewport may contain earlier events or a previous game; first-seen time is not event time." if window_index == 0 else "Frame timestamp bounds first visibility, not the exact MTGO action time."))
         previous = lines  # empty/occluded windows break the continuity chain
     return records
 

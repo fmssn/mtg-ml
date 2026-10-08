@@ -6,7 +6,7 @@ import pytest
 
 from mtg_ml.expert.artifacts import evidence, fact, ref, review
 from mtg_ml.expert.learning import demonstrations
-from mtg_ml.expert.scenarios import compile_scenario, regression, select, selector_for
+from mtg_ml.expert.scenarios import compile_scenario, regression, replay, select, selector_for, verify
 from mtg_ml.rl.features import featurize
 
 
@@ -62,10 +62,16 @@ def demonstration_fixture(engine=None):
 
 def test_turn_and_land_history_setup():
     spec, data = fixture()
+    spec["initial"]["players"][0]["hand"].append("Mountain")
+    spec["initial"]["players"][0]["hand_count"] = 2
+    for field in ("hand", "hand_count"):
+        path = f"players.0.{field}"
+        rid = spec["state_facts"][path][0]
+        next(r for r in data["records"] if r["id"] == rid)["value"]["value"] = copy.deepcopy(spec["initial"]["players"][0][field])
     g, _ = compile_scenario(spec, data)
     assert g.turn == 8 and g.lands_played == 1
     assert g.spells_cast_this_turn == 0
-    assert not any(o.key[0] == "land" for o in g.legal_options())
+    assert not any(o.key[0] == "play_land" for o in g.legal_options())
     # The setup closure is retained by copies/replay forks as on normal games.
     clone = g.copy()
     assert clone.turn == g.turn and clone.lands_played == g.lands_played
@@ -177,4 +183,36 @@ def test_group_cannot_separate_video_variants():
     spec, data = fixture()
     spec["group_id"] = "fake-split-group"
     with pytest.raises(ValueError, match="source video group"):
+        compile_scenario(spec, data)
+
+
+def test_replay_is_viewer_compatible_and_hides_synthetic_opponent_hand():
+    spec, data = demonstration_fixture()
+    result = replay(spec, data)
+    assert result["format"] == 1 and result["meta"]["reconstructed"]
+    assert result["frames"][0]["state"]["players"][1]["hand"][0]["hidden"]
+    assert result["frames"][0]["state"]["players"][1]["hand"][0]["name"] == ""
+
+
+def test_verification_checks_declared_actions_and_outcome():
+    from mtg_ml.backend import native_available
+
+    if not native_available():
+        pytest.skip("native engine not built")
+    spec, data = demonstration_fixture()
+    spec["expected_after"] = {"winner": "self", "opponent.life": 0}
+    result = verify(spec, data)
+    assert result["identical"] and result["actions_checked"] == len(spec["demonstration"])
+
+
+def test_cannot_silently_hide_reviewed_opponent_hand_knowledge():
+    spec, data = demonstration_fixture()
+    path = "players.1.hand"
+    del spec["synthetic_fields"][path]
+    record = fact("known-hand", "state", {"path": path, "value": ["Island"]},
+                  [ref("fixture", 0, 0, "frame", "revealed-hand")], "public")
+    record["review"] = review("accepted", "test", "Explicitly revealed opponent hand.")
+    data["records"].append(record)
+    spec["state_facts"][path] = ["known-hand"]
+    with pytest.raises(ValueError, match="hidden-zone knowledge"):
         compile_scenario(spec, data)

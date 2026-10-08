@@ -53,6 +53,7 @@ def parser() -> argparse.ArgumentParser:
     vision.add_argument("--end", type=float, required=True)
     vision.add_argument("--viewer", type=int, choices=(0, 1), required=True)
     vision.add_argument("--max-frames", type=int, default=12)
+    vision.add_argument("--source-id", help="required when evidence has multiple video sources")
     vision.add_argument("--video", help="YouTube URL for Gemini's direct-video comparison")
     vision.add_argument("--out", type=Path, required=True)
     rev = sub.add_parser("review", help="apply explicit review patches; preserve unreviewed records")
@@ -66,7 +67,7 @@ def parser() -> argparse.ArgumentParser:
     template.add_argument("--time", type=float, required=True)
     template.add_argument("--viewer", type=int, choices=(0, 1), required=True)
     template.add_argument("--out", type=Path, required=True)
-    for name in ("compile", "regression", "export"):
+    for name in ("compile", "regression", "export", "replay", "verify"):
         cmd = sub.add_parser(name)
         cmd.add_argument("scenario", type=Path)
         cmd.add_argument("--evidence", type=Path, required=True)
@@ -77,8 +78,10 @@ def parser() -> argparse.ArgumentParser:
     metrics = sub.add_parser("metrics", help="ordered extraction accuracy against a manual gold log")
     metrics.add_argument("evidence", type=Path)
     metrics.add_argument("--gold", type=Path, required=True, help="JSON list of event texts in order")
-    metrics.add_argument("--review-minutes", type=float, default=0)
-    metrics.add_argument("--api-cost", type=float, default=0)
+    metrics.add_argument("--start", type=float, default=0, help="first-seen source time, inclusive")
+    metrics.add_argument("--end", type=float, default=float("inf"), help="first-seen source time, inclusive")
+    metrics.add_argument("--review-minutes", type=float, help="measured correction time; omitted means unmeasured")
+    metrics.add_argument("--api-cost", type=float, help="measured monetary cost; omitted means unmeasured")
     metrics.add_argument("--out", type=Path, required=True)
     score = sub.add_parser("score", help="evaluate a checkpoint on compiled expert episodes")
     score.add_argument("checkpoint", type=Path)
@@ -173,16 +176,23 @@ def run(args) -> dict:
         align(data["records"], list(CARDS) + list(TOKENS), read(args.aliases) if args.aliases else None)
         result = data
     elif name == "interpret":
-        from .interpret import interpret
+        from .interpret import InterpretationError, interpret
 
         frames = [f for f in read(args.frames) if args.start <= f["time"] <= args.end]
         require(args.max_frames > 0, "positive max-frames required")
         if len(frames) > args.max_frames:
             frames = [frames[int(i * (len(frames) - 1) / max(1, args.max_frames - 1))] for i in range(args.max_frames)]
         transcript = [r for r in data["records"] if r["kind"] == "commentary" and all(args.start <= t["start"] <= t["end"] <= args.end for t in r["refs"])]
-        source_id = data["sources"][0]["id"]
-        records, metrics = interpret(frames, transcript, source_id, args.viewer, backend=args.backend, model=args.model,
-                                     endpoint=args.endpoint, video=args.video, start=args.start, end=args.end)
+        require(args.source_id or len(data["sources"]) == 1, "multiple sources: select --source-id")
+        source_id = args.source_id or data["sources"][0]["id"]
+        require(any(s["id"] == source_id for s in data["sources"]), "unknown interpretation source")
+        transcript = [r for r in transcript if all(t["source_id"] == source_id for t in r["refs"])]
+        try:
+            records, metrics = interpret(frames, transcript, source_id, args.viewer, backend=args.backend, model=args.model,
+                                         endpoint=args.endpoint, video=args.video, start=args.start, end=args.end)
+        except InterpretationError as e:
+            write(args.out.with_suffix(".attempt.json"), e.metrics)
+            raise
         existing = {r["id"] for r in data["records"]}
         for r in records:
             r["id"] = f"{args.backend}-{len(existing)}-{r['id']}"
@@ -194,9 +204,13 @@ def run(args) -> dict:
         result = apply_reviews(data, read(args.patch))
     elif name == "template":
         result = scenario_template(data, args.source_id, args.id, args.time, args.viewer)
-    elif name in {"compile", "regression", "export"}:
+    elif name in {"compile", "regression", "export", "replay", "verify"}:
         spec, data = read(args.scenario), read(args.evidence)
-        if name == "export":
+        if name == "verify":
+            from .scenarios import verify
+
+            result = verify(spec, data)
+        elif name == "export":
             from .learning import demonstrations
 
             result = demonstrations(spec, data, args.engine, args.features)
@@ -204,6 +218,10 @@ def run(args) -> dict:
             from .scenarios import regression
 
             result = regression(spec, data, args.engine)
+        elif name == "replay":
+            from .scenarios import replay
+
+            result = replay(spec, data, args.engine)
         else:
             from ..engine.view import observe
             from .scenarios import compile_scenario
@@ -214,8 +232,10 @@ def run(args) -> dict:
     elif name == "metrics":
         from .extraction import event_metrics
 
-        require(args.review_minutes >= 0 and args.api_cost >= 0, "cost and review duration cannot be negative")
-        result = event_metrics([r["value"]["text"] for r in data["records"] if r["kind"] == "log"], read(args.gold))
+        require(all(v is None or v >= 0 for v in (args.review_minutes, args.api_cost)), "cost and review duration cannot be negative")
+        require(0 <= args.start <= args.end, "invalid metrics interval")
+        result = event_metrics([r["value"]["text"] for r in data["records"] if r["kind"] == "log"
+                                and args.start <= r["refs"][0]["start"] <= args.end], read(args.gold))
         result.update(review_minutes=args.review_minutes, api_cost=args.api_cost,
                       accepted_records=sum(r["review"]["status"] == "accepted" for r in data["records"]))
         result["metrics"] = data.get("metrics", {})

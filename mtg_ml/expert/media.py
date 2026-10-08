@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import time
 
-from .artifacts import evidence, fact, ref, require, write
+from .artifacts import evidence, fact, read, ref, require, write
 from .extraction import align, merge_log, parse_vtt
 
 
@@ -179,10 +179,19 @@ def extract(source: dict, directory: Path, start: float, end: float, *, crop=Non
     data = evidence(source)
     offset = source.get("media_offset", 0)
     media = Path(source["media"])
-    frames = decode_frames(media, directory / "frames", start - offset, end - offset, fps)
-    for frame in frames:
-        frame["time"] += offset
-    write(directory / "frames.json", frames)
+    manifest = {"media": str(media.resolve()), "bytes": media.stat().st_size, "mtime_ns": media.stat().st_mtime_ns,
+                "start": start, "end": end, "offset": offset, "fps": fps}
+    manifest_path = directory / "decode-manifest.json"
+    if (directory / "frames.json").exists():
+        require(manifest_path.exists() and read(manifest_path) == manifest, "existing frames belong to different media/interval; use a fresh directory")
+        frames = read(directory / "frames.json")
+        require(all(Path(f["frame"]).exists() for f in frames), "cached frame files are missing")
+    else:
+        write(manifest_path, manifest)
+        frames = decode_frames(media, directory / "frames", start - offset, end - offset, fps)
+        for frame in frames:
+            frame["time"] += offset
+        write(directory / "frames.json", frames)
     if run_ocr:
         records, metrics = ocr_frames(frames, source["id"], PaddleReader(ocr_device), crop)
         write(directory / "ocr-windows.json", metrics.pop("raw_windows"))
