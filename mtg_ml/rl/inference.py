@@ -171,10 +171,31 @@ class InferenceClient:
     def submit(self, group: int, rows: list) -> tuple:
         """rows: (policy key, slot, fresh, state, option lengths, option
         tokens, events), grouped by policy key (rows of one policy
-        contiguous). Returns a handle."""
+        contiguous). Returns a handle.
+
+        A request larger than the slot (ServerConfig.request_ints) is split
+        into consecutive chunks that fit: the first goes out now, `collect`
+        sends the others one after another on the same slot and joins the
+        replies (rows are independent: each carries its own hidden-state
+        slot). Only a single decision larger than the slot is an error."""
         L = self.layout
         if not 0 <= group < L.groups:
             raise ValueError(f"group {group}: the server has {L.groups} request slots per worker (ServerConfig.groups)")
+        chunks, cur, size = [], [], 0
+        for r in rows:
+            need = REC + len(r[4]) + len(r[3]) + len(r[6]) + len(r[5])  # record, option lengths, state, events, option tokens
+            if need > L.request_ints:
+                raise ValueError(f"one decision of {need} ints ({len(r[4])} options, {len(r[5])} option tokens, {len(r[3])} state) does not fit a request slot (ServerConfig.request_ints = {L.request_ints})")
+            if cur and size + need > L.request_ints:
+                chunks.append(cur)
+                cur, size = [], 0
+            cur.append(r)
+            size += need
+        chunks.append(cur)
+        return self._submit(group, chunks[0]) + (chunks[1:],)
+
+    def _submit(self, group: int, rows: list) -> tuple:
+        L = self.layout
         n = len(rows)
         if n > MAX_ROWS:
             raise ValueError(f"{n} decisions in one request, at most {MAX_ROWS}")
@@ -215,6 +236,16 @@ class InferenceClient:
         return (ticket, group, n)
 
     def collect(self, handle: tuple) -> tuple[list[int], list[float], list[float]]:
+        *first, rest = handle
+        acts, logps, values = self._collect(first)
+        for rows in rest:  # an oversized request's further chunks, one at a time
+            a, lp, v = self._collect(self._submit(first[1], rows))
+            acts += a
+            logps += lp
+            values += v
+        return acts, logps, values
+
+    def _collect(self, handle) -> tuple[list[int], list[float], list[float]]:
         ticket, group, n = handle
         L = self.layout
         i = L.resp0 + (self.wid * L.groups + group) * RESP_STRIDE

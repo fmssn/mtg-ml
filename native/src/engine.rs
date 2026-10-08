@@ -1522,13 +1522,9 @@ impl Eng {
                 assignments.push((a, Ref::Perm(st.c(blockers[0]).oid), pw));
                 continue;
             }
-            let slots = blockers.len() + usize::from(trample);
             let lethal: Vec<i32> = blockers.iter().map(|&b| st.lethal(st.c(a), st.c(b))).collect();
             let mut options = vec![];
-            for split in compositions(pw, slots) {
-                if trample && *split.last().unwrap() > 0 && split.iter().zip(&lethal).any(|(s, l)| s < l) {
-                    continue;
-                }
+            for split in damage_splits(pw, &lethal, trample) {
                 let mut parts: Vec<String> = split.iter().zip(&blockers).map(|(s, &b)| format!("{s} to {}", st.c(b).repr())).collect();
                 if trample {
                     parts.push(format!("{} to player", split.last().unwrap()));
