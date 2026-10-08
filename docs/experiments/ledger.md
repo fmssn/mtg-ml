@@ -13,6 +13,8 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
+| 20261007-fs4-ft | r4-control final + feature set 4 (combat relations, incoming damage, X and colour previews), same flags | 17.61M + 5.0M | **78.8%** | **80.3%** | **213 ± 14**⁶ | **adopt**: set 4 on by default, new best parent |
+| 20261007-fs3-ctl | r4-control final, identical resume on feature set 3 (control) | 17.61M + 5.0M | 77.4% | 78.9% | 190 ± 13⁶ | control |
 | 20261007-red-madness-1m | new deck: Red Madness learner vs frozen r1-control Jund, warm-started from it | 1M | (vs Jund bot) 89.9% | 92.6% | | new-deck baseline⁴ |
 | 20261007-r5-mix-h256 | fresh h256 entity net on the three-deck mix, lr 1.5e-4 → 1.5e-5 | 2.6M (stopped) | 46.3%⁵ | 60.4%⁵ | -32 ± 13⁵ | inconclusive: level with h128 at equal games, slightly behind |
 | 20261007-r5-mix-h256-lr3e-4 | the same at the h128 lr (3e-4 → 3e-5) | 2.6M | 38.1% at 2.5M | | -69 at 2.5M | abort: steps too large |
@@ -36,9 +38,33 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | 20261006-overnight-selfplay | open-ended self-play + pool | 8.4M | 64.6% | 70.9% | 103 ± 13 | parent |
 | 20261006-overnight-bot10 | + 10% games vs scripted bots | 8.4M | 65.6% | | 75 ± 12 | no effect |
 
-Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows. ⁵ last in-training evaluation (1,000 games); the 2,000-game final evals were not run (runs stopped 2026-10-07).
+Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows. ⁵ last in-training evaluation (1,000 games); the 2,000-game final evals were not run (runs stopped 2026-10-07). ⁶ measured on the set-4 code (759358e), where r4-control's final policy reads 199.5 ± 13.6 (its in-training 163-173 was on the PR #28 code): compare the fs4 rows with each other, not with older rows.
 
 ---
+
+## 20261007-fs4 · feature set 4 fine-tune vs a feature set 3 control
+
+- **Question**: do the rules-level observation gaps the r4-control game review found (feature set 4, PR fmssn/mtg-ml#33: combat relations between attackers and blockers, incoming damage, X and colour previews) make the model stronger once it trains on them.
+- **Parent**: `20261007-r4-control` final (`final.pt`, 17.61M games, feature set 3) with its pool and optimizer state, resumed in both arms; pool snapshots without a feature stamp were stamped `features=3` in the run copies. The new set-4 rows start untrained.
+- **Code**: `claude/feature-set-4` @ 759358e (PR #33), box copy `~/mtg-ml-fs4`. No rules change (golden digests untouched); sets 1-3 unchanged (digest-tested).
+- **Flags** (`~/mtg-ml-fs4/launch_fs4.sh`, both arms, only `--features` differs): `--hidden 128 --trunk entity --value-net shared --engine native --device cuda --inference server --server-device cuda:0 --workers 28 --games-per-iter 2048 --iterations 10000000 --total-games 22612800 --checkpoint-every 25 --snapshot-every 122 --seed 4 --server-policy-slots 256 --features {4|3} --postboard-frac 0.2 --ppo-lr 1e-4 --ppo-lr-final 3e-5 --lr-anneal-games 8000000 --eval-every 0 --eval-every-games 250000 --bench-games 1000 --bench-greedy-games 1000 --bench-bo3-matches 0 --eval-games 40 --eval-bo3-matches 0 --ladder <L1> --ladder-ratings <L1>/ladder.json --ladder-games 200`. fs4-ft on cores 0-31, fs3-ctl on 32-63, `OMP_NUM_THREADS=8`. Started 2026-10-07 18:49 UTC, both finished 22:49 UTC at 22.61M games (iteration 11042, 5.0M games each).
+- **Result** (final policy, all on the set-4 code; benchmark 2,000 games, ladder L1 200 paired games per rung, sampled):
+
+| | sampled | greedy | L1 Elo | in-training L1 Elo, mean of last 10 (20.25-22.5M) | audit blind spots (greedy self-play, 200 games) |
+|---|---|---|---|---|---|
+| fs4-ft | **78.8%** (77.0–80.5) | **80.3%** (78.6–82.0) | **212.5 ± 13.8** | 198.5 | **0.0 / 1k** (0 of 56,675; declare_blocker 0 of 947) |
+| fs3-ctl | 77.4% (75.6–79.2) | 78.9% (77.1–80.6) | 190.1 ± 13.4 | 179.9 | 2.16 / 1k (125; declare_blocker 86 of 991) |
+| r4-control (parent) | 76.5% (74.6–78.4) | 75.6% (73.7–77.5) | 199.5 ± 13.6 | | 2.77 / 1k (152; declare_blocker 107 of 933) |
+
+Head to head, 2,000 paired games: fs4-ft vs fs3-ctl **52.9% (50.8–55.1)**; fs4-ft vs r4-control 51.5% (49.4–53.7).
+
+- **Findings**
+  - *Set 4 vs control* (same parent, flags, seed and games): the head to head is the one interval clear of 50% (52.9%). Benchmark +1.4 sampled and +1.4 greedy (each inside noise), final Elo +22 (inside noise alone), but the in-training Elo sits ~19 above the control across the whole last 2.25M games, so the direction is consistent everywhere.
+  - *Audit*: under set 4 no two options of a decision look identical where the outcome differs (blind spots 2.16 → 0 per 1k). The control's blind spots are mostly blocks (which attacker a blocker takes: Eldrazi Spawn, Tolarian Terror, Cryptic Serpent); set 4's `e:blocking:*` / `pv:attacker_*` tokens remove them. 11 identical-option groups remain (priority, none blind).
+  - *Control vs parent*: 5M more games on set 3 bought little (+0.9 sampled, +3.3 greedy, Elo 190 vs 200), so most of fs4-ft's edge over r4-control comes from the features, not from the extra games.
+  - The 50 greedy review games of the fs4-ft final policy (seeds 0-49, jund_blue self-play; Jund won 23) are in `~/mtg-ml-fs4/review-games/` on the box.
+- **Verdict**: **adopt**. Feature set 4 becomes the default and `20261007-fs4-ft` the next parent. The gain is small (head to head ~53%), consistent with features that mainly fix block selection. A 5,000-game head to head would narrow it further if needed.
+- **Archive**: `20261007-fs4-ft`, `20261007-fs3-ctl` (evals.txt has every number above; audit json in `~/mtg-ml-fs4/audit/`).
 
 ## 20261007-r5 · width test on the three-deck mix
 
