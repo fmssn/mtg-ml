@@ -24,15 +24,15 @@ import random
 
 import mtg_ml_native as _n
 
-from .cards import CARDS, FACES, SPEC_PATH, TOKENS, count_of
+from .cards import CARDS, DUNGEONS, FACES, SPEC_PATH, TOKENS, count_of
 from .game import Game, RulesError
 from .mana import ManaCost
-from .objects import FREE, TempEffect
+from .objects import FREE, DamageAllocation, TempEffect
 
 with open(SPEC_PATH, encoding="utf-8") as _f:
     _n.load_cards(_f.read())
 
-_ALL_DEFS = {**FACES, **TOKENS, **CARDS}
+_ALL_DEFS = {**FACES, **TOKENS, **CARDS, **DUNGEONS}  # dungeons: the source of room triggers on the stack
 
 
 class NativeCard(_n.CardView):
@@ -299,8 +299,16 @@ class NativeGame:
         auto_mana: bool = False,
         auto_pass: bool = False,
         deck_names: tuple[str | None, str | None] | None = None,
+        registered_main: tuple | None = None,
+        registered_sideboards: tuple | None = None,
         _snapshots: bool = False,
     ):
+        decks = tuple(tuple(d) for d in decks)
+        self._current_main = decks
+        self._registered_main = tuple(tuple(d) for d in registered_main) if registered_main is not None else decks
+        self._registered_sideboards = tuple(tuple(d) for d in registered_sideboards) if registered_sideboards is not None else ((), ())
+        if len(decks) != 2 or len(self.registered_main) != 2 or len(self.registered_sideboards) != 2:
+            raise ValueError("deck registration needs two seats")
         self._args = dict(
             decks=decks,
             seed=seed,
@@ -315,6 +323,8 @@ class NativeGame:
             auto_mana=auto_mana,
             auto_pass=auto_pass,
             deck_names=deck_names,
+            registered_main=self.registered_main,
+            registered_sideboards=self.registered_sideboards,
         )
         # Names of decks that are not the default for their seat (Game.deck_names).
         self.deck_names = tuple(deck_names) if deck_names else (None, None)
@@ -339,6 +349,8 @@ class NativeGame:
             auto_mana,
             auto_pass,
             self.deck_names,
+            self.registered_main,
+            self.registered_sideboards,
         )
         self._cache: dict = {}
         self._cache_version = -1
@@ -351,6 +363,25 @@ class NativeGame:
             self._g.start()
         except _n.NativeRulesError as e:
             raise RulesError(str(e)) from None
+
+    @property
+    def registered_main(self):
+        return self._registered_main
+
+    @property
+    def registered_sideboards(self):
+        return self._registered_sideboards
+
+    @property
+    def current_main(self):
+        return self._current_main
+
+    @property
+    def damage_allocation(self):
+        raw = self._g.damage_allocation()
+        if raw is None:
+            return None
+        return DamageAllocation(raw[0], tuple(raw[1]), tuple(raw[2]), tuple(raw[3]), *raw[4:])
 
     # -- caching -------------------------------------------------------------
 

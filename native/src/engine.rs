@@ -1547,20 +1547,20 @@ impl Eng {
                 continue;
             }
             let lethal: Vec<i32> = blockers.iter().map(|&b| st.lethal(st.c(a), st.c(b))).collect();
-            let mut options = vec![];
-            for split in damage_splits(pw, &lethal, trample) {
-                let mut parts: Vec<String> = split.iter().zip(&blockers).map(|(s, &b)| format!("{s} to {}", st.c(b).repr())).collect();
-                if trample {
-                    parts.push(format!("{} to player", split.last().unwrap()));
+            let split = if let Some(splits) = damage_splits(pw, &lethal, trample) {
+                let mut options = vec![];
+                for split in splits {
+                    let mut parts: Vec<String> = split.iter().zip(&blockers).map(|(s, &b)| format!("{s} to {}", st.c(b).repr())).collect();
+                    if trample { parts.push(format!("{} to player", split.last().unwrap())); }
+                    let key = vec![s("damage"), KI::T(split.iter().map(|&v| v as i64).collect())];
+                    options.push(opt(parts.join(", "), key, Val::Split(split)));
                 }
-                let key = vec![s("damage"), KI::T(split.iter().map(|&v| v as i64).collect())];
-                options.push(opt(parts.join(", "), key, Val::Split(split)));
-            }
-            let (an, ao) = (st.c(a).name(), st.c(a).oid);
-            let active = st.active;
-            let split = match self.ask(active, Kind::AssignDamage, || format!("Assign {pw} damage from {an}#{ao}"), options)? {
-                Val::Split(v) => v,
-                _ => unreachable!(),
+                let (an, ao, active) = (st.c(a).name(), st.c(a).oid, st.active);
+                match self.ask(active, Kind::AssignDamage, || format!("Assign {pw} damage from {an}#{ao}"), options)? {
+                    Val::Split(v) => v, _ => unreachable!(),
+                }
+            } else {
+                self.allocate_damage(a, &blockers, &lethal, pw, trample, defender)?
             };
             let st = self.s();
             for (sv, &b) in split.iter().zip(&blockers) {
@@ -1595,6 +1595,28 @@ impl Eng {
             st.pending.push(PendingTrigger { controller: a, source: src, tdef: &db().take_initiative, data: Data::default() });
         }
         Ok(())
+    }
+
+    fn allocate_damage(&mut self, a: CIdx, blockers: &[CIdx], lethal: &[i32], pw: i32, trample: bool, defender: u8) -> R<Vec<i32>> {
+        let mut assigned = vec![0; blockers.len()];
+        let (mut remaining, mut player_damage) = (pw, if trample { -1 } else { 0 });
+        let recipients = (if trample { -1 } else { 0 })..blockers.len() as i32;
+        for recipient in recipients {
+            let st = self.s();
+            let (an, ao, active) = (st.c(a).name(), st.c(a).oid, st.active);
+            st.damage_allocation = Some(DamageAllocation { attacker: ao, blockers: blockers.iter().map(|&b| st.c(b).oid).collect(), lethal: lethal.to_vec(), assigned: assigned.clone(), recipient, remaining, defender, player_damage });
+            let name = if recipient == -1 { "player" } else { st.c(blockers[recipient as usize]).name() };
+            let target = if recipient == -1 { "player".to_string() } else { st.c(blockers[recipient as usize]).repr() };
+            let options = damage_amounts(remaining, lethal, recipient, player_damage).map(|n| {
+                opt(format!("{n} to {target} from {an}#{ao}"), vec![s("damage_amount"), s(an), s(name), KI::I(recipient as i64), KI::I(n as i64), KI::I(remaining as i64), KI::T(assigned.iter().map(|&v| v as i64).collect()), KI::I(player_damage as i64)], Val::Int(n))
+            }).collect();
+            let n = match self.ask(active, Kind::AssignDamageAmount, || format!("Assign damage from {an}#{ao} to {target} ({remaining} remaining)"), options)? { Val::Int(n) => n, _ => unreachable!() };
+            remaining -= n;
+            if recipient == -1 { player_damage = n; } else { assigned[recipient as usize] = n; }
+        }
+        self.s().damage_allocation = None;
+        if trample { assigned.push(player_damage); }
+        Ok(assigned)
     }
 
     // ------------------------------------------------------------------

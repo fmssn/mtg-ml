@@ -55,3 +55,8 @@ and the context index. The Codex `game-review` skill lives in `.agents/skills/`;
 Claude retains its existing skill and Workflow runner. Both use the same Python
 recording, prompt, reply-import and verification tools; see `game-review.md`.
 The GitHub autopilot continues to run independently of the local coding agent.
+
+Project `mtg-*` subagents share short role instructions across Codex and Claude.
+See [agents.md](agents.md) for routing, scoped briefs, limits, validation and
+fallbacks. Small tasks stay single-agent; independent deliverables retain their
+own workspace and PR.

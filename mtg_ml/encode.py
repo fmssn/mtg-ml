@@ -41,8 +41,14 @@ DEFAULT_DIM = 1 << 16
 #   6: + simulated option previews: each option is applied to a copy of the
 #      game, advanced while that needs no hidden information and no choice
 #      of the opponent, and the observable change is featurized (`pv:sim:`)
-FEATURES = 6  # the latest; what new runs train on
-FEATURE_VERSIONS = (1, 2, 3, 4, 5, 6)
+#   7: hidden-list own-deck counts, no absolute seat token, uncapped
+#      entities, and simulated previews independent of candidate count.
+FEATURES = 7  # the latest; what new runs train on
+FEATURE_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
+
+
+def information_contract(features: int) -> str:
+    return "hidden_list" if check_features(features) >= 7 else "legacy_archetype_disclosed"
 
 
 def check_features(features: int) -> int:
@@ -103,11 +109,23 @@ def state_features(game, viewer: int, features: int = FEATURES) -> list[str]:
     o = observe(game, viewer)
     f = [f"step:{o['step']}", f"active:{o['active']}", f"postboard:{o['match_game'] > 1}"]
     deck = game.deck_names[viewer]
-    if deck is not None and features >= 2:  # not the seat's usual deck (match.deck_names)
+    if deck is not None and 2 <= features < 7:  # not the seat's usual deck (match.deck_names)
         f.append(f"self:deck:{deck}")
     opp_deck = game.deck_names[1 - viewer]
-    if opp_deck is not None and features >= 3:
+    if opp_deck is not None and 3 <= features < 7:
         f.append(f"opp:deck:{opp_deck}")
+    if features >= 7:
+        for zone, cards in (("registered_main", game.registered_main[viewer]), ("registered_sideboard", game.registered_sideboards[viewer]), ("current_main", game.current_main[viewer])):
+            counts = {}
+            for name in cards:
+                counts[name] = counts.get(name, 0) + 1
+            for name, count in sorted(counts.items()):
+                f += [f"self:list:{zone}:{name}#{k}" for k in range(1, count + 1)]
+        allocation = game.damage_allocation
+        if allocation is not None:
+            f += [f"damage:recipient:{allocation.recipient}", f"damage:remaining:{allocation.remaining}", f"damage:player:{allocation.player_damage}"]
+            f += [f"damage:assigned:{i}:{n}" for i, n in enumerate(allocation.assigned)]
+            f += [f"damage:lethal:{i}:{n}" for i, n in enumerate(allocation.lethal)]
     f += _thermo("turn", o["turn"], TURN_STEPS)
     if o["lands_played"] is not None:
         f.append(f"land_played:{o['lands_played'] > 0}")
@@ -350,6 +368,17 @@ def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[l
             e += _combat_entity(game, c, slots)
         if v5:
             e += card.face.shape
+        if features >= 7 and game.damage_allocation is not None:
+            allocation = game.damage_allocation
+            if p["oid"] == allocation.attacker:
+                e.append("e:damage:source")
+            if p["oid"] in allocation.blockers:
+                j = allocation.blockers.index(p["oid"])
+                e += [f"e:damage:slot:{j}", f"e:damage:assigned:{allocation.assigned[j]}", f"e:damage:lethal:{allocation.lethal[j]}"]
+                if j == allocation.recipient:
+                    e.append("e:damage:recipient")
+                if j < allocation.recipient:
+                    e.append("e:damage:committed")
         index[p["oid"]] = len(ents)
         ents.append(e)
     for i, (it, item) in enumerate(zip(reversed(o["stack"]), reversed(game.stack))):
@@ -368,7 +397,7 @@ def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[l
         ents.append(e)
     if v5:
         _hand_entities(game, viewer, ents, index)
-    if len(ents) > MAX_ENTITIES:
+    if features < 7 and len(ents) > MAX_ENTITIES:
         ents = ents[:MAX_ENTITIES]
         index = {k: v for k, v in index.items() if v < MAX_ENTITIES}
     return ents, index
@@ -664,7 +693,7 @@ def option_preview(game, player: int, i: int, features: int = FEATURES) -> list[
         return game.option_preview(player, i, features)
     f = _static_preview(game, player, i, features)
     if features >= 6:
-        f += sim_preview(game, player, i)
+        f += sim_preview(game, player, i, features)
     return f
 
 
@@ -677,7 +706,7 @@ def option_previews(game, player: int, features: int = FEATURES) -> list[list[st
         return game.option_previews(player, features)
     out = [_static_preview(game, player, i, features) for i in range(len(game.legal_options()))]
     if features >= 6:
-        for f, sim in zip(out, sim_previews(game, player)):
+        for f, sim in zip(out, sim_previews(game, player, features)):
             f += sim
     return out
 
@@ -724,7 +753,7 @@ SIM_MAX_STEPS = 64  # engine steps per option: the option itself plus forced opp
 # mana), so having no choice reveals nothing. Every other opponent decision
 # (priority, cards from hand or library, yes / no, modes, mulligans) stops it.
 SIM_FORCED_KINDS = frozenset(
-    {"target", "pay_mana", "sacrifice", "exile_from_graveyard", "order_triggers", "declare_attacker", "declare_blocker", "assign_damage", "choose_x"}
+    {"target", "pay_mana", "sacrifice", "exile_from_graveyard", "order_triggers", "declare_attacker", "declare_blocker", "assign_damage", "assign_damage_amount", "choose_x"}
 )
 SIM_FLAGS = (
     "self:lethal_on_board",
@@ -800,20 +829,20 @@ def _signed(name: str, d: int, steps: tuple = COUNT_STEPS) -> list[str]:
     return _thermo(f"{name}+", d, steps) if d > 0 else _thermo(f"{name}-", -d, steps)
 
 
-def sim_previews(game, player: int) -> list[list[str]]:
+def sim_previews(game, player: int, features: int = 6) -> list[list[str]]:
     """`sim_preview` of every option of the current decision."""
     n = len(game.legal_options())
-    if n > SIM_MAX_OPTIONS or not _sim_ready(game):
+    if (features < 7 and n > SIM_MAX_OPTIONS) or not _sim_ready(game):
         return [["pv:sim:skipped", "pv:simp:skipped"] for _ in range(n)]
     before = _sim_summary(game, player)
     return [_simulate(game, player, i, before) for i in range(n)]
 
 
-def sim_preview(game, player: int, i: int) -> list[str]:
+def sim_preview(game, player: int, i: int, features: int = 6) -> list[str]:
     """Feature set 6: what taking option `i` changes, simulated on a copy of
     the game (docs/features.md, "Simulated option previews"): `pv:sim:` if
     the opponent may respond, `pv:simp:` if it passes."""
-    if len(game.legal_options()) > SIM_MAX_OPTIONS or not _sim_ready(game):
+    if (features < 7 and len(game.legal_options()) > SIM_MAX_OPTIONS) or not _sim_ready(game):
         return ["pv:sim:skipped", "pv:simp:skipped"]
     return _simulate(game, player, i, _sim_summary(game, player))
 
