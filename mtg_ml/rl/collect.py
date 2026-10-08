@@ -32,7 +32,7 @@ import traceback
 import queue
 import threading
 from array import array
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
 from dataclasses import dataclass
 
 from .rollout import Result, create_pool
@@ -338,20 +338,27 @@ class PoolThread:
 
     def __init__(self, pool):
         self.pool = pool
-        self._exec = ThreadPoolExecutor(1, thread_name_prefix="rollout")
+        self._calls = queue.Queue()
+        self._thread = threading.Thread(target=self._serve, name="rollout", daemon=True)  # not a ThreadPoolExecutor: its threads are joined at exit
+        self._thread.start()
         self._tag = 0
         self._futures: dict = {}
 
-    def call(self, fn, *args) -> Pending:
-        def run():
+    def _serve(self):
+        while (item := self._calls.get()) is not None:
+            future, fn, args = item
+            if not future.set_running_or_notify_cancel():
+                continue
             started = time.monotonic()
             try:
-                return ("ok", fn(self.pool, *args), time.monotonic(), started)
+                future.set_result(("ok", fn(self.pool, *args), time.monotonic(), started))
             except BaseException as e:  # noqa: BLE001 - re-raised by wait()
-                return ("err", e, time.monotonic(), started)
+                future.set_result(("err", e, time.monotonic(), started))
 
+    def call(self, fn, *args) -> Pending:
         self._tag += 1
-        self._futures[self._tag] = self._exec.submit(run)
+        self._futures[self._tag] = future = Future()
+        self._calls.put((future, fn, args))
         return Pending(self, self._tag, time.monotonic())
 
     def _ready(self, tag) -> bool:
@@ -361,13 +368,16 @@ class PoolThread:
         return self._futures.pop(tag).result()
 
     def close(self) -> None:
-        self._exec.shutdown(wait=True)
+        self._calls.put(None)
+        self._thread.join()
         self.pool.close()
         self.pool.join()
 
     def terminate(self) -> None:
         self.pool.terminate()
-        self._exec.shutdown(wait=False, cancel_futures=True)
+        for future in self._futures.values():
+            future.cancel()  # those not yet started
+        self._calls.put(None)
 
 
 # -- CPU layout ------------------------------------------------------------------
