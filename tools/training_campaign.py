@@ -40,6 +40,27 @@ ARMS = {
 
 def prepare(args):
     root, frozen, code = Path(args.root).resolve(), Path(args.frozen).resolve(), Path(args.code).resolve()
+    arms = args.arms.split(",")
+    cpus, gpus = parse_cpus(args.cpus), args.gpus.split(",")
+    if args.hours not in (0, 2, 6):
+        raise ValueError("use 0 hours for screens, 2 for finalists or 6 for extended finalists")
+    if len(set(arms)) != len(arms) or any(arm not in ARMS for arm in arms):
+        raise ValueError(f"choose distinct arms from {', '.join(ARMS)}")
+    if len(set(gpus)) != len(gpus) or any(not gpu.startswith("GPU-") for gpu in gpus):
+        raise ValueError("assign distinct GPU UUIDs")
+    if len(cpus) < 8:
+        raise ValueError("reserve at least 8 CPUs: four learners, inference, workers, evaluation")
+    for arm in arms:
+        settings = ARMS[arm]
+        learners = settings.get("learners", args.base_learners if arm in ("bf16", "batch8192-lr150", "batch8192-lr300", "epochs2", "lag2") else 1)
+        required = learners + int(not settings.get("same_gpu", False))
+        if len(gpus) < required:
+            raise ValueError(f"{arm} needs {required} GPU UUIDs")
+        for seed in (0, 1, 2) if args.hours else (0,):
+            if (root / f"{arm}-seed{seed}").exists():
+                raise FileExistsError(root / f"{arm}-seed{seed}")
+    if (root / "campaign.json").exists():
+        raise FileExistsError(root / "campaign.json")
     manifest = json.loads((frozen / "manifest.json").read_text())
     if not manifest.get("opponents"):
         raise ValueError("freeze the historical opponent pool with --opponent-pool first")
@@ -53,11 +74,7 @@ def prepare(args):
     fraction = min(1, position / anneal) if anneal else 0
     if training["lr_schedule"] == "cosine":
         fraction = 0.5 * (1 - math.cos(math.pi * fraction))
-    cpus, gpus = parse_cpus(args.cpus), args.gpus.split(",")
-    if len(cpus) < 8:
-        raise ValueError("reserve at least 8 CPUs: four learners, inference, workers, evaluation")
     root.mkdir(parents=True, exist_ok=True)
-    arms = args.arms.split(",")
     entries = []
     for arm in arms:
         settings = ARMS[arm]
@@ -174,6 +191,7 @@ def summarize(entry, charged_s):
                   median_rollout_s=statistics.median(r["rollout_s"] for r in timed),
                   median_publication_s=statistics.median(r["publish_s"] for r in timed),
                   mean_residency_selection_s=statistics.mean(r.get("residency", {}).get("selection_s", 0) for r in timed),
+                  mean_residency_merge_s=statistics.mean(r.get("residency", {}).get("merge_s", 0) for r in timed),
                   mean_residency_waves=statistics.mean(r.get("residency", {}).get("waves", 1) for r in timed))
     initial, final = rows[entry["warmup"] - 1].get("inference_stats", {}), rows[-1].get("inference_stats", {})
     report["inference_peak_bytes"] = [s["peak_bytes"] for s in final.get("servers", [])]
@@ -193,6 +211,24 @@ def run(args):
     for entry in entries:
         if entry["name"] in done or (args.arms and entry["arm"] not in args.arms.split(",")):
             continue
+        if not entry["hours"] and entry["arm"] in ("learners2", "learners4"):
+            reports = {r["name"]: r for r in (json.loads(s) for s in outcomes.read_text().splitlines())} if outcomes.exists() else {}
+            previous = reports.get("bf16-seed0" if entry["arm"] == "learners2" else "learners2-seed0")
+            baseline = reports.get("bf16-seed0")
+            reason = None
+            if previous is None or "median_ppo_s" not in previous:
+                reason = "run the preceding learner screen successfully first"
+            elif previous["median_ppo_s"] <= previous["median_rollout_s"]:
+                reason = "learning is no longer the limiting stage"
+            elif entry["arm"] == "learners4" and (baseline is None or previous["games_per_hour"] <= 1.05 * baseline["games_per_hour"]):
+                reason = "two learner GPUs did not improve total throughput by at least 5%"
+            if reason:
+                report = dict(name=entry["name"], verdict="skipped", reason=reason, code_ref=entry["code_ref"])
+                if not args.check_only:
+                    with open(outcomes, "a") as f:
+                        f.write(json.dumps(report) + "\n")
+                print(json.dumps(report), flush=True)
+                continue
         deadline = time.monotonic() + args.wait_seconds
         while reasons := blockers(entry):
             print(json.dumps(dict(name=entry["name"], blocked=reasons)), flush=True)

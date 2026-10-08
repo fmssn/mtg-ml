@@ -730,6 +730,7 @@ def run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int
         res = _run_specs(pool, wave, job, workers, inflight)
         for f in fields(Result):
             getattr(merged, f.name).extend(getattr(res, f.name))
+    t_merge = time.monotonic()
     if merged.trajectory_ids:
         order = sorted(range(len(merged.lengths)), key=lambda i: merged.trajectory_ids[i])
         starts = list(itertools.accumulate(merged.lengths, initial=0))
@@ -741,7 +742,7 @@ def run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int
         merged.lengths = [merged.lengths[i] for i in order]
         merged.trajectory_ids = [merged.trajectory_ids[i] for i in order]
     merged.games.sort(key=lambda g: g[-1])
-    merged.residency = {"waves": waves, "selection_s": selection_s}
+    merged.residency = {"waves": waves, "selection_s": selection_s, "merge_s": time.monotonic() - t_merge}
     return merged
 
 

@@ -298,3 +298,32 @@ def test_sparse_residency_policy_ids_grouped_projection():
     got = grouped_linear(x, w, bias, policies)
     expected = torch.cat([torch.nn.functional.linear(x[:8], w[0], bias[0]), torch.nn.functional.linear(x[8:], w[63], bias[63])])
     assert torch.allclose(got, expected, atol=3e-5, rtol=1e-5)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="two CUDA devices")
+@pytest.mark.parametrize("capture", [0, 1])
+def test_two_gpu_updates_match_single_gpu_with_empty_shards(capture):
+    import copy
+
+    from mtg_ml.rl.distributed import DistributedLearner
+    from mtg_ml.rl.ppo import PPOConfig, make_optimizer, ppo_update
+
+    torch.manual_seed(13)
+    cpu = PolicyNet(hidden=16, trunk="entity", entity_attn=1)
+    data = _training_data(cpu)
+    reference, net = copy.deepcopy(cpu).cuda(0), copy.deepcopy(cpu).cuda(0)
+    cfg = PPOConfig(epochs=2, minibatch=3, capture=capture, target_kl=None)
+    opt0, opt1 = [make_optimizer(n.parameters(), cfg.lr, "cuda:0") for n in (reference, net)]
+    expected = ppo_update(reference, opt0, data, cfg, device="cuda:0", gen=torch.Generator().manual_seed(9), mode="graph" if capture else "eager")
+    learner = DistributedLearner(net, opt1, cfg, ("cuda:0", "cuda:1"))
+    try:
+        got = learner.update(net, opt1, data, cfg, cfg.lr, gen=torch.Generator().manual_seed(9))
+    finally:
+        learner.close()
+    assert got["updates"] == expected["updates"]
+    for key in ("pg_loss", "v_loss", "entropy", "approx_kl", "nt_entropy"):
+        assert got[key] == pytest.approx(expected[key], abs=1e-5), key
+    for (name, p), (_, q) in zip(reference.named_parameters(), net.named_parameters()):
+        assert torch.allclose(p, q, atol=2e-5), name
+        assert torch.allclose(opt0.state[p]["exp_avg"], opt1.state[q]["exp_avg"], atol=1e-6), name
