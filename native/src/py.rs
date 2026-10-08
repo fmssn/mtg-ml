@@ -819,6 +819,14 @@ impl PyGame {
         self.st().damage_allocation.as_ref().map(|a| (a.attacker, a.blockers.clone(), a.lethal.clone(), a.assigned.clone(), a.recipient, a.remaining, a.defender, a.player_damage))
     }
 
+    fn combat_subjects(&self) -> Vec<Vec<u32>> {
+        self.st().combat_subjects.clone()
+    }
+
+    fn payment_context(&self) -> Option<(i32, Vec<(String, i32)>)> {
+        self.st().paying.as_ref().map(|(rem, _, _)| (rem.generic, rem.colored.iter().map(|(c, n)| (color_str(*c).to_string(), *n)).collect()))
+    }
+
     /// `rl.features.featurize(game, player, state_dim, option_dim, features)`.
     #[pyo3(signature = (player, state_dim, option_dim, features = crate::features::FEATURES))]
     fn featurize(&mut self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
@@ -1073,6 +1081,27 @@ fn mtg_ml_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(loaded_spec, m)?)?;
     m.add_function(wrap_pyfunction!(card_shapes, m)?)?;
     m.add_function(wrap_pyfunction!(spec_fields, m)?)?;
+    m.add_function(wrap_pyfunction!(build_sources, m)?)?;
     m.add("NativeRulesError", m.py().get_type_bound::<NativeRulesError>())?;
     Ok(())
+}
+
+/// Embedded build inputs let benchmark validation verify the installed binary,
+/// even when worktrees share a Cargo cache. Python hashes these exact bytes.
+#[pyfunction]
+fn build_sources() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("native/Cargo.toml", include_str!("../Cargo.toml")),
+        ("native/Cargo.lock", include_str!("../Cargo.lock")),
+        ("native/src/lib.rs", include_str!("lib.rs")),
+        ("native/src/cards.rs", include_str!("cards.rs")),
+        ("native/src/game.rs", include_str!("game.rs")),
+        ("native/src/engine.rs", include_str!("engine.rs")),
+        ("native/src/features.rs", include_str!("features.rs")),
+        ("native/src/mana.rs", include_str!("mana.rs")),
+        ("native/src/py.rs", include_str!("py.rs")),
+        ("native/src/rng.rs", include_str!("rng.rs")),
+        ("native/src/sim.rs", include_str!("sim.rs")),
+        ("native/src/state.rs", include_str!("state.rs")),
+    ]
 }
