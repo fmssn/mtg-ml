@@ -25,7 +25,7 @@ from mtg_ml.bots import make_bot
 from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR
 from mtg_ml.engine.cards import SPEC_PATH
 
-BASELINE_REVISION = "beb19099133985ebe10636d105c2ac01a412bdcd"
+BASELINE_REVISION = "66345da4c5bff4a1a31ab0047ff8b1abf3869c49"
 LEGACY_FILES = ("mtg_ml/bots/base.py", "mtg_ml/bots/blue.py", "mtg_ml/bots/jund.py")
 SETTINGS = dict(max_turns=100, max_decisions=10000, auto_single=False, auto_mana=False, auto_pass=False)
 ROOT = Path(__file__).resolve().parents[1]
@@ -192,7 +192,7 @@ def main(argv=None):
     # Final reports identify committed code; exploratory checks explicitly carry
     # the dirty tracked patch and untracked source identities instead of lying.
     source_files = {p: file_digest(ROOT / p) for p in untracked.decode().splitlines()}
-    provenance = {"code_revision": code, "native_build_revision": native_revision, "legacy_revision": args.baseline_revision,
+    provenance = {"code_revision": code, "native_build": native_revision, "legacy_revision": args.baseline_revision,
                   "legacy_sources": legacy_hashes, "card_spec_sha256": file_digest(SPEC_PATH), "decks": schedule.data["decks"],
                   "candidate": {"id": BOT_ID, "rules_revision": RULES_REVISION, "parameters_sha256": digest(thaw(PARAMETERS)),
                                 "information_contract": FAIR}, "baseline_contract": DIAGNOSTIC,
