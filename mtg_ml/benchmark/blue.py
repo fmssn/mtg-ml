@@ -279,8 +279,11 @@ class BenchmarkBlue:
                 # it is not certain to resolve; preserve our backup counter.
                 disrupted = any(t.get("sid") == s["sid"] for higher in stack[stack.index(s) + 1:]
                                 if higher["name"] in COUNTERS for t in higher["targets"])
-                if not disrupted and (s["name"] != "Force Spike" or available(view, item["controller"]) < 1):
-                    return True
+                if not disrupted:
+                    if s["name"] == "Force Spike":
+                        tax += 1
+                    else:
+                        return True
         return tax > available(view, item["controller"])
 
     def _spell_value(self, view, item):

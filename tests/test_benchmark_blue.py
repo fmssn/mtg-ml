@@ -524,3 +524,15 @@ def test_ponder_does_not_count_known_bottom_land_as_a_top_three_hit():
     state["self"] = own
     v = replace(v, state=freeze(state))
     assert actions[bot().choose(v, actions)].key == ("shuffle", "yes")
+
+
+def test_combined_spike_and_ward_do_not_spend_a_redundant_counter():
+    g = scenario(p0={"hand": ["Force Spike", "Counterspell"], "battlefield": ["Tolarian Terror"]+ISLANDS(3)},
+                 p1={"hand": ["Cast Down"], "battlefield": ["Swamp"]*4}, active=1)
+    choose(g, "Cast Cast Down"); pay(g); pass_priority(g)
+    assert key(g)[:2] == ("cast", "Force Spike")
+    choose(g, "Cast Force Spike"); pay(g)
+    assert key(g) == ("pass",)
+    while g.stack: g.step(choice(g) if g.decision.player == 0 else 0)
+    assert "Tolarian Terror" in names(g.battlefield)
+    assert names(g.players[0].hand) == ["Counterspell"]
