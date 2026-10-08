@@ -331,6 +331,11 @@ button:disabled{cursor:default}
 #log .th{color:var(--text);font-weight:700;margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
 #log .me{color:#f3dc9e}#log .opp{color:#bcd5ff}
 #log .combat{color:#ffb0a0}
+#log .dim{color:var(--dim)}
+#log .bad{color:#ffb0a0}
+#feed .fchip.impact{background:#ef676718;border-color:#ef676755;color:#ffd0c8}
+#feed .fchip.old{opacity:.6}
+#spot .cap.atme{border-color:var(--bad);color:#fff;background:#3a0d0d}
 #log .life{font-weight:700}#log .life.neg{color:var(--bad)}#log .life.pos{color:var(--good)}
 #log .sub{padding-left:12px}
 #log .flag{background:none;border:0;color:#ffffff33;padding:0 2px;font-size:11px;margin-left:auto}

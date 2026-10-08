@@ -114,10 +114,15 @@ class LiveGame:
         take(g, self.agents, index)
         new = self._sync_log()
         extra = combat_and_life_lines(before, status(g), new)
-        if new and new[-1].startswith("GAME OVER"):  # the damage comes before the result
-            self.log[-1:-1] = extra
-        else:
-            self.log.extend(extra)
+        if not extra:
+            return
+        # Put the lines where they happened: right after the combat damage step
+        # began, else before the next turn starts or the game ends.
+        start = len(self.log) - len(new)
+        at = next((k + 1 for k, line in enumerate(new) if line == "-- combat_damage"), None)
+        if at is None:
+            at = next((k for k, line in enumerate(new) if line.startswith("=== Turn") or line.startswith("GAME OVER")), len(new))
+        self.log[start + at : start + at] = extra
 
     # -- game loop
     def _record(self, decision: dict | None) -> None:

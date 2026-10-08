@@ -34,7 +34,7 @@ if ((PREF.stopsVersion || 1) < 2) { PREF.stops.opp.declare_blockers = true; PREF
 // ---------------------------------------------------------------- game state
 const S = {
   gid: null, seat: 0, raw: [], cards: {}, meta: null, over: false, replay: null,
-  shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], pumping: false, busy: false, error: null, skip: false,
+  shown: -1, prev: null, lastCast: {}, seenUids: new Set(), pendingSpells: [], fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], pumping: false, busy: false, error: null, skip: false,
   plan: null, ui: null, lastMine: -1, passMode: null, fullControl: false, feed: [], logDone: 0,
 };
 const opp = () => 1 - S.seat;
@@ -144,7 +144,7 @@ function applyView(view) {
 
 function resetGame(id) {
   // Every auto-pass mode and plan resets at a game boundary (Forge bug: End Turn carried over).
-  Object.assign(S, {gid: id, lastPriority: -1, raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
+  Object.assign(S, {gid: id, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
     fullControl: false, feed: [], logDone: 0, error: null, skip: false});
   $('#log').innerHTML = '';
   renderFeed();
@@ -174,8 +174,6 @@ async function act(index, plan, frame) {
   if (S.busy || S.pumping || !myDecision()) return;
   if (frame != null && frame !== last()) return;  // made for a decision that is gone
   if (plan !== undefined) S.plan = stamp(plan);
-  S.feed = [];
-  renderFeed();
   await send(index);
   pump();
 }
@@ -338,9 +336,6 @@ async function playFrame(i) {
   const f = S.raw[i];
   const acts = f.actions || [];
   const theirs = acts.filter(a => a.p === opp());
-  const prevD = i > 0 ? S.raw[i - 1].decision : null;
-  if (prevD && prevD.player === opp()) feedFromDecision(prevD, i - 1);
-  for (const a of acts) if (a.p === opp() && ['discard', 'mulligan', 'sacrifice'].includes(a.t)) pushFeed(quietText(a), i, true);
   const notable = acts.some(a => ['cast', 'play', 'activate', 'attack', 'block', 'resolve', 'trigger', 'enter', 'leave', 'dies', 'turn', 'discard', 'hit', 'life'].includes(a.t));
   const isLast = i === last();
   if (!notable && !isLast && i !== 0) { appendLog(i); return; }
@@ -348,8 +343,11 @@ async function playFrame(i) {
   if (cast && !S.skip && beatScale() > 0) {
     const name = cast.t === 'activate' ? cast.name.split(':')[0].trim() : cast.name;
     await ensureImg(name, 900);
-    showSpot(name, cast.t === 'cast' ? `${oppLabel()} casts ${cast.name}` : cast.t === 'plot' ? `${oppLabel()} plots ${cast.name}` : `${oppLabel()} activates ${cast.name}`);
-    await wait(950);
+    const td = f.decision && f.decision.player === opp() && f.decision.kind === 'target' ? f.decision : null;
+    const aim = td ? plainTarget(td.options[0], opp()) : '';
+    const atMe = /^(you|your )/.test(aim);
+    showSpot(name, (cast.t === 'cast' ? `${oppLabel()} casts ${cast.name}` : cast.t === 'plot' ? `${oppLabel()} plots ${cast.name}` : `${oppLabel()} activates ${cast.name}`) + (aim ? ` → ${aim}` : ''), atMe);
+    await wait(atMe ? 1400 : 950);
     hideSpot();
   }
   // Combat and deaths play out on the board as it was, before the new state lands.
@@ -429,9 +427,9 @@ function nudgeAttackers() {
   sound('attack');
 }
 
-function showSpot(name, cap) {
+function showSpot(name, cap, atMe) {
   const el = $('#spot');
-  el.innerHTML = cardHtml(name) + `<div class="cap">${esc(cap)}</div>`;
+  el.innerHTML = cardHtml(name) + `<div class="cap ${atMe ? 'atme' : ''}">${esc(cap)}</div>`;
   el.classList.add('on');
 }
 function hideSpot() { $('#spot').classList.remove('on'); }
@@ -447,22 +445,14 @@ function humanize(label) {
     .replace(/player (\d) \((self|opponent)\)/, (_, p) => +p === S.seat ? 'you' : 'themselves')
     .replace(/ \(opponent\)/, ' (yours)').replace(/ \(self\)/, ' (theirs)');
 }
-function feedFromDecision(d, fi) {
-  const r = d.refs?.[0] || {};
-  if (['pass', 'pay', 'hidden', 'keep'].includes(r.type) || d.kind === 'pay_mana') return;
-  if (r.type === 'attack' && r.done) return;
-  pushFeed(humanize(d.options[d.chosen ?? 0]), fi, false);
-}
-function quietText(a) {
-  if (a.t === 'discard') return `discards ${a.name}`;
-  if (a.t === 'mulligan') return `mulligans (${a.n})`;
-  if (a.t === 'sacrifice') return `sacrifices ${a.name}`;
-  return a.t;
-}
-function pushFeed(text, fi, quiet) {
-  S.feed.push({text, fi, quiet});
-  if (!quiet) S.lastOpp = text;
-  if (S.feed.length > 12) S.feed.shift();
+function pushFeed(text, fi, quiet, kind) {
+  const e = {text, fi, quiet, kind, turn: S.shown >= 0 ? stateAt(S.shown).turn : 0};
+  S.feed.push(e);
+  if (!quiet && kind !== 'impact') S.lastOpp = text;
+  if (S.feed.length > 14) S.feed.shift();
+  // the cast line an opponent's target is later added to updates its feed entry too
+  const lc = S.lastCast[opp()];
+  if (lc && !kind && lc.text.replace(/^Opponent /, '') === text) lc.feed = e;
   renderFeed();
 }
 const FLAGS = () => loadJSON('mtgml-play-flags', []);
@@ -477,52 +467,161 @@ function toggleFlag(fi, text) {
   $$(`#log .flag[data-fi="${fi}"]`).forEach(b => b.classList.toggle('on', isFlagged(fi)));
 }
 function renderFeed() {
-  $('#feed').innerHTML = S.feed.length ? [...S.feed].reverse().map(c => `<div class="fchip ${c.quiet ? 'quiet' : ''}"><span class="txt">${esc(c.text)}</span><button class="flag ${isFlagged(c.fi) ? 'on' : ''}" data-flag="${c.fi}" title="Flag this play as odd">⚑</button></div>`).join('')
+  const nowTurn = S.shown >= 0 ? stateAt(S.shown).turn : 0;
+  $('#feed').innerHTML = S.feed.length ? S.feed.map(c => `<div class="fchip ${c.quiet ? 'quiet' : ''} ${c.kind === 'impact' ? 'impact' : ''} ${nowTurn - c.turn > 1 ? 'old' : ''}"><span class="txt">${esc(c.text)}</span>${c.kind === 'impact' ? '' : `<button class="flag ${isFlagged(c.fi) ? 'on' : ''}" data-flag="${c.fi}" title="Flag this play as odd">⚑</button>`}</div>`).join('')
     : '<div class="none">Nothing yet</div>';
   const la = $('#plate1 .lastact');
   if (la) la.innerHTML = S.lastOpp ? `<span>Last:</span> ${esc(S.lastOpp)}` : '';
 }
 
 // ---------------------------------------------------------------- log
+// ---- the game log in Magic's words: one line per action, built from the
+// parsed events, the decisions and the difference between two states (draws,
+// mills). No engine tokens (p0, choose_card, (normal), winner=1).
+const who = p => p === S.seat ? 'You' : 'Opponent';
+const whose = p => p === S.seat ? 'your' : "the opponent's";
+const cleanName = n => String(n).replace(/#\d+/g, '');
+const KEYWORDS = {nonlegendary_creature: 'nonlegendary creature', creature_or_planeswalker: 'creature or planeswalker'};
+function plainTarget(label, p) {  // "Target Sagu Wildling#12 (opponent)" from p's side -> "your Sagu Wildling" from mine
+  const t = cleanName(label).replace(/^Target /, '');
+  const m = /^player (\d)/.exec(t);
+  if (m) return +m[1] === S.seat ? 'you' : 'the opponent';
+  const rel = /\((self|opponent)\)$/.exec(t);
+  const name = t.replace(/ \((self|opponent)\)$/, '').replace(/^spell /, '');
+  if (!rel) return name;
+  const theirs = (rel[1] === 'self') === (p !== S.seat);  // relative to the chooser
+  return `${theirs ? "the opponent's" : 'your'} ${name}`;
+}
+const LOG_KINDS_SKIP = new Set(['priority', 'pay_mana', 'declare_attacker', 'declare_blocker', 'mulligan', 'order_triggers', 'assign_damage', 'sacrifice']);
+function logEntry(cls, text, extra = '') { return {cls, text, extra}; }
+function frameLog(i) {
+  const f = S.raw[i], prevS = i > 0 ? S.raw[i - 1].state : null, out = [];
+  const nameOf = o => f.state.battlefield.find(c => c.oid === o)?.name || prevS?.battlefield.find(c => c.oid === o)?.name || 'a creature';
+  const acts = f.actions || [];
+  const resolvedNames = new Set(acts.filter(a => a.t === 'resolve' || a.t === 'play').map(a => a.name));
+  const sacrificed = new Set(acts.filter(a => a.t === 'sacrifice').map(a => a.name));
+  // the opponent's previous decision caused this frame's events: its line carries the flag
+  const cause = i > 0 && S.raw[i - 1].decision && S.raw[i - 1].decision.player === opp() ? i - 1 : null;
+  let flagged = false;
+  const flagFor = () => { if (cause == null || flagged) return ''; flagged = true; return `<button class="flag ${isFlagged(cause) ? 'on' : ''}" data-flag="${cause}" data-fi="${cause}" title="Flag this play">⚑</button>`; };
+  let lineIdx = 0;
+  const lines = f.events || [];
+  for (const a of acts) {
+    // align echo lines (decisions) with the events: walk the raw lines alongside
+    while (lineIdx < lines.length && lines[lineIdx].startsWith('  ')) { echo(lines[lineIdx]); lineIdx++; }
+    lineIdx++;
+    const p = a.p;
+    switch (a.t) {
+      case 'turn': out.push(logEntry('th', `Turn ${a.turn} · ${a.p === S.seat ? 'your turn' : "opponent's turn"}`)); break;
+      case 'play': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'play' : 'plays'} ${a.name}`, p !== S.seat ? flagFor() : '')); break;
+      case 'cast': {
+        const how = a.mode && a.mode !== 'normal' ? ` (${a.mode})` : '', from = a.zone && a.zone !== 'hand' ? ` from ${a.zone === 'graveyard' ? whose(p) + ' graveyard' : a.zone}` : '';
+        const e = logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'cast' : 'casts'} ${a.name}${how}${from}`, p !== S.seat ? flagFor() : '');
+        e.castBy = p; out.push(e); S.lastCast[p] = e; break;
+      }
+      case 'activate': { const e = logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'activate' : 'activates'} ${a.name}`, p !== S.seat ? flagFor() : ''); out.push(e); S.lastCast[p] = e; break; }
+      case 'plot': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'plot' : 'plots'} ${a.name}`)); break;
+      case 'trigger': out.push(logEntry('dim', `Trigger: ${a.name.replace(/: /, ' — ')}`)); break;
+      case 'resolve': if (!/: /.test(a.name)) out.push(logEntry('dim', `${a.name} resolves`)); break;
+      case 'countered': out.push(logEntry('', `${a.name} is countered`)); break;
+      case 'fizzle': out.push(logEntry('', `${a.name} has no legal target and fizzles`)); break;
+      case 'enter': if (!resolvedNames.has(a.name)) out.push(logEntry('dim', `${a.name} enters the battlefield`)); break;
+      case 'leave': {
+        if (a.to === 'graveyard' && sacrificed.has(a.name)) break;
+        const creature = prevS?.battlefield.find(c => c.oid === a.oid)?.power != null;
+        const t = a.to === 'graveyard' ? (creature ? `${a.name} dies` : `${a.name} is put into the graveyard`) : a.to === 'exile' ? `${a.name} is exiled` : a.to === 'hand' ? `${a.name} returns to its owner's hand` : `${a.name} is put into the library`;
+        out.push(logEntry(a.p === S.seat ? 'bad' : '', t));
+        if (a.p === S.seat && creature) pushFeed(`Your ${a.name} ${a.to === 'graveyard' ? 'died' : a.to === 'exile' ? 'was exiled' : 'left the battlefield'}`, cause ?? i, false, 'impact');
+        break;
+      }
+      case 'attack': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'attack' : 'attacks'} with ${(a.oids || []).map(nameOf).join(', ')}`, p !== S.seat ? flagFor() : '')); break;
+      case 'block': {
+        const pairs = (a.pairs || []).map(([b, at]) => `${nameOf(b)} blocks ${nameOf(at)}`);
+        if (pairs.length) out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)}: ${pairs.join('; ')}`, p !== S.seat ? flagFor() : ''));
+        break;
+      }
+      case 'hit': {
+        const to = a.p != null ? (a.p === S.seat ? 'you' : 'the opponent') : a.to_name;
+        out.push(logEntry('combat', `${a.name} deals ${a.n} damage to ${to}`));
+        if (a.p === S.seat) pushFeed(`${a.name} hit you for ${a.n}`, cause ?? i, false, 'impact');
+        break;
+      }
+      case 'life': {
+        const d = a.new - a.old;
+        out.push(logEntry(`life ${d < 0 ? 'neg' : 'pos'}`, `${a.p === S.seat ? 'Your' : "Opponent's"} life ${a.old} → ${a.new} (${d > 0 ? '+' : '−'}${Math.abs(d)})`));
+        if (a.p === S.seat && d < 0) pushFeed(`You lost ${-d} life (${a.new} left)`, cause ?? i, true, 'impact');
+        break;
+      }
+      case 'discard': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'discard' : 'discards'} ${a.name}`)); break;
+      case 'sacrifice': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'sacrifice' : 'sacrifices'} ${a.name}`)); break;
+      case 'mulligan': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'mulligan' : 'mulligans'} to ${7 - a.n}`)); break;
+      case 'game_over': out.push(logEntry('th', `Game over: ${resultText()}`)); break;
+      case 'note': out.push(logEntry('dim', cleanName(a.text).replace(/\bp(\d)\b/g, (_, q) => +q === S.seat ? 'you' : 'the opponent'))); break;
+      default: break;  // step, mana, dies (the leave line says it)
+    }
+  }
+  while (lineIdx < lines.length) { if (lines[lineIdx].startsWith('  ')) echo(lines[lineIdx]); lineIdx++; }
+  // the opponent's public choices that have no event line of their own
+  const d = f.decision;
+  if (d && d.player === opp() && d.chosen != null) {
+    const r = d.refs?.[0] || {}, label = d.options[d.chosen];
+    if (r.type === 'target' && S.lastCast[opp()]) S.lastCast[opp()].text += ` → ${plainTarget(label, opp())}`, S.lastCast[opp()].dirty = true;
+    else if (d.kind === 'choose_x' && S.lastCast[opp()]) S.lastCast[opp()].text += ` (${label})`, S.lastCast[opp()].dirty = true;
+    else if (d.kind === 'yes_no' && !/shuffle/i.test(label)) out.push(logEntry('opp dim', `Opponent: ${cleanName(label)}`));
+  }
+  // draws and mills come from the state difference; they go before a new turn's header
+  const diff = [];
+  const discarded = acts.filter(a => a.t === 'discard').map(a => a.name);
+  if (prevS) {
+    const had = new Set([...prevS.players.flatMap(P => [...P.hand, ...P.graveyard, ...P.exile]), ...prevS.battlefield].map(c => c.uid));
+    const drawn = f.state.players[S.seat].hand.filter(c => !had.has(c.uid) && c.uid >= 0).map(c => c.name);
+    if (drawn.length) diff.push(logEntry('me dim', `You draw ${drawn.join(', ')}`));
+    f.state.players.forEach((P, q) => {
+      const milled = P.graveyard.filter(c => !had.has(c.uid) && !S.seenUids.has(c.uid)).map(c => c.name).filter(n => {
+        const k = S.pendingSpells.indexOf(n); if (k >= 0) { S.pendingSpells.splice(k, 1); return false; }
+        const j = discarded.indexOf(n); if (j >= 0) { discarded.splice(j, 1); return false; }  // discarded from a hidden hand
+        return true;
+      });
+      if (milled.length) diff.push(logEntry('dim', `${milled.join(', ')} ${milled.length > 1 ? 'are' : 'is'} put into ${whose(q)} graveyard from the library`));
+    });
+  }
+  const th = out.findIndex(e => e.cls === 'th');
+  // your own turn starting: the draw belongs after its header; otherwise before it
+  out.splice(th < 0 ? out.length : out[th].text.endsWith('your turn') ? th + 1 : th, 0, ...diff);
+  for (const a of acts) if (a.t === 'cast') S.pendingSpells.push(a.name);
+  for (const P of f.state.players) for (const c of [...P.hand, ...P.graveyard, ...P.exile]) if (c.uid >= 0) S.seenUids.add(c.uid);
+  for (const c of f.state.battlefield) S.seenUids.add(c.uid);
+  return out;
+
+  function echo(line) {  // a decision line "  p0 kind: label"
+    const m = /^ {2}p(\d) (\w+): (.*)$/.exec(line);
+    if (!m) return;
+    const q = +m[1], kind = m[2], label = m[3].replace(/ \((only option|auto)\)$/, '');
+    if (LOG_KINDS_SKIP.has(kind) || q !== S.seat) return;
+    if (kind === 'target' && S.lastCast[q]) { S.lastCast[q].text += ` → ${plainTarget(label, q)}`; S.lastCast[q].dirty = true; return; }
+    if (kind === 'choose_x' && S.lastCast[q]) { S.lastCast[q].text += ` (${label})`; S.lastCast[q].dirty = true; return; }
+    if (kind === 'choose_card' && /^Discard /.test(label)) return;  // the discard event says it
+    const t = cleanName(label).replace(/^Bottom /, 'You put on the bottom: ').replace(/^Find nothing$/, 'You find nothing').replace(/^Find /, 'You find ').replace(/^Choose /, 'You choose ');
+    out.push(logEntry('me dim', /^You /.test(t) ? t : `You: ${t}`));
+  }
+}
 function appendLog(i) {
   if (i < S.logDone) return;
   S.logDone = i + 1;
-  const f = S.raw[i], el = $('#log'), out = [];
-  for (const line of f.events || []) {
-    if (/^-- /.test(line) || / \((only option|auto)\)$/.test(line)) continue;
-    if (/^ {2}p\d (priority|pay_mana|declare_attacker|mulligan|order_triggers):/.test(line)) continue;  // the action has a line of its own
-    const m = /^=== Turn (\d+): player (\d) ===$/.exec(line);
-    if (m) { out.push(`<div class="th">Turn ${m[1]} · ${+m[2] === S.seat ? 'your turn' : "opponent's turn"}</div>`); continue; }
-    const hm = /^combat: (.+)#\d+ deals (\d+) damage to (?:p(\d)|(.+)#\d+)$/.exec(line);
-    if (hm) {
-      const to = hm[3] != null ? (+hm[3] === S.seat ? 'you' : 'the opponent') : hm[4];
-      out.push(`<div class="combat">${esc(`${hm[1]} deals ${hm[2]} damage to ${to}`)}</div>`);
-      continue;
-    }
-    const lm = /^life: p(\d) (-?\d+) -> (-?\d+)$/.exec(line);
-    if (lm) {
-      const d = +lm[3] - +lm[2];
-      out.push(`<div class="life ${d < 0 ? 'neg' : 'pos'}">${esc(`${+lm[1] === S.seat ? 'Your' : "Opponent's"} life ${lm[2]} → ${lm[3]} (${d > 0 ? '+' : '−'}${Math.abs(d)})`)}</div>`);
-      continue;
-    }
-    const bm = /^p(\d) blocks: \{(.*)\}$/.exec(line);
-    if (bm) {
-      const name = o => f.state.battlefield.find(c => c.oid === o)?.name || S.prev?.battlefield.find(c => c.oid === o)?.name || '?';
-      const pairs = [...bm[2].matchAll(/(\d+): (\d+)/g)].map(m => `${name(+m[1])} blocks ${name(+m[2])}`);
-      out.push(`<div class="${+bm[1] === S.seat ? 'me' : 'opp'}">${esc((+bm[1] === S.seat ? 'You: ' : 'Opp: ') + pairs.join(', '))}</div>`);
-      continue;
-    }
-    const pm = /^\s*p(\d) /.exec(line);
-    const who = pm ? (+pm[1] === S.seat ? 'me' : 'opp') : '';
-    const text = (who === 'me' ? mine(clean(line.trim())) : clean(line.trim())).replace(/^p(\d) /, (_, p) => +p === S.seat ? 'You: ' : 'Opp: ')
-      .replace(/^(\w+): (Pass priority|Done declaring attackers)$/, '$1: $2');
-    out.push(`<div class="${who} ${/^\s/.test(line) ? 'sub' : ''}">${esc(text)}</div>`);
+  const el = $('#log');
+  // entries changed after the fact (a target added to its cast) are re-drawn
+  for (const e of Object.values(S.lastCast)) if (e && e.dirty && e.el) { e.el.firstChild.textContent = e.text; e.dirty = false; }
+  for (const e of frameLog(i)) {
+    const div = document.createElement('div');
+    div.className = e.cls;
+    div.appendChild(document.createTextNode(e.text));
+    if (e.extra) div.insertAdjacentHTML('beforeend', e.extra);
+    el.appendChild(div);
+    e.el = div;
+    if (e.cls.startsWith('opp') && !e.cls.includes('dim')) pushFeed(e.text.replace(/^Opponent /, ''), +(div.querySelector('.flag')?.dataset.flag ?? i), false);
   }
-  const d = f.decision;
-  if (d && d.player === opp() && d.chosen != null && !['pass', 'pay', 'hidden'].includes(d.refs?.[0]?.type) && !d.refs?.[0]?.done) {
-    out.push(`<div class="opp sub">${esc('Opp: ' + humanize(d.options[d.chosen]))}<button class="flag ${isFlagged(i) ? 'on' : ''}" data-flag="${i}" data-fi="${i}" title="Flag this play">⚑</button></div>`);
-  }
-  if (out.length) { el.insertAdjacentHTML('beforeend', out.join('')); el.scrollTop = el.scrollHeight; }
+  for (const e of Object.values(S.lastCast)) if (e && e.dirty && e.el) { e.el.firstChild.textContent = e.text; e.dirty = false; if (e.feed) { e.feed.text = e.text.replace(/^Opponent /, ''); renderFeed(); } }
+  el.scrollTop = el.scrollHeight;
 }
 
 // ---------------------------------------------------------------- highlights: options mapped onto the board

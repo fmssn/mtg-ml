@@ -111,6 +111,12 @@ Drop and double-click mean "play it": they take only a land play or a normal cas
 | yes_no, choose_mode, choose_x, order, order_triggers | option buttons above the primary button |
 | mulligan | "Keep 7" as the primary button, "Mulligan to 6" beside it |
 
+### Log and feed
+
+The log is written in Magic's words, one line per action, from the parsed events, the decisions and the difference between two states: "Opponent casts Lightning Bolt → your Sagu Wildling", "Cryptic Serpent deals 6 damage to you", "Your life 18 → 12 (−6)", "Tolarian Terror dies", "You draw Ponder", "Mountain, Ponder are put into the opponent's graveyard from the library". Targets and X join the line of their spell; steps, mana, priority passes and engine tokens (p0/p1, choose_card, (normal), winner=1) never show. Triggers and resolutions are dimmed.
+
+The side-panel feed keeps the opponent's recent actions and everything that hit you (damage, deaths of your creatures, life lost) in order, across your own moves; entries older than the last turn fade. The opponent's spells aimed at you or your permanents get a longer spotlight with "→ your X".
+
 ### Board layout
 
 Each battlefield row (creatures in front, lands and other permanents behind) gets its share of the side's height and picks the largest card size that fits in one to three lines, up to a cap, measured after layout. Cards never overlap. Identical permanents stack with a ×N count (lands, tokens, and creatures outside combat declarations; while declaring attackers or blockers every creature is its own card). Opponent actions since your last move are listed in full in the side panel, each with a ⚑; the latest also shows on the opponent's plate.
