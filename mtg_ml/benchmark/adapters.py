@@ -25,10 +25,11 @@ class AgentMetadata:
 
 class AgentRegistry:
     def __init__(self):
-        self._agents: dict[str, tuple[AgentMetadata, Callable]] = {}
+        self._agents: dict[str, tuple[AgentMetadata, Callable, object]] = {}
 
     def register(self, metadata: AgentMetadata, factory: Callable, parameters) -> None:
         require(metadata.id not in self._agents, "registry.id", "already registered")
+        require(callable(factory), "registry.factory", "callable required")
         require(metadata.kind in {"specialist", "synthetic", "legacy"}, "registry.kind", "unsupported kind")
         require(metadata.information_contract in {FAIR, DIAGNOSTIC}, "registry.contract", "unsupported contract")
         sha(metadata.source_revision, "registry.source_revision", True)
@@ -37,21 +38,26 @@ class AgentRegistry:
         if metadata.id in {"benchmark-jund@1", "benchmark-blue@1"}:
             require(metadata.kind == "specialist", "registry.id", "reserved specialist identity")
         require(metadata.kind != "legacy" or metadata.information_contract == DIAGNOSTIC, "registry.contract", "legacy adapters are diagnostic")
-        self._agents[metadata.id] = metadata, factory
+        self._agents[metadata.id] = metadata, factory, parameters
 
     def metadata(self, name):
         require(name in self._agents, "registry", f"missing agent {name}")
+        require(digest(self._agents[name][2]) == self._agents[name][0].parameters_sha256, "registry.parameters", "parameters changed after registration")
         return self._agents[name][0]
 
     def create(self, name):
-        self.metadata(name)
-        return self._agents[name][1]()
+        metadata = self.metadata(name)
+        agent = self._agents[name][1]()
+        methods = ("reset", "act") if metadata.kind == "legacy" else ("reset", "observe", "choose")
+        require(all(callable(getattr(agent, method, None)) for method in methods), "registry.factory", "agent protocol required")
+        return agent
 
     def verify(self, spec, contract):
         m = self.metadata(spec["id"])
         for k in ("deck", "source_revision", "rules_revision", "parameters_sha256"):
             require(getattr(m, k) == spec[k], "registry." + k, f"freeze mismatch for {m.id}")
         require(m.information_contract == contract, "registry.contract", "freeze mismatch")
+        self.create(spec["id"])  # check factory/interface without evaluating its strategy
 
 
 class ScriptedAdapter:

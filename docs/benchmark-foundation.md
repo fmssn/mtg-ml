@@ -119,7 +119,10 @@ and confidence intervals remain null in the foundation, with
 `interval_method="unavailable-foundation"`; release statistics come later.
 Partial, privileged, invalid and incomplete runs cannot carry primary scores.
 Record the caller's actual code revision, candidate byte digest and features;
-native results additionally require their build revision. Match hardware and
+native results additionally require their build revision. Pass `workers=N` and
+optional `runtime` details (including the hardware model) when building results;
+the defaults capture hostname, architecture, processor, CPU count and parent
+thread settings. Process workers use one Torch thread. Match hardware and
 thread/worker settings before interpreting latency.
 
 `write_result` returns the stored envelope, converts its manifest reference to

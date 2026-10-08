@@ -167,6 +167,12 @@ def test_registry_freeze_and_reserved_identities(tmp_path):
     bot["parameters_sha256"] = "a" * 64
     with pytest.raises(ValueError, match="freeze mismatch"):
         r.verify(bot, FAIR)
+    mutable = {"threshold": 1}
+    meta = AgentMetadata("synthetic-params@1", "jund_wildfire", revision(), 1, digest(mutable), FAIR, "synthetic")
+    registry.register(meta, PassAgent, mutable)
+    mutable["threshold"] = 2
+    with pytest.raises(ValueError, match="parameters changed"):
+        registry.create(meta.id)
 
 
 def test_validation_fails_missing_components_and_freeze(tmp_path, monkeypatch):
@@ -187,3 +193,47 @@ def test_validation_fails_missing_components_and_freeze(tmp_path, monkeypatch):
     (tmp_path / "bundle.json").unlink()
     report = validate(m.path, engines=("python",), registry=r)
     assert report["status"] == "invalid" and "missing file" in report["errors"][0]
+
+
+def test_planned_cases_strategic_failure_and_missing_completion(tmp_path):
+    from dataclasses import asdict
+    from mtg_ml.benchmark import puzzle_plan
+    m, _ = fixture(tmp_path)
+    cells, modes = ["jund_vs_blue"], ["greedy"]
+    games = [{k: v for k, v in asdict(s).items() if k != "decks"} | dict(status="completed", winner=None, reason="turn_limit", decisions=20, turns=2)
+             for s in episodes(m, cells, modes)]
+    kw = dict(cells=cells, modes=modes, code_revision=m.data["freeze"]["code_revision"])
+    missing = build_result(m, candidate(), games, **kw)
+    assert missing["status"] == "incomplete" and missing["counts"]["greedy"]["planned_puzzles"] == 1
+    rows = [r | dict(status="failure", objective_met=False, first_action_correct=True, decisions=64, reason="horizon_exhausted") for r in puzzle_plan(m, cells, modes)]
+    complete = build_result(m, candidate(), games, rows, **kw)
+    assert complete["status"] == "complete" and complete["panel"] == "partial"
+    assert complete["counts"]["greedy"]["completed_puzzles"] == 1
+    rows[0]["status"] = "error"
+    incomplete = build_result(m, candidate(), games, rows, **kw)
+    assert incomplete["status"] == "incomplete" and incomplete["counts"]["greedy"]["technical_case_errors"] == 1
+    rows[0]["status"] = "success"
+    with pytest.raises(ValueError, match="objective"):
+        build_result(m, candidate(), games, rows, **kw)
+
+
+def test_result_manifest_and_plan_are_reverified(tmp_path):
+    m, _ = fixture(tmp_path, puzzles=False)
+    result = build_result(m, candidate(), [], code_revision=m.data["freeze"]["code_revision"])
+    stored = write_result(tmp_path / "result.json", result)
+    stored["planned_game_rows"][0]["simulator_seed"] += 1
+    with pytest.raises(ValueError, match="manifest schedule mismatch"):
+        write_result(tmp_path / "false-plan.json", stored)
+    m.path.write_text(m.path.read_text() + "\n")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        load_result(tmp_path / "result.json")
+
+
+def test_cli_success_uses_explicit_registered_adapters(tmp_path, monkeypatch):
+    from mtg_ml.benchmark.__main__ import main
+    m, r = fixture(tmp_path)
+    monkeypatch.setattr("mtg_ml.benchmark.REGISTRY", r)
+    monkeypatch.setattr("mtg_ml.benchmark.validation.check_freeze", lambda m: None)
+    out = tmp_path / "validation.json"
+    main(["validate", "--manifest", str(m.path), "--engines", "python", "--out", str(out)])
+    assert read_json(out)["status"] == "complete"

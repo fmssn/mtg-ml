@@ -110,14 +110,19 @@ def validate_result(d):
 
 
 def build_result(manifest, candidate, game_rows, puzzle_rows=(), *, engine="python", code_revision,
-                 native_build_revision=None, cells=None, modes=None, planned_puzzles=None, invalid=False):
-    """Caller supplies planned case rows; later tactical runner owns scoring."""
+                 native_build_revision=None, cells=None, modes=None, planned_puzzles=None, invalid=False, workers=1, runtime=None):
+    """Derive planned cases; the later tactical runner supplies actual rows."""
     from dataclasses import asdict
     from .jsonio import canonical_bytes
     import json
     from ..encode import information_contract
     candidate = dict(candidate)
     candidate.setdefault("recorded_information_contract", information_contract(candidate["features"]))
+    integer(workers, "workers")
+    runtime = {"python": sys.version, "platform": platform.platform(), "machine": platform.machine(), "hostname": platform.node(),
+               "processor": platform.processor(), "cpu_count": os.cpu_count(), "workers": workers,
+               "torch_threads": sys.modules["torch"].get_num_threads() if "torch" in sys.modules else None,
+               "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"), **(runtime or {})}
     specs = episodes(manifest, cells, modes)
     expected_puzzles = puzzle_plan(manifest, cells, modes)
     require(planned_puzzles is None or list(planned_puzzles) == expected_puzzles, "planned_puzzles", "manifest plan mismatch")
@@ -125,6 +130,8 @@ def build_result(manifest, candidate, game_rows, puzzle_rows=(), *, engine="pyth
     planned = [{k: v for k, v in asdict(s).items() if k != "decks"} for s in specs]
     # Normalize tuples to the JSON representation also used by loaded rows.
     planned, game_rows, puzzle_rows = json.loads(canonical_bytes([planned, list(game_rows), list(puzzle_rows)]))
+    game_rows.sort(key=game_identity)
+    puzzle_rows.sort(key=puzzle_identity)
     modes = list(manifest.data["modes"] if modes is None else modes)
     counts, summaries = {}, []
     for mode in modes:
@@ -146,7 +153,7 @@ def build_result(manifest, candidate, game_rows, puzzle_rows=(), *, engine="pyth
     done = len(game_rows) == len(specs) and all(r["status"] == "completed" for r in game_rows) and len(puzzle_rows) == len(planned_puzzles) and all(r["status"] != "error" for r in puzzle_rows)
     d = dict(format="BenchmarkResult", version=1, manifest={"path": str(manifest.path), "sha256": manifest.sha256}, candidate=candidate,
              engine=engine, code_revision=code_revision, native_build_revision=native_build_revision,
-             runtime={"python": sys.version, "platform": platform.platform(), "machine": platform.machine()},
+             runtime=runtime,
              settings=manifest.data["engine_settings"], modes=modes, selected_cells=sorted({s.cell for s in specs}),
              panel="full" if {s.cell for s in specs} == set(CELLS) else "partial",
              status="invalid" if invalid else "complete" if done else "incomplete", counts=counts,

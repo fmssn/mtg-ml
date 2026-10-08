@@ -65,7 +65,7 @@ def load(path, validator) -> Artifact:
         validator(data)
         import hashlib
         return Artifact(path, data, hashlib.sha256(raw).hexdigest())
-    except (ValueError, KeyError, TypeError, OSError) as e:
+    except (ValueError, KeyError, TypeError, AttributeError, OSError) as e:
         raise ValueError(f"{path}: {e}") from e
 
 

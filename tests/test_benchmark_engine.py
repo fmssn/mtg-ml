@@ -199,6 +199,26 @@ def test_checkpoint_admission_reset_events_and_byte_identity(tmp_path, engine):
     with pytest.raises(ValueError, match="changed"): adapter.reset(JUND_WILDFIRE, 123)
 
 
+def test_fair_checkpoint_choice_ignores_hidden_world_and_opponent_metadata(tmp_path, engine):
+    path = checkpoint(tmp_path)
+    adapter = CheckpointAdapter(path, 0, mode="greedy")
+    g = game(engine, own_library=("Swamp", "Forest", "Mountain", "Cast Down") * 3,
+             opponent_hand=("Counterspell",), opponent_library=("Island", "Ponder") * 6)
+    # Construct both completions through setup so simulated previews have the
+    # same snapshot availability (determinize deliberately invalidates it).
+    shuffled = ["Swamp", "Forest", "Mountain", "Cast Down"] * 3
+    random.Random(678).shuffle(shuffled)
+    fork = game(engine, own_library=tuple(shuffled), opponent_hand=("Ponder",),
+                opponent_library=("Island",)*6 + ("Ponder",)*5 + ("Counterspell",))
+    fork.deck_names = ("unknown-self-id", "different-opponent-id")
+    adapter.reset(JUND_WILDFIRE, 42)
+    action = adapter.act(g)
+    info = copy.deepcopy(adapter.model.last_info)
+    adapter.reset(JUND_WILDFIRE, 42)
+    assert adapter.act(fork) == action
+    assert adapter.model.last_info == info
+
+
 def test_native_build_and_trace_parity(tmp_path, engine, monkeypatch):
     if engine != "native": pytest.skip("cross-engine check runs once")
     assert len(native_build()["source_sha256"]) == 64
