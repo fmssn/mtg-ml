@@ -16,6 +16,8 @@ change when hidden cards are re-sampled (`view.determinize`).
 from __future__ import annotations
 
 import re
+from collections import deque
+from itertools import accumulate
 
 from ..engine.game import Game
 from ..engine.objects import Card, Decision, Option
@@ -35,6 +37,9 @@ class Bot:
 
     def act(self, g: Game) -> int:
         d = g.decision
+        if d.kind == "assign_damage_amount":
+            scores = self.damage_amount_scores(g)
+            return max(range(len(scores)), key=scores.__getitem__)
         handler = getattr(self, f"score_{d.kind}", None)
         if d.kind == "target" and self.building(g, d) == "Undercity":
             handler = self.score_room_target  # every deck can take the initiative by combat damage
@@ -211,6 +216,40 @@ class Bot:
         if len(split) > len(blockers):
             s += split[-1]
         return s
+
+    def damage_amount_scores(self, g: Game) -> list[float]:
+        """Exact suffix DP under the existing full-split kill/value/trample score."""
+        a = g.damage_allocation
+        weights = [10 + self.creature_value(g, g.perm(b)) for b in a.blockers]
+        start = 0 if a.recipient == -1 else a.recipient + 1
+        # dp[r]: best score assigning exactly r to the remaining blockers.
+        dp = [0.0] + [-float("inf")] * a.remaining
+        for i in reversed(range(start, len(a.blockers))):
+            lethal = a.lethal[i]
+            prefix = list(accumulate(dp, max))
+            window = deque()
+            next_dp = []
+            for r in range(a.remaining + 1):
+                # Killing: assign at least lethal; the suffix uses <= r-lethal.
+                kill = prefix[r - lethal] + weights[i] if r >= lethal else -float("inf")
+                # Not killing: suffix uses r-lethal+1 .. r. Sliding max makes
+                # each blocker O(power), rather than enumerating all amounts.
+                while window and dp[window[-1]] <= dp[r]:
+                    window.pop()
+                window.append(r)
+                while window and window[0] <= r - lethal:
+                    window.popleft()
+                spare = dp[window[0]] if window and a.player_damage <= 0 else -float("inf")
+                next_dp.append(max(kill, spare))
+            dp = next_dp
+        scores = []
+        for option in g.legal_options():
+            n = option.value
+            if a.recipient == -1:
+                scores.append(sum(weights) + n if n > 0 else dp[a.remaining])
+            else:
+                scores.append((weights[a.recipient] if n >= a.lethal[a.recipient] else 0.0) + dp[a.remaining - n])
+        return scores
 
     # -- costs and choices (shared) -----------------------------------------
 
