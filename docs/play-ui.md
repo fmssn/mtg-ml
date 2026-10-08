@@ -179,6 +179,28 @@ Nothing is paid automatically. Playing a spell or an ability with a mana cost (d
 - **Cancel** (Esc, right-click, the Cancel button) only clears the client's panel, so no engine undo is ever needed.
 - **Opt-in:** Settings → "Auto-pay without asking" casts at once and auto-pays (the old behaviour).
 
+### Post-game review
+
+After a game ends, the result card's **Review game** (or Menu → "Review the finished game") opens the game omnisciently on the same board, read-only. It answers the question "did the bot misplay, or was it flooded or screwed?".
+
+- **Server:** `GET /api/live/<id>/review?token=…` returns the omniscient replay: both hands, libraries, and the model's `policy` and `value` at each of its decisions. It is refused while the game runs and without the game's token. The token is a secret handed to the player only in the answer that starts the game (`live.token`, kept in localStorage per game id). Later views never carry it, so knowing a game id (it appears in public issues) does not open the review.
+- **Timeline:** a strip under the header with turn markers and a dot per bot decision. Orange dots are surprising picks (an option under 15 % that the sampling policy chose). A red or green ring marks a big value swing (|Δ| ≥ 0.35 by its next decision). Click the strip to jump. Keys: ←/→ step, Shift+←/→ a turn, [ ] the previous or next bot decision, Home/End, Esc leaves.
+- **Decision panel:** for each bot decision, its options ranked by probability (top five with bars, the chosen one marked), and its value before and after (the next decision's estimate, or the result at the end). Values are the network's own estimate of its return, −1 to +1, not a calibrated win probability. Your own decisions show what you chose.
+- **Draw quality:** a strip under the timeline, one cell per turn and player aligned with the turns (lands and spells drawn, the land drop; red for a missed drop or 5+ lands in hand; the tooltip has the rest), and the full table behind the Draw quality button or Q. For each player it shows:
+  - lands and spells drawn (cards new to the hand, so tutors count too);
+  - lands and cards in hand at the start of the turn;
+  - lands in play;
+  - the land drop;
+  - mana spent (pay steps) against mana sources.
+
+  Chips in the strip summarise it: "mulligan to N", "flooded (turn T: 5+ lands in hand)", "screwed (missed N land drops)" (an own turn with no land in hand and no land played, under five lands), and the lands and spells drawn in total.
+- **Reports from the review:** "Report: bot played wrong" (on a bot decision) and "Bug: engine / UI" (anywhere) open the same form. They post `{category, review_frame, token, …}`. Since the game is over, the issue holds everything:
+  - the bot's hand and the full board;
+  - its options with probabilities and its value;
+  - the seed and the decision number;
+  - `python -m mtg_ml.live_issues rebuild … --choices <the choices before this decision>`, which rebuilds the game up to that decision.
+- **Replay viewer:** a link opens the same replay file in the viewer for the full debug view.
+
 ### The opponent's choices in the spotlight
 
 The bot's moves still replay in order, but the choices that matter get a centred spotlight with the card's art that stays for `PREF.spotMs` (Settings: short 1.5 s, normal 2.8 s, long 4.5 s) or until a click or Space (which ends only the spotlight, not the whole replay):
@@ -259,5 +281,6 @@ Combat damage and life changes are not in the engine's log; the live layer adds 
 - Card art comes from Scryfall on first sight; until it arrives a card shows a text face. When Scryfall is unreachable the client backs off for two minutes (text faces, no waiting before the opponent's spells).
 - A game lives only in the server's memory: after a server restart the page says so and offers a new game.
 - Phone layout is not done; the target is desktop 1280×720 and up.
+- The review needs the game to still be in the server's memory (finished games are kept until idle eviction); afterwards the replay viewer still has the file.
 - X spells skip the paying panel (their cost is known only after X): their engine pay steps wait for clicks, and they cannot be cancelled once X is chosen. Hybrid or phyrexian pips never appear in the panel (the engine resolves them into plain pips or a cast mode first).
 - Tapping a plain land at priority is a client-side reservation (see *Mana*): an unused one leaves the land untapped when the step ends.

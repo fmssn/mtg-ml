@@ -143,6 +143,7 @@ class LiveGame:
             game = game_class(engine)(**live_game_args(matchup, game_no, seat, plan), seed=seed, log=True, **({} if start is None else {"starting_player": start}))
         self.g = game
         self.seed = seed
+        self.token = secrets.token_urlsafe(16)  # the player's key to the post-game review
         self.full_info: dict = {}  # card data for the saved replay
         self.view_info: dict = {}  # card data the player has seen
         self.full_frames: list[dict] = []  # omniscient, one per decision (the saved replay)
@@ -332,6 +333,8 @@ class LiveGame:
         category = req.get("category")
         if category not in FLAG_CATEGORIES:
             raise LiveError("category must be 'bot' or 'bug'")
+        if req.get("review_frame") is not None:
+            return self._review_flag(category, req)
         frame = req.get("frame", len(self.frames) - 1)
         if not (isinstance(frame, int) and 0 <= frame < len(self.frames)):
             raise LiveError("no such frame")
@@ -375,6 +378,73 @@ class LiveGame:
         ])
         return {"entry": entry, "issue": {"category": category, "title": title, "body": body}, "over": self.over, "flags": self.flags}
 
+    def _review_flag(self, category: str, req: dict) -> dict:
+        """A flag from the post-game review: the game is over, so the issue
+        may hold everything (the bot's hand, its options with probabilities and
+        value, seed + choices and a command that rebuilds the game up to the
+        flagged decision)."""
+        from . import live_issues
+
+        if not self.over:
+            raise LiveError("the review opens when the game is over")
+        rf = req.get("review_frame")
+        if not (isinstance(rf, int) and 0 <= rf < len(self.full_frames)):
+            raise LiveError("no such frame")
+        fr = self.full_frames[rf]
+        d = fr["decision"]
+        bot = 1 - self.seat
+        if category == "bot" and (d is None or d["player"] != bot):
+            raise LiveError("pick one of the bot's decisions to flag")
+        what = str(req.get("what", "")).strip()[:200]
+        if not what:
+            raise LiveError("say in a few words what happened")
+        if len(self.flags) >= 50:
+            raise LiveError("too many flags in one game")
+        self._pseudonym(req)
+        state = fr["state"]
+        chosen = d["options"][d["chosen"]] if d is not None and d.get("chosen") is not None else None
+        entry = {"id": len(self.flags) + 1, "category": category, "frame": None, "replay_frame": rf, "from": "review",
+                 "action": chosen, "kind": d["kind"] if d else None, "turn": state["turn"], "step": state["step"], "what": what,
+                 "note": str(req.get("note", ""))[:2000], "at": time.strftime("%Y-%m-%d %H:%M:%S"), "issue": None}
+        self.flags.append(entry)
+        decks = [DECK_TITLES[x] for x in matchup_decks(self.matchup)]
+        when = f"turn {state['turn']}" if state["turn"] else "mulligan"
+        title = f"[{'bot-play' if category == 'bot' else 'bug'}] {decks[self.seat]} vs {decks[bot]}, {when} (review): {what.splitlines()[0][:80]}"
+        fb = self.feedback()
+        options = []
+        if d is not None:
+            pol = d.get("policy") or []
+            ranked = sorted(range(len(d["options"])), key=lambda i: -(pol[i] if i < len(pol) else 0))
+            for i in ranked[:10]:
+                p = f"{pol[i]:.3f}" if i < len(pol) else "-"
+                options.append(f"| {'**' if i == d.get('chosen') else ''}{d['options'][i]}{'**' if i == d.get('chosen') else ''} | {p} |")
+        rebuild = (f"python -m mtg_ml.live_issues rebuild --matchup {self.matchup} --seed {self.seed} --seat {self.seat} --game {self.game_no} --plan {self.plan}"
+                   + ("" if self.start_arg is None else f" --start {self.start_arg}") + f" --engine {engine_name(self.engine)}"
+                   + (f" --scenario {self.scenario}" if self.scenario else "") + f" --choices {','.join(str(c) for c in fb['choices'][:rf])}")
+        recent = [line for line in fr["events"] if not line.startswith("--")][-12:]
+        body = "\n".join([
+            f"**{FLAG_CATEGORIES[category]}**, flagged by **{self.pseudonym or 'anonymous'}** from the post-game review of the play UI.",
+            "",
+            f"> {what}",
+            *([">", *[f"> {line}" for line in entry["note"].splitlines()]] if entry["note"] else []),
+            "",
+            f"- game `{self.id}` (over: {'draw' if self.winner is None else ('the player' if self.winner == self.seat else 'the bot') + ' won'}, {self.end_reason}), game {self.game_no} of the match, turn {state['turn']}, step `{state['step']}`",
+            f"- {decks[self.seat]} (player, seat {self.seat}) vs {decks[bot]} played by `{self.model_name}` ({'greedy' if self.greedy else 'sampling'})",
+            f"- engine `{engine_name(self.engine)}`, code `{live_issues.code_commit()}`, seed `{self.seed}`, decision #{rf} of the omniscient replay `{self.replay_file}`",
+            *([f"- decision: {d['kind']} by {'the bot' if d['player'] == bot else 'the player'}: {d.get('prompt') or ''}", f"- value estimate (bot's view, -1..1): {d['value']}" if d.get("value") is not None else "- value: -"] if d else []),
+            "",
+            *(["### Options (policy)", "| option | probability |", "|---|---|", *options, ""] if options else []),
+            "### Board (everything)",
+            live_issues.board_text(state, self.seat, everything=True),
+            "",
+            "### Recent log",
+            "```", *recent, "```",
+            "",
+            "### Rebuild the game up to this decision",
+            "```", rebuild, "```",
+        ])
+        return {"entry": entry, "issue": {"category": category, "title": title, "body": body}, "over": True, "flags": self.flags, "revealed": True}
+
     def reveal_comment(self) -> str:
         """For issues filed during this game, once it is over: what rebuilds it."""
         fb = self.feedback()
@@ -396,6 +466,10 @@ class LiveGame:
         self._pseudonym(req)
         self.survey = {"strength": strength, "hardest": str(req.get("hardest", ""))[:1000], "note": str(req.get("note", ""))[:1000], "at": time.strftime("%Y-%m-%d %H:%M:%S")}
         return {"survey": self.survey}
+
+    def check_token(self, token) -> None:
+        if not token or not secrets.compare_digest(str(token), self.token):
+            raise LiveError("this review belongs to the player of the game")
 
     def _pseudonym(self, req: dict) -> None:
         name = str(req.get("pseudonym", "") or "").strip()[:40]
@@ -510,6 +584,8 @@ class LiveManager:
 
     def _feedback(self, gid: str, what: str, req: dict) -> dict:
         game = self._get(gid)
+        if what == "flag" and req.get("review_frame") is not None:
+            game.check_token(req.get("token"))
         out = game.flag(req) if what == "flag" else game.set_survey(req)
         if game.replay_file:  # the game is over: the saved replay gets the new feedback
             self._write(game)
@@ -530,7 +606,7 @@ class LiveManager:
             try:
                 url = self.filer.create(issue["category"], issue["title"], issue["body"])
                 self._run(self._filed, gid, entry["id"], url)
-                if out["over"] and game:  # the game is already over: reveal right away
+                if out["over"] and game and not out.get("revealed"):  # the game is already over: reveal right away
                     self._reveal(self._run(game.reveal_comment), [url])
                 return {"flags": flags, "filed": True, "issue": url, "message": "Filed as a GitHub issue."}
             except FilingError as e:
@@ -648,7 +724,24 @@ class LiveManager:
             raise LiveError(f"cannot play {name}: {e}") from e
         self.games[gid] = game
         self._finish(game)
-        return game.view()
+        view = game.view()
+        view["live"]["token"] = game.token  # only here: later views (anyone with the id) never carry it
+        return view
+
+    def review(self, gid: str, token: str | None) -> dict:
+        """The finished game, omniscient (both hands, the bot's policy and
+        value), for the player who played it: refused while it runs and
+        without the game's token (given only to the player, with the new game)."""
+        return self._run(self._review, gid, token)
+
+    def _review(self, gid: str, token: str | None) -> dict:
+        game = self._get(gid)
+        game.check_token(token)
+        if not game.over:
+            raise LiveError("the review opens when the game is over")
+        rep = game.replay()
+        rep["review"] = {"seat": game.seat, "bot": 1 - game.seat, "model": game.model_name, "greedy": game.greedy, "replay": game.replay_file}
+        return rep
 
     def _evict(self) -> None:
         """Drop expired games, then make room for one more by dropping idle or

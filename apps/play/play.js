@@ -132,6 +132,7 @@ async function api(path, body) {
 function applyView(view) {
   const L = view.live;
   if (S.gid !== L.id) resetGame(L.id);
+  if (L.token) { const t = loadJSON('mtgml-play-tokens', {}); t[L.id] = L.token; for (const k of Object.keys(t).slice(0, -20)) delete t[k]; saveJSON('mtgml-play-tokens', t); }
   Object.assign(S, {seat: L.seat, over: L.over, replay: L.replay, meta: view.meta, matchup: L.matchup || S.matchup});
   Object.assign(S.cards, view.cards);
   const before = S.raw.length;
@@ -843,15 +844,15 @@ function botPlays() {  // the bot's recent public plays, newest first
   return out;
 }
 function toggleFlag(fi) { openFlagForm('bot', fi); }
-function openFlagForm(category, fi) {
+function openFlagForm(category, fi, review) {
   if (!S.gid) return;
-  const bot = category === 'bot', plays = bot ? botPlays() : [];
-  if (bot && !plays.length) { toast('The bot has not made a play yet.'); return; }
+  const bot = category === 'bot', plays = review != null ? [] : bot ? botPlays() : [];
+  if (bot && review == null && !plays.length) { toast('The bot has not made a play yet.'); return; }
   const sel = fi != null && plays.some(([i]) => i === fi) ? fi : plays[0]?.[0];
   const m = $('#modal');
   m.innerHTML = `<div class="mbox flagbox"><h2>${bot ? '⚑ Bot played wrong' : '⚠ Bug: engine / UI'}</h2>
-    <div class="note">${bot ? 'A bad decision by the bot. It becomes a public GitHub issue with what you could see (never the bot&#39;s hidden cards).' : 'Wrong rules, an illegal play, or the page misbehaving. It becomes a public GitHub issue with the board as you see it.'}</div>
-    <form id="fFlag">${bot ? `<label>Which play</label><select name="frame">${plays.map(([i, t]) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
+    <div class="note">${review != null ? `From the review (the game is over): the public GitHub issue gets everything, including the bot&#39;s hand, its options with probabilities and value, the seed and a command that rebuilds the game up to this decision.${rvDecisionText(review)}` : bot ? 'A bad decision by the bot. It becomes a public GitHub issue with what you could see (never the bot&#39;s hidden cards).' : 'Wrong rules, an illegal play, or the page misbehaving. It becomes a public GitHub issue with the board as you see it.'}</div>
+    <form id="fFlag">${bot && review == null ? `<label>Which play</label><select name="frame">${plays.map(([i, t]) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
       <label>What happened? (one line)</label><input name="what" maxlength="200" required placeholder="${bot ? 'e.g. attacked into my 4/4 with a 2/2' : 'e.g. my creature did not untap'}">
       <label>Anything else (optional)</label><textarea name="note" rows="3" maxlength="2000" placeholder="${bot ? 'What would you have done?' : 'Steps, what you expected'}"></textarea>
       <label>Your name or nickname (optional, shown publicly; never your real name)</label><input name="who" maxlength="40" value="${esc(pseudonym())}">
@@ -868,7 +869,8 @@ function openFlagForm(category, fi) {
     btn.disabled = true; btn.textContent = 'Sending…';
     saveJSON('mtgml-play-name', f.who.value.trim());
     const body = {category, what: f.what.value.trim(), note: f.note.value, pseudonym: f.who.value.trim()};
-    if (bot) body.frame = +f.frame.value;
+    if (review != null) { body.review_frame = review; body.token = loadJSON('mtgml-play-tokens', {})[S.gid]; }
+    else if (bot) body.frame = +f.frame.value;
     try {
       const out = await api(`${encodeURIComponent(S.gid)}/flag`, body);
       S.flags = out.flags;
@@ -1183,6 +1185,7 @@ function renderMeta() {
   const score = mm ? ` · Game ${mm.game_no} of 3 · ${mm.wins[me]}–${mm.wins[op]}` : '';
   $('#meta').innerHTML = `<b>${esc(m.decks[me])}</b> (you) vs <b>${esc(m.decks[op])}</b> (${esc(agentName(m.agents[op]))})${score}`;
   $('#bConcede').disabled = !!S.over;
+  $('#bReviewMenu').disabled = !S.over;
 }
 
 function renderPlate(p, s, prev) {
@@ -2281,6 +2284,7 @@ function primary() {
 }
 
 document.addEventListener('keydown', e => {
+  if (S.rv && !$('#modal').classList.contains('on') && !e.target.closest?.('input, select, textarea')) { rvKey(e); return; }
   if (e.key === 'Escape' && $('#modal').classList.contains('on') && S.gid && !$('#fNew')) { $('#modal').classList.remove('on'); return; }
   if (e.key === 'Escape' && $('#pop').classList.contains('on')) { closePop(); return; }
   const pm = $('#pop').classList.contains('on') && $('#pop')._mana;
@@ -2424,6 +2428,7 @@ $('#menu').addEventListener('click', e => {
   else if (k === 'flag-bot') openFlagForm('bot', S.lastOppFi);
   else if (k === 'flag-bug') openFlagForm('bug');
   else if (k === 'decks') openDecks();
+  else if (k === 'review') openReview();
   else if (k === 'settings') openSettings();
 });
 document.addEventListener('click', e => { if (!e.target.closest('#menu, #bMenu')) $('#menu').classList.remove('on'); }, true);
@@ -2491,8 +2496,225 @@ function sound(name, amount) {
 let audio = null;
 function ping() { sound('decide'); }
 
+// ---------------------------------------------------------------- post-game review
+// The finished game, omniscient: the same board read-only with a timeline,
+// both hands, the bot's options with probabilities and its value at each of
+// its decisions, and a draw-quality strip (was it a misplay, or flood/screw?).
+// The server opens it only once the game is over and only with the game's
+// token (handed to the player with the new game).
+async function openReview() {
+  if (!S.gid || !S.over) { toast('The review opens when the game is over.'); return; }
+  if (S.paying) payCancel(true);
+  const token = loadJSON('mtgml-play-tokens', {})[S.gid];
+  let rep;
+  try { rep = await api(`${encodeURIComponent(S.gid)}/review?token=${encodeURIComponent(token || '')}`); } catch (e) { toast(e.message); return; }
+  Object.assign(S.cards, rep.cards);
+  S.rv = {rep, back: {raw: S.raw, shown: S.shown, ui: S.ui, prev: S.prev}, i: 0, drawq: false};
+  S.rv.a = rvAnalyse(rep);
+  S.raw = rep.frames; S.ui = null; S.prev = null;
+  document.body.classList.add('reviewing');
+  closePop(); closeDrawer(); toggleLog(false);
+  rvBuild();
+  const first = S.rv.a.bot[0] ?? 0;
+  rvGo(first);
+}
+function closeReview() {
+  if (!S.rv) return;
+  const b = S.rv.back;
+  S.raw = b.raw; S.ui = b.ui; S.prev = null; S.rv = null;
+  document.body.classList.remove('reviewing');
+  $$('#revbar, #revpanel, #drawq').forEach(x => x.remove());
+  render(b.shown, {noAnim: true}); renderDock();
+}
+function rvAnalyse(rep) {
+  const frames = rep.frames, seat = rep.review.seat, bot = rep.review.bot;
+  const isLand = n => (S.cards[n]?.types || []).includes('Land');
+  const isSource = c => c.types.includes('Land') || (S.cards[c.name]?.mana && !S.cards[c.name]?.mana_sac && !(c.power != null && c.sick));
+  const seen = [new Set(), new Set()], turns = new Map(), turnStart = new Map();
+  const row = t => { if (!turns.has(t)) turns.set(t, {t, active: null, p: [0, 1].map(() => ({drawnL: 0, drawnS: 0, handLands: null, hand: null, bfLands: null, played: 0, spent: 0, avail: null}))}); return turns.get(t); };
+  frames.forEach((f, i) => {
+    const st = f.state, t = st.turn, r = row(t);
+    if (!turnStart.has(t)) turnStart.set(t, i);
+    if (r.active == null && t > 0) r.active = st.active;
+    for (const p of [0, 1]) {
+      const P = st.players[p], pr = r.p[p];
+      if (pr.handLands == null) {
+        pr.handLands = P.hand.filter(c => isLand(c.name)).length; pr.hand = P.hand.length;
+        pr.bfLands = st.battlefield.filter(c => c.controller === p && c.types.includes('Land')).length;
+        pr.avail = st.battlefield.filter(c => c.controller === p && isSource(c)).length;
+      }
+      for (const c of P.hand) if (!seen[p].has(c.uid) && t > 0) { if (isLand(c.name)) pr.drawnL++; else pr.drawnS++; }
+      for (const c of P.hand) seen[p].add(c.uid);
+      for (const z of ['graveyard', 'exile']) for (const c of P[z]) seen[p].add(c.uid);
+      for (const c of st.battlefield) if (c.controller === p) seen[p].add(c.uid);
+    }
+    for (const e of f.events) {
+      let m = /^p(\d) plays /.exec(e); if (m) r.p[+m[1]].played++;
+      m = /^ {2}p(\d) pay_mana:/.exec(e); if (m) r.p[+m[1]].spent++;
+    }
+  });
+  const rows = [...turns.values()].filter(r => r.t > 0).sort((a, b) => a.t - b.t);
+  const last = frames.at(-1).state;
+  const flags = [0, 1].map(p => {
+    const out = [], mull = last.players[p].mulligans || 0, mine = rows.filter(r => r.active === p);
+    if (mull) out.push({cls: 'bad', text: `mulligan to ${7 - mull}`});
+    const flood = mine.find(r => r.p[p].handLands >= 5);
+    if (flood) out.push({cls: 'bad', text: `flooded (turn ${flood.t}: ${flood.p[p].handLands} lands in hand)`});
+    const missed = mine.filter(r => r.p[p].played === 0 && r.p[p].handLands === 0 && r.p[p].bfLands < 5);
+    if (missed.length >= 2) out.push({cls: 'bad', text: `screwed (missed ${missed.length} land drops)`});
+    else if (missed.length === 1) out.push({cls: '', text: `missed a land drop (turn ${missed[0].t})`});
+    const L = rows.reduce((a, r) => a + r.p[p].drawnL, 0), Sp = rows.reduce((a, r) => a + r.p[p].drawnS, 0);
+    out.push({cls: '', text: `drew ${L} land${L === 1 ? '' : 's'}, ${Sp} spell${Sp === 1 ? '' : 's'}`});
+    return out;
+  });
+  // the bot's decisions: probabilities, value before -> after, surprises and swings
+  const botIdx = [];
+  frames.forEach((f, i) => { const d = f.decision; if (d && d.player === bot && d.policy && d.options.length > 1) botIdx.push(i); });
+  const allBot = [];
+  frames.forEach((f, i) => { const d = f.decision; if (d && d.player === bot && d.value != null) allBot.push(i); });
+  const w = rep.meta.winner, final = w == null ? 0 : w === bot ? 1 : -1;
+  const info = new Map();
+  for (const i of botIdx) {
+    const d = frames[i].decision, k = allBot.indexOf(i);
+    const v0 = d.value, v1 = k + 1 < allBot.length ? frames[allBot[k + 1]].decision.value : final;
+    const pc = d.policy[d.chosen] ?? 0;
+    info.set(i, {v0, v1, dv: v1 - v0, pc, surprising: pc < 0.15, swing: Math.abs(v1 - v0) >= 0.35});
+  }
+  return {rows, flags, turnStart, bot: botIdx, info, seat, botSeat: bot};
+}
+function rvBuild() {
+  const rv = S.rv, n = rv.rep.frames.length, a = rv.a;
+  const bar = document.createElement('div');
+  bar.id = 'revbar';
+  const x = i => `${(i / Math.max(1, n - 1)) * 100}%`;
+  const ticks = [...a.turnStart.entries()].filter(([t]) => t > 0).map(([t, i]) => `<span class="tturn" style="left:${x(i)}" data-go="${i}">T${t}</span>`).join('');
+  const marks = a.bot.map(i => { const f = a.info.get(i); return `<span class="tdec ${f.surprising ? 'surp' : ''} ${f.swing ? (f.dv < 0 ? 'drop' : 'rise') : ''}" style="left:${x(i)}" data-go="${i}" title="${esc(`turn ${rv.rep.frames[i].state.turn}: ${clean(rv.rep.frames[i].decision.options[rv.rep.frames[i].decision.chosen])}${f.surprising ? ' · surprising (' + Math.round(f.pc * 100) + '%)' : ''}${f.swing ? ' · value ' + (f.dv > 0 ? '+' : '') + f.dv.toFixed(2) : ''}`)}"></span>`; }).join('');
+  const meta = rv.rep.meta, w = meta.winner;
+  bar.innerHTML = `<div class="rvhead"><b>Review</b><span>${w == null ? 'Draw' : w === S.seat ? 'You won' : 'You lost'} · turn ${meta.turns}</span>
+      <button class="btn small" data-rv="prevdec" title="Previous bot decision ([)">◀ bot</button><button class="btn small" data-rv="prev" title="Back (←; Shift+← a turn)">◀</button>
+      <button class="btn small" data-rv="next" title="Forward (→; Shift+→ a turn)">▶</button><button class="btn small" data-rv="nextdec" title="Next bot decision (])">bot ▶</button>
+      <span class="rvflags">${[0, 1].map(p => `<span class="who">${p === S.seat ? 'You' : 'Bot'}:</span>${a.flags[p].map(f => `<span class="chip ${f.cls}">${esc(f.text)}</span>`).join('')}`).join('')}</span>
+      <span class="sp"></span><button class="btn small" data-rv="drawq">Draw quality</button>
+      ${rv.rep.review.replay ? `<a class="btn small" href="../#r=${encodeURIComponent(rv.rep.review.replay)}" target="_blank" title="The full debug view of this game">Replay viewer</a>` : ''}
+      <button class="btn small" data-rv="exit">Exit (Esc)</button></div>
+    <div class="track" id="rvtrack"><div class="line"></div>${ticks}${marks}<span class="cursor" id="rvcur"></span></div>
+    <div class="dqstrip">${[S.seat, a.botSeat].map(p => `<div class="dqrow"><span class="dqwho">${p === S.seat ? 'You' : 'Bot'}</span>${dqCells(p, x)}</div>`).join('')}</div>
+    <div class="legend"><span class="tdec"></span>bot decision <span class="tdec surp"></span>surprising pick <span class="tdec drop"></span>value drop <span class="tdec rise"></span>value rise · ←/→ step, Shift+←/→ turn, [ ] bot decisions</div>`;
+  $('#app').insertBefore(bar, $('#board'));
+  const panel = document.createElement('div');
+  panel.id = 'revpanel';
+  $('#board').appendChild(panel);
+  const dq = document.createElement('div');
+  dq.id = 'drawq';
+  $('#board').appendChild(dq);
+  bar.addEventListener('click', e => {
+    const g = e.target.closest('[data-go]');
+    if (g) return rvGo(+g.dataset.go);
+    const b = e.target.closest('[data-rv]');
+    if (b) return rvCmd(b.dataset.rv);
+    const tr = e.target.closest('#rvtrack');
+    if (tr) { const r = tr.getBoundingClientRect(); rvGo(Math.round((e.clientX - r.left) / r.width * (n - 1))); }
+  });
+  panel.addEventListener('click', e => {
+    const b = e.target.closest('[data-rvflag]');
+    if (b) openFlagForm(b.dataset.rvflag, null, S.rv.i);
+  });
+  dq.addEventListener('click', e => { const r = e.target.closest('[data-turn]'); if (r) rvGo(S.rv.a.turnStart.get(+r.dataset.turn)); });
+  requestAnimationFrame(() => { fitRows(); fitHand(); });
+}
+// The draw-quality strip: per turn and player, aligned with the timeline's turns.
+function dqCells(p, x) {
+  const a = S.rv.a, starts = [...a.turnStart.entries()].filter(([t]) => t > 0).sort((u, v) => u[1] - v[1]), n = S.rv.rep.frames.length;
+  return starts.map(([t, i], k) => {
+    const r = a.rows.find(z => z.t === t); if (!r) return '';
+    const q = r.p[p], own = r.active === p, end = k + 1 < starts.length ? starts[k + 1][1] : n - 1;
+    const missed = own && !q.played && !q.handLands && q.bfLands < 5, flood = q.handLands >= 5;
+    const drawn = [q.drawnL ? `<b class="ld">${q.drawnL}L</b>` : '', q.drawnS ? `<b class="sp">${q.drawnS}S</b>` : ''].join('') || '–';
+    const tip = `Turn ${t} (${own ? 'own turn' : 'their turn'}): drew ${q.drawnL} land(s), ${q.drawnS} spell(s); ${q.handLands} land(s) of ${q.hand} cards in hand; ${q.bfLands} land(s) in play; ${own ? (q.played ? 'land drop made' : 'no land drop') + '; ' : ''}mana spent ${q.spent} of ${q.avail} source(s)`;
+    return `<span class="dqc ${own ? 'own' : ''} ${missed || flood ? 'warn' : ''}" style="left:${x(i)};width:calc(${x(end)} - ${x(i)})" title="${esc(tip)}" data-go="${i}">${drawn}${own ? `<i>${q.played ? '✓' : '✗'}</i>` : ''}${flood ? '<i>flood</i>' : ''}</span>`;
+  }).join('');
+}
+function rvCmd(c) {
+  const rv = S.rv, n = rv.rep.frames.length, a = rv.a;
+  if (c === 'exit') return closeReview();
+  if (c === 'prev') return rvGo(rv.i - 1);
+  if (c === 'next') return rvGo(rv.i + 1);
+  if (c === 'prevdec') { const j = [...a.bot].reverse().find(i => i < rv.i); return rvGo(j ?? rv.i); }
+  if (c === 'nextdec') { const j = a.bot.find(i => i > rv.i); return rvGo(j ?? rv.i); }
+  if (c === 'prevturn' || c === 'nextturn') {
+    const t = rv.rep.frames[rv.i].state.turn, starts = [...a.turnStart.entries()].sort((x, y) => x[1] - y[1]);
+    const j = c === 'nextturn' ? starts.find(([tt]) => tt > t)?.[1] : (rv.i > a.turnStart.get(t) ? a.turnStart.get(t) : starts.filter(([tt]) => tt < t).at(-1)?.[1]);
+    return rvGo(j ?? (c === 'nextturn' ? n - 1 : 0));
+  }
+  if (c === 'drawq') { rv.drawq = !rv.drawq; return rvGo(rv.i); }
+}
+function rvKey(e) {
+  const k = e.key;
+  const map = {ArrowLeft: e.shiftKey ? 'prevturn' : 'prev', ArrowRight: e.shiftKey ? 'nextturn' : 'next', '[': 'prevdec', ']': 'nextdec', Escape: 'exit', q: 'drawq', Q: 'drawq'};
+  if (map[k]) { e.preventDefault(); rvCmd(map[k]); return; }
+  if (k === 'Home') { e.preventDefault(); rvGo(0); }
+  if (k === 'End') { e.preventDefault(); rvGo(S.rv.rep.frames.length - 1); }
+}
+function rvGo(i) {
+  const rv = S.rv; if (!rv) return;
+  const n = rv.rep.frames.length;
+  i = Math.max(0, Math.min(n - 1, i));
+  rv.i = i;
+  render(i, {noAnim: true});
+  const cur = $('#rvcur'); if (cur) cur.style.left = `${(i / Math.max(1, n - 1)) * 100}%`;
+  rvPanel(); rvDrawq();
+}
+function rvDecisionText(i) {
+  const d = S.rv?.rep.frames[i]?.decision;
+  return d ? ` <b>Decision:</b> ${esc(d.kind)}, chose “${esc(clean(d.options[d.chosen]))}”.` : '';
+}
+const pct = p => `${Math.round(p * 1000) / 10}%`;
+function rvPanel() {
+  const rv = S.rv, f = rv.rep.frames[rv.i], st = f.state, d = f.decision, a = rv.a, el = $('#revpanel');
+  let h = `<div class="rph">Turn ${st.turn} · ${esc(STEP_LABEL[st.step] || st.step || '')} <span class="muted">frame ${rv.i + 1}/${rv.rep.frames.length}</span></div>`;
+  if (!d) h += `<div class="muted">The game ended here.</div>`;
+  else {
+    const isBot = d.player === a.botSeat, info = a.info.get(rv.i);
+    h += `<div class="rpk">${isBot ? 'Bot' : 'You'} · ${esc(d.kind.replace(/_/g, ' '))}</div>${d.prompt ? `<div class="muted">${esc(clean(d.prompt))}</div>` : ''}`;
+    if (isBot && d.policy) {
+      const order = d.options.map((o, k) => k).sort((x, y) => (d.policy[y] ?? 0) - (d.policy[x] ?? 0));
+      const shown = order.slice(0, 5);
+      if (!shown.includes(d.chosen)) shown.push(d.chosen);
+      h += `<div class="probs">${shown.map(k => `<div class="prob ${k === d.chosen ? 'chosen' : ''}"><div class="pl">${k === d.chosen ? '✓ ' : ''}${esc(clean(d.options[k]))}</div><div class="pb"><i style="width:${Math.max(1, (d.policy[k] ?? 0) * 100)}%"></i><span>${pct(d.policy[k] ?? 0)}</span></div></div>`).join('')}${d.options.length > shown.length ? `<div class="muted">+${d.options.length - shown.length} more option${d.options.length - shown.length > 1 ? 's' : ''}</div>` : ''}</div>`;
+      if (info) {
+        const vb = v => `<span class="vbar"><i style="left:${(v + 1) * 50}%"></i></span>`;
+        h += `<div class="vals"><div>Value before ${vb(info.v0)} <b>${info.v0.toFixed(2)}</b></div><div>after ${vb(info.v1)} <b>${info.v1.toFixed(2)}</b> <span class="${info.dv < 0 ? 'neg' : 'pos'}">(${info.dv > 0 ? '+' : ''}${info.dv.toFixed(2)})</span></div>
+          <div class="muted">The bot's own estimate of its result (−1 loss … +1 win), at this and at its next decision.</div></div>`;
+        if (info.surprising) h += `<div class="badge surp">Surprising: picked a ${pct(info.pc)} option (the bot samples its moves)</div>`;
+        if (info.swing) h += `<div class="badge ${info.dv < 0 ? 'drop' : 'rise'}">Big value ${info.dv < 0 ? 'drop' : 'rise'} by its next decision</div>`;
+      }
+    } else if (isBot) {
+      h += `<div class="probs"><div class="prob chosen"><div class="pl">✓ ${esc(clean(d.options[d.chosen]))}</div></div></div><div class="muted">${d.options.length === 1 ? 'Its only option.' : 'No policy recorded for this decision.'}</div>`;
+    } else if (d.chosen != null) h += `<div class="probs"><div class="prob chosen mine"><div class="pl">✓ ${esc(clean(d.options[d.chosen]))}</div></div></div>`;
+    h += `<div class="rpb">${isBot ? '<button class="btn small" data-rvflag="bot">⚑ Report: bot played wrong</button>' : ''}<button class="btn small" data-rvflag="bug">⚠ Bug: engine / UI</button></div>`;
+  }
+  el.innerHTML = h;
+}
+function rvDrawq() {
+  const rv = S.rv, el = $('#drawq');
+  el.classList.toggle('on', rv.drawq);
+  if (!rv.drawq) return;
+  const t = rv.rep.frames[rv.i].state.turn, me = S.seat, bot = rv.a.botSeat;
+  const cell = (r, p) => { const x = r.p[p]; const own = r.active === p;
+    return `<td class="${own ? 'own' : ''}"><span title="drawn this turn: lands / spells">${x.drawnL ? `<b class="ld">${x.drawnL}L</b>` : ''}${x.drawnS ? `<b class="sp">${x.drawnS}S</b>` : ''}${!x.drawnL && !x.drawnS ? '–' : ''}</span></td>
+      <td class="${own ? 'own' : ''} ${x.handLands >= 5 ? 'warn' : ''}" title="lands in hand / cards in hand at the start of the turn">${x.handLands}/${x.hand}</td>
+      <td class="${own ? 'own' : ''}" title="lands on the battlefield at the start of the turn">${x.bfLands}</td>
+      <td class="${own ? 'own' : ''} ${own && !x.played && !x.handLands ? 'warn' : ''}" title="land drop this turn">${own ? (x.played ? '✓' : '✗') : ''}</td>
+      <td class="${own ? 'own' : ''}" title="mana spent / mana sources at the start of the turn">${x.spent}/${x.avail}</td>`; };
+  el.innerHTML = `<div class="dqh"><b>Draw quality</b><span class="muted">L lands · S spells drawn; hand lands/cards, lands in play, land drop, mana spent/sources (own turns in bold)</span></div>
+    <table><thead><tr><th></th><th colspan="5">You</th><th colspan="5">Bot</th></tr><tr><th>T</th>${'<th>drew</th><th>hand</th><th>play</th><th>drop</th><th>mana</th>'.repeat(2)}</tr></thead>
+    <tbody>${rv.a.rows.map(r => `<tr data-turn="${r.t}" class="${r.t === t ? 'cur' : ''}"><td>${r.t}</td>${cell(r, me)}${cell(r, bot)}</tr>`).join('')}</tbody></table>`;
+  el.querySelector('tr.cur')?.scrollIntoView({block: 'nearest'});
+}
+
 // ---------------------------------------------------------------- game start / end
 function finishGame() {
+  if (S.paying) payCancel(true);  // a game that ended (a concession, a timeout) leaves no half-played spell
   S.ui = null;
   if (S.raw.length) render(last(), {noAnim: true});
   renderDock();
@@ -2551,7 +2773,7 @@ async function showResult() {
       <label>Hardest moment</label><input name="hardest" maxlength="1000" placeholder="e.g. their turn-6 Counterspell">
       <span></span><button class="btn small" type="submit">Send feedback</button></form>
     <div class="rbtns">${S.replay ? `<a class="btn" href="../#r=${encodeURIComponent(S.replay)}" target="_blank">Full replay (both hands)</a>` : ''}
-      <button class="btn" id="bLook">Look at the board</button><button class="btn" id="bChange">Change opponent or decks</button>
+      <button class="btn" id="bLook">Look at the board</button><button class="btn" id="bReview" title="Both hands, the bot's options with probabilities and its value, draw quality">Review game</button><button class="btn" id="bChange">Change opponent or decks</button>
       <button class="primary" id="bAgain">${matchOver ? 'Rematch' : `Next game (${mm.game_no + 1} of 3)`}</button></div></div>`;
   m.classList.add('on');
   $('#bAgain').focus();
@@ -2570,6 +2792,7 @@ async function showResult() {
     catch (err) { toast(err.message); }
   };
   $('#bLook').onclick = () => m.classList.remove('on');
+  $('#bReview').onclick = () => { m.classList.remove('on'); openReview(); };
 }
 
 async function openNewGame() {
@@ -2687,7 +2910,7 @@ async function resync() {
 
 // For tests and debugging: the state and a way to read the current decision.
 window.PLAY = {
-  S, myDecision, act,
+  S, myDecision, act, rvGo,
   info: () => ({ready: canAct() && !S.queue.length && !inputLocked(), over: S.over, busy: S.busy || S.pumping, error: S.error, frame: last(), kind: S.ui?.kind || null,
     options: myDecision()?.options || [], overlay: $('#overlay').classList.contains('on'), turn: S.shown >= 0 ? stateAt(S.shown).turn : 0}),
 };

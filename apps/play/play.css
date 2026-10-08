@@ -526,3 +526,72 @@ button:disabled{cursor:default}
 #hand .card.casting{opacity:.18;filter:grayscale(.6)}
 #board .perm.paysrc{cursor:pointer}
 #board .perm.paysrc>.card{box-shadow:0 0 0 2px #f0c869cc,0 0 16px #f0c86977}
+
+/* post-game review */
+body.reviewing #app{grid-template-rows:42px auto minmax(0,1fr)}
+body.reviewing #dock, body.reviewing #paying{display:none}
+#revbar{grid-column:1;background:#0d1117;border-bottom:1px solid var(--line);padding:6px 12px 4px;display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+#revbar .rvhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#revbar .rvhead b{color:var(--me);letter-spacing:.08em;text-transform:uppercase;font-size:11px}
+#revbar .rvflags{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-left:8px}
+#revbar .rvflags .who{color:var(--muted);margin-left:6px}
+#revbar .chip{background:#ffffff10;border:1px solid var(--line);border-radius:999px;padding:1px 8px;font-size:11.5px}
+#revbar .chip.bad{border-color:#ef676799;color:#ffb0b0}
+#revbar .track{position:relative;height:30px;margin:2px 6px;cursor:pointer}
+#revbar .track .line{position:absolute;left:0;right:0;top:15px;height:2px;background:#ffffff22}
+#revbar .tturn{position:absolute;top:0;translate:-50% 0;font-size:10px;color:var(--muted);border-left:1px solid #ffffff2a;padding-left:2px;height:30px}
+#revbar .tdec{position:absolute;top:11px;width:9px;height:9px;translate:-50% 0;border-radius:50%;background:#6fa8ff;border:1px solid #000}
+#revbar .tdec.surp{background:#ffa64d;width:12px;height:12px;top:10px}
+#revbar .tdec.drop{box-shadow:0 0 0 2px #ef6767}
+#revbar .tdec.rise{box-shadow:0 0 0 2px #5fd38f}
+#revbar .cursor{position:absolute;top:0;bottom:0;width:2px;background:var(--me);translate:-1px 0;pointer-events:none;box-shadow:0 0 8px var(--me)}
+#revbar .legend{font-size:11px;color:var(--muted);display:flex;gap:6px;align-items:center}
+#revbar .legend .tdec{position:static;translate:none;display:inline-block}
+#revpanel{position:absolute;right:12px;bottom:12px;width:min(330px,30vw);max-height:calc(100% - 24px);overflow:auto;z-index:70;background:#10141bf2;border:1px solid #3a4152;border-radius:12px;padding:12px;box-shadow:0 14px 40px #000c;font-size:13px;display:flex;flex-direction:column;gap:7px}
+#revpanel .rph{font-weight:700}
+#revpanel .rpk{color:var(--opp);font-weight:700;text-transform:capitalize}
+#revpanel .muted, #drawq .muted{color:var(--muted);font-size:12px;font-weight:400}
+#revpanel .probs{display:flex;flex-direction:column;gap:5px}
+#revpanel .prob .pl{font-size:12.5px}
+#revpanel .prob.chosen .pl{color:var(--me);font-weight:700}
+#revpanel .prob .pb{position:relative;height:16px;background:#ffffff0d;border-radius:4px;overflow:hidden}
+#revpanel .prob .pb i{position:absolute;left:0;top:0;bottom:0;background:#6fa8ff88}
+#revpanel .prob.chosen .pb i{background:#f0c869aa}
+#revpanel .prob .pb span{position:relative;font-size:11px;padding-left:6px;line-height:16px}
+#revpanel .vals{display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+#revpanel .vbar{display:inline-block;position:relative;width:90px;height:8px;border-radius:4px;background:linear-gradient(90deg,#ef676766,#ffffff22,#5fd38f66);vertical-align:middle;margin:0 4px}
+#revpanel .vbar i{position:absolute;top:-3px;width:3px;height:14px;background:#fff;translate:-1px 0}
+#revpanel .neg{color:var(--bad)} #revpanel .pos{color:var(--good)}
+#revpanel .badge{border-radius:8px;padding:5px 8px;font-size:12px}
+#revpanel .badge.surp{background:#ffa64d22;border:1px solid #ffa64d88}
+#revpanel .badge.drop{background:#ef676722;border:1px solid #ef676788}
+#revpanel .badge.rise{background:#5fd38f22;border:1px solid #5fd38f88}
+#revpanel .rpb{display:flex;flex-wrap:wrap;gap:6px}
+#drawq{position:absolute;left:50%;translate:-50% 0;top:8px;z-index:65;display:none;max-height:42%;overflow:auto;background:#10141bf0;border:1px solid #3a4152;border-radius:12px;padding:8px 10px;font-size:12px;box-shadow:0 14px 40px #000b}
+#drawq.on{display:block}
+#drawq .dqh{display:flex;gap:10px;align-items:baseline;margin-bottom:4px}
+#drawq table{border-collapse:collapse}
+#drawq th, #drawq td{padding:2px 6px;text-align:center;border-bottom:1px solid #ffffff10}
+#drawq th{color:var(--muted);font-weight:500}
+#drawq td.own{font-weight:700}
+#drawq td.warn{color:#ffb0b0}
+#drawq tr{cursor:pointer}
+#drawq tr.cur td{background:#f0c86922}
+#drawq .ld{color:#94c9a0;margin-right:3px} #drawq .sp{color:#9ccfee}
+body.reviewing .lastact{display:none}
+/* the review shows the bot's hand: a readable fan on top of its side */
+body.reviewing .ohand{top:4px;pointer-events:auto;z-index:20}
+body.reviewing .ohand .card{--w:calc(var(--lw)*.9);margin-left:calc(var(--lw)*-.25)}
+body.reviewing .ohand .card:first-child{margin-left:0}
+body.reviewing #drawq{left:auto;right:12px;translate:none;top:8px;max-height:46%}
+body.reviewing #revpanel{max-height:51%}
+
+#revbar .dqstrip{display:flex;flex-direction:column;gap:2px;margin:0 6px 2px}
+#revbar .dqrow{position:relative;height:18px}
+#revbar .dqwho{position:absolute;left:-2px;top:2px;font-size:10px;color:var(--muted);z-index:2;background:#0d1117;padding-right:3px}
+#revbar .dqc{position:absolute;top:0;height:18px;font-size:10.5px;line-height:18px;padding-left:4px;border-left:1px solid #ffffff1c;overflow:hidden;white-space:nowrap;cursor:pointer;color:var(--muted)}
+#revbar .dqc.own{background:#ffffff08;color:var(--text)}
+#revbar .dqc.warn{background:#ef676726;color:#ffd0d0}
+#revbar .dqc i{font-style:normal;margin-left:4px}
+#revbar .dqc .ld{color:#94c9a0;margin-right:2px} #revbar .dqc .sp{color:#9ccfee}
+body.reviewing #hand .b.reduced{display:none}

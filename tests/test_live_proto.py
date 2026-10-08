@@ -503,3 +503,48 @@ def test_play_config_offer(tmp_path, models):
         assert m.next_game(gid, {"plan": "maindeck"})["meta"]["match"]["game_no"] == 2  # the match goes on in play mode
     finally:
         m.close()
+
+
+def test_review_only_after_the_game_and_only_for_its_player(manager):
+    """The post-game review (omniscient: both hands, the bot's policy) is
+    refused while the game runs and without the game's token; the token comes
+    only with the new game, never in later views (anyone with the id)."""
+    view = manager.new({"model": SCRIPTED, "seed": 3, "seat": 0, "matchup": "jund_blue"})
+    gid, token = view["live"]["id"], view["live"]["token"]
+    assert "token" not in manager.view(gid)["live"]
+    with pytest.raises(LiveError, match="over"):
+        manager.review(gid, token)
+    manager.concede(gid)
+    for bad in (None, "", "x" * 22):
+        with pytest.raises(LiveError, match="player"):
+            manager.review(gid, bad)
+    rep = manager.review(gid, token)
+    assert rep["review"]["seat"] == 0 and rep["review"]["bot"] == 1
+    assert any(c.get("name") and not c.get("hidden") for f in rep["frames"] for c in f["state"]["players"][1]["hand"])  # the bot's hand, by name
+    nxt = manager.next_game(gid, {"plan": "maindeck"})
+    other = nxt["live"]
+    assert other["token"] and other["token"] != token
+    with pytest.raises(LiveError, match="player"):
+        manager.review(other["id"], token)  # one game's token does not open another game
+
+
+def test_review_flag_files_everything(manager):
+    """A flag from the review may hold everything: the bot's hand, options
+    with probabilities, seed and a rebuild command up to the decision."""
+    manager.filer = FakeFiler()
+    view = manager.new({"model": SCRIPTED, "seed": 4, "seat": 0, "matchup": "jund_blue"})
+    gid, token = view["live"]["id"], view["live"]["token"]
+    with pytest.raises(LiveError):
+        manager.flag(gid, {"category": "bot", "review_frame": 1, "what": "x", "token": token})  # still running
+    play_until_bot_action(manager, gid, list(view["frames"]))
+    manager.concede(gid)
+    rep = manager.review(gid, token)
+    rf = next(i for i, f in enumerate(rep["frames"]) if f["decision"] and f["decision"]["player"] == 1)
+    with pytest.raises(LiveError):
+        manager.flag(gid, {"category": "bot", "review_frame": rf, "what": "x"})  # no token
+    out = manager.flag(gid, {"category": "bot", "review_frame": rf, "what": "Kept a bad hand", "token": token})
+    assert out["filed"]
+    cat, title, body = manager.filer.issues[-1]
+    assert "(review)" in title and f"seed `{rep['meta']['seed']}`" in body and "--choices" in body and "### Options (policy)" in body
+    bot_hand = {c["name"] for c in rep["frames"][rf]["state"]["players"][1]["hand"]}
+    assert any(n in body for n in bot_hand)

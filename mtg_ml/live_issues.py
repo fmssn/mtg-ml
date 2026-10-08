@@ -100,10 +100,10 @@ def code_commit() -> str:
         return "unknown"
 
 
-def board_text(state: dict, seat: int) -> str:
+def board_text(state: dict, seat: int, everything: bool = False) -> str:
     """The board as `seat` sees it (their snapshot): life, hands (theirs by
     name, the opponent's by count), battlefield, graveyards, stack."""
-    who = lambda p: "You" if p == seat else "Opponent"  # noqa: E731
+    who = lambda p: ("Player" if p == seat else "Bot") if everything else ("You" if p == seat else "Opponent")  # noqa: E731
     lines = []
     for p, P in enumerate(state["players"]):
         hand = ", ".join(c["name"] for c in P["hand"] if not c.get("hidden")) or "-"
@@ -111,7 +111,7 @@ def board_text(state: dict, seat: int) -> str:
         perms = ", ".join(c["name"] + (" (tapped)" if c.get("tapped") else "") + (f" {c['power']}/{c['toughness']}" if c.get("power") is not None else "")
                           for c in state["battlefield"] if c["controller"] == p) or "-"
         grave = ", ".join(c["name"] for c in P["graveyard"]) or "-"
-        hand_txt = f"{hand}" if p == seat else (f"{hidden} hidden" + (f" + known: {hand}" if hand != "-" else ""))
+        hand_txt = f"{hand}" if p == seat or everything else (f"{hidden} hidden" + (f" + known: {hand}" if hand != "-" else ""))
         lines += [f"**{who(p)}**: life {P['life']}, library {P['library']}", f"- hand: {hand_txt}", f"- battlefield: {perms}", f"- graveyard: {grave}"]
     if state["stack"]:
         lines.append("**Stack** (top last): " + "; ".join(f"{it['name']} ({who(it['controller'])})" for it in state["stack"]))

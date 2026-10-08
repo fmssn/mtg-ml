@@ -254,6 +254,8 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                     return self._json(live.sideboard(query.get("matchup", [""])[0], int(query.get("seat", ["0"])[0])))
                 if method == "GET" and parts == ["decks"]:
                     return self._json(live.decklists(query.get("matchup", [""])[0], int(query.get("seat", ["0"])[0]), int(query.get("game", ["1"])[0])))
+                if method == "GET" and len(parts) == 2 and parts[1] == "review":
+                    return self._json(live.review(parts[0], query.get("token", [None])[0]))
                 if method == "GET" and len(parts) == 1:
                     return self._json(live.view(parts[0], int(query.get("since", ["0"])[0])))
                 if method == "POST":
