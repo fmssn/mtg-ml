@@ -129,6 +129,15 @@ The opening hand opens a mulligan screen: the seven cards large, the land count 
 
 Endpoints: `POST /api/live/<id>/concede`, `POST /api/live/<id>/next {plan, play}`, `GET /api/live/sideboard?matchup=&seat=`, `GET /api/live/decks?matchup=&seat=`. A full server never drops a game that is being played (touched in the last 10 minutes and not over): it refuses a new game with a message instead.
 
+### Polish
+
+- A short "Your turn" / "Opponent's turn" banner at each turn start (not at instant replay speed).
+- Sounds (Web Audio, synthesized, no files): cast, land, attack, hit (louder for more damage), death, your turn, win, lose, your decision. Rate-limited so a big attack is one sound. The 🔊 header button mutes; Settings has a volume slider.
+- Colour is never the only cue: playable cards glow white and sit a little higher, targets carry a ◎, attackers a ⚔, blockers a ⛨. Text colours meet WCAG AA on every panel (muted 6.6-7.7:1, dim 4.6-5.3:1).
+- The stop bars have a ~22 px hit area around the small bar.
+- Keyboard: Tab reaches playable cards, activatable or targetable permanents, plates and stack items (each with an aria label); Enter or Space clicks the focused one, Shift+Enter double-clicks (plays it); focusing a card shows it in the preview. Modals take focus; Esc closes menus and modals.
+- More than four attackers draw one bundled arrow with the count; hover an attacker to see its own. Attackers lift only slightly, so they stay inside their row.
+
 ### Feedback: flags and survey
 
 The ⚑ on any opponent action (feed or log) opens a small form: a reason (misplay, missed lethal, rules bug, weird timing, other), a note ("what was wrong, what would you have done?") and an optional name or nickname, remembered locally. It is sent to the server (`POST /api/live/<id>/flag {frame, reason, note, pseudonym}`; `remove: true` takes it back) and kept with the game. The result card has a short survey: how strong the bot played (1-5) and the hardest moment (`POST /api/live/<id>/survey`).

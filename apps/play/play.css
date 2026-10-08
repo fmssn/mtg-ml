@@ -1,7 +1,8 @@
 /* Play vs model: board client. Design notes: docs/play-ui.md */
 :root{
-  --bg:#0b0d11; --panel:#13161d; --panel2:#1a1e27; --line:#272d39; --text:#e8eaf0; --muted:#8c95a8; --dim:#5d6578;
+  --bg:#0b0d11; --panel:#13161d; --panel2:#1a1e27; --line:#272d39; --text:#e8eaf0; --muted:#9aa3b5; --dim:#7d8699;
   --me:#f0c869; --opp:#6fa8ff; --good:#5fd38f; --bad:#ef6767; --cyan:#5fe1e8; --block:#8fc1ff;
+  --play:#ffffff; /* playable: white glow plus a lift (not a colour only: safe under red-green colour blindness) */
   --felt:#122019; --felt2:#0c1510;
   --u:min(1vh,.6vw);
   --cw:calc(var(--u)*11);    /* creature width */
@@ -69,7 +70,9 @@ button:disabled{cursor:default}
 .step.cur.me{box-shadow:inset 0 -2px 0 var(--me)}
 .step.cur.opp{box-shadow:inset 0 -2px 0 var(--opp)}
 .step .stops{display:flex;gap:3px}
-.step .stop{width:12px;height:6px;border-radius:2px;border:1px solid #ffffff2a;background:transparent;padding:0}
+.step .stop{position:relative;width:16px;height:8px;border-radius:2px;border:1px solid #ffffff4a;background:transparent;padding:0}
+.step .stop::after{content:'';position:absolute;inset:-8px -3px}  /* a ~22 px hit area around the small bar */
+.step{font-size:11px;color:var(--muted)}
 .step .stop.me.on{background:var(--me);border-color:var(--me)}
 .step .stop.opp.on{background:var(--opp);border-color:var(--opp)}
 .step .stop:hover{border-color:#fff}
@@ -163,8 +166,8 @@ button:disabled{cursor:default}
 .will-tap>.card{box-shadow:0 0 0 2px var(--me),0 0 16px #f0c869cc !important;filter:brightness(1.08)}
 
 /* states on the board */
-.perm.attacking{transform:translateY(calc(var(--u)*-3))}
-.side.opp .perm.attacking{transform:translateY(calc(var(--u)*3))}
+.perm.attacking{transform:translateY(calc(var(--u)*-1.2))}  /* small enough to stay inside the row (no clipping, no covering the rail) */
+.side.opp .perm.attacking{transform:translateY(calc(var(--u)*1.2))}
 .perm.attacking>.card{box-shadow:0 0 0 2px var(--bad),0 0 18px #ef676799}
 .perm.blocking>.card{box-shadow:0 0 0 2px var(--block),0 0 16px #8fc1ff88}
 .perm.entered>.card{animation:enter .5s var(--ease)}
@@ -174,15 +177,16 @@ button:disabled{cursor:default}
 @keyframes flash{0%{filter:brightness(2) saturate(.3) sepia(1) hue-rotate(-30deg)}100%{}}
 
 /* what you can do: glow, never grey out */
-.playable>.card,.card.playable{box-shadow:0 0 0 2px var(--good),0 0 16px #5fd38faa}
+.playable>.card,.card.playable{box-shadow:0 0 0 2px var(--play),0 0 16px #ffffffaa}
 .activatable>.card{box-shadow:0 0 0 2px #7cc7ff,0 0 14px #7cc7ff88}
 .can-attack>.card{box-shadow:0 0 0 2px #ef676799,0 0 10px #ef676755}
-.attack-sel{transform:translateY(calc(var(--u)*-3.2)) !important}
+.attack-sel{transform:translateY(calc(var(--u)*-1.2)) !important}
 .attack-sel>.card{box-shadow:0 0 0 3px var(--bad),0 0 24px var(--bad) !important}
 .can-block>.card{box-shadow:0 0 0 2px #8fc1ffaa,0 0 12px #8fc1ff66}
 .block-sel>.card{box-shadow:0 0 0 3px #fff,0 0 24px var(--block) !important}
 .blocked-by>.card{box-shadow:0 0 0 3px var(--block),0 0 20px var(--block) !important}
 .attacker-target>.card{box-shadow:0 0 0 2px var(--bad),0 0 18px #ef6767aa;animation:pulse 1.2s ease-in-out infinite}
+.targetable>.badges::after{content:'◎';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:26px;color:var(--cyan);text-shadow:0 0 6px #000}
 .targetable>.card,.sitem.targetable{box-shadow:0 0 0 3px var(--cyan),0 0 22px #5fe1e899 !important;animation:pulse 1.2s ease-in-out infinite}
 .payable>.card{box-shadow:0 0 0 2px var(--me),0 0 14px #f0c869aa}
 .drop-hot>.card{box-shadow:0 0 0 3px #fff,0 0 30px var(--cyan) !important}
@@ -196,7 +200,8 @@ button:disabled{cursor:default}
   transform:translateX(var(--sx,0px)) translateY(var(--ty,0px)) rotate(var(--rot,0deg));transition:transform .14s var(--ease),box-shadow .14s,left .25s var(--ease)}
 #hand .card.hover{transform:translateX(var(--sx,0px)) translateY(calc(var(--hw)*var(--ar)*-.3)) scale(1.14);z-index:50 !important}
 #hand .card.dragging{opacity:.25}
-#hand .card.playable{box-shadow:0 0 0 2px var(--good),0 0 18px #5fd38fbb,0 6px 14px #000c}
+#hand .card.playable{box-shadow:0 0 0 2px var(--play),0 0 18px #ffffffaa,0 6px 14px #000c;--ty2:-8px}
+#hand .card.playable:not(.hover){transform:translateX(var(--sx,0px)) translateY(calc(var(--ty,0px) - 8px)) rotate(var(--rot,0deg))}
 
 #ghost{position:fixed;left:0;top:0;pointer-events:none;z-index:300;display:none;filter:drop-shadow(0 18px 24px #000c)}
 #ghost .card{--w:var(--hw)}
@@ -208,7 +213,7 @@ button:disabled{cursor:default}
 #board.has-stack .field{padding-right:222px}
 #board.has-stack .side.me .row.back{margin-right:260px}
 #stack .smore{pointer-events:auto;align-self:flex-end;background:#000c;border:1px solid #ffffff2a;border-radius:999px;color:var(--text);font-size:11.5px;padding:2px 10px}
-#stack .sh{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#ffffff66;text-align:right}
+#stack .sh{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);text-align:right}
 .sitem{pointer-events:auto;display:flex;gap:8px;align-items:center;padding:5px 8px 5px 5px;border-radius:10px;background:#000c;border:1px solid #ffffff1c;animation:chipin .25s var(--ease)}
 .sitem.c-me{border-left:3px solid var(--me)}.sitem.c-opp{border-left:3px solid var(--opp)}
 .sitem .card{--w:46px}
@@ -326,6 +331,15 @@ button:disabled{cursor:default}
 .seg input{display:none}
 .seg label:has(input:checked){background:#f0c86922;color:var(--me)}
 
+/* keyboard focus */
+:focus-visible{outline:3px solid var(--cyan);outline-offset:2px}
+#board .perm:focus-visible,#hand .card:focus-visible{outline:3px solid var(--cyan);outline-offset:3px;z-index:9}
+/* turn banner, crowded combat */
+.turnbanner{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:150;pointer-events:none;font-size:calc(var(--u)*5);font-weight:900;letter-spacing:.1em;text-transform:uppercase;padding:8px 28px;border-radius:14px;background:#000b;animation:turnin .9s ease-out forwards}
+.turnbanner.me{color:var(--me);box-shadow:0 0 0 2px #f0c86966}
+.turnbanner.opp{color:var(--opp);box-shadow:0 0 0 2px #6fa8ff66}
+@keyframes turnin{0%{opacity:0;transform:translate(-50%,-50%) scale(.85)}20%{opacity:1;transform:translate(-50%,-50%) scale(1)}75%{opacity:1}100%{opacity:0}}
+.a-count{fill:#fff;font-weight:800;font-size:14px;text-anchor:middle;paint-order:stroke;stroke:#000;stroke-width:3px}
 /* feedback */
 .flagform{display:flex;flex-direction:column;gap:6px;width:320px;padding:4px}
 .flagform .flagwhat{font-size:12.5px;color:var(--text);padding:0 8px}
@@ -415,7 +429,7 @@ button:disabled{cursor:default}
 #spot .cap.atme{border-color:var(--bad);color:#fff;background:#3a0d0d}
 #log .life{font-weight:700}#log .life.neg{color:var(--bad)}#log .life.pos{color:var(--good)}
 #log .sub{padding-left:12px}
-#log .flag{background:none;border:0;color:#ffffff33;padding:0 2px;font-size:11px;margin-left:auto}
+#log .flag{background:none;border:0;color:var(--dim);padding:0 2px;font-size:11px;margin-left:auto}
 #log .flag:hover,#log .flag.on{color:var(--bad)}
 
 @media (max-width:1100px){

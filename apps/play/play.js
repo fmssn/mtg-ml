@@ -369,6 +369,10 @@ async function playFrame(i) {
   await playDeaths(acts);
   render(i);
   appendLog(i);
+  if (acts.some(a => a.t === 'cast' || a.t === 'activate')) sound('cast');
+  else if (acts.some(a => a.t === 'play')) sound('land');
+  const turnEv = acts.filter(a => a.t === 'turn').at(-1);
+  if (turnEv && i > 0) turnBanner(turnEv.p === S.seat);
   if (theirs.some(a => a.t === 'attack')) nudgeAttackers();
   if (fought && !S.skip) await wait(300);  // hold the result a moment before input opens
   if (f.state.players.some(P => P.life <= 0)) await wait(600);  // the lethal blow lands before the result
@@ -435,6 +439,18 @@ async function playDeaths(acts) {
   sound('death');
   await sleepFx(620);
 }
+// A short banner when a turn starts (skipped at instant replay speed).
+function turnBanner(mine) {
+  if (beatScale() === 0 || S.skip) return;
+  $$('.turnbanner').forEach(x => x.remove());
+  const b = document.createElement('div');
+  b.className = `turnbanner ${mine ? 'me' : 'opp'}`;
+  b.textContent = mine ? 'Your turn' : "Opponent's turn";
+  $('#board').appendChild(b);
+  if (mine) sound('turn');
+  setTimeout(() => b.remove(), 900);
+}
+
 // Freshly declared attackers step forward once.
 function nudgeAttackers() {
   for (const el of $$('#board .perm.attacking')) el.animate([{translate: '0 0'}, {translate: `0 ${el.closest('#side1') ? 14 : -14}px`}, {translate: '0 0'}], {duration: 380, easing: 'ease-out'});
@@ -736,6 +752,7 @@ function render(i, o = {}) {
   if (before) flip(before, prev);
   requestAnimationFrame(drawArrows);
   scheduleFxCleanup();
+  markFocusable();
 }
 let fxTimer = null;
 function scheduleFxCleanup() {
@@ -1112,11 +1129,18 @@ function drawArrows() {
   const blocks = ui?.kind === 'declare_blocker' ? ui.blocks : new Map(s.battlefield.filter(c => c.blocking != null).map(c => [c.oid, c.blocking]));
   const blocked = new Set(blocks.values());
   const attackers = ui?.kind === 'declare_attacker' ? [...ui.sel] : s.battlefield.filter(c => c.attacking).map(c => c.oid);
-  for (const o of attackers) {
-    if (blocked.has(o)) continue;
-    const c = s.battlefield.find(x => x.oid === o), el = permEl(o);
-    if (!c || !el) continue;
-    h += arrow(el, $(`#plate${c.controller === S.seat ? 1 : 0}`), 'a-red', 'mRed');
+  const free = attackers.filter(o => !blocked.has(o)).map(o => [s.battlefield.find(x => x.oid === o), permEl(o)]).filter(([c, el]) => c && el);
+  if (free.length > 4) {
+    // many attackers: one bundled arrow (with the count) from the middle of the group; hover one to see its own
+    const els = free.map(([, el]) => el.getBoundingClientRect()), box = $('#board').getBoundingClientRect();
+    const cx = els.reduce((a, r) => a + r.left + r.width / 2, 0) / els.length, cy = els.reduce((a, r) => a + r.top + r.height / 2, 0) / els.length;
+    const plate = $(`#plate${free[0][0].controller === S.seat ? 1 : 0}`);
+    h += arrow({getBoundingClientRect: () => ({left: cx - 2, top: cy - 2, width: 4, height: 4})}, plate, 'a-red', 'mRed');
+    h += `<text class="a-count" x="${cx - box.left}" y="${cy - box.top - 14}">⚔ ${free.length}</text>`;
+    const hov = document.querySelector('#board .perm.hovered');
+    for (const [c, el] of free) if (el === hov) h += arrow(el, plate, 'a-red', 'mRed');
+  } else {
+    for (const [c, el] of free) h += arrow(el, $(`#plate${c.controller === S.seat ? 1 : 0}`), 'a-red', 'mRed');
   }
   for (const [b, a] of blocks) { const be = permEl(b), ae = permEl(a); if (be && ae) h += arrow(be, ae, 'a-blue', 'mBlue'); }
   // a gesture in progress: block drag, or targeting from the source
@@ -1671,6 +1695,17 @@ document.addEventListener('dblclick', e => {
     return risky || idxs.length > 1 ? showMenu(pm, idxs, pm.dataset.name) : chooseFromCard(pm, idxs);
   }
 });
+// Focus: interactive cards can be reached with Tab; focusing one shows it in the preview.
+function markFocusable() {
+  for (const el of $$('#hand .card.playable, #board .perm.activatable, #board .perm.targetable, #board .perm.can-attack, #board .perm.attack-sel, #board .perm.can-block, #board .perm.blocked-by, #board .perm.attacker-target, #board .perm.payable, .plate.targetable, .sitem')) {
+    el.tabIndex = 0;
+    const name = el.dataset.name || el.querySelector('[data-name]')?.dataset.name || (el.classList.contains('plate') ? (el.dataset.player == S.seat ? 'You' : 'Opponent') : '');
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', name + (el.classList.contains('tapped') ? ', tapped' : ''));
+  }
+}
+document.addEventListener('focusin', e => { const c = e.target.closest?.('[data-name]'); if (c && S.cards[c.dataset.name]) showPreview(c.dataset.name); });
+
 document.addEventListener('contextmenu', e => {
   const ui = S.ui, pm = e.target.closest('#board .perm');
   if (ui && pm && canAct()) {  // undo a selection that has not been sent yet
@@ -1713,6 +1748,12 @@ function showTaps(p) {
 // Hover: hand lift with neighbours spreading, and the preview panel.
 let hoverTimer = null, pinned = false;
 document.addEventListener('pointerover', e => {
+  const hp = e.target.closest('#board .perm');
+  if (hp !== document.querySelector('#board .perm.hovered')) {
+    $$('#board .perm.hovered').forEach(x => x.classList.remove('hovered'));
+    if (hp) hp.classList.add('hovered');
+    if (S.shown >= 0 && stateAt(S.shown).battlefield.filter(c => c.attacking).length > 4) requestAnimationFrame(drawArrows);
+  }
   if (!drag) {
     const hcard = e.target.closest('#hand .card'), pcard = e.target.closest('#board .perm.activatable'), mitem = e.target.closest('#pop [data-opt]');
     showTaps(hcard ? tapsFor(handOpts(hcard.dataset.name)) : pcard ? tapsFor(permOpts(pcard)) : mitem ? tapsFor([+mitem.dataset.opt]) : null);
@@ -1784,10 +1825,19 @@ function primary() {
 }
 
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('#modal').classList.contains('on') && S.gid && !$('#fNew')) { $('#modal').classList.remove('on'); return; }
+  if (e.key === 'Escape' && $('#pop').classList.contains('on')) { closePop(); return; }
   if (e.target.closest('input, select, textarea') || $('#modal').classList.contains('on')) return;
   const k = e.key;
   if (e.repeat && (k === ' ' || k === 'Enter' || k === 'r' || k === 'R' || k === 'a' || k === 'n')) { e.preventDefault(); return; }  // a held key is not a decision
   if (inputLocked() && [' ', 'Enter', 'r', 'R', 'a', 'A', 'n', 'N'].includes(k)) { e.preventDefault(); return; }
+  // A focused card, permanent, plate or stack item: Enter or Space clicks it (Shift+Enter double-clicks: plays it).
+  const fc = e.target.closest?.('#hand .card, #board .perm, .plate, .sitem');
+  if (fc && (k === 'Enter' || k === ' ')) {
+    e.preventDefault();
+    fc.dispatchEvent(new MouseEvent(e.shiftKey ? 'dblclick' : 'click', {bubbles: true}));
+    return;
+  }
   // A focused button, link or option keeps Space and Enter (activate it), never the global hotkeys.
   if ((k === ' ' || k === 'Enter') && e.target !== document.body && e.target.closest('button, a, [role=button], [tabindex]')) return;
   if (k === ' ') { e.preventDefault(); if ($('#overlay').classList.contains('on') && (S.ui?.kind === 'assign_damage' || S.ui?.kind === 'mulligan')) { const b = $('#overlay .primary'); if (b && !b.disabled) b.click(); return; } primary(); return; }
@@ -1832,6 +1882,9 @@ $('#bConcede').addEventListener('click', async () => {
 });
 $('#bSettings').addEventListener('click', () => openSettings());
 $('#bHelp').addEventListener('click', () => openHelp());
+const muteLabel = () => { $('#bMute').textContent = PREF.sound ? '🔊' : '🔇'; $('#bMute').title = PREF.sound ? 'Sound on (click to mute)' : 'Muted (click for sound)'; };
+$('#bMute').addEventListener('click', () => { PREF.sound = !PREF.sound; savePref(); muteLabel(); if (PREF.sound) sound('decide'); });
+muteLabel();
 
 const HELP = [
   ['Play a land or cast a spell', 'Drag the glowing card up onto the battlefield, or double-click it. One click opens its options (flashback, cycling, modes).'],
@@ -1920,18 +1973,34 @@ function toast(text) {
   $('#toast').appendChild(el);
   setTimeout(() => el.remove(), 2600);
 }
-function sound() { /* the sound set is added with the polish pass */ }
-let audio = null;
-function ping() {
-  if (!PREF.sound) return;
+// Short synthesized sounds (Web Audio, no files): each is a few oscillator
+// notes with a fast envelope. PREF.sound mutes, PREF.volume scales.
+const SOUNDS = {
+  cast: [[520, 880, 0.12, 'triangle']], land: [[110, 70, 0.12, 'sine']], attack: [[300, 160, 0.16, 'sawtooth']],
+  hit: [[180, 90, 0.10, 'square']], death: [[260, 70, 0.35, 'triangle']], turn: [[660, 660, 0.10, 'sine'], [990, 990, 0.14, 'sine', 0.09]],
+  win: [[523, 523, 0.14, 'triangle'], [659, 659, 0.14, 'triangle', 0.12], [784, 784, 0.3, 'triangle', 0.24]],
+  lose: [[392, 392, 0.2, 'triangle'], [330, 330, 0.2, 'triangle', 0.18], [262, 262, 0.4, 'triangle', 0.36]], draw: [[440, 440, 0.3, 'triangle']],
+  decide: [[880, 1320, 0.18, 'sine']],
+};
+const lastSound = {};
+function sound(name, amount) {
+  if (!PREF.sound || !SOUNDS[name] || beatScale() === 0 && name !== 'decide') return;
+  const now = performance.now();
+  if (now - (lastSound[name] || 0) < 90) return;  // a 15-creature attack is one sound, not fifteen
+  lastSound[name] = now;
   try {
     audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.type = 'sine'; o.frequency.setValueAtTime(880, audio.currentTime); o.frequency.exponentialRampToValueAtTime(1320, audio.currentTime + 0.09);
-    g.gain.setValueAtTime(0.0001, audio.currentTime); g.gain.exponentialRampToValueAtTime(0.05, audio.currentTime + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.22);
-    o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.25);
+    const vol = 0.06 * (PREF.volume ?? 0.6) * (name === 'hit' ? Math.min(2, 0.7 + (amount || 1) / 4) : 1);
+    for (const [f0, f1, dur, type, delay = 0] of SOUNDS[name]) {
+      const t = audio.currentTime + delay, o = audio.createOscillator(), g = audio.createGain();
+      o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(30, f1), t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(audio.destination); o.start(t); o.stop(t + dur + 0.02);
+    }
   } catch (e) { /* no audio */ }
 }
+let audio = null;
+function ping() { sound('decide'); }
 
 // ---------------------------------------------------------------- game start / end
 function finishGame() {
@@ -2057,12 +2126,13 @@ async function openNewGame() {
 
 function openSettings() {
   const m = $('#modal');
+  setTimeout(() => m.querySelector('input, button')?.focus(), 0);
   m.innerHTML = `<div class="mbox"><h2>Settings</h2><form id="fSet">
     <label>Opponent replay speed</label><span class="seg">${Object.keys(SPEEDS).map(k => `<label><input type="radio" name="speed" value="${k}" ${PREF.speed === k ? 'checked' : ''}>${k === 'instant' ? 'instant' : k + '×'}</label>`).join('')}</span>
     <label>Mana</label><label class="note"><input type="checkbox" name="manualPay" ${PREF.manualPay ? 'checked' : ''}> pay mana by hand (default: auto-pay)</label>
     <label>Attacks</label><label class="note"><input type="checkbox" name="confirmEmptyAttack" ${PREF.confirmEmptyAttack ? 'checked' : ''}> confirm "No attacks" when creatures could attack</label>
     <label>Targets</label><label class="note"><input type="checkbox" name="autoTarget" ${PREF.autoTarget ? 'checked' : ''}> pick the only legal target automatically</label>
-    <label>Sound</label><label class="note"><input type="checkbox" name="sound" ${PREF.sound ? 'checked' : ''}> ping when it is your decision</label>
+    <label>Sound</label><span><label class="note"><input type="checkbox" name="sound" ${PREF.sound ? 'checked' : ''}> sounds on</label> <input type="range" name="volume" min="0" max="1" step="0.1" value="${PREF.volume ?? 0.6}" title="Volume"></span>
     <label>Priority</label><label class="note"><input type="checkbox" name="full" ${S.fullControl ? 'checked' : ''}> full control (never auto-pass; F)</label>
     <div class="full note">Auto-pass stops: click the small bars under each step in the phase rail (gold: your turn, blue: the opponent's).</div>
     <div class="full" style="margin-top:8px"><button class="primary" type="submit">Done</button></div></form></div>`;
@@ -2071,7 +2141,7 @@ function openSettings() {
   f.onsubmit = e => {
     e.preventDefault();
     PREF.speed = f.speed.value; PREF.manualPay = f.manualPay.checked; PREF.confirmEmptyAttack = f.confirmEmptyAttack.checked;
-    PREF.autoTarget = f.autoTarget.checked; PREF.sound = f.sound.checked; S.fullControl = f.full.checked;
+    PREF.autoTarget = f.autoTarget.checked; PREF.sound = f.sound.checked; PREF.volume = +f.volume.value; S.fullControl = f.full.checked;
     savePref(); m.classList.remove('on'); renderDock();
   };
 }
