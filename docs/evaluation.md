@@ -2,6 +2,11 @@
 
 What the trainer measures, and how to read it. Code: `mtg_ml/rl/evaluate.py` (games, Elo fits), `mtg_ml/rl/train.py` (`rollout_stats`, when evaluations run), `mtg_ml/rl/ppo.py` (update statistics).
 
+The [scripted bot and tactical puzzle benchmark plan](benchmark-plan.md) specifies
+a proposed Jund/Blue benchmark with two stronger scripted specialists, reviewed
+outcome puzzles and frozen evaluation contracts. Its interfaces and commands are
+not implemented yet; the metrics below describe the existing evaluator.
+
 ## Periodic evaluation
 
 Every `--eval-every` iterations, and/or whenever the training games cross a multiple of `--eval-every-games` (e.g. `250000`), the policy of that iteration is evaluated in a process of its own. Results go into the iteration's row of `metrics.jsonl` when they arrive.
