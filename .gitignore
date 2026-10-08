@@ -13,3 +13,4 @@ replays/
 .env
 .env.*
 .conductor/settings.local.toml
+.DS_Store
