@@ -5,6 +5,7 @@
 ```bash
 python -m mtg_ml.replay serve --models runs/          # then open http://127.0.0.1:8765/play/
 python -m mtg_ml.replay serve --scripted-bot          # no checkpoint: play the decks' scripted bots (dev)
+python -m mtg_ml.replay serve --models runs/ --max-games 20   # hold more games at once (default 8)
 ```
 
 `--scripted-bot` marks a development server: the new-game dialog then also offers **dev scenarios** (`mtg_ml/live_dev.py`), games that start in a set position: a crowded Elves board, a trampling Hydra that must be chump-blocked (damage assignment), Tron lands that float mana. Players on a normal server never see them.
@@ -169,11 +170,10 @@ Combat damage and life changes are not in the engine's log; the live layer adds 
 ### Known gaps
 
 - The tap preview assumes the first choice for anything decided while casting (targets, X, additional costs), so an X spell is previewed at its smallest X. A playtest saw empty previews for instants on the opponent's turn; not reproduced in 112 checked casts against the model on both engines (`tests/test_live_proto.py` covers an opponent-turn instant).
-- Combat lines are approximate for first strike, pump effects in the damage step and multi-blocks (life lines are exact).
-- No server-side undo, no "always yes/no", no smart stops per card, no manual-mana undo.
-- The combat preview ignores first strike and tricks; it is a hint.
-- Motion covers zone changes on the board and hand (FLIP); draws, deaths and damage get simple effects, not full flights to the graveyard.
-- A board of 25+ different permanents on one side gets small cards (three lines); hover still shows the full card on the right.
+- Combat lines and hit animations use the powers before damage: first strike, pump effects in the damage step and non-default multi-block splits are approximate (life lines are exact).
+- No server-side undo or cancel once a cast has started (targets, costs); the engine's sacrifice-before-mana order is a separate engine PR.
+- Sideboarding offers the plan table's standard plan or the maindeck, not free card-by-card swaps; game 1 play/draw is a coin flip.
+- "Quiet" abilities (no timing value) are recognised from their text (draw, search, cycling, scry, life, tokens); a per-card stop list is the yield button on stack items only.
 - Card art comes from Scryfall on first sight; until it arrives a card shows a text face. When Scryfall is unreachable the client backs off for two minutes (text faces, no waiting before the opponent's spells).
 - A game lives only in the server's memory: after a server restart the page says so and offers a new game.
-- Phone layout is not done; the target is desktop 1280×800 and up.
+- Phone layout is not done; the target is desktop 1280×720 and up.

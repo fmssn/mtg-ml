@@ -353,6 +353,7 @@ def main(argv=None) -> None:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--models", default=None, help="directory of checkpoints to play against in the viewer (needs torch)")
+    s.add_argument("--max-games", type=int, default=None, help="live games held at once (default 8); a full server refuses new games instead of dropping one being played")
     s.add_argument("--scripted-bot", action="store_true", help="also offer the decks' scripted bots as opponents (dev; works without --models and torch)")
     s.add_argument("--engine", default=None, help="engine for live games: python or native; default: $MTG_ENGINE, else python")
     args = ap.parse_args(argv)
@@ -377,7 +378,7 @@ def main(argv=None) -> None:
             from .live import LiveManager, find_models
 
             models = pathlib.Path(args.models) if args.models else None
-            live = LiveManager(models, pathlib.Path(args.dir), engine=args.engine, scripted=args.scripted_bot)
+            live = LiveManager(models, pathlib.Path(args.dir), engine=args.engine, scripted=args.scripted_bot, **({} if args.max_games is None else {"max_games": args.max_games}))
             if models:
                 print(f"{len(find_models(models))} checkpoints in {args.models}")
             print(f"play against them at http://{args.host}:{args.port}/play/")

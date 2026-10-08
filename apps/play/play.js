@@ -1833,13 +1833,13 @@ document.addEventListener('keydown', e => {
   if (inputLocked() && [' ', 'Enter', 'r', 'R', 'a', 'A', 'n', 'N'].includes(k)) { e.preventDefault(); return; }
   // A focused card, permanent, plate or stack item: Enter or Space clicks it (Shift+Enter double-clicks: plays it).
   const fc = e.target.closest?.('#hand .card, #board .perm, .plate, .sitem');
-  if (fc && (k === 'Enter' || k === ' ')) {
+  if (fc && fc.matches(':focus-visible') && (k === 'Enter' || k === ' ')) {  // keyboard focus only: a clicked card must not capture Space
     e.preventDefault();
     fc.dispatchEvent(new MouseEvent(e.shiftKey ? 'dblclick' : 'click', {bubbles: true}));
     return;
   }
   // A focused button, link or option keeps Space and Enter (activate it), never the global hotkeys.
-  if ((k === ' ' || k === 'Enter') && e.target !== document.body && e.target.closest('button, a, [role=button], [tabindex]')) return;
+  if ((k === ' ' || k === 'Enter') && e.target !== document.body && (e.target.closest('button, a') || (e.target.closest('[role=button], [tabindex]') && e.target.matches(':focus-visible')))) return;
   if (k === ' ') { e.preventDefault(); if ($('#overlay').classList.contains('on') && (S.ui?.kind === 'assign_damage' || S.ui?.kind === 'mulligan')) { const b = $('#overlay .primary'); if (b && !b.disabled) b.click(); return; } primary(); return; }
   if (k === 'Escape') {
     if (drag) { const dg = drag; drag = null; $('#field0').classList.remove('drop', 'hot'); $('#ghost').style.display = 'none'; dg.el.classList.remove('dragging'); dg.el.style.translate = ''; clearHot(); }
@@ -1869,7 +1869,7 @@ document.addEventListener('keydown', e => {
   if (k === 'o' || k === 'O') { $('#drawer').classList.contains('on') ? closeDrawer() : openDrawer(); }
 });
 $('#primary').addEventListener('click', e => { e.stopPropagation(); primary(); });
-document.addEventListener('mouseup', e => { const b = e.target.closest('button'); if (b && e.detail > 0) b.blur(); });  // mouse clicks don't park focus
+document.addEventListener('mouseup', e => { const b = document.activeElement; if (b && b !== document.body && b.closest('button, [tabindex]') && !b.closest('form, #modal')) b.blur(); });  // mouse clicks don't park focus (Space stays the pass key)
 $('#bAll').addEventListener('click', e => { e.stopPropagation(); openDrawer(); });
 $('#bNew').addEventListener('click', () => {
   if (S.gid && !S.over && S.raw.length && !confirm('Leave this game? It counts as a loss and cannot be resumed.')) return;
