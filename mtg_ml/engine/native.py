@@ -24,7 +24,7 @@ import random
 
 import mtg_ml_native as _n
 
-from .cards import CARDS, FACES, SPEC_PATH, TOKENS, count_of
+from .cards import CARDS, DUNGEONS, FACES, SPEC_PATH, TOKENS, count_of
 from .game import Game, RulesError
 from .mana import ManaCost
 from .objects import FREE, TempEffect
@@ -32,7 +32,7 @@ from .objects import FREE, TempEffect
 with open(SPEC_PATH, encoding="utf-8") as _f:
     _n.load_cards(_f.read())
 
-_ALL_DEFS = {**FACES, **TOKENS, **CARDS}
+_ALL_DEFS = {**FACES, **TOKENS, **CARDS, **DUNGEONS}  # dungeons: the source of room triggers on the stack
 
 
 class NativeCard(_n.CardView):
@@ -463,6 +463,10 @@ class NativeGame:
     def turn(self) -> int:
         return self._g.turn
 
+    @turn.setter
+    def turn(self, value: int) -> None:
+        self._g.turn = value
+
     @property
     def step_name(self) -> str:
         return self._g.step_name
@@ -490,6 +494,18 @@ class NativeGame:
     @property
     def lands_played(self) -> int:
         return self._g.lands_played
+
+    @lands_played.setter
+    def lands_played(self, value: int) -> None:
+        self._g.lands_played = value
+
+    @property
+    def spells_cast_this_turn(self) -> int:
+        return self._g.spells_cast_this_turn
+
+    @spells_cast_this_turn.setter
+    def spells_cast_this_turn(self, value: int) -> None:
+        self._g.spells_cast_this_turn = value
 
     @property
     def mulligans_taken(self) -> list[int]:

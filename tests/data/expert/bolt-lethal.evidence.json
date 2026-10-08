@@ -1,0 +1,682 @@
+{
+  "format": "EvidenceGame",
+  "version": 1,
+  "sources": [
+    {
+      "id": "fixture",
+      "group_id": "fixture",
+      "type": "synthetic_test"
+    }
+  ],
+  "records": [
+    {
+      "id": "state-0",
+      "kind": "state",
+      "value": {
+        "path": "active",
+        "value": 0
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-1",
+      "kind": "state",
+      "value": {
+        "path": "step",
+        "value": "main1"
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-2",
+      "kind": "state",
+      "value": {
+        "path": "turn",
+        "value": 8
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-3",
+      "kind": "state",
+      "value": {
+        "path": "lands_played",
+        "value": 1
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-4",
+      "kind": "state",
+      "value": {
+        "path": "spells_cast_this_turn",
+        "value": 0
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-5",
+      "kind": "state",
+      "value": {
+        "path": "players.0.life",
+        "value": 20
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-6",
+      "kind": "state",
+      "value": {
+        "path": "players.0.drawn",
+        "value": 0
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-7",
+      "kind": "state",
+      "value": {
+        "path": "players.0.hand",
+        "value": [
+          "Lightning Bolt"
+        ]
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "self",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-8",
+      "kind": "state",
+      "value": {
+        "path": "players.0.hand_count",
+        "value": 1
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-9",
+      "kind": "state",
+      "value": {
+        "path": "players.0.battlefield",
+        "value": [
+          "Mountain"
+        ]
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-10",
+      "kind": "state",
+      "value": {
+        "path": "players.0.graveyard",
+        "value": []
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-11",
+      "kind": "state",
+      "value": {
+        "path": "players.0.exile",
+        "value": []
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-13",
+      "kind": "state",
+      "value": {
+        "path": "players.0.library_count",
+        "value": 10
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-14",
+      "kind": "state",
+      "value": {
+        "path": "players.1.life",
+        "value": 3
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-15",
+      "kind": "state",
+      "value": {
+        "path": "players.1.drawn",
+        "value": 0
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-17",
+      "kind": "state",
+      "value": {
+        "path": "players.1.hand_count",
+        "value": 1
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-18",
+      "kind": "state",
+      "value": {
+        "path": "players.1.battlefield",
+        "value": []
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-19",
+      "kind": "state",
+      "value": {
+        "path": "players.1.graveyard",
+        "value": []
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-20",
+      "kind": "state",
+      "value": {
+        "path": "players.1.exile",
+        "value": []
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "state-22",
+      "kind": "state",
+      "value": {
+        "path": "players.1.library_count",
+        "value": 10
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 0,
+          "end": 0,
+          "kind": "frame",
+          "locator": "synthetic-test-frame",
+          "viewer": 0
+        }
+      ],
+      "visibility": "public",
+      "available_at": 0,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Synthetic unit-test evidence."
+      }
+    },
+    {
+      "id": "action-0",
+      "kind": "action",
+      "value": {
+        "selector": {
+          "player": 0,
+          "kind": "priority",
+          "key": [
+            "cast",
+            "Lightning Bolt",
+            "hand",
+            "normal"
+          ],
+          "label": "Cast Lightning Bolt"
+        }
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 1,
+          "end": 1,
+          "kind": "frame",
+          "locator": "test-action",
+          "viewer": null
+        }
+      ],
+      "visibility": "public",
+      "available_at": 1,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Explicit synthetic test action, not a human label."
+      }
+    },
+    {
+      "id": "action-1",
+      "kind": "action",
+      "value": {
+        "selector": {
+          "player": 0,
+          "kind": "target",
+          "key": [
+            "target",
+            "any",
+            "player",
+            "opponent"
+          ],
+          "label": "Target player 1 (opponent)"
+        }
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 2,
+          "end": 2,
+          "kind": "frame",
+          "locator": "test-action",
+          "viewer": null
+        }
+      ],
+      "visibility": "public",
+      "available_at": 2,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Explicit synthetic test action, not a human label."
+      }
+    },
+    {
+      "id": "action-2",
+      "kind": "action",
+      "value": {
+        "selector": {
+          "player": 0,
+          "kind": "pay_mana",
+          "key": [
+            "pay",
+            "source",
+            "Mountain",
+            "R"
+          ],
+          "label": "Tap Mountain#12 for R"
+        }
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 3,
+          "end": 3,
+          "kind": "frame",
+          "locator": "test-action",
+          "viewer": null
+        }
+      ],
+      "visibility": "public",
+      "available_at": 3,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Explicit synthetic test action, not a human label."
+      }
+    },
+    {
+      "id": "action-3",
+      "kind": "action",
+      "value": {
+        "selector": {
+          "player": 0,
+          "kind": "priority",
+          "key": [
+            "pass"
+          ],
+          "label": "Pass priority"
+        }
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 4,
+          "end": 4,
+          "kind": "frame",
+          "locator": "test-action",
+          "viewer": null
+        }
+      ],
+      "visibility": "public",
+      "available_at": 4,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Explicit synthetic test action, not a human label."
+      }
+    },
+    {
+      "id": "action-4",
+      "kind": "action",
+      "value": {
+        "selector": {
+          "player": 1,
+          "kind": "priority",
+          "key": [
+            "pass"
+          ],
+          "label": "Pass priority"
+        }
+      },
+      "refs": [
+        {
+          "source_id": "fixture",
+          "start": 5,
+          "end": 5,
+          "kind": "frame",
+          "locator": "test-action",
+          "viewer": null
+        }
+      ],
+      "visibility": "public",
+      "available_at": 5,
+      "review": {
+        "status": "accepted",
+        "reviewer": "test",
+        "note": "Explicit synthetic test action, not a human label."
+      }
+    }
+  ],
+  "metrics": {}
+}

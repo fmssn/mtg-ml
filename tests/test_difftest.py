@@ -160,11 +160,12 @@ def test_entity_and_preview_strings_identical():
     seats (set 5 adds the viewer's own hand), the ids options point at, and
     the simulated previews of set 6 (`option_previews` too)."""
     from mtg_ml.encode import FEATURE_VERSIONS, entity_features, option_object_ids, option_preview, option_previews, state_features
-    from mtg_ml.match import MATCHUPS, game_args
+    from mtg_ml.match import EXPLICIT_ONLY, MATCHUPS, game_args
 
     first = ("blue_madness", "jund_blue", "jund_madness")  # the token coverage below was found on these (15 games since the fidelity sideboards changed game 2)
-    later = sorted(set(MATCHUPS) - set(first))
+    later = sorted(set(MATCHUPS) - set(first) - EXPLICIT_ONLY)
     runs = [(seed, first[seed % 3]) for seed in range(15)] + [(15 + i, later[i % len(later)]) for i in range(2 * len(later))]
+    runs += [(100 + i, m) for m in sorted(EXPLICIT_ONLY) for i in range(2)]  # appended, so the runs above are unchanged
     seen = set()
     for seed, matchup in runs:
         args = game_args(1 + seed // 3 % 2, matchup)

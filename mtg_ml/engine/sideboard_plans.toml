@@ -235,3 +235,14 @@ opponent = "tron"
 why = "A race: Spinewoods Paladin adds a 5/4 trampler, Deglamer answers Bonder's Ornament or a Golem; the slower card selection goes out."
 in = { "Spinewoods Paladin" = 2, "Deglamer" = 1 }
 out = { "Winding Way" = 1, "Lead the Stampede" = 2 }
+
+# The Delver mirror (2026-10-08, from card knowledge; for the play UI's Delver
+# against the model's Delver). Only the matchup blue_mirror uses this row, and
+# training sees it only when a --matchup list names blue_mirror.
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "mono_blue_terror"
+why = "Mirror: Gut Shot kills Delver before it flips, Envelop counters Lorien Revealed, Ponder, Mental Note and Sleep of the Dead; the tap-down and two Force Spike (weak once both sides hold up Counterspell) go out."
+in = { "Gut Shot" = 3, "Envelop" = 1 }
+out = { "Sleep of the Dead" = 2, "Force Spike" = 2 }

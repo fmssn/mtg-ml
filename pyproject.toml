@@ -9,6 +9,9 @@ dependencies = []
 dev = ["pytest>=8"]
 rl = ["torch>=2.2", "numpy"]
 review = ["anthropic"]  # only for `mtg_ml.review --backend claude`
+expert-media = ["yt-dlp>=2026.3", "pillow>=10", "numpy"]
+expert-asr = ["faster-whisper>=1.1"]
+expert-ocr = ["paddleocr>=3,<4", "paddlepaddle>=3,<4", "setuptools>=70"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -19,6 +22,7 @@ include = ["mtg_ml*"]
 
 [tool.setuptools.package-data]
 "mtg_ml.engine" = ["cards.toml", "sideboard_plans.toml"]
+"mtg_ml" = ["play_config.toml"]
 
 [tool.ruff]
 line-length = 120

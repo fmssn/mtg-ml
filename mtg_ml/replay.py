@@ -29,11 +29,13 @@ from .match import DEFAULT_MATCHUP, game_args, matchup_decks
 FORMAT = 1
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VIEWER = ROOT / "viz" / "viewer.html"
+PLAY_APP = ROOT / "apps" / "play"  # the play-vs-model client, served at /play
+_PLAY_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
 DECK_TITLES = {"jund_wildfire": "Jund Wildfire", "mono_blue_terror": "Mono Blue Terror", "red_madness": "Red Madness", "grixis_affinity": "Grixis Affinity", "elves": "Elves", "tron": "Tron"}
 
 
 def _card_info(face, token: bool) -> dict:
-    return {
+    info = {
         "types": sorted(face.types),
         "subtypes": sorted(face.subtypes),
         "cost": str(face.cost) if not ("Land" in face.types or token) else "",
@@ -42,6 +44,13 @@ def _card_info(face, token: bool) -> dict:
         "toughness": face.toughness,
         "token": token,
     }
+    # The colours its plain mana ability makes (the play client taps sources for mana)
+    ab = next((a for a in face.abilities if a.mana is not None and not a.is_filter and a.zone == "battlefield"), None)
+    if ab is not None:
+        info["mana"] = list(ab.mana)
+        if ab.sac_self:
+            info["mana_sac"] = True
+    return info
 
 
 def _card(c, info: dict) -> dict:
@@ -241,6 +250,10 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
             try:
                 if method == "GET" and parts == ["options"]:
                     return self._json(live.options())
+                if method == "GET" and parts == ["sideboard"]:
+                    return self._json(live.sideboard(query.get("matchup", [""])[0], int(query.get("seat", ["0"])[0])))
+                if method == "GET" and parts == ["decks"]:
+                    return self._json(live.decklists(query.get("matchup", [""])[0], int(query.get("seat", ["0"])[0]), int(query.get("game", ["1"])[0])))
                 if method == "GET" and len(parts) == 1:
                     return self._json(live.view(parts[0], int(query.get("since", ["0"])[0])))
                 if method == "POST":
@@ -254,6 +267,14 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                         return self._json(live.new(req))
                     if len(parts) == 2 and parts[1] == "choose":
                         return self._json(live.choose(parts[0], req))
+                    if len(parts) == 2 and parts[1] == "concede":
+                        return self._json(live.concede(parts[0]))
+                    if len(parts) == 2 and parts[1] == "flag":
+                        return self._json(live.flag(parts[0], req))
+                    if len(parts) == 2 and parts[1] == "survey":
+                        return self._json(live.survey(parts[0], req))
+                    if len(parts) == 2 and parts[1] == "next":
+                        return self._json(live.next_game(parts[0], req))
             except (LiveError, ValueError) as e:  # JSON and int() errors are ValueErrors too
                 return self._json({"error": str(e)}, 400)
             except Exception as e:  # keep the connection: the viewer shows the message
@@ -273,6 +294,16 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                 return self._live("GET", path, urllib.parse.parse_qs(url.query))
             if path in ("/", "/index.html"):
                 return self._send(VIEWER.read_bytes(), "text/html; charset=utf-8")
+            if path == "/play":
+                self.send_response(301)
+                self.send_header("Location", "/play/")
+                self.end_headers()
+                return
+            if path.startswith("/play/"):
+                name = path[len("/play/"):] or "index.html"
+                f = (PLAY_APP / name).resolve()
+                if f.parent == PLAY_APP.resolve() and f.suffix in _PLAY_TYPES and f.is_file():
+                    return self._send(f.read_bytes(), _PLAY_TYPES[f.suffix])
             if path == "/api/replays":
                 files = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
                 return self._send(json.dumps([_replay_summary(p) for p in files]).encode(), "application/json")
@@ -329,6 +360,11 @@ def main(argv=None) -> None:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--models", default=None, help="directory of checkpoints to play against in the viewer (needs torch)")
+    s.add_argument("--max-games", type=int, default=None, help="live games held at once (default 8); a full server refuses new games instead of dropping one being played")
+    s.add_argument("--dev", action="store_true", help="development server: every checkpoint and matchup, the scripted bots and the dev scenarios (works without --models and torch)")
+    s.add_argument("--scripted-bot", action="store_true", help="same as --dev (kept for old commands)")
+    s.add_argument("--play-config", default=None, help="the play offer (default: mtg_ml/play_config.toml); ignored with --dev")
+    s.add_argument("--no-issues", action="store_true", help="never file flags as GitHub issues (default: file them when gh is authenticated or MTG_PLAY_GITHUB_TOKEN is set)")
     s.add_argument("--engine", default=None, help="engine for live games: python or native; default: $MTG_ENGINE, else python")
     args = ap.parse_args(argv)
 
@@ -348,11 +384,20 @@ def main(argv=None) -> None:
             print(f"{path}: {len(rep['frames'])} frames, {m['turns']} turns, winner {m['winner']} ({m['end_reason']})")
     else:
         live = None
-        if args.models:
-            from .live import LiveManager, find_models
+        dev = args.dev or args.scripted_bot
+        if args.models or dev:
+            from .live import LiveManager, find_models, load_play_config
+            from .live_issues import GitHubFiler
 
-            live = LiveManager(pathlib.Path(args.models), pathlib.Path(args.dir), engine=args.engine)
-            print(f"{len(find_models(pathlib.Path(args.models)))} checkpoints in {args.models}")
+            models = pathlib.Path(args.models) if args.models else None
+            config = None if dev else load_play_config(pathlib.Path(args.play_config) if args.play_config else None)
+            filer = None if args.no_issues else GitHubFiler()
+            live = LiveManager(models, pathlib.Path(args.dir), engine=args.engine, scripted=dev, config=config, filer=filer,
+                               **({} if args.max_games is None else {"max_games": args.max_games}))
+            print(f"flags: {'filed as GitHub issues on ' + filer.repo if filer and filer.available() else 'saved with the replays only (no GitHub access)'}")
+            if models:
+                print(f"{len(find_models(models))} checkpoints in {args.models}")
+            print(f"play against them at http://{args.host}:{args.port}/play/")
         serve(pathlib.Path(args.dir), args.host, args.port, live=live)
 
 
