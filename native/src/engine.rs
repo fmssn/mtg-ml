@@ -732,10 +732,10 @@ impl Eng {
         let xv = st.stack[st.stack_pos(sid).unwrap()].x;
         let cost = base.with_x(xv).reduced(reduction);
         self.pay_mana(p, Remaining::of(&cost), add_sac, &[], cname)?;
-        if mode == Method::Phyrexian {
+        let life = if mode == Method::Phyrexian { d.phyrexian_life } else if mode == Method::Flashback { d.flashback_life } else { 0 };
+        if life != 0 {
             let st = self.s();
-            st.players[p as usize].life -= d.phyrexian_life;
-            let life = d.phyrexian_life;
+            st.players[p as usize].life -= life;
             st.push_log_lazy(|_| format!("p{p} pays {life} life for {cname}"));
         }
         if let Some(flt) = add_sac {
@@ -1645,10 +1645,13 @@ impl Eng {
     fn run_op(&mut self, op: &'static Op, item: &StackItem) -> R<()> {
         let ctl = item.controller;
         match op {
-            Op::Draw { n, n_cast_from_graveyard, each_controlling } => {
+            Op::Draw { n, n_cast_from_graveyard, each_controlling, target_player } => {
                 let n = if item.cast_from == Zone::Graveyard { n_cast_from_graveyard.unwrap_or(*n) } else { *n };
                 let st = self.s();
                 match each_controlling {
+                    None if *target_player => {
+                        if let Some(Tgt::Player(p)) = st.target(item, 0) { st.draw(p as usize, n, true); }
+                    }
                     None => st.draw(ctl as usize, n, true),
                     Some(name) => {
                         for q in [ctl, 1 - ctl] {

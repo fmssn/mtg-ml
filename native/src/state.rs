@@ -1970,6 +1970,9 @@ impl State {
         if d.additional_discard && (self.players[p as usize].hand.len() as i32 - (c.zone == Zone::Hand) as i32) < 1 {
             return false;
         }
+        if mode == Method::Flashback && self.players[p as usize].life < d.flashback_life {
+            return false;
+        }
         if mode == Method::Phyrexian && self.players[p as usize].life < d.phyrexian_life {
             return false;
         }
