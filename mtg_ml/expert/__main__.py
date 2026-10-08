@@ -75,6 +75,19 @@ def parser() -> argparse.ArgumentParser:
         cmd.add_argument("--out", type=Path, required=True)
         if name == "export":
             cmd.add_argument("--features", type=int, default=6)
+    reconstruction = sub.add_parser("reconstruct", help="bounded legal replay between reviewed evidence checkpoints")
+    reconstruction.add_argument("evidence", type=Path)
+    reconstruction.add_argument("--spec", type=Path, required=True)
+    reconstruction.add_argument("--engine", choices=("python", "native"), default="native")
+    reconstruction.add_argument("--out", type=Path, required=True)
+    for field in ("candidates", "expansions", "actions", "seconds", "escalations"):
+        reconstruction.add_argument("--" + field, type=int, default=None, help="override this reconstruction search budget")
+    checkpoint = sub.add_parser("checkpoint-template", help="pending scenario using only one checkpoint's as-of facts")
+    checkpoint.add_argument("evidence", type=Path)
+    checkpoint.add_argument("--spec", type=Path, required=True)
+    checkpoint.add_argument("--checkpoint", required=True)
+    checkpoint.add_argument("--id", required=True)
+    checkpoint.add_argument("--out", type=Path, required=True)
     metrics = sub.add_parser("metrics", help="ordered extraction accuracy against a manual gold log")
     metrics.add_argument("evidence", type=Path)
     metrics.add_argument("--gold", type=Path, required=True, help="JSON list of event texts in order")
@@ -162,9 +175,22 @@ def run(args) -> dict:
         return extract(read(args.source), args.out, args.start, args.end, crop=crop, fps=args.fps, captions=args.captions,
                        run_ocr=args.ocr, run_asr=args.asr, ocr_device=args.ocr_device, asr_device=args.asr_device,
                        asr_model=args.asr_model, aliases=read(args.aliases) if args.aliases else None)
-    if name in {"import-log", "align", "interpret", "review", "template", "metrics"}:
+    if name in {"import-log", "align", "interpret", "review", "template", "metrics", "reconstruct", "checkpoint-template"}:
         data = validate_evidence(read(args.evidence))
-    if name == "import-log":
+    if name == "reconstruct":
+        from .reconstruction import reconstruct
+
+        spec = read(args.spec)
+        overrides = {field: getattr(args, field) for field in ("candidates", "expansions", "actions", "seconds", "escalations")
+                     if getattr(args, field) is not None}
+        spec["budget"] = {**spec.get("budget", {}), **overrides}
+        result = reconstruct(data, spec, args.engine,
+                             on_progress=lambda status: write(args.out.with_suffix(".progress.json"), status))
+    elif name == "checkpoint-template":
+        from .reconstruction import checkpoint_template
+
+        result = checkpoint_template(data, read(args.spec), args.checkpoint, args.id)
+    elif name == "import-log":
         from .media import import_log
 
         data["records"].extend(import_log(args.log, args.source_id, args.start, args.end, args.parser))
@@ -265,8 +291,9 @@ def main(argv=None) -> None:
         print(f"expert: {e}", file=sys.stderr)
         raise SystemExit(2) from None
     # Never print transcript contents, signed URLs, or image payloads.
+    metrics = {key: len(value) if isinstance(value, list) else value for key, value in result.get("metrics", {}).items()}
     print(json.dumps({"command": args.command, "out": str(args.out), "format": result.get("format"),
-                      "records": len(result.get("records", [])), "metrics": result.get("metrics", {})}, default=str))
+                      "records": len(result.get("records", [])), "metrics": metrics}, default=str))
 
 
 if __name__ == "__main__":
