@@ -24,7 +24,7 @@ import random
 
 import mtg_ml_native as _n
 
-from .cards import CARDS, FACES, SPEC_PATH, TOKENS, count_of
+from .cards import CARDS, DUNGEONS, FACES, SPEC_PATH, TOKENS, count_of
 from .game import Game, RulesError
 from .mana import ManaCost
 from .objects import FREE, TempEffect
@@ -32,7 +32,7 @@ from .objects import FREE, TempEffect
 with open(SPEC_PATH, encoding="utf-8") as _f:
     _n.load_cards(_f.read())
 
-_ALL_DEFS = {**FACES, **TOKENS, **CARDS}
+_ALL_DEFS = {**FACES, **TOKENS, **CARDS, **DUNGEONS}  # dungeons: the source of room triggers on the stack
 
 
 class NativeCard(_n.CardView):

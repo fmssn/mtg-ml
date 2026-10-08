@@ -22,7 +22,7 @@ import time
 
 from mtg_ml.backend import game_class
 from mtg_ml.encode import SIM_MAX_OPTIONS, option_previews
-from mtg_ml.match import MATCHUPS, game_args
+from mtg_ml.match import EXPLICIT_ONLY, MATCHUPS, game_args
 from mtg_ml.rl.features import featurize_flat
 
 
@@ -35,7 +35,8 @@ def main() -> None:
     t5, t6, ts, nopt = [], [], [], []
     skipped = second = 0
     for seed in range(a.games):
-        m = sorted(MATCHUPS)[seed % len(MATCHUPS)]
+        pool = sorted(set(MATCHUPS) - EXPLICIT_ONLY)
+        m = pool[seed % len(pool)]
         g = game_class(a.engine)(seed=seed, max_turns=a.max_turns, **game_args(1 + seed // 3 % 2, m))
         r = random.Random(seed)
         while not g.over:

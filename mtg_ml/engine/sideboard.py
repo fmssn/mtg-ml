@@ -109,8 +109,6 @@ def validate_plan(plan: SideboardPlan, decks: Mapping = DECKS, sideboards: Mappi
     for d in (plan.deck, plan.opponent):
         if d not in decks:
             raise ValueError(f"{where}: unknown deck {d!r}")
-    if plan.deck == plan.opponent:
-        raise ValueError(f"{where}: a deck has no plan against itself (yet)")
     main, side = decks[plan.deck], sideboards.get(plan.deck, {})
     for name, n in plan.cards_out.items():
         if not isinstance(n, int) or n <= 0:
