@@ -138,8 +138,9 @@ It uses buses 18, 0A, 87, 90, C7 and CPU cores 48–63 as a **template**, not a
 reservation. The read-only resource check correctly rejected overlap with the
 live r6 trainer and its descendants. Reprepare in a new directory with the
 actual dedicated CPU allocation and final deployed ref before launching. Prefer
-cores local to the learner/inference GPUs' NUMA nodes. No waiting launcher or
-training continuation has been armed.
+cores local to the learner/inference GPUs' NUMA nodes. The dedicated campaign
+was subsequently started after the user released the project GPUs; see the
+experiment ledger for its live directory and allocation.
 
 ## Preliminary stage measurements
 

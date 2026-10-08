@@ -48,10 +48,19 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
   before applying explicit BF16 bounds. The large full-update trace was stopped
   after timing because host aggregation was excessive; plain timing runs and
   one-graph kernel traces were collected instead. All raw logs are retained.
+- **Dedicated computational campaign:** started 2026-10-08 15:47 UTC after the
+  user released the project GPUs. Exact deployed ref `e8662a5`; manifest at
+  `/home/taiga-support/mtg-ml-256-opt/campaigns/screens-20261008-dedicated/campaign.json`.
+  Baseline uses bus 18 and CPU 0–31 (26 rollout workers); four-rank FP32/BF16
+  correctness runs concurrently on buses 0A/87/90/C7 and CPU 32–35. Persistent
+  `start_computational_checks.sh` continues the remaining twelve-arm screens
+  after validation and baseline succeed. Five warm-up and twenty timed
+  iterations per arm; two/four learner expansion retains the bottleneck gates.
+  Logs and outcomes stay in that campaign directory. ComfyUI and bus BE are
+  excluded. These timing screens disable evaluation; strength comparisons and
+  three paired two-hour finalists have not started.
 - **Training strength:** not measured; sampled/greedy benchmark and L1 Elo are
-  unavailable. No full training continuation has been launched. The user is
-  arranging dedicated resources for the five-warm-up/twenty-timed screens and
-  three paired two-hour finalists.
+  unavailable pending the paired continuation experiments.
 - **Verdict: inconclusive.** The 3–5× end-to-end target remains unmeasured. Adopt
   optimizations only after correctness, throughput and matched-game/elapsed-time
   policy-strength comparisons. The campaign records failures and GPU-hours;
