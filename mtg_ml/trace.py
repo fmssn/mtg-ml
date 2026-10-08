@@ -123,9 +123,13 @@ def new_game(sc: Scenario, engine: str | None = None, log: bool = True):
     from .match import game_args
 
     cls = game_class(engine)
+    decks = sc.decks()
+    registration = {k: v for k, v in game_args(sc.match_game, sc.matchup).items() if k not in ("decks", "match_game")}
+    if sc.extra:  # synthetic card-coverage variants have no original 75-card registration
+        registration.update(registered_main=decks, registered_sideboards=((), ()))
     return cls(
-        sc.decks(),
-        **{k: v for k, v in game_args(sc.match_game, sc.matchup).items() if k not in ("decks", "match_game")},
+        decks,
+        **registration,
         seed=sc.seed,
         starting_player=sc.starting_player,
         max_turns=sc.max_turns,

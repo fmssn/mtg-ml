@@ -227,3 +227,32 @@ def test_bot_suffix_dp_matches_exhaustive_complete_allocations():
                                and (n == 0 or all(s >= l for s, l in zip(split, lethal)))]
                 expected = max(sum(w for w, s, l in zip(weights, split, lethal) if s >= l) + n for split in allocations)
                 assert score == expected
+
+
+def test_synthetic_trace_variant_registers_the_actual_supplied_list(engine):
+    from mtg_ml.trace import Scenario, new_game as trace_game
+
+    sc = Scenario(seed=57, extra=((0, "Mental Note", 1),), max_turns=1)
+    g = trace_game(sc, engine)
+    assert g.registered_main == tuple(tuple(d) for d in sc.decks())
+    assert g.registered_sideboards == ((), ())
+    assert "self:list:registered_main:Mental Note#1" in state_features(g, 0, 7)
+
+
+def test_custom_replay_lists_and_explicit_registration_are_propagated(engine):
+    from mtg_ml.replay import record
+
+    class Capture:
+        def act(self, g):
+            self.registration = (g.registered_main, g.registered_sideboards, g.current_main)
+            return 0
+
+    agents = [Capture(), Capture()]
+    decks = (["Mountain"] * 10, ["Island"] * 10)
+    main = (["Forest"] * 10, ["Island"] * 10)
+    record(agents, decks=decks, engine=engine, starting_player=0, mulligans=False, max_turns=1)
+    assert agents[0].registration[0] == tuple(tuple(d) for d in decks)
+    assert agents[0].registration[1] == ((), ())
+    record(agents, decks=decks, engine=engine, starting_player=0, mulligans=False, max_turns=1, registered_main=main)
+    assert agents[0].registration[0] == tuple(tuple(d) for d in main)
+    assert agents[0].registration[2] == tuple(tuple(d) for d in decks)

@@ -39,6 +39,33 @@ def test_lockstep_without_auto_single():
         assert py.log == nat.log and (py.winner, py.end_reason) == (nat.winner, nat.end_reason)
 
 
+def test_large_damage_allocation_context_features_and_copies_match(monkeypatch):
+    from test_correctness_foundations import amount, combat
+
+    from mtg_ml.encode import entity_features
+    from mtg_ml.rl.features import featurize
+
+    games = []
+    for engine in ("python", "native"):
+        monkeypatch.setenv("MTG_ENGINE", engine)
+        games.append(combat(power=50, life=100))
+    py, nat = games
+    while py.damage_allocation is not None:
+        assert py.damage_allocation == nat.damage_allocation
+        assert first_diff(snapshot(py), snapshot(nat)) is None
+        assert entity_features(py, 0, 7) == entity_features(nat, 0, 7)
+        assert featurize(py, 0, features=7) == featurize(nat, 0, features=7)
+        for game in games:
+            clone = game.copy()
+            assert clone.damage_allocation == game.damage_allocation
+            assert first_diff(snapshot(game), snapshot(clone)) is None
+        a = py.damage_allocation
+        n = a.remaining if a.recipient == 10 else 2 if a.recipient == 0 else 0
+        for game in games:
+            amount(game, n)
+    assert first_diff(snapshot(py), snapshot(nat)) is None
+
+
 def test_harness_reports_divergence():
     sc = Scenario(seed=5, agents=("chaos", "bot"))
     py, nat = new_game(sc, "python"), new_game(Scenario(seed=6, agents=sc.agents), "native")

@@ -234,7 +234,8 @@ def play_match(agents, seed: int = 0, engine: str | None = None, matchup: str = 
         decks = tuple(expand(p.apply()) for p in plans)
         args = game_args(n, matchup)
         args["decks"] = decks
-        g = Game(**args, seed=game_seed(seed, n), starting_player=start, **game_kw)
+        args.update(game_kw)
+        g = Game(**args, seed=game_seed(seed, n), starting_player=start)
         while not g.over:
             take(g, agents, agents[g.decision.player].act(g))
         res.games.append((start, g.winner, g.end_reason))

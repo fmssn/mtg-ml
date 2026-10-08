@@ -508,7 +508,10 @@ Without metadata they default to the supplied starting decks and empty
 sideboards. Match, rollout, trace and live-play construction supply registration
 from the selected lists while passing the actual sideboarded current decks.
 Synthetic setups must supply registration explicitly when they need it; setup
-cards are never used to reconstruct an undisclosed registration.
+cards are never used to reconstruct an undisclosed registration. Custom replay
+decks and synthetic trace card-coverage variants default to their supplied
+list with an empty sideboard; custom replay callers can pass explicit original
+registration when supplying a sideboarded current list.
 
 `GameSpec.swap_seats` defaults to false. Its `seats` and `starting_player` are
 canonical matchup positions; `physical_seats` and `game_args()` map decks,
@@ -518,8 +521,8 @@ training swaps with probability 0.5 using the trainer RNG. Set-7 evaluation
 cycles through both physical deck positions and both starts, with both learner
 roles when unrestricted; complete balance requires multiples of four games for
 one role or eight for both. BO3 keeps its mapping for the complete match and
-maps the losing player's next start consistently. Legacy training/evaluation
-keeps its original seat schedule.
+maps the losing player's next start consistently. Legacy training and evaluation involving only legacy policies
+keep their original seat schedule.
 
 Entities use the existing ragged and padded batching paths without the legacy
 64-object cap: all battlefield objects, stack items and own-hand cards retain
@@ -551,7 +554,9 @@ ids, lethal requirements, committed shares, recipient (`-1` for the defender),
 remaining power, defender, and defender share (`-1` before its choice). Keys
 include the progress and amount without object ids; labels supply attacker and
 recipient pointers. Set 7 also puts exact lethal/committed amounts and current
-recipient/attacker markers on their corresponding entities. The new decision is supported by both engines, snapshots,
+recipient/attacker markers on their corresponding entities. Early previews
+stop at the next allocation choice; shares are not treated as dealt damage
+before the whole allocation completes. The new decision is supported by both engines, snapshots,
 public events, bots, and the live client. Scripted bots maximize their existing
 kill/value/trample score using suffix dynamic programming. Old policies can
 load but have not learned the new decision; engine-version changes must be
