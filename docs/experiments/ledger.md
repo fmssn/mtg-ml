@@ -2,6 +2,12 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## Open (handoff 2026-10-08)
+
+- Round 6 (three fresh six-deck arms on feature set 6) stopped 2026-10-08 17:41 CEST on request, all archived. Numbers are the last in-training evaluations (1,000 games, ladder L1 200/rung); the 2,000-game final evals were not run.
+- Next: continue `r6-h128` from its 12M checkpoint with a longer lr schedule (it was still climbing at the 3e-5 floor), and find out why the attention arm is ~6x slower per iteration before giving it more games (it was the best per game). Width: h256 needs more games to say anything.
+- Ladder: r6-h128 reached 76 at 12M, at the top L1 rung (79): start L2 before the next round.
+
 ## Open (handoff 2026-10-07)
 
 - Rounds 4 and 5 stopped 2026-10-07 17:25 UTC on request (Mix complete, the others early); all archived. The numbers below are the last in-training evaluations (1,000 games, ladder L1 200/rung); the standard 2,000-game final evals and head to heads were not run yet: `final_evals.sh` with `H2H="20261007-r4-mix 20261007-r4-control"`, `ladder_final.py`, from `~/mtg-ml-r4`.
@@ -13,6 +19,9 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
+| 20261008-r6-h128 | fresh h128 entity net, feature set 6, six decks (15 pairings, jund_blue ×2), real 15-card sideboards | 12.9M (stopped) | **66.8%**⁶ at 12M | 67.2%⁶ at 12M | **76 ± 12**⁶ at 12M | works: best six-deck model; still climbing |
+| 20261008-r6-h128-attn | the same + 1 entity self-attention layer | 2.4M (stopped) | 50.8%⁶ at 2M | 65.9%⁶ at 2M | -26 ± 13⁶ at 2M | promising per game (+9 pts, +52 Elo vs h128 at 2M), ~6x slower: fix speed first |
+| 20261008-r6-h256 | the same at h256, lr 1.5e-4 → 1.5e-5 | 7.3M (stopped) | 50.0%⁶ at 6M | 59.3%⁶ at 6M | -4 ± 12⁶ at 6M | inconclusive: behind h128 at equal games (54.5% / 8 at 6M) |
 | 20261007-red-madness-1m | new deck: Red Madness learner vs frozen r1-control Jund, warm-started from it | 1M | (vs Jund bot) 89.9% | 92.6% | | new-deck baseline⁴ |
 | 20261007-r5-mix-h256 | fresh h256 entity net on the three-deck mix, lr 1.5e-4 → 1.5e-5 | 2.6M (stopped) | 46.3%⁵ | 60.4%⁵ | -32 ± 13⁵ | inconclusive: level with h128 at equal games, slightly behind |
 | 20261007-r5-mix-h256-lr3e-4 | the same at the h128 lr (3e-4 → 3e-5) | 2.6M | 38.1% at 2.5M | | -69 at 2.5M | abort: steps too large |
@@ -36,9 +45,40 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 | 20261006-overnight-selfplay | open-ended self-play + pool | 8.4M | 64.6% | 70.9% | 103 ± 13 | parent |
 | 20261006-overnight-bot10 | + 10% games vs scripted bots | 8.4M | 65.6% | | 75 ± 12 | no effect |
 
-Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows. ⁵ last in-training evaluation (1,000 games); the 2,000-game final evals were not run (runs stopped 2026-10-07).
+Sampled/greedy of finished runs: 2,000 games on the fixed engine, final checkpoint. ¹ last in-training evaluation (1,000 games, 9.25M). ² sampled training games of the last iterations against the frozen main policy; starting levels 45% (Jund) and 55% (Blue). ³ evaluated without auto mana (it trained with it), so the model paid mana itself. L1 Elo: final checkpoint (policy file), 200 paired games per rung, on the code the run was trained with (round 1: feature set 1; rounds 2-3: feature set 2, under which the L1 rungs, trained on set 1, see untrained feature rows: about 1 benchmark point weaker, so round 2-3 Elos may read a few points high against round 1). Head-to-head results are in the round sections. ⁴ benchmark here = learner Red vs the scripted Jund bot (1,000 games); not comparable to the Jund-vs-blue rows. ⁵ last in-training evaluation (1,000 games); the 2,000-game final evals were not run (runs stopped 2026-10-07). ⁶ last in-training evaluation (1,000 games); the 2,000-game final evals were not run (runs stopped 2026-10-08).
 
 ---
+
+## 20261008-r6 · six decks from scratch on feature set 6 (h128, h128 + attention, h256)
+
+- **Question**: can one network learn all six decks (Jund Wildfire, Mono Blue Terror, Red Madness, Grixis Affinity, Elves, Tron) from scratch with the set-6 representation, and do width or entity attention help.
+- **Code**: 30d9ef6 (PR #45 sideboard overhaul + Affinity/Elves/Tron, plus #48 damage-assignment cap and chunked inference requests), feature set 6, native engine. Launch scripts in `~/mtg-ml-r6/` on h100-private (start_arm.sh, stop_r6.sh, status_r6.sh).
+- **Flags (shared)**: `--trunk entity --value-net shared --engine native --device cuda --inference server --server-device cuda:0 --seed 6 --server-policy-slots 256 --features 6 --postboard-frac 0.2 --matchup jund_blue:2,affinity_elves,affinity_tron,blue_affinity,blue_elves,blue_madness,blue_tron,elves_tron,jund_affinity,jund_elves,jund_madness,jund_tron,madness_affinity,madness_elves,madness_tron --lr-anneal-games 10000000 --workers 19 --games-per-iter 2048 --checkpoint-every 25 --snapshot-every 122 --eval-every 0 --eval-every-games 1000000 --bench-games 1000 --bench-greedy-games 1000 --ladder-games 200 --bench-bo3-matches 0 --eval-bo3-matches 0`. Arms: `r6-h128` `--hidden 128 --ppo-lr 3e-4 --ppo-lr-final 3e-5`; `r6-h128-attn` the same + `--entity-attn 1`; `r6-h256` `--hidden 256 --ppo-lr 1.5e-4 --ppo-lr-final 1.5e-5`. GPUs 87 / 90 / C7 by bus id. Each arm restarted once (08:28 CEST) after the damage-assignment crash fixed in #48.
+- **Ladder bug (fixed during the run)**: the r6 copy of `ladder.json` held a 2-game smoke re-rating (0 / -59 / -59 / -119) instead of L1's fixed ratings, so every logged `ladder/elo` up to 11M was ~100 too low. Restored from `~/mtg-ml-checkpoints/ladder/L1/` at 12:50 CEST (rung files byte-identical). The Elo below is recomputed from the per-rung scores against L1; the 12M value was logged with the right ratings and matches. Rule: a run's `--ladder-ratings` is always a copy of L1, never a fresh rating.
+
+| games | h128 sampled / greedy | h128 Elo | attn sampled / greedy | attn Elo | h256 sampled / greedy | h256 Elo |
+|---|---|---|---|---|---|---|
+| 1M | 36.7 / 53.7% | -56 | 40.6 / 59.8% | -65 | 37.2 / 52.4% | -75 |
+| 2M | 42.0 / 56.4% | -78 | **50.8 / 65.9%** | **-26** | 37.2 / 56.3% | -82 |
+| 3M | 41.8 / 57.3% | -46 | | | 38.7 / 54.3% | -63 |
+| 4M | 52.6 / 64.0% | -19 | | | 46.8 / 57.5% | -45 |
+| 5M | 53.1 / 63.5% | 1 | | | 47.5 / 63.2% | -28 |
+| 6M | 54.5 / 63.5% | 8 | | | 50.0 / 59.3% | -4 |
+| 8M | 54.8 / 63.0% | -3 | | | | |
+| 10M | 63.8 / 68.1% | 63 | | | | |
+| 12M | **66.8 / 67.2%** | **76** | | | | |
+
+± 12-13 Elo, benchmark ± ~3 points. Rows left out are within noise of their neighbours.
+
+- **Per deck at 12M** (h128, mean over its pairings, sampled, vs the scripted bots): Jund 61%, Affinity 65%, Blue 76%, Tron 78%, Red 83%, Elves 84%. The newer decks' bots are probably weaker opponents, so these measure progress, not deck strength.
+- **Findings**:
+  - One network learns all six decks. At 12M games, of which only ~1.5M were Jund vs Blue, h128 plays the main matchup at L1 76: level with the old two-deck self-play run after 8M games of that matchup alone, and still 90-140 Elo below the best specialists (r4-control 163, the set-4 fine-tune ~212).
+  - h128 never plateaued: 8M looked flat (noise), then +65 Elo by 10M and +13 more by 12M, with the lr already at its 3e-5 floor from 10M.
+  - Attention was clearly better per game at 2M (+9 benchmark points and +52 Elo against h128 at 2M; round 3's warm-started attention arm showed no gain), but ran at 20 → 40 s/iter against h128's 4.5 → 6.3. Its arm also had fewer collector cores (21-31 against 2-20), so part of the gap may be the CPU layout rather than the model.
+  - h256 learned slower per game than h128 throughout, as in round 5, at twice the cost per iteration. Not yet a verdict on capacity.
+  - The h128 arm's s/iter rose ~40% over the day (the attention arm's doubled): longer games as play improves, and evaluation sharing the worker cores.
+- **Verdicts**: `r6-h128` **best six-deck parent**; `r6-h128-attn` promising, fix its speed and rerun; `r6-h256` inconclusive.
+- **Archive**: `~/mtg-ml-checkpoints/20261008-r6-h128`, `20261008-r6-h128-attn`, `20261008-r6-h256`.
 
 ## 20261007-r5 · width test on the three-deck mix
 
