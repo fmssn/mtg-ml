@@ -418,3 +418,51 @@ def test_vapor_snag_fizzles_when_the_creature_is_gone():
     choose(g, "Cast Cast Down")
     resolve_stack(g)
     assert g.players[1].life == 20 and "Delver of Secrets" in names(g.players[1].graveyard)
+
+
+def test_deep_analysis_targets_either_player():
+    for target in (0, 1):
+        g = scenario(p1={"hand": ["Deep Analysis"], "battlefield": ISLANDS(4)}, active=1)
+        choose(g, "Cast Deep Analysis")
+        choose(g, f"Target player {target}")
+        pay(g)
+        resolve_stack(g)
+        assert len(g.players[target].hand) == 2
+        assert "Deep Analysis" in names(g.players[1].graveyard)
+
+
+def test_deep_analysis_flashback_life_and_exile():
+    g = scenario(p1={"graveyard": ["Deep Analysis"], "battlefield": ISLANDS(2), "life": 4}, active=1)
+    choose(g, "flashback")
+    choose(g, "Target player 1")
+    pay(g)
+    assert g.players[1].life == 1
+    resolve_stack(g)
+    assert names(g.players[1].exile) == ["Deep Analysis"]
+    assert len(g.players[1].hand) == 2
+    g = scenario(p1={"graveyard": ["Deep Analysis"], "battlefield": ISLANDS(2), "life": 2}, active=1)
+    assert not has(g, "Deep Analysis")
+
+
+def test_mystic_trigger_survives_countered_spell():
+    g = scenario(p0={"hand": ["Counterspell"], "battlefield": ISLANDS(2)},
+                 p1={"hand": ["Mental Note"], "battlefield": ["Murmuring Mystic"] + ISLANDS(1)}, active=1)
+    choose(g, "Cast Mental Note")
+    pay(g)
+    pass_priority(g)
+    choose(g, "Cast Counterspell")
+    pay(g)
+    resolve_stack(g)
+    assert bf(g, 1).count("Bird Illusion") == 1
+    bird = find(g, "Bird Illusion")
+    assert bird.face.colors == frozenset({"U"}) and g.has(bird, "flying")
+    assert g.power(bird) == g.toughness(bird) == 1
+    assert len(g.players[1].hand) == 0
+
+
+def test_mystic_does_not_trigger_for_creature():
+    g = scenario(p1={"hand": ["Delver of Secrets"], "battlefield": ["Murmuring Mystic"] + ISLANDS(1)}, active=1)
+    choose(g, "Cast Delver")
+    pay(g)
+    resolve_stack(g)
+    assert "Bird Illusion" not in bf(g)
