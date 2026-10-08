@@ -8,6 +8,11 @@ Background research and the roadmap: [`docs/research-mtg-pauper-rl.md`](docs/res
 
 ## Quickstart
 
+For development in Conductor, Codex or Claude Code, start with `make setup` to
+create an isolated workspace environment and build the Rust engine. See
+[development setup](docs/development.md) and the [shared context index](docs/context.md).
+The Python-only quickstart below also works without the optional native engine.
+
 ```bash
 pip install -e '.[dev]'          # no runtime dependencies, Python >= 3.11
 python -m pytest                 # per-card rules, combat, fuzzing, golden traces (+ native variants, see below)

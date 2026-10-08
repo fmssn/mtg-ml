@@ -20,9 +20,10 @@ Forced decisions (a single option) appear only as log lines. A state line is pri
 ```bash
 M=model:runs/<run>/model.pt
 python -m mtg_ml.review record --agents $M,$M --games 20 --engine native   # reviews/games/*.json
-python -m mtg_ml.review review reviews/games/*.json --backend deepseek      # *.findings-deepseek.json
-python -m mtg_ml.review verify reviews/games/*.json --backend deepseek      # rollouts for "B was better" claims
-python -m mtg_ml.review report reviews/games/*.json --backend deepseek > reviews/report.md
+GAMES=(reviews/games/*.json)  # capture game files before findings are written
+python -m mtg_ml.review review "${GAMES[@]}" --backend deepseek      # *.findings-deepseek.json
+python -m mtg_ml.review verify "${GAMES[@]}" --backend deepseek      # rollouts for "B was better" claims
+python -m mtg_ml.review report "${GAMES[@]}" --backend deepseek > reviews/report.md
 ```
 
 - **Backends.** `deepseek` (`DEEPSEEK_API_KEY`; `--model deepseek-reasoner` for the thinking model) is the cheap first pass. `claude` (the `anthropic` package and its usual credentials; default `claude-opus-5-5`, `--model claude-sonnet-5-5` is cheaper) is for escalation: rerun it on games where the first pass found engine bugs, masking gaps or severity-3 findings. On a safety decline the request falls back server-side (`fallbacks: "default"`). `prompt` writes `<game>.prompt.md` and makes no call: any agent can answer it, for example a Claude Code subagent. Save the reply as `<game>.reply.txt` and read it back in with `--backend file`.
@@ -31,7 +32,40 @@ python -m mtg_ml.review report reviews/games/*.json --backend deepseek > reviews
 
 ## Setup focus
 
-`review --focus setup` adds two things to each prompt. The first is a sheet of what the policy observes (feature sets 2-3, entity trunk). It lists what is missing: which attacker a blocker blocks, what an aura is attached to, and incoming combat damage. The second is an instruction to look for engine, mask, observation and architecture flaws before judging play quality. It also enables the `architecture` cause: a decision that needs a relation between objects, which this network (entities encoded independently and summed, no attention) cannot represent. Run it on greedy games, so sampling noise does not crowd out the setup findings.
+`review --focus setup` adds a checkpoint-specific observation sheet and an instruction to look for engine, mask, observation and architecture flaws before judging play quality. New recordings store each model's configuration in `meta.review.policy_configs`, independently of the human-readable `--note`. The sheet selects its cumulative feature set (1–6), trunk, recurrent memory and entity-attention layers. For example, set 4 includes combat relations and incoming damage, set 5 adds card shapes and hand entities, and set 6 adds bounded simulated option previews. Check the sheet against `docs/features.md` and the checkpoint before confirming a gap; feature presence does not prove the model learned to use it.
+
+Older recordings without structured configuration show a versioned reference marked **configuration unknown**. Resolve their checkpoint configuration before attributing observation or architecture flaws. Run setup reviews on greedy games so sampling noise does not crowd out setup findings.
+
+## Review with Codex or another coding agent
+
+The repository skill is `.agents/skills/game-review/SKILL.md`. It uses the same
+recording, prompt, reply-import and verification tools as Claude's workflow,
+without requiring Claude's JavaScript `Workflow` runner or another API key.
+Use the workspace environment from `make setup`, the checkpoint's compatible
+code ref, and an artifact directory outside Git:
+
+```bash
+M=model:/path/to/policy/vNNNNN.pt
+REVIEW_DIR=/path/to/review/games
+.venv/bin/python -m mtg_ml.review record --agents "$M,$M" --games 50 --seed 1000 \
+  --greedy --engine python --matchup jund_blue --out "$REVIEW_DIR"
+GAMES=("$REVIEW_DIR"/*.json)
+.venv/bin/python -m mtg_ml.review review "${GAMES[@]}" --backend prompt --focus setup
+# Review each .prompt.md independently; save JSON responses as <game>.reply.txt.
+.venv/bin/python -m mtg_ml.review review "${GAMES[@]}" --backend file
+.venv/bin/python -m mtg_ml.review verify "${GAMES[@]}" --backend file
+.venv/bin/python -m mtg_ml.review report "${GAMES[@]}" --backend file
+```
+
+For separate reviewer outputs, save `<game>.reply-codex.txt`, import with
+`--backend file --model codex`, and use `--backend codex` for verify/report.
+Start with a fresh games directory, or select only the original replay files;
+findings are also JSON files and must not be passed back as games.
+Cluster repeated findings and check each against the code and the inputs at its
+fixture decisions; engine and masking claims need rules evidence. Preserve the
+existing `flaws.json` shape and compare earlier reviews as the skill describes.
+Recalibrate when changing the reviewer or prompt. Earlier Opus calibration
+results do not establish another reviewer's recall.
 
 ## Calibration: seeded faults
 
