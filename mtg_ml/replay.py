@@ -248,6 +248,13 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                 return self._json({"error": "live play is off (start the server with --models DIR)"}, 404)
             parts = path.strip("/").split("/")[2:]  # after api/live
             try:
+                # Everything that reads or acts on one game needs that game's token
+                # (X-Game-Token, or ?token=): its id alone is never enough (ids
+                # appear in public issues). Only the player has it: the answer
+                # that starts the game carries it, nothing else does.
+                token = self.headers.get("X-Game-Token") or query.get("token", [None])[0]
+                if parts and parts[0] not in ("options", "sideboard", "decks", "new"):
+                    live.authorize(parts[0], token)
                 if method == "GET" and parts == ["options"]:
                     return self._json(live.options())
                 if method == "GET" and parts == ["sideboard"]:
@@ -255,7 +262,7 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                 if method == "GET" and parts == ["decks"]:
                     return self._json(live.decklists(query.get("matchup", [""])[0], int(query.get("seat", ["0"])[0]), int(query.get("game", ["1"])[0])))
                 if method == "GET" and len(parts) == 2 and parts[1] == "review":
-                    return self._json(live.review(parts[0], query.get("token", [None])[0]))
+                    return self._json(live.review(parts[0], token))
                 if method == "GET" and len(parts) == 1:
                     return self._json(live.view(parts[0], int(query.get("since", ["0"])[0])))
                 if method == "POST":
@@ -277,7 +284,9 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                         return self._json(live.survey(parts[0], req))
                     if len(parts) == 2 and parts[1] == "next":
                         return self._json(live.next_game(parts[0], req))
-            except (LiveError, ValueError) as e:  # JSON and int() errors are ValueErrors too
+            except LiveError as e:
+                return self._json({"error": str(e)}, 403 if getattr(e, "forbidden", False) else 400)
+            except ValueError as e:  # JSON and int() errors
                 return self._json({"error": str(e)}, 400)
             except Exception as e:  # keep the connection: the viewer shows the message
                 return self._json({"error": f"server error: {e!r}"}, 500)

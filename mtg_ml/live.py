@@ -469,7 +469,9 @@ class LiveGame:
 
     def check_token(self, token) -> None:
         if not token or not secrets.compare_digest(str(token), self.token):
-            raise LiveError("this review belongs to the player of the game")
+            err = LiveError("this game belongs to another player (or its key is missing)")
+            err.forbidden = True
+            raise err
 
     def _pseudonym(self, req: dict) -> None:
         name = str(req.get("pseudonym", "") or "").strip()[:40]
@@ -727,6 +729,11 @@ class LiveManager:
         view = game.view()
         view["live"]["token"] = game.token  # only here: later views (anyone with the id) never carry it
         return view
+
+    def authorize(self, gid: str, token: str | None) -> None:
+        """Refuse unless `token` is the game's (the HTTP layer asks this before
+        every request about one game)."""
+        self._run(lambda: self._get(gid).check_token(token))
 
     def review(self, gid: str, token: str | None) -> dict:
         """The finished game, omniscient (both hands, the bot's policy and

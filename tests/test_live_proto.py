@@ -516,7 +516,7 @@ def test_review_only_after_the_game_and_only_for_its_player(manager):
         manager.review(gid, token)
     manager.concede(gid)
     for bad in (None, "", "x" * 22):
-        with pytest.raises(LiveError, match="player"):
+        with pytest.raises(LiveError, match="another player"):
             manager.review(gid, bad)
     rep = manager.review(gid, token)
     assert rep["review"]["seat"] == 0 and rep["review"]["bot"] == 1
@@ -524,7 +524,7 @@ def test_review_only_after_the_game_and_only_for_its_player(manager):
     nxt = manager.next_game(gid, {"plan": "maindeck"})
     other = nxt["live"]
     assert other["token"] and other["token"] != token
-    with pytest.raises(LiveError, match="player"):
+    with pytest.raises(LiveError, match="another player"):
         manager.review(other["id"], token)  # one game's token does not open another game
 
 
@@ -548,3 +548,54 @@ def test_review_flag_files_everything(manager):
     assert "(review)" in title and f"seed `{rep['meta']['seed']}`" in body and "--choices" in body and "### Options (policy)" in body
     bot_hand = {c["name"] for c in rep["frames"][rf]["state"]["players"][1]["hand"]}
     assert any(n in body for n in bot_hand)
+
+
+def test_every_game_endpoint_needs_the_games_token(tmp_path):
+    """Over HTTP, every request about one game (view, choose, concede, next,
+    flag, survey, review) is refused (403) without the game's token or with
+    another game's; with it, it works. The id alone is never enough."""
+    from mtg_ml.replay import make_server
+
+    m = LiveManager(None, tmp_path / "replays", scripted=True)
+    srv = make_server(tmp_path, port=0, live=m)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}/api/live/"
+
+    def call(path, body=None, token=None):
+        headers = {"Content-Type": "application/json"}
+        if token is not None:
+            headers["X-Game-Token"] = token
+        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(), headers=headers, method="GET" if body is None else "POST")
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+
+    try:
+        code, view = call("new", {"model": SCRIPTED, "seed": 5, "seat": 0, "matchup": "jund_blue"})
+        assert code == 200
+        gid, token = view["live"]["id"], view["live"]["token"]
+        _, other = call("new", {"model": SCRIPTED, "seed": 6, "seat": 0, "matchup": "jund_blue"})
+        frame = len(view["frames"]) - 1
+        requests = [
+            (gid, None), (f"{gid}?since=0", None), (f"{gid}/review", None),
+            (f"{gid}/choose", {"frame": frame, "index": 0, "since": frame}),
+            (f"{gid}/flag", {"category": "bug", "what": "x"}), (f"{gid}/survey", {"strength": 3}),
+            (f"{gid}/concede", {}), (f"{gid}/next", {}),
+        ]
+        for path, body in requests:
+            for bad in (None, "", "nope", other["live"]["token"]):
+                code, out = call(path, body, bad)
+                assert code == 403 and "another player" in out["error"], (path, bad, code, out)
+        assert "token" not in call(gid, token=token)[1]["live"]  # later views never carry it
+        assert call(f"{gid}/review", token=token)[0] == 400  # the right key, but the game still runs
+        assert call(f"{gid}/concede", {}, token)[0] == 200
+        assert call(f"{gid}/review?token={token}")[0] == 200  # a query token works too (links)
+        code, nxt = call(f"{gid}/next", {"plan": "maindeck"}, token)
+        assert code == 200 and nxt["live"]["token"] not in (None, token)  # the next game has a key of its own
+        assert call(nxt["live"]["id"], token=token)[0] == 403
+        assert call("nosuchgame", token=token)[0] == 400  # an unknown id says so (no key to check)
+    finally:
+        srv.shutdown()
+        m.close()

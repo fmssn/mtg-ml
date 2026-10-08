@@ -56,6 +56,14 @@ The replay viewer (`/`) and its own live mode are unchanged. A finished game is 
 
 ## Protocol (`mtg_ml/live_proto.py`)
 
+**Every request about one game needs its token.** That covers view, choose, concede, next, flag, survey and review. The game id alone is never enough, because ids appear in public issues.
+
+- The answer that starts a game (`new`, and `next` for the following game of the match) carries `live.token`. No other answer does.
+- The page keeps the token in localStorage under the game id, and sends it as `X-Game-Token` (`?token=` also works).
+- A reload resumes the game, since the URL hash holds only the id. Another browser opened with the id gets nothing.
+- A request without the token, or with another game's token, is refused with 403. An unknown id gets 400.
+- The token never goes into issues or logs.
+
 The live server's frames keep the replay format, with two additions.
 
 **`decision.refs`**, one per option, derived from `Option.key` and `Option.value` in the live layer (no engine change; both engines expose card objects in values):
@@ -183,7 +191,7 @@ Nothing is paid automatically. Playing a spell or an ability with a mana cost (d
 
 After a game ends, the result card's **Review game** (or Menu → "Review the finished game") opens the game omnisciently on the same board, read-only. It answers the question "did the bot misplay, or was it flooded or screwed?".
 
-- **Server:** `GET /api/live/<id>/review?token=…` returns the omniscient replay: both hands, libraries, and the model's `policy` and `value` at each of its decisions. It is refused while the game runs and without the game's token. The token is a secret handed to the player only in the answer that starts the game (`live.token`, kept in localStorage per game id). Later views never carry it, so knowing a game id (it appears in public issues) does not open the review.
+- **Server:** `GET /api/live/<id>/review?token=…` returns the omniscient replay: both hands, libraries, and the model's `policy` and `value` at each of its decisions. It is refused while the game runs, and like every game endpoint it needs the game's token (see Protocol).
 - **Timeline:** a strip under the header with turn markers and a dot per bot decision. Orange dots are surprising picks (an option under 15 % that the sampling policy chose). A red or green ring marks a big value swing (|Δ| ≥ 0.35 by its next decision). Click the strip to jump. Keys: ←/→ step, Shift+←/→ a turn, [ ] the previous or next bot decision, Home/End, Esc leaves.
 - **Decision panel:** for each bot decision, its options ranked by probability (top five with bars, the chosen one marked), and its value before and after (the next decision's estimate, or the result at the end). Values are the network's own estimate of its return, −1 to +1, not a calibrated win probability. Your own decisions show what you chose.
 - **Draw quality:** a strip under the timeline, one cell per turn and player aligned with the turns (lands and spells drawn, the land drop; red for a missed drop or 5+ lands in hand; the tooltip has the rest), and the full table behind the Draw quality button or Q. For each player it shows:

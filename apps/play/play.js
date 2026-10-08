@@ -122,8 +122,15 @@ const backHtml = (attrs = '') => `<div class="card back"${attrs}></div>`;
 const clean = label => String(label).replace(/#\d+/g, '');
 
 // ---------------------------------------------------------------- server
+// The game's token (kept per game id in this browser, never shown or sent
+// anywhere else) goes with every request about the game: the server refuses
+// a game id without it.
+const gameToken = gid => loadJSON('mtgml-play-tokens', {})[gid] || '';
 async function api(path, body) {
-  const r = await fetch(API + path, body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const headers = {};
+  if (S.gid) headers['X-Game-Token'] = gameToken(S.gid);
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const r = await fetch(API + path, body === undefined ? {headers} : {method: 'POST', headers, body: JSON.stringify(body)});
   let j; try { j = await r.json(); } catch (e) { throw new Error(`server answered ${r.status}`); }
   if (!r.ok || j.error) throw new Error(j.error || `server answered ${r.status}`);
   return j;
@@ -2904,7 +2911,8 @@ async function resync() {
 
 (async function init() {
   const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get("g")) { S.gid = h.get("g"); try { await resync(); if (!S.error) return; } catch (e) { /* fall through */ } S.error = null; S.gid = null; toast("Your last game is no longer on the server (it was restarted or the game expired)."); }
+  if (h.get("g") && !gameToken(h.get("g"))) toast("That game was started in another browser: its key is not here.");
+  else if (h.get("g")) { S.gid = h.get("g"); try { await resync(); if (!S.error) return; } catch (e) { /* fall through */ } S.error = null; S.gid = null; toast("Your last game is no longer on the server (it was restarted or the game expired)."); }
   openNewGame();
 })();
 
