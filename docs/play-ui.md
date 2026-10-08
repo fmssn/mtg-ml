@@ -17,7 +17,7 @@ A normal server offers exactly what `mtg_ml/play_config.toml` (or `--play-config
 
 The new-game screen has two sections, **Your deck** and **Opponent**. An opponent shows only if the server has its checkpoint, and only for decks that have a matchup against it (`matchup_for`). The client sends `{deck, opponent}` and the server resolves the matchup and seat; model names, matchups, scenarios and the scripted bot are not accepted.
 
-**No Delver mirror yet.** The engine's matchups (`MATCHUPS`) have no Mono Blue Terror mirror, and adding one needs a sideboard-plan row and new sideboard test expectations. So Mono Blue Terror is listed as a player deck but shows "No opponent for this deck yet" and cannot be started. Adding a `blue_blue` matchup with its plan row would enable it without client changes.
+**The Delver mirror** is the matchup `blue_mirror` (Mono Blue Terror in both seats; the player takes seat 0). For games 2 and 3 it uses the plan table's mirror row: Gut Shot and Envelop come in, Sleep of the Dead and two Force Spike go out. `blue_mirror` is in `match.EXPLICIT_ONLY`, so code that enumerates the matchups (benchmarks, tools, the difftest token sweep) skips it. Training plays it only when a `--matchup` list names it. A deck with no matchup against any offered opponent would still be listed but greyed out.
 
 `--dev` (`--scripted-bot` still works as an alias) gives a development server: the old form with every checkpoint, every matchup, seat choice, the scripted bots and the **dev scenarios** (`mtg_ml/live_dev.py`). Scenarios are games that start in a set position: a crowded Elves board, a trampling Hydra that must be chump-blocked, Tron lands that float mana, Cleansing Wildfire with a Drossforge Bridge. Players on a normal server never see any of this.
 
@@ -236,4 +236,3 @@ Combat damage and life changes are not in the engine's log; the live layer adds 
 - A game lives only in the server's memory: after a server restart the page says so and offers a new game.
 - Phone layout is not done; the target is desktop 1280×720 and up.
 - Tapping a plain land at priority is a client-side reservation (see *Mana*): an unused one leaves the land untapped when the step ends.
-- No Delver mirror: the engine has no Mono Blue Terror mirror matchup, so a player on Mono Blue Terror has no opponent yet.

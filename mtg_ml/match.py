@@ -47,7 +47,12 @@ MATCHUPS = {
     "madness_tron": ("red_madness", "tron"),
     "affinity_tron": ("grixis_affinity", "tron"),
     "elves_tron": ("elves", "tron"),
+    "blue_mirror": ("mono_blue_terror", "mono_blue_terror"),  # the Delver mirror (play UI); see EXPLICIT_ONLY
 }
+# Matchups used only where they are named (a --matchup list, the play
+# config): code that enumerates MATCHUPS for training mixes, benchmarks or
+# tools skips them, so earlier runs and numbers stay comparable.
+EXPLICIT_ONLY = frozenset({"blue_mirror"})
 DEFAULT_MATCHUP = "jund_blue"
 
 

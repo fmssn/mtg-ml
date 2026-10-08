@@ -435,8 +435,8 @@ def models(tmp_path):
 
 def test_play_config_offer(tmp_path, models):
     """A normal server offers exactly the configured decks and opponents and
-    refuses anything else; a deck without a matchup against them is listed
-    with no opponents."""
+    refuses anything else; the Delver mirror is offered (blue_mirror); a deck
+    without a matchup against them would be listed with no opponents."""
     cfg = {"player_decks": ["jund_wildfire", "mono_blue_terror"],
            "opponents": [{"id": "delver", "label": "Delver", "model": "tiny/model", "deck": "mono_blue_terror"},
                          {"id": "ghost", "label": "Missing", "model": "nope/model", "deck": "red_madness"}]}
@@ -446,10 +446,12 @@ def test_play_config_offer(tmp_path, models):
         assert opt["mode"] == "play" and "models" not in opt and "scenarios" not in opt
         assert [o["id"] for o in opt["opponents"]] == ["delver"]  # a checkpoint the server lacks is not offered
         decks = {d["deck"]: d["opponents"] for d in opt["player_decks"]}
-        assert decks == {"jund_wildfire": ["delver"], "mono_blue_terror": []}  # no Delver mirror matchup
+        assert decks == {"jund_wildfire": ["delver"], "mono_blue_terror": ["delver"]}  # the Delver mirror is a matchup (blue_mirror)
+        mirror = m.new({"deck": "mono_blue_terror", "opponent": "delver", "seed": 2})
+        assert mirror["live"]["matchup"] == "blue_mirror" and mirror["meta"]["decks"] == ["Mono Blue Terror", "Mono Blue Terror"]
         view = m.new({"deck": "jund_wildfire", "opponent": "delver", "seed": 1})
         assert view["live"]["seat"] == 0 and view["meta"]["decks"] == ["Jund Wildfire", "Mono Blue Terror"]
-        for bad in ({"deck": "mono_blue_terror", "opponent": "delver"}, {"deck": "elves", "opponent": "delver"},
+        for bad in ({"deck": "elves", "opponent": "delver"},
                     {"deck": "jund_wildfire", "opponent": "ghost"}, {"model": "tiny/model", "matchup": "jund_blue"},
                     {"model": SCRIPTED, "scenario": "crowded"}):
             with pytest.raises(LiveError):
