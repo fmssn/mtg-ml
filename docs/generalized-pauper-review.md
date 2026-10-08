@@ -234,6 +234,7 @@ under its assumptions, not automatically to a finite neural-network experiment.
 |---|---|---|---|
 | [PPO](https://arxiv.org/abs/1707.06347), [action masking](https://arxiv.org/abs/2006.14171) | Stable baseline with variable legal candidates; inspect probability ratios and masks | Single-agent empirical success is not convergence in self-play; a mask cannot restore omitted legal moves | Low: freeze PPO baseline; verify returns/recurrent replay; change one objective parameter at a time (O) |
 | Recurrent information-state policy; [Suphx](https://arxiv.org/abs/2003.13590) | Remember revealed cards and strategic context; supervised warm starts and controlled adaptation are practical | Mahjong's domain-specific representations, scoring and oracle guidance are not a ready-made Magic solution | Low–medium: ordered history versus current GRU/event bag on reveal/forgetting scenarios, then held-out play (R) |
+| [Relational deep RL](https://arxiv.org/abs/1806.01830v2) | Shared entity interactions can generalize across object combinations and counts | Box-World and StarCraft mini-games have different observation/control problems; the paper reports variable transfer and 10B-step StarCraft training, not a cheap universal gain | Medium: explicit block/target/attachment edges plus one attention layer, compared to the same encoder without it (R) |
 | Explicit beliefs | Predict hidden-card/deck distributions from public evidence, with a known training prior | Finite list priors can be misspecified; a calibrated deck classifier is not necessarily a stronger player | Medium: belief auxiliary head versus same-capacity non-belief head, public-only inputs and proper held-out scoring (R) |
 | [PerfectDou](https://arxiv.org/abs/2203.16406); [unbiased asymmetric critics](https://arxiv.org/abs/2105.11674) | Privileged training information may reduce variance while execution stays information-legal | DouDizhu scoring/roles differ; a state-only critic can be biased for a history-dependent actor. PerfectDou used 880 CPU cores and eight GPUs | Medium: history-plus-state critic versus parameter-matched history-only critic (O); verify actor independence |
 | [NFSP](https://arxiv.org/abs/1603.01121) | Learn a historical average policy as well as a response; address cycling | Approximate neural best responses, replay coverage and perfect recall remain requirements; Leduc/limit-poker evidence is not Pauper evidence | High as a replacement; first test policy averaging/distillation against snapshots in small solved subgames |
@@ -256,6 +257,27 @@ The [ReBeL release](https://github.com/facebookresearch/rebel) covers Liar's
 Dice, not the full poker system. The paper's full poker setup used 90 eight-V100
 machines for data generation. “Use ReBeL” therefore describes a substantial
 research and systems project, not a small algorithm switch.
+
+The equilibrium-method evidence also deserves careful reading. NFSP's limit
+Hold'em evaluation used 25,000 hands per checkpoint, but its final reported
+greedy-average policy still lost to each of the three leading comparison bots.
+Its stronger convergence evidence is on small Leduc, where exact exploitability
+is computable. PSRO measures independently trained policy cross-play and
+NashConv in smaller games; it motivates our population tests without certifying
+an incomplete Pauper population. Student of Games evaluates exact small-game
+exploitability for 50 constructed search-policy seeds from a **single training
+run**; those are not 50 independent training replications. Its chess/Go
+comparison uses very large TPU resources and up to 60,000 evaluation search
+simulations. These papers establish substantive algorithmic possibilities, but
+none removes the need for local compute accounting and independent roots.
+
+For relational encoders, the inspected Zambaldi et al. preprint demonstrates
+stronger compositional performance in Box-World, yet explicitly reports high
+variability when transferring StarCraft resource collection from two to five
+units. That distinction matters: attending across entities is an architectural
+prior, not proof that a model will infer Magic's exact rules or transfer to new
+effects. Supply correct relations, retain an efficient non-attention control,
+and test the intended distribution shift.
 
 ## 3. Simulator and information foundations
 
