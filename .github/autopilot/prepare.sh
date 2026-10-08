@@ -21,8 +21,12 @@ mb=$(git merge-base HEAD "origin/$base")
   echo '```'
   echo '```diff'
   # Generated data stays out of the prompt: it is re-sent on every model turn.
+  # Written to a file first: piping straight into `head` kills git with SIGPIPE on a
+  # diff over the cap, and pipefail turns that into exit 141 (PR #45).
   git diff "$mb" HEAD -- . ':(exclude)data/*.json' ':(exclude)*.lock' ':(exclude)tests/data/**' \
-    ':(exclude)docs/experiments/ledger.jsonl' | head -c 120000
+    ':(exclude)docs/experiments/ledger.jsonl' > "$RUNNER_TEMP/pr.diff"
+  head -c 120000 "$RUNNER_TEMP/pr.diff"
+  [ "$(wc -c < "$RUNNER_TEMP/pr.diff")" -le 120000 ] || printf '\n[diff cut at 120 KB; read the files for the rest]\n'
   echo '```'
 } > "$ctx"
 
