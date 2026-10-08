@@ -88,12 +88,22 @@ def card_ref(g, c, viewer, choice=False):
             "uid": c.uid if c.zone != "library" else None, "owner": "self" if c.owner == viewer else "opponent"}
 
 
+def mana_cost(cost):
+    return {"generic": cost.generic, "colored": cost.colored_dict(), "x": cost.x}
+
+
 def _rules(face, token=False):
     return {"types": sorted(face.types), "subtypes": sorted(face.subtypes), "cost": str(face.cost), "text": face.text,
+            "mana_cost": mana_cost(face.cost), "colors": sorted(face.colors), "supertypes": sorted(face.supertypes),
+            "ward": face.ward, "enters_tapped": face.enters_tapped, "targets": [t.kind for t in face.targets],
+            "additional_sacrifice": face.additional_sac, "additional_discard": face.additional_discard,
+            "escape_exile": face.escape_exile, "shape": face.shape,
             "power": face.power, "toughness": face.toughness, "token": token,
             "keywords": sorted(face.keywords),
-            "abilities": [{"name": a.name, "cost": str(a.cost), "tap": a.tap, "sac_self": a.sac_self, "sac_other": a.sac_other,
-                           "mana": a.mana, "zone": a.zone, "sorcery_speed": a.sorcery_speed,
+            "abilities": [{"name": a.name, "cost": str(a.cost), "mana_cost": mana_cost(a.cost), "tap": a.tap, "sac_self": a.sac_self, "sac_other": a.sac_other,
+                           "mana": a.mana, "mana_amount": a.mana_amount, "zone": a.zone, "sorcery_speed": a.sorcery_speed,
+                           "return_land": a.return_land, "once_per_turn": a.once_per_turn,
+                           "discard_self": a.discard_self, "discard_other": a.discard_other, "exile_self": a.exile_self,
                            "targets": [t.kind for t in a.targets]} for a in face.abilities],
             "modes": [{"name": m.name, "targets": [t.kind for t in m.targets]} for m in face.modes]}
 
@@ -137,13 +147,15 @@ def inputs(g, viewer, own_deck):
                 if v[0] == "cast":
                     mode = key[3]
                     data["mode"] = mode
-                    data["cost"] = str(g._mode_cost(c, mode).with_x(0).reduced(g._cost_reduction(viewer, c)))
+                    cost = g._mode_cost(c, mode).reduced(g._cost_reduction(viewer, c))
+                    data["cost"], data["mana_cost"] = str(cost.with_x(0)), mana_cost(cost)
                     if len(key) > 4:
                         data["spell_mode"] = key[4]
                 elif v[0] in {"activate", "mana"}:
                     data["ability"] = key[2]
                     if v[0] == "activate":
-                        data["cost"] = str(c.face.abilities[v[2]].cost)
+                        cost = c.face.abilities[v[2]].cost
+                        data["cost"], data["mana_cost"] = str(cost), mana_cost(cost)
                     else:
                         data["color"] = key[2]
         elif d.kind == "target":

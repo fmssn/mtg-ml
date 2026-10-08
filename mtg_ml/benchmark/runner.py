@@ -3,6 +3,7 @@
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 from functools import partial
+from collections.abc import Mapping
 import multiprocessing
 import pickle
 import gc
@@ -18,7 +19,7 @@ from .views import inputs, thaw
 
 
 def play_episode(spec, settings, learner_factory, opponent_factory, engine="python", record=False):
-    """Factories receive (physical seat, mode), and create isolated adapters."""
+    """Factories receive (seat, mode); maps select explicit deck/agent roles."""
     integer(settings["max_decisions"], "max_decisions")
     row = {k: v for k, v in asdict(spec).items() if k != "decks"}
     row.update(status="error", winner=None, reason=None, decisions=0, turns=0, latency_seconds=[], attempted_action=None)
@@ -27,8 +28,10 @@ def play_episode(spec, settings, learner_factory, opponent_factory, engine="pyth
     try:
         g = game_class(engine)(**spec.game_args(settings))
         agents = [None, None]
-        agents[spec.learner_seat] = learner_factory(spec.learner_seat, spec.mode)
-        agents[1 - spec.learner_seat] = opponent_factory(1 - spec.learner_seat, spec.mode)
+        learner = learner_factory[spec.deck_ids[spec.learner_seat]] if isinstance(learner_factory, Mapping) else learner_factory
+        opponent = opponent_factory[spec.opponent] if isinstance(opponent_factory, Mapping) else opponent_factory
+        agents[spec.learner_seat] = learner(spec.learner_seat, spec.mode)
+        agents[1 - spec.learner_seat] = opponent(1 - spec.learner_seat, spec.mode)
         from collections import Counter
         for seat, a in enumerate(agents):
             a.reset(dict(Counter(spec.decks[seat])), spec.actor_seed)
