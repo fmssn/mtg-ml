@@ -34,7 +34,7 @@ if ((PREF.stopsVersion || 1) < 2) { PREF.stops.opp.declare_blockers = true; PREF
 // ---------------------------------------------------------------- game state
 const S = {
   gid: null, seat: 0, raw: [], cards: {}, meta: null, over: false, replay: null,
-  shown: -1, prev: null, stats: {dealt: 0, taken: 0, played: 0}, lastCast: {}, seenUids: new Set(), pendingSpells: [], fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], pumping: false, busy: false, error: null, skip: false,
+  shown: -1, prev: null, stopLog: [], lastAutoPassed: 0, yields: new Set(), holdOnce: false, autoPassed: 0, stats: {dealt: 0, taken: 0, played: 0}, lastCast: {}, seenUids: new Set(), pendingSpells: [], fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], pumping: false, busy: false, error: null, skip: false,
   plan: null, ui: null, lastMine: -1, passMode: null, fullControl: false, feed: [], logDone: 0,
 };
 const opp = () => 1 - S.seat;
@@ -144,7 +144,7 @@ function applyView(view) {
 
 function resetGame(id) {
   // Every auto-pass mode and plan resets at a game boundary (Forge bug: End Turn carried over).
-  Object.assign(S, {gid: id, stats: {dealt: 0, taken: 0, played: 0}, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
+  Object.assign(S, {gid: id, stopLog: [], lastAutoPassed: 0, yields: new Set(), holdOnce: false, autoPassed: 0, stats: {dealt: 0, taken: 0, played: 0}, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
     fullControl: false, feed: [], logDone: 0, error: null, skip: false});
   $('#log').innerHTML = '';
   renderFeed();
@@ -194,6 +194,7 @@ async function pump() {
       try { a = autoAnswer(d); } catch (e) { console.error(e); a = null; }
       if (a == null || autos > 400) { S.plan = null; S.skip = false; S.passMode = null; enterDecision(true); break; }
       autos++;
+      if (myDecision()?.kind === 'priority' && d.refs[a]?.type === 'pass') S.autoPassed++;
       await send(a);
     }
   } finally { S.pumping = false; renderDock(); }
@@ -201,6 +202,16 @@ async function pump() {
 
 // ---------------------------------------------------------------- automation (P2, P6, P7 of the brief)
 const isReal = r => r.type !== 'pass' && r.type !== 'mana';
+// Abilities with no timing value (draw, search, cycling, scry, life, tokens):
+// they never make the opponent's actions a reason to stop. Casts and other
+// abilities (pump, untap, damage, counters...) do.
+const QUIET_ABILITY = /draw a card|search|cycling|scry|surveil|investigate|gain \d+ life|create .*token|shuffle|look at/i;
+const sourceOf = r => r.name || '';
+function timely(r, label) {
+  if (!isReal(r) || S.yields.has(sourceOf(r))) return false;
+  if (r.type === 'activate') return !QUIET_ABILITY.test(r.ability || label);
+  return true;
+}
 const ACTS = new Set(['cast', 'activate', 'plot', 'attack', 'block']);
 
 // Did the opponent act in the current step since my last decision? (cast,
@@ -232,8 +243,10 @@ function autoAnswer(d) {
     const s = stateAt(last());
     const top = s.stack[s.stack.length - 1];
     const acted = oppActedSince(S.lastMine);
-    if (top && top.controller !== S.seat) return null;  // something of theirs to answer
-    if (acted) return null;  // never pass right after they did something
+    const canRespond = refs.some((r, i) => timely(r, d.options[i]));
+    if (top && top.controller === S.seat && S.holdOnce) { S.holdOnce = false; return null; }  // hold priority once
+    if (top && top.controller !== S.seat) return canRespond && !S.yields.has(top.card || top.name.split(':')[0]) ? null : pass;  // something of theirs to answer
+    if (acted && canRespond) return null;  // never pass right after they did something you could answer
     if (top) return pass;  // my own spell: let it resolve (they may still respond)
     const mine = s.active === S.seat;
     if (S.passMode === 'opp') {
@@ -245,7 +258,7 @@ function autoAnswer(d) {
     const prevS = S.lastPriority >= 0 ? stateAt(S.lastPriority) : null;
     const firstInStep = !prevS || prevS.turn !== s.turn || prevS.step !== s.step;
     const blocked = s.battlefield.some(c => c.blocking != null);
-    if (s.step === 'declare_blockers' && firstInStep && s.battlefield.some(c => c.attacking) && (!mine || blocked)) return null;
+    if (s.step === 'declare_blockers' && firstInStep && canRespond && s.battlefield.some(c => c.attacking) && (!mine || blocked)) return null;
     if (S.passMode) return null;
     return PREF.stops[mine ? 'me' : 'opp'][s.step] ? null : pass;
   }
@@ -967,7 +980,9 @@ function renderStack(s) {
   el.innerHTML = `<div class="sh">Stack · ${all.length} · top first</div>` + items.map((it, j) => {
     const tgt = H.target.has('s' + it.sid);
     const name = it.card || it.name;
-    return `<div class="sitem ${it.controller === S.seat ? 'c-me' : 'c-opp'} ${j === 0 ? 'top' : ''} ${tgt ? 'targetable' : ''}" data-sid="${it.sid}" data-name="${esc(name)}">
+    const src = it.card || it.name.split(':')[0];
+    const yieldBtn = it.controller !== S.seat ? `<button class="yield ${S.yields.has(src) ? 'on' : ''}" data-yield="${esc(src)}" title="${S.yields.has(src) ? 'Stop again for' : "Don't stop for"} ${esc(src)} this game">${S.yields.has(src) ? 'auto-passing ✓' : 'auto-pass'}</button>` : '';
+    return `<div class="sitem ${it.controller === S.seat ? 'c-me' : 'c-opp'} ${j === 0 ? 'top' : ''} ${tgt ? 'targetable' : ''}" data-sid="${it.sid}" data-name="${esc(name)}">${yieldBtn}
       ${cardHtml(name)}<div class="st"><b>${esc(it.name)}</b>${it.controller === S.seat ? 'yours' : 'opponent'}${it.x ? ` · X=${it.x}` : ''}${it.targets.length ? `<div class="tg">→ ${esc(it.targets.map(t => clean(t.replace(/^player (\d)/, (_, p) => +p === S.seat ? 'you' : 'opponent'))).join(', '))}</div>` : ''}</div></div>`;
   }).join('') + (more > 0 ? `<button class="smore" data-cmd="stack-more">+${more} more below</button>` : stackOpen && all.length > SHOW + 1 ? '<button class="smore" data-cmd="stack-more">Show fewer</button>' : '');
 }
@@ -1102,6 +1117,9 @@ function enterDecision(fresh) {
   }
   if (!d) { S.ui = null; if (S.shown !== last() && S.raw.length) render(last()); renderDock(); return; }
   const fi = last(), s = stateAt(fi);
+  S.lastAutoPassed = S.autoPassed; S.autoPassed = 0;
+  // what stopped here (for the docs' numbers and tests): step, whose turn, whether a timely play existed
+  S.stopLog.push({fi, kind: d.kind, step: s.step, mine: s.active === S.seat, timely: d.kind === 'priority' ? d.refs.some((r, i) => timely(r, d.options[i])) : null, top: s.stack.at(-1)?.controller ?? null});
   const ui = {kind: d.kind, d, fi, sel: new Set(), blocks: new Map(), blockSel: null, armed: null, eligible: new Set(), blockers: new Set(), source: S.ui?.source};
   if (d.kind === 'declare_attacker') {
     const names = new Set(d.refs.filter(r => r.attacker != null).map(r => r.name));
@@ -1130,7 +1148,7 @@ function passLabel(s) {
 }
 
 const HINTS = {
-  priority: '<kbd>R</kbd> pass till they act · <kbd>F</kbd> full control',
+  priority: '<kbd>R</kbd> pass till they act · <kbd>H</kbd> hold priority · <kbd>F</kbd> full control',
   declare_attacker: 'undo: <kbd>right-click</kbd> · <kbd>Esc</kbd> clears',
   declare_blocker: 'undo: <kbd>right-click</kbd> · <kbd>Esc</kbd> clears',
   target: 'the spell is being cast: pick a target',
@@ -1138,14 +1156,18 @@ const HINTS = {
 };
 function modeHint(d, ui) {
   if (!d || !ui || S.busy || S.pumping) return S.queue.length ? '<kbd>click</kbd> or <kbd>Space</kbd> skips the replay' : '';
-  return HINTS[d.kind] || '<kbd>O</kbd> lists every option';
+  const auto = S.lastAutoPassed ? `<span title="Priority passes the client answered for you since your last decision">auto-passed ${S.lastAutoPassed}</span> · ` : '';
+  return auto + (HINTS[d.kind] || '<kbd>O</kbd> lists every option');
 }
 
 function renderDock() {
   const d = myDecision(), ui = S.ui, P = $('#primary'), pr = $('#prompt'), ch = $('#choices');
   const pill = $('#pill');
-  pill.className = S.passMode || S.fullControl ? 'on' : '';
-  pill.textContent = S.fullControl ? 'Full control: no auto-pass · F' : S.passMode === 'opp' ? 'Passing until the opponent acts · Esc' : '';
+  const yields = S.yields.size ? ` · not stopping for ${[...S.yields].join(', ')}` : '';
+  pill.className = S.passMode || S.fullControl || S.holdOnce || S.yields.size ? 'on' : '';
+  pill.textContent = S.fullControl ? 'Full control: no auto-pass · F' : S.passMode === 'opp' ? 'Passing until the opponent acts · Esc'
+    : S.holdOnce ? 'Holding priority after your next spell · H' : yields ? yields.slice(3) : '';
+  pill.title = 'Esc ends passing until they act; the auto-pass button on a stack item toggles yielding to that source';
   P.className = 'primary'; P.disabled = true; ch.innerHTML = ''; pr.className = '';
   $('#modehint').innerHTML = modeHint(d, ui);
   $('#bAll').style.visibility = d && ui ? 'visible' : 'hidden';
@@ -1504,6 +1526,15 @@ document.addEventListener('click', e => {
     if (idxs.length && canAct()) showMenu(zc, idxs, zc.dataset.zcard);
     return;
   }
+  const yb = t.closest('[data-yield]');
+  if (yb) {
+    const n = yb.dataset.yield;
+    if (S.yields.has(n)) S.yields.delete(n); else S.yields.add(n);
+    toast(S.yields.has(n) ? `Auto-passing ${n}'s spells and triggers this game.` : `Stopping for ${n} again.`);
+    render(S.shown, {noAnim: true}); renderDock();
+    if (S.yields.has(n) && canAct() && S.ui.kind === 'priority') { const top = stateAt(last()).stack.at(-1); if (top && top.controller !== S.seat && (top.card || top.name.split(':')[0]) === n) return act(S.ui.d.refs.findIndex(r => r.type === 'pass')); }
+    return;
+  }
   const dl = t.closest('[data-decks]');
   if (dl) { openDecks(); return; }
   const zone = t.closest('.zone[data-zone]');
@@ -1676,6 +1707,7 @@ document.addEventListener('keydown', e => {
     S.passMode = 'opp'; S.passTurn = stateAt(last()).active === S.seat ? stateAt(last()).turn : -1;
     return act(S.ui.d.refs.findIndex(r => r.type === 'pass'));
   }
+  if (k === 'h' || k === 'H') { S.holdOnce = !S.holdOnce; toast(S.holdOnce ? 'You keep priority after your next spell (to respond to it yourself).' : 'Hold priority off.'); renderDock(); return; }
   if (k === 'f' || k === 'F') { S.fullControl = !S.fullControl; toast(S.fullControl ? 'Full control: every priority stop is yours.' : 'Auto-pass back on.'); renderDock(); return; }
   if ((k === 'a' || k === 'A') && S.ui?.kind === 'declare_attacker') return command('all');
   if ((k === 'n' || k === 'N') && canAct()) {

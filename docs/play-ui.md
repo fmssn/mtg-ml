@@ -28,6 +28,8 @@ The replay viewer (`/`) and its own live mode are unchanged. A finished game is 
 | pass priority | **Space**: the button says what happens ("Pass → Combat", "Resolve Lightning Bolt", "End turn") |
 | pass until the opponent acts | **R**; **Esc** cancels. Space and Enter on a focused button or option press that control, never the global hotkeys |
 | full control (never auto-pass) | **F** |
+| hold priority after your next spell | **H** |
+| stop yielding / yield to a source | the **auto-pass** button on an opponent's stack item |
 | everything else | **O** or "All options": the plain list of the engine's options, always there |
 | inspect a card | hover (preview on the right); right-click pins it |
 | skip the opponent's replay | click the board or **Space** |
@@ -88,7 +90,9 @@ A priority decision is answered "pass" by the client unless:
 - it is the first priority after blockers were declared (the combat-trick window): always on the opponent's turn, on yours when something blocked, whatever the stop settings say;
 - the step has a stop (phase rail; defaults: your main 1 and main 2, the opponent's declare-blockers and end steps), unless "pass until the opponent acts" is running.
 
-Your own spell on top of the stack passes (it resolves unless they respond, and a response stops you).
+Your own spell on top of the stack passes (it resolves unless they respond, and a response stops you), unless you pressed **H** (hold priority once): then you keep priority with your spell on top, to respond to it yourself.
+
+"Something you could answer" means a cast or an ability with timing value. Abilities without it (draw a card, search, cycling, scry, gaining life, making tokens: a Clue, Twisted Landscape, cycling lands) never turn the opponent's actions into stops; they still count for the step stops you set (the opponent's end step is where you crack them). Each opponent stack item has an **auto-pass** button: its source's spells and triggers no longer stop you this game (click again to undo; the pill lists the sources). The middle strip says how many priority passes were answered for you since your last decision.
 
 Batched plans (an attack, blocks, a drop-to-target) answer only decisions of the turn and step they were made in; a plan left over from an earlier combat is dropped, never applied. "Pass until the opponent acts" ends at the first stop.
 

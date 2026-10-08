@@ -212,6 +212,9 @@ button:disabled{cursor:default}
 .sitem{pointer-events:auto;display:flex;gap:8px;align-items:center;padding:5px 8px 5px 5px;border-radius:10px;background:#000c;border:1px solid #ffffff1c;animation:chipin .25s var(--ease)}
 .sitem.c-me{border-left:3px solid var(--me)}.sitem.c-opp{border-left:3px solid var(--opp)}
 .sitem .card{--w:46px}
+.sitem{position:relative}
+.sitem .yield{position:absolute;right:6px;bottom:4px;background:#ffffff10;border:1px solid #ffffff2a;border-radius:999px;color:var(--muted);font-size:10.5px;padding:0 7px;line-height:16px}
+.sitem .yield:hover,.sitem .yield.on{color:var(--text);border-color:var(--opp)}
 .sitem .st{font-size:11.5px;line-height:1.3;min-width:0}
 .sitem .st b{display:block;font-size:12px}
 .sitem .st .tg{color:var(--cyan)}
