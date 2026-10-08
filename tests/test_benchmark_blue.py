@@ -244,6 +244,24 @@ def test_stack_references_and_counter_war():
     assert "Cast Down" in names(g.players[1].graveyard)
 
 
+def test_countered_counter_does_not_spend_another_backup():
+    # Legal chain: removal <- our counter <- opposing counter <- our counter.
+    # The top spell restores the lower counter. A third copy must stay in hand.
+    g = scenario(p0={"hand": ["Counterspell"]*3, "battlefield": ISLANDS(6)+["Delver of Secrets"]},
+                 p1={"hand": ["Cast Down", "Counterspell"], "battlefield": ["Swamp"]*2+ISLANDS(2)}, active=1)
+    choose(g, "Cast Cast Down"); pay(g); pass_priority(g)
+    choose(g, "Cast Counterspell"); pay(g); pass_priority(g)
+    choose(g, "Cast Counterspell"); choose(g, "Target spell Counterspell"); pay(g); pass_priority(g)
+    choose(g, "Cast Counterspell"); g.step(choice(g)); pay(g)
+    assert key(g) == ("pass",)
+    while g.stack:
+        g.step(choice(g) if g.decision.player == 0 else 0)
+    assert "Delver of Secrets" in names(g.battlefield)
+    assert names(g.players[0].hand) == ["Counterspell"]
+    assert sum(not c.tapped for c in g.battlefield if c.controller == 0 and c.name == "Island") == 2
+    assert "Cast Down" in names(g.players[1].graveyard)
+
+
 def test_target_ward_budget_avoids_unpayable_bounce():
     g = scenario(p0={"hand": ["Deem Inferior"], "battlefield": ISLANDS(2), "drawn": 2},
                  p1={"battlefield": ["Tolarian Terror"]})

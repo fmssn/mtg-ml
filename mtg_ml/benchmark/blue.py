@@ -269,22 +269,27 @@ class BenchmarkBlue:
         # not settle the spell. A counter underneath its target cannot resolve
         # in time. Ward taxes are cumulative and tied to actual spell IDs.
         stack = view.context["stack"]
-        pos = next(i for i, s in enumerate(stack) if s["sid"] == item["sid"])
-        tax = 0
-        for s in stack[pos + 1:]:
-            if s.get("ward", {}).get("sid") == item["sid"]:
-                tax += s["ward"]["amount"]
-            if s["name"] in COUNTERS and any(t.get("sid") == item["sid"] for t in s["targets"]):
-                # A still-higher opposing counter targeting this counter means
-                # it is not certain to resolve; preserve our backup counter.
-                disrupted = any(t.get("sid") == s["sid"] for higher in stack[stack.index(s) + 1:]
-                                if higher["name"] in COUNTERS for t in higher["targets"])
-                if not disrupted:
-                    if s["name"] == "Force Spike":
-                        tax += 1
-                    else:
-                        return True
-        return tax > available(view, item["controller"])
+        positions = {s["sid"]: i for i, s in enumerate(stack)}
+
+        @lru_cache(maxsize=None)
+        def failed(sid):
+            pos = positions[sid]
+            tax = 0
+            for s in stack[pos + 1:]:
+                if s.get("ward", {}).get("sid") == sid:
+                    tax += s["ward"]["amount"]
+                if s["name"] in COUNTERS and any(t.get("sid") == sid for t in s["targets"]):
+                    # Reduce the existing public chain from its top. A counter
+                    # that is itself certainly countered cannot disrupt the
+                    # lower counter; no future actions or hidden cards enter.
+                    if not failed(s["sid"]):
+                        if s["name"] == "Force Spike":
+                            tax += 1
+                        else:
+                            return True
+            return tax > available(view, stack[pos]["controller"])
+
+        return failed(item["sid"])
 
     def _spell_value(self, view, item):
         if item["kind"] != "spell" or item["controller"] != "opponent" or self._handled(view, item):
