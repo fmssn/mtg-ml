@@ -77,9 +77,10 @@ def _dealt_game(seed: int, hidden_seed: int, decks: tuple[list[str], list[str]],
     return new_game(([], []), seed=seed, starting_player=0, setup=setup, start_step="main1", mulligans=False)
 
 
+@pytest.mark.parametrize("features", [6, 7])
 @pytest.mark.parametrize("own_library", [False, True])
 @pytest.mark.parametrize("matchup", ["jund_blue", "jund_madness", "blue_madness"])
-def test_hidden_cards_never_change_sim_tokens(matchup, own_library):
+def test_hidden_cards_never_change_sim_tokens(matchup, own_library, features):
     """Pairs of games that differ only in hidden cards are played with the
     same choices while the decider's observation stays the same; at every
     decision of the decider every option's previews (set 6, both `pv:sim:`
@@ -101,8 +102,13 @@ def test_hidden_cards_never_change_sim_tokens(matchup, own_library):
                     g.step(0)
             if a.over or b.over or observe(a, 0) != observe(b, 0):
                 break
-            pa, pb = option_previews(a, 0, 6), option_previews(b, 0, 6)
+            pa, pb = option_previews(a, 0, features), option_previews(b, 0, features)
             assert pa == pb, (seed, a.decision.kind, [o.label for o in a.legal_options()])
+            if features >= 7:
+                from mtg_ml.rl.features import event_hashes, featurize
+
+                assert featurize(a, 0, features=features) == featurize(b, 0, features=features)
+                assert [event_hashes(a, i) for i in range(len(pa))] == [event_hashes(b, i) for i in range(len(pb))]
             compared += len(pa)
             stops += sum("pv:sim:stop:opponent_decision" in p for p in pa)
             passes += sum(any(t.startswith("pv:simp:") for t in p) and [t[7:] for t in p if t.startswith("pv:sim:")] != [t[8:] for t in p if t.startswith("pv:simp:")] for p in pa)
