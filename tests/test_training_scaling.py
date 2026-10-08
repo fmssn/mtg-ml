@@ -302,8 +302,8 @@ def test_sparse_residency_policy_ids_grouped_projection():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="two CUDA devices")
-@pytest.mark.parametrize("capture", [0, 1])
-def test_two_gpu_updates_match_single_gpu_with_empty_shards(capture):
+@pytest.mark.parametrize("capture,precision", [(0, "fp32"), (1, "fp32"), (2, "bf16")])
+def test_two_gpu_updates_match_single_gpu_with_empty_shards(capture, precision):
     import copy
 
     from mtg_ml.rl.distributed import DistributedLearner
@@ -313,7 +313,7 @@ def test_two_gpu_updates_match_single_gpu_with_empty_shards(capture):
     cpu = PolicyNet(hidden=16, trunk="entity", entity_attn=1)
     data = _training_data(cpu)
     reference, net = copy.deepcopy(cpu).cuda(0), copy.deepcopy(cpu).cuda(0)
-    cfg = PPOConfig(epochs=2, minibatch=3, capture=capture, target_kl=None)
+    cfg = PPOConfig(epochs=2, minibatch=3, capture=capture, precision=precision, target_kl=None)
     opt0, opt1 = [make_optimizer(n.parameters(), cfg.lr, "cuda:0") for n in (reference, net)]
     expected = ppo_update(reference, opt0, data, cfg, device="cuda:0", gen=torch.Generator().manual_seed(9), mode="graph" if capture else "eager")
     learner = DistributedLearner(net, opt1, cfg, ("cuda:0", "cuda:1"))

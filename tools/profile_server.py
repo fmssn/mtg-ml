@@ -127,7 +127,7 @@ def main(argv=None) -> None:
     for _ in range(args.warmup):
         batch()
     print(f"warm-up (captures): {time.perf_counter() - t:.2f}s, {srv.stats['graphs']} graphs")
-    for k in ("busy_s", "prep_s", "launch_s", "infer_s"):
+    for k in ("busy_s", "prep_s", "launch_s", "infer_s", "rows", "requests", "padded_rows"):
         srv.stats[k] = 0.0
     srv.stats["batches"] = 0
     pr = cProfile.Profile() if args.profile else None
@@ -150,6 +150,7 @@ def main(argv=None) -> None:
     print(
         f"{args.device}{' eager' if args.no_graphs else ''}: {n} decisions in {args.requests} requests, {args.policies} policies: {dt * 1000:.2f} ms/batch = {n / dt:,.0f} decisions/s "
         f"(prep {st['prep_s'] / b * 1000:.3f}, launch {st['launch_s'] / b * 1000:.3f}, launch to answer {st['infer_s'] / b * 1000:.3f} ms; padded rows {st['padded_rows'] / max(b, 1):.0f})"
+        + (f"; peak device memory {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB" if args.device.startswith("cuda") else "")
     )
     if args.device.startswith("cuda") and not args.no_graphs and srv.lanes[0].graphs:  # GPU time of one replay
         graph, _ = next(iter(srv.lanes[0].graphs.values()))

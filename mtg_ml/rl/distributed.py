@@ -106,7 +106,7 @@ class _BackwardGraphs(_StepGraphs):
         return graph, si, sf
 
 
-def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
+def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None, control=None):
     """One global PPO update; every rank returns the same reduced statistics."""
     dev = next(net.parameters()).device
     n = len(data.actions)
@@ -140,6 +140,8 @@ def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
                     pos += length
                 schedule.append(trajectories)
         box = [schedule]
+        if control is not None:
+            dist.monitored_barrier(group=control, timeout=timedelta(seconds=600), wait_all_ranks=True)
         dist.broadcast_object_list(box, src=0)
         schedule = box[0]
         local = [trajectory_shards(batch, world)[rank] for batch in schedule]
@@ -176,6 +178,7 @@ def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
         else:
             grad = torch.zeros(sum(p.numel() for p in params), device=dev)
         for m, batch in enumerate(schedule):
+            used = None
             if graphs:
                 graphs.prepare(shapes)
                 if any(p not in opt.state for p in params):
@@ -203,13 +206,20 @@ def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
                     if p.grad is not None:
                         grad[off : off + p.numel()].copy_(p.grad.flatten())
                     off += p.numel()
+                acc.add_(stats)
+                del loss
+            # CUDA collectives enqueue asynchronously. A faster rank must not
+            # enqueue reductions while a peer compiles/captures a cold shape:
+            # that host work can exceed NCCL's failure-detection timeout.
+            # Gloo coordinates host readiness without outstanding GPU reads.
+            if control is not None:
+                dist.monitored_barrier(group=control, timeout=timedelta(seconds=600), wait_all_ranks=True)
+            if used is not None:
                 dist.all_reduce(used, op=dist.ReduceOp.MAX)
                 off = 0
                 for p, active in zip(params, used.tolist()):
                     p.grad = grad[off : off + p.numel()].view_as(p) if active else None
                     off += p.numel()
-                acc.add_(stats)
-                del loss
             dist.all_reduce(grad)
             grad.div_(world)
             torch.nn.utils.clip_grad_norm_(params, cfg.max_grad_norm)
@@ -250,6 +260,7 @@ def _init_group(rank, devices, init):
     if dev.type == "cuda":
         torch.cuda.set_device(dev)
     dist.init_process_group("nccl" if dev.type == "cuda" else "gloo", init_method=init, rank=rank, world_size=len(devices), timeout=timedelta(seconds=90))
+    return dist.new_group(backend="gloo", timeout=timedelta(seconds=600)) if dev.type == "cuda" else None
 
 
 def _worker(rank, devices, init, config, state, optimizer, cfg, cpus, conn):
@@ -264,7 +275,7 @@ def _worker(rank, devices, init, config, state, optimizer, cfg, cpus, conn):
         net.load_state_dict(state)
         opt = make_optimizer(net.parameters(), cfg.lr, devices[rank])
         load_optimizer_state(opt, optimizer)
-        _init_group(rank, devices, init)
+        control = _init_group(rank, devices, init)
         graphs = None
         while True:
             msg = conn.recv()
@@ -279,7 +290,7 @@ def _worker(rank, devices, init, config, state, optimizer, cfg, cpus, conn):
                     graphs = _BackwardGraphs(net, opt, cfg)
             else:
                 graphs = None
-            distributed_update(net, opt, data, cfg, rank, len(devices), graphs=graphs)
+            distributed_update(net, opt, data, cfg, rank, len(devices), graphs=graphs, control=control)
             release(data)
             data = None
             conn.send(None)
@@ -331,7 +342,7 @@ class DistributedLearner:
                 child.close()
                 self.procs.append(proc)
                 self.conns.append(parent)
-            _init_group(0, devices, init)
+            self.control = _init_group(0, devices, init)
         except BaseException:
             self.close()
             raise
@@ -351,7 +362,7 @@ class DistributedLearner:
                     self.graphs = _BackwardGraphs(net, opt, cfg)
             else:
                 self.graphs = None
-            stats = distributed_update(net, opt, data, cfg, 0, len(self.devices), gen=gen, graphs=self.graphs)
+            stats = distributed_update(net, opt, data, cfg, 0, len(self.devices), gen=gen, graphs=self.graphs, control=self.control)
             errors = self._replies(90)
             if any(errors):
                 raise RuntimeError(f"learner failed: {errors}")
