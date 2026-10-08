@@ -83,14 +83,15 @@ def transition(g, before, decision, option):
     facts = []
     key = canonical(option.key)
     p, kind = decision
+    resolving = next(
+        (it for it in reversed(before["stack"]) if "resolve " + it["name"] in g.log[before["log_size"] :]), None
+    )
+    cause = resolving or (after["stack"][-1] if after["stack"] else before["stack"][-1] if before["stack"] else None)
+    cause_id = ("stack", cause["sid"]) if cause else ("turn", after["turn"])
 
     def add(t, player=None, **kw):
-        facts.append({"type": t, "player": player, **kw})
+        facts.append({"type": t, "player": player, "cause": cause_id, **kw})
 
-    # Cycle moves the card as an activation cost; don't count mana clicks as
-    # source-recorded non-mana activations.
-    if kind == "priority" and key[0] == "activate":
-        add("cycle" if "cycl" in option.label.lower() else "activate", p, card=key[1])
     if kind == "declare_attacker" and key[0] == "attack" and key[1] is None:
         add("attack", p, cards=[c.name for c in g.battlefield if c.oid in g.attackers])
     if kind == "declare_blocker" and key[0] == "block" and key[-1] is not None:
@@ -102,7 +103,14 @@ def transition(g, before, decision, option):
     if kind == "order":
         add("order_choice", p, cards=[it["name"] for it in before["stack"]], key=key)
     if key[0] == "scry":
-        add("scry", p, key=key)
+        if len(key) == 2:
+            top = int(key[1] == "top")
+            bottom = 1 - top
+        else:
+            split = key.index("bottom")
+            top = split - 2
+            bottom = len(key) - split - 1
+        add("scry", p, key=key, count=top + bottom, top=top, bottom=bottom)
     names = {c[3]: c[0] for c in before["cards"].values()} | {c[3]: c[0] for c in after["cards"].values()}
     stack_names = {it["sid"]: it["name"] for it in before["stack"] + after["stack"]}
     # The engine log attests completion of casting, after targets and costs.
@@ -111,14 +119,15 @@ def transition(g, before, decision, option):
         # Casting logs before target/cost prompts. Emit the cast constraint
         # only after these finish; a resolving spell is not a new cast.
         for it in after["stack"]:
-            if it["kind"] != "spell":
+            if it["kind"] not in {"spell", "ability"}:
                 continue
+            pattern = (
+                r"p[01] casts " + re.escape(it["name"]) + r" \("
+                if it["kind"] == "spell"
+                else r"p[01] activates " + re.escape(it["name"]) + "$"
+            )
             cast_index = next(
-                (
-                    i
-                    for i in range(len(g.log) - 1, -1, -1)
-                    if re.match(r"p[01] casts " + re.escape(it["name"]) + r" \(", g.log[i])
-                ),
+                (i for i in range(len(g.log) - 1, -1, -1) if re.match(pattern, g.log[i])),
                 None,
             )
             cast_line = g.log[cast_index] if cast_index is not None else None
@@ -130,6 +139,24 @@ def transition(g, before, decision, option):
             if cast_line and not resolving and cast_line not in lines:
                 lines.append(cast_line)
     for line in lines:
+        activation = re.match(r"p([01]) activates (.+): (.+)$", line)
+        if activation and g.decision is not None and g.decision.kind == "priority":
+            name = activation[2]
+            it = next((it for it in after["stack"] if it["name"] == name + ": " + activation[3]), None)
+            targets = []
+            target_player = None
+            for target_kind, oid in (it or {}).get("targets", []):
+                if target_kind == "player":
+                    target_player = oid
+                elif oid in names:
+                    targets.append(names[oid])
+            add(
+                "cycle" if "cycl" in activation[3].lower() else "activate",
+                int(activation[1]),
+                card=name,
+                targets=targets,
+                target_player=target_player,
+            )
         m = re.match(r"p([01]) casts (.+) \(([^)]+)\) from (\w+)", line)
         if m and g.decision is not None and g.decision.kind == "priority":
             actor, name, method, zone = int(m[1]), m[2], m[3], m[4]
@@ -235,7 +262,7 @@ def compatible(event, fact):
         return False
     if event.get("player") is not None and event["player"] != fact.get("player"):
         return False
-    for field in ("card", "engine_turn", "count", "yes", "method", "target_player"):
+    for field in ("card", "engine_turn", "count", "yes", "method", "target_player", "top", "bottom"):
         if event.get(field) is not None and event[field] != fact.get(field):
             return False
     if event.get("targets") and Counter(event["targets"]) != Counter(fact.get("targets", [])):
@@ -253,16 +280,44 @@ def compatible(event, fact):
     return True
 
 
-def advance(events, cursor, facts):
-    """One atomic engine step may expose several facts in a different log order."""
-    remaining = list(facts)
+def advance(events, cursor, facts, pending=None):
+    """Group split cost choices from one engine cause, never unrelated draws."""
+    remaining = list(pending or []) + list(facts)
     matched = []
     while cursor < len(events):
         event = events[cursor]["event"]
         hit = next((i for i, f in enumerate(remaining) if compatible(event, f)), None)
         if hit is None:
-            break
-        remaining.pop(hit)
+            groups = {}
+            if event["type"] in {"exile", "discard", "mill", "draw", "reveal"}:
+                for i, f in enumerate(remaining):
+                    if f["type"] == event["type"] and event.get("player") in (None, f.get("player")):
+                        groups.setdefault((f.get("player"), f.get("cause")), []).append(i)
+            group_hit = None
+            for indices in groups.values():
+                if len(indices) < 2:
+                    continue
+                aggregate = {
+                    **remaining[indices[0]],
+                    "cards": [c for i in indices for c in remaining[i].get("cards", [])],
+                    "count": sum(remaining[i].get("count", len(remaining[i].get("cards", []))) for i in indices),
+                }
+                if compatible(event, aggregate):
+                    group_hit = indices
+                    break
+            if group_hit is None:
+                break
+            for i in reversed(group_hit):
+                remaining.pop(i)
+        else:
+            remaining.pop(hit)
         matched.append(events[cursor]["id"])
         cursor += 1
-    return cursor, matched
+    if cursor < len(events):
+        wanted = events[cursor]["event"]
+        remaining = [
+            f for f in remaining if f["type"] == wanted["type"] and wanted.get("player") in (None, f.get("player"))
+        ]
+    else:
+        remaining = []
+    return cursor, matched, remaining

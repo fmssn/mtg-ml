@@ -68,7 +68,19 @@ def parse_event(text, players, aliases=None):
     elif lower.startswith("plays"):
         event.update(type="play_land", card=cards[0] if cards else None)
     elif lower.startswith("activates"):
-        event.update(type="activate", card=cards[0] if cards else None)
+        event.update(
+            type="activate", card=cards[0] if cards else None, targets=cards[1:] if "targeting" in lower else []
+        )
+        target = next(
+            (
+                int(seat)
+                for name, seat in players.items()
+                if "targeting" in lower and folded(name) in lower.split("targeting", 1)[1]
+            ),
+            None,
+        )
+        if target is not None:
+            event["target_player"] = target
     elif lower.startswith("cycles"):
         event.update(type="cycle", card=cards[0] if cards else None)
     elif lower.startswith("draws"):
@@ -95,6 +107,9 @@ def parse_event(text, players, aliases=None):
         event.update(type="sacrifice", card=cards[0] if cards else None)
     elif lower.startswith("scrys") or lower.startswith("scries"):
         event.update(type="scry")
+        counts = re.search(r"(?:scrys|scries)\s*(\d+)\s*\((\d+)\s*top,\s*(\d+)\s*bottom\)", lower)
+        if counts:
+            event.update(count=int(counts[1]), top=int(counts[2]), bottom=int(counts[3]))
     elif "is being attacked by" in lower:
         event.update(type="attack", player=None if actor is None else 1 - actor)
     elif "blocks" in lower:

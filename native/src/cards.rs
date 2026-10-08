@@ -1606,7 +1606,13 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 128);
+        assert_eq!(db.cards.len(), 130);
+        assert!(db.cards.contains_key("Murmuring Mystic"));
+        assert!(db.tokens.contains_key("Bird Illusion"));
+        let analysis = db.def(db.cards["Deep Analysis"]);
+        assert_eq!(analysis.flashback_life, 3);
+        assert_eq!(analysis.flashback.as_ref().unwrap().mana_value(), 2);
+        assert_eq!(analysis.targets, vec![TK::Player]);
         assert!(db.undercity.is_some() && db.room_next[0] == vec![1, 2]);
         let gut = db.def(db.cards["Gut Shot"]);
         assert_eq!((gut.colors, gut.phyrexian_life, gut.cost.mana_value()), (color_bit(b'R'), 2, 1));

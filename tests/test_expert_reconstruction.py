@@ -364,6 +364,97 @@ def test_brainstorm_transition_counts_three_cards(engine):
     assert not any(f["type"] == "reveal" for f in facts)
 
 
+def rebind(evidence, root):
+    import copy
+    from mtg_ml.expert.scenarios import at_path
+
+    for path, ids in root["state_facts"].items():
+        for rid in ids:
+            next(r for r in evidence["records"] if r["id"] == rid)["value"]["value"] = copy.deepcopy(
+                at_path(root["initial"], path)
+            )
+
+
+def test_cycling_discard_cost_precedes_activation_and_search(engine, native_parity):
+    evidence, spec = fixture()
+    window = spec["windows"][0]
+    root = window["start_scenario"]
+    p = root["initial"]["players"][0]
+    p.update(
+        hand=["Lorien Revealed"],
+        hand_count=1,
+        battlefield=["Island", "Island"],
+        library=["Island", "Mountain"],
+        library_count=2,
+    )
+    root["expected_after"] = {}
+    rebind(evidence, root)
+    window["event_ids"] = []
+    for rid, text in [
+        ("cost", "Alice discards Lorien Revealed."),
+        ("cycle", "Alice cycles Lorien Revealed."),
+        ("reveal", "Alice reveals Island."),
+    ]:
+        add_event(evidence, spec, rid, text)
+    window["end_assertions"] = {
+        "self.hand": ["Island"],
+        "self.graveyard": ["Lorien Revealed"],
+        "self.library_count": 1,
+        "stack": [],
+    }
+    spec["budget"].update(actions=20, expansions=2000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "matched"
+    assert result["paths"][0]["matched_event_ids"] == ["cost", "cycle", "reveal"]
+
+
+def test_escape_groups_three_exile_choices_before_the_cast(engine, native_parity):
+    evidence, spec = fixture()
+    window = spec["windows"][0]
+    root = window["start_scenario"]
+    root["initial"]["players"][0].update(
+        hand=[],
+        hand_count=0,
+        battlefield=["Island"] * 3,
+        graveyard=["Sleep of the Dead", "Ponder", "Brainstorm", "Mental Note"],
+    )
+    root["initial"]["players"][1]["battlefield"] = ["Refurbished Familiar"]
+    root["expected_after"] = {}
+    rebind(evidence, root)
+    window["event_ids"] = []
+    add_event(
+        evidence, spec, "exile", "Alice exiles Ponder, Brainstorm, and Mental Note with Sleep of the Dead's ability."
+    )
+    add_event(
+        evidence,
+        spec,
+        "escape",
+        "Alice casts Sleep of the Dead from the graveyard for its escape cost targeting Refurbished Familiar.",
+    )
+    window["end_assertions"] = {
+        "self.exile": {"multiset": ["Ponder", "Brainstorm", "Mental Note"]},
+        "battlefield.3.name": "Refurbished Familiar",
+        "battlefield.3.tapped": True,
+        "stack": [],
+    }
+    spec["budget"].update(actions=30, expansions=4000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "matched" and result["paths"][0]["verification"]["identical"]
+
+
+def test_split_draws_from_different_causes_cannot_match_one_draw():
+    from mtg_ml.expert.transitions import advance
+
+    events = [{"id": "draw", "event": {"type": "draw", "player": 0, "count": 2}}]
+    cursor, matched, pending = advance(
+        events, 0, [{"type": "draw", "player": 0, "count": 1, "cards": ["Island"], "cause": ("stack", 1)}]
+    )
+    cursor, matched, _ = advance(
+        events, cursor, [{"type": "draw", "player": 0, "count": 1, "cards": ["Island"], "cause": ("stack", 2)}], pending
+    )
+    assert cursor == 0 and not matched
+
+
 @pytest.mark.parametrize(
     "text,kind,cards",
     [

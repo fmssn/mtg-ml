@@ -455,6 +455,7 @@ def verify_path(scenario, evidence, trace, assertions, events=None):
     from ..difftest import snapshot
 
     cursor = 0
+    pending = []
     for step in [*trace, None]:
         require(snapshot(games[0]) == snapshot(games[1]), "reconstruction engine divergence")
         if step is not None:
@@ -472,7 +473,7 @@ def verify_path(scenario, evidence, trace, assertions, events=None):
                 facts.append(transition(g, before, decision, option))
             require(facts[0] == facts[1], "reconstruction transition divergence")
             if events is not None:
-                cursor, matched = advance(events, cursor, facts[0])
+                cursor, matched, pending = advance(events, cursor, facts[0], pending)
                 require(matched == step["matched_event_ids"], "reconstruction event alignment changed")
     if events is not None:
         require(cursor == len(events), "reconstruction left unchecked events")
@@ -534,6 +535,7 @@ def _search(window, evidence, events, budget, engine):
                 break
             candidate = g.copy()
             cursor = 0
+            pending = []
             trace = []
             valid = True
             for recorded in prefix["trace"]:
@@ -558,7 +560,9 @@ def _search(window, evidence, events, budget, engine):
                 option = frozen_option(candidate.legal_options()[index])
                 candidate.step(index)
                 expansions += 1
-                new_cursor, matched = advance(events, cursor, transition(candidate, before, decision, option))
+                new_cursor, matched, pending = advance(
+                    events, cursor, transition(candidate, before, decision, option), pending
+                )
                 if matched != recorded["matched_event_ids"] or not _check_gates(
                     candidate, gates, cursor, new_cursor, root["perspective"]
                 ):
@@ -567,10 +571,10 @@ def _search(window, evidence, events, budget, engine):
                 cursor = new_cursor
                 trace.append({**recorded, "index": index})
             if valid and matches(observe(candidate, root["perspective"]), prefix["assertions"]):
-                frontier.append((candidate, cursor, trace, None))
+                frontier.append((candidate, cursor, trace, None, pending))
         for depth in range(budget["actions"] + 1):
             next_frontier = []
-            for game, cursor, trace, obligation in frontier:
+            for game, cursor, trace, obligation, pending in frontier:
                 best = max(best, cursor)
                 if cursor == len(events) and matches(observe(game, root["perspective"]), window["end_assertions"]):
                     paths.append(
@@ -592,7 +596,10 @@ def _search(window, evidence, events, budget, engine):
                 if len(trace) >= budget["actions"]:
                     truncated = True
                     continue
-                requirements = _requirements(events[cursor : cursor + 1]) if cursor < len(events) else []
+                # MTGO can log a discard/exile cost before the corresponding
+                # activation/cast. Guide with the next action, while retaining
+                # the original cursor and checking every intervening outcome.
+                requirements = next((_requirements([event]) for event in events[cursor:] if _requirements([event])), [])
                 req = requirements[0] if requirements else None
                 for index, observed in _options(game, req, obligation):
                     if expansions >= budget["expansions"] or time.monotonic() - started >= budget["seconds"]:
@@ -605,7 +612,9 @@ def _search(window, evidence, events, budget, engine):
                     option = frozen_option(child.legal_options()[index])
                     child.step(index)
                     expansions += 1
-                    new_cursor, matched = advance(events, cursor, transition(child, before, decision, option))
+                    new_cursor, matched, new_pending = advance(
+                        events, cursor, transition(child, before, decision, option), pending
+                    )
                     if not _check_gates(child, gates, cursor, new_cursor, root["perspective"]):
                         continue
                     new_obligation = (
@@ -621,7 +630,7 @@ def _search(window, evidence, events, budget, engine):
                         "matched_event_ids": matched,
                         "assumption": None if observed else "Unrecorded legal engine choice.",
                     }
-                    next_frontier.append((child, new_cursor, trace + [step], new_obligation))
+                    next_frontier.append((child, new_cursor, trace + [step], new_obligation, new_pending))
                 if expansions >= budget["expansions"] or time.monotonic() - started >= budget["seconds"]:
                     break
             if (
