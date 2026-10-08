@@ -45,6 +45,12 @@ order. Timing fields vary with worker count and hardware; gameplay seeds do not.
 Protect process-launching callers with Python's usual `if __name__ == "__main__"`
 guard. Scripted-only execution and validation do not require PyTorch.
 
+For a heterogeneous panel, pass learner factories keyed by learner deck ID and
+opponent factories keyed by the manifest's agent ID. The runner selects each
+factory from the cell before assigning its physical seat. A single callable is
+also supported for a shared checkpoint or generic synthetic adapter. Factory
+selection never infers a deck from seat 0/1.
+
 Call `reset(own_deck, actor_seed)` on every adapter before using `take`. The shared
 stepper captures model events before the engine step to preserve existing
 recurrent encoding, then sends scripted agents only visible events after the

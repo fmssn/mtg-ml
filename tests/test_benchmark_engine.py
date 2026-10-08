@@ -101,6 +101,17 @@ def test_search_choice_does_not_include_unknown_order(engine):
     assert "Island" in view.cards
 
 
+def test_public_rule_facts_and_costs_support_ward_and_mana_decisions(engine):
+    g = game(engine, opposing=("Tolarian Terror",))
+    view, actions = inputs(g, 0, JUND_WILDFIRE)
+    cast = next(a for a in actions if a.key[:2] == ("cast", "Cast Down"))
+    assert cast.data["mana_cost"]["generic"] == 1 and cast.data["mana_cost"]["colored"]["B"] == 1
+    assert view.cards["Tolarian Terror"]["ward"] == 2
+    assert view.cards["Drossforge Bridge"]["enters_tapped"] is True
+    assert set(view.cards["Drossforge Bridge"]["abilities"][0]["mana"]) == {"B", "R"}
+    with pytest.raises(TypeError): view.cards["Tolarian Terror"]["ward"] = 0
+
+
 def without_time(rows):
     rows = copy.deepcopy(rows)
     for r in rows:
@@ -117,6 +128,21 @@ def test_panel_repeatability_across_workers_and_draws(tmp_path, engine):
     assert without_time(serial) == without_time(threaded)
     assert all(r["status"] == "completed" and r["winner"] is None and r["reason"] == "turn limit" for r in serial)
     assert len({(r["cell"], r["slot"]) for r in serial}) == 16
+
+
+def test_agent_factories_follow_deck_and_identity_across_seat_swaps(tmp_path, engine):
+    m, _ = fixture(tmp_path, puzzles=False)
+    class DeckAgent(PassAgent):
+        def __init__(self, card): self.card = card
+        def choose(self, view, actions):
+            assert self.card in view.own_deck
+            return 0
+    def jund(seat, mode): return ScriptedAdapter(DeckAgent("Cast Down"), seat)
+    def blue(seat, mode): return ScriptedAdapter(DeckAgent("Ponder"), seat)
+    learner = {"jund_wildfire": jund, "mono_blue_terror": blue}
+    opponent = {"synthetic-jund@1": jund, "synthetic-blue@1": blue}
+    rows = run_episodes(episodes(m, modes=["greedy"]), m.data["engine_settings"], learner, opponent, engine)
+    assert len(rows) == 16 and all(r["status"] == "completed" for r in rows)
 
 
 def test_errors_and_caps_retain_rows(tmp_path, engine):
