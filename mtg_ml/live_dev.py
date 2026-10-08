@@ -43,6 +43,13 @@ SCENARIOS: dict[str, dict] = {
         "me": {"battlefield": ["Masked Vandal", "Forest"], "hand": ["Generous Ent"]},
         "opp": {"battlefield": ["Mountain", "Mountain"], "library": ["Mountain"] * 20},
     },
+    "reduced": {
+        "title": "Reduced cost (Tolarian Terror, three instants in the graveyard)",
+        "matchup": "jund_blue",
+        "seat": 1,
+        "me": {"hand": ["Tolarian Terror", "Counterspell"], "graveyard": ["Brainstorm", "Ponder", "Counterspell"], "battlefield": ["Island"] * 3},
+        "opp": {"battlefield": ["Swamp", "Mountain"]},
+    },
     "trade": {
         "title": "Combat death (attack a 1/1 into their 2/2)",
         "matchup": "madness_elves",

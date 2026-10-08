@@ -326,6 +326,18 @@ button:disabled{cursor:default}
 .seg input{display:none}
 .seg label:has(input:checked){background:#f0c86922;color:var(--me)}
 
+/* mana and costs */
+.openmana{font-size:11px;color:var(--muted)}
+.b.reduced{left:50%;top:6px;transform:translateX(-50%);background:var(--good);color:#04210f;font-size:11px}
+/* help */
+.mbox.help{max-width:min(760px,94vw)}
+.mbox.help table{border-collapse:collapse;font-size:13px}
+.mbox.help th{text-align:left;vertical-align:top;padding:6px 14px 6px 0;white-space:nowrap;color:var(--me);font-weight:600}
+.mbox.help td{padding:6px 0;color:var(--text)}
+.coach{position:fixed;z-index:600;max-width:300px;background:#1d2533;border:1px solid var(--me);border-radius:12px;padding:10px 12px;box-shadow:0 12px 30px #000c;font-size:13px;animation:chipin .2s var(--ease)}
+.coach .cbtns{display:flex;gap:6px;align-items:center;margin-top:8px}
+.coach .cbtns span{flex:1;color:var(--muted);font-size:11px}
+.primary.small{min-width:0;padding:4px 12px;font-size:12px;border-radius:8px}
 /* match flow */
 .playdraw{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .decklink{background:none;border:0;padding:0;color:inherit;font:inherit;text-decoration:underline dotted #ffffff40;text-underline-offset:3px}

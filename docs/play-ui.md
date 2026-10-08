@@ -129,6 +129,10 @@ The opening hand opens a mulligan screen: the seven cards large, the land count 
 
 Endpoints: `POST /api/live/<id>/concede`, `POST /api/live/<id>/next {plan, play}`, `GET /api/live/sideboard?matchup=&seat=`, `GET /api/live/decks?matchup=&seat=`. A full server never drops a game that is being played (touched in the last 10 minutes and not over): it refuses a new game with a message instead.
 
+### Help and information
+
+A **?** in the header opens the controls sheet; a first game shows four short tips anchored to the hand, the main button, the phase rail and the feed (once; the sheet can show them again). Each plate counts its open mana (untapped lands, and creatures and artifacts that tap for mana). Hand cards that cost less right now (Tolarian Terror, affinity) carry a "−N cost" badge: the server sends `reductions` ({uid: n}, from the engine's own cost reduction) with each of the player's decisions.
+
 ### Log and feed
 
 The log is written in Magic's words, one line per action, from the parsed events, the decisions and the difference between two states: "Opponent casts Lightning Bolt → your Sagu Wildling", "Cryptic Serpent deals 6 damage to you", "Your life 18 → 12 (−6)", "Tolarian Terror dies", "You draw Ponder", "Mountain, Ponder are put into the opponent's graveyard from the library". Targets and X join the line of their spell; steps, mana, priority passes and engine tokens (p0/p1, choose_card, (normal), winner=1) never show. Triggers and resolutions are dimmed.

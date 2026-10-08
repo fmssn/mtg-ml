@@ -179,6 +179,17 @@ class LiveGame:
                 decision["auto"] = auto_pay_index(g, d)
             elif d.kind == "priority":
                 add_tap_previews(g, decision["refs"], self.seat, visible_ids(state))
+            # what the player's hand cards cost less right now (Tolarian Terror, affinity)
+            red = {}
+            for c in g.players[self.seat].hand:
+                try:
+                    n = g._cost_reduction(self.seat, c)
+                except Exception:  # a card without a reduction rule
+                    n = 0
+                if n:
+                    red[c.uid] = n
+            if red:
+                decision["reductions"] = red
             elif d.kind in ("order", "choose_mode", "yes_no", "choose_card"):
                 names = decision_cards(g, d, self.seat)
                 for r in decision["refs"]:

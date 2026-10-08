@@ -300,3 +300,19 @@ def test_sideboarded_decks(manager):
         want = expand(postboard("mono_blue_terror", "jund_wildfire")) if plan == "standard" else expand(DECKS["mono_blue_terror"])
         assert decks == sorted(want)
         assert model == sorted(expand(postboard("jund_wildfire", "mono_blue_terror")))
+
+
+def test_hand_cost_reductions(manager, monkeypatch):
+    """Tolarian Terror with instants in the graveyard: the decision says how
+    much less it costs, for the player's own hand only."""
+    from mtg_ml import live_dev
+
+    monkeypatch.setitem(live_dev.SCENARIOS, "terror", {
+        "title": "t", "matchup": "jund_blue", "seat": 1,
+        "me": {"hand": ["Tolarian Terror", "Island"], "graveyard": ["Brainstorm", "Ponder", "Counterspell"], "battlefield": ["Island"] * 3},
+        "opp": {"battlefield": ["Swamp"]},
+    })
+    view = manager.new({"model": SCRIPTED, "scenario": "terror", "seed": 1})
+    d = view["frames"][-1]["decision"]
+    terror = next(c["uid"] for c in view["frames"][-1]["state"]["players"][1]["hand"] if c["name"] == "Tolarian Terror")
+    assert d["player"] == 1 and {int(k): v for k, v in d["reductions"].items()} == {terror: 3}

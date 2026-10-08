@@ -809,9 +809,22 @@ function renderPlate(p, s, prev) {
       <div class="zone clickable ${gyCast}" data-zone="graveyard" data-p="${p}" title="Click to see the graveyard">Grave <b>${P.graveyard.length}</b></div>
       <div class="zone clickable ${exCast}" data-zone="exile" data-p="${p}" title="Click to see exiled cards">Exile <b>${P.exile.length}</b></div>
     </div>
+    <div class="openmana" title="Untapped mana sources: lands, and creatures and artifacts that tap for mana">${openMana(s, p)} open mana</div>
     ${pool ? `<div class="mana" title="Floating mana">${pool}</div>` : ''}
     ${isMe ? '' : `<div class="lastact" title="The opponent's latest action">${S.lastOpp ? `<span>Last:</span> ${esc(S.lastOpp)}` : ''}</div>`}`;
   void d;
+}
+
+// Untapped sources that can make mana now: lands; creatures (not summoning
+// sick) and artifacts whose text has "{T}: Add".
+function openMana(s, p) {
+  return s.battlefield.filter(c => {
+    if (c.controller !== p || c.tapped) return false;
+    if (c.types.includes('Land')) return true;
+    const text = S.cards[c.name]?.text || '';
+    if (!/\{T\}(, [^:]*)?: Add/.test(text)) return false;
+    return !(c.power != null && c.sick);
+  }).length;
 }
 
 function groupPerms(perms, s) {
@@ -891,9 +904,13 @@ function permHtml(g, s, prevBy, attachedTo) {
 function renderHand(s) {
   const P = s.players[S.seat];
   const el = $('#hand');
+  const red = myDecision()?.reductions || S.reductions || {};
+  S.reductions = red;
   el.innerHTML = P.hand.map(c => {
     const opts = H.hand.get(c.name);
-    return cardHtml(c.name, {uid: c.uid, cls: opts ? 'playable' : '', attrs: ' data-hand="1"'});
+    const n = red[c.uid];
+    const badge = n ? `<div class="badges"><span class="b reduced" title="This costs ${n} less right now">−${n} cost</span></div>` : '';
+    return cardHtml(c.name, {uid: c.uid, cls: opts ? 'playable' : '', attrs: ' data-hand="1"', badges: badge});
   }).join('');
 }
 
@@ -1137,6 +1154,7 @@ function enterDecision(fresh) {
   renderDock();
   renderOverlay();
   if (fresh) ping();
+  if (d.kind === 'priority') coach();
 }
 
 function passLabel(s) {
@@ -1149,7 +1167,7 @@ function passLabel(s) {
 }
 
 const HINTS = {
-  priority: '<kbd>R</kbd> pass till they act · <kbd>H</kbd> hold priority · <kbd>F</kbd> full control',
+  priority: '<kbd>R</kbd> pass till they act · <kbd>H</kbd> hold · <kbd>F</kbd> full control',
   declare_attacker: 'undo: <kbd>right-click</kbd> · <kbd>Esc</kbd> clears',
   declare_blocker: 'undo: <kbd>right-click</kbd> · <kbd>Esc</kbd> clears',
   target: 'the spell is being cast: pick a target',
@@ -1794,6 +1812,59 @@ $('#bConcede').addEventListener('click', async () => {
   try { applyView(await api(`${encodeURIComponent(S.gid)}/concede`, {})); pump(); } catch (e) { toast(e.message); }
 });
 $('#bSettings').addEventListener('click', () => openSettings());
+$('#bHelp').addEventListener('click', () => openHelp());
+
+const HELP = [
+  ['Play a land or cast a spell', 'Drag the glowing card up onto the battlefield, or double-click it. One click opens its options (flashback, cycling, modes).'],
+  ['See what it will tap', 'Hover a castable card: the lands auto-pay will use light up.'],
+  ['Target', 'Click a glowing (cyan) creature, player plate or stack item. Or drop a targeted spell right onto its target.'],
+  ['Attack', 'Click your creatures (or drag them forward), A for all, then Space. Right-click undoes one.'],
+  ['Block', 'Drag your creature onto an attacker, or click yours then theirs. Space confirms.'],
+  ['Pass', 'Space. The button always says what happens next. R passes until the opponent does something; F turns auto-pass off; H keeps priority after your next spell.'],
+  ['Auto-pass stops', 'The small bars under each step in the middle strip: gold for your turn, blue for theirs.'],
+  ['Everything else', 'O lists every option the engine offers. Number keys pick listed choices. Esc cancels a menu or selection.'],
+  ['Read a card', 'Hover it; right-click pins it in the panel. Click a deck name for both decklists.'],
+  ['The opponent', 'Their moves replay one by one; click or Space skips. The panel lists what they did and what hit you; ⚑ flags a play that looks wrong.'],
+];
+function openHelp() {
+  const m = $('#modal');
+  m.innerHTML = `<div class="mbox help"><h2>How to play</h2><table>${HELP.map(([a, b]) => `<tr><th>${esc(a)}</th><td>${esc(b)}</td></tr>`).join('')}</table>
+    <div style="margin-top:14px;display:flex;gap:8px"><button class="primary" id="bHelpClose">Got it</button><button class="btn" id="bCoachAgain">Show the first-game tips again</button></div></div>`;
+  m.classList.add('on');
+  $('#bHelpClose').focus();
+  $('#bHelpClose').onclick = () => m.classList.remove('on');
+  $('#bCoachAgain').onclick = () => { saveJSON('mtgml-play-coached', false); m.classList.remove('on'); coach(true); };
+}
+
+// First-game callouts: four short tips anchored to the parts of the screen, once.
+const COACH = [
+  ['#hand', 'Your hand. Drag a glowing card up to play it, or double-click it.'],
+  ['#primary', 'The main button says what happens next. Space presses it.'],
+  ['#rail', 'Where auto-pass stops: click the small bars under a step.'],
+  ['#feedbox', "What the opponent did and what hit you. ⚑ flags a play that looks wrong."],
+];
+function coach(force) {
+  if (!force && loadJSON('mtgml-play-coached', false)) return;
+  let k = 0;
+  const show = () => {
+    $$('.coach').forEach(x => x.remove());
+    if (k >= COACH.length) { saveJSON('mtgml-play-coached', true); return; }
+    const [sel, text] = COACH[k], at = $(sel)?.getBoundingClientRect();
+    if (!at) { k++; return show(); }
+    const c = document.createElement('div');
+    c.className = 'coach';
+    c.innerHTML = `<div>${esc(text)}</div><div class="cbtns"><span>${k + 1}/${COACH.length}</span><button class="btn small" data-coach="skip">Skip tips</button><button class="primary small" data-coach="next">${k + 1 < COACH.length ? 'Next' : 'Got it'}</button></div>`;
+    document.body.appendChild(c);
+    const w = c.offsetWidth, h = c.offsetHeight;
+    let x = at.left + at.width / 2 - w / 2, y = at.top - h - 12;
+    if (y < 50) y = at.bottom + 12;
+    c.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, x))}px`;
+    c.style.top = `${Math.max(8, Math.min(innerHeight - h - 8, y))}px`;
+    c.querySelector('[data-coach=next]').onclick = () => { k++; show(); };
+    c.querySelector('[data-coach=skip]').onclick = () => { k = COACH.length; show(); };
+  };
+  show();
+}
 $('#bLog').addEventListener('click', () => { const l = $('#log'); l.classList.toggle('hide'); $('#bLog').textContent = l.classList.contains('hide') ? 'Show' : 'Hide'; });
 $('#overlay').addEventListener('click', e => {
   const ob = e.target.closest('[data-ord]');
