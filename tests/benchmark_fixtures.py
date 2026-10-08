@@ -2,6 +2,7 @@
 
 import copy
 from dataclasses import asdict
+from dataclasses import dataclass
 from pathlib import Path
 import subprocess
 
@@ -28,6 +29,15 @@ class PassAgent:
 
 def pass_factory(seat, mode):
     return ScriptedAdapter(PassAgent(), seat)
+
+
+@dataclass(frozen=True)
+class ModelFactory:
+    path: str
+
+    def __call__(self, seat, mode):
+        from mtg_ml.benchmark import CheckpointAdapter
+        return CheckpointAdapter(self.path, seat, mode=mode)
 
 
 def revision():
@@ -105,7 +115,8 @@ def fixture(tmp_path, puzzles=True):
     return load_manifest(root / "manifest.json"), r
 
 
-def game(engine=None, *, active=0, step="main1", hand=("Cast Down",), board=("Swamp", "Swamp"), opposing=("Delver of Secrets",), own_library=("Swamp",)*12):
+def game(engine=None, *, active=0, step="main1", hand=("Cast Down",), board=("Swamp", "Swamp"), opposing=("Delver of Secrets",),
+         own_library=("Swamp",)*12, opponent_hand=(), opponent_library=("Island",)*12):
     def setup(g):
         for name in hand:
             g.add_card(name, 0, "hand")
@@ -115,7 +126,9 @@ def game(engine=None, *, active=0, step="main1", hand=("Cast Down",), board=("Sw
             g.add_card(name, 1, "battlefield", sick=False)
         for name in own_library:
             g.add_card(name, 0, "library")
-        for _ in range(12):
-            g.add_card("Island", 1, "library")
+        for name in opponent_hand:
+            g.add_card(name, 1, "hand")
+        for name in opponent_library:
+            g.add_card(name, 1, "library")
     return game_class(engine)(([], []), setup=setup, seed=5, starting_player=active, start_step=step,
                               auto_single=False, log=True, max_turns=4, registered_main=(tuple(JUND_WILDFIRE), tuple(MONO_BLUE_TERROR)))

@@ -7,7 +7,7 @@ import re
 from ..engine.cards import CARDS
 from ..engine.game import STEPS
 from ..expert.artifacts import validate_review
-from .jsonio import digest, file_digest, read_json
+from .jsonio import digest, file_digest, parse_json
 
 FAIR = "own-list-hidden-opponent-v1"
 DIAGNOSTIC = "privileged-diagnostic"
@@ -61,7 +61,7 @@ def load(path, validator) -> Artifact:
     path = Path(path).resolve()
     try:
         raw = path.read_bytes()
-        data = read_json(path)
+        data = parse_json(raw)
         validator(data)
         import hashlib
         return Artifact(path, data, hashlib.sha256(raw).hexdigest())
@@ -123,6 +123,9 @@ def validate_manifest(d):
     integer(settings["max_decisions"], "engine_settings.max_decisions")
     for k in ("auto_single", "auto_mana", "auto_pass"):
         require(type(settings[k]) is bool, "engine_settings." + k, "boolean required")
+    if any(settings[k] for k in ("auto_single", "auto_mana", "auto_pass")):
+        identifier(d.get("configuration_id"), "configuration_id")
+        require(d["information_contract"] == DIAGNOSTIC, "engine_settings", "alternate decomposition is diagnostic")
     integer(d["bootstrap"]["replicates"], "bootstrap.replicates")
     require(type(d["bootstrap"]["confidence"]) in (float, int) and 0 < d["bootstrap"]["confidence"] < 1, "bootstrap.confidence", "invalid confidence")
     require(isinstance(d.get("puzzles"), dict), "puzzles", "bundle reference required")

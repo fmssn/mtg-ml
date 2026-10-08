@@ -23,7 +23,7 @@ def file_digest(path) -> str:
     return h.hexdigest()
 
 
-def read_json(path):
+def parse_json(raw):
     def pairs(items):
         out = {}
         for k, v in items:
@@ -35,10 +35,13 @@ def read_json(path):
     def constant(s):
         raise ValueError(f"nonfinite JSON number {s}")
 
-    with open(path, encoding="utf-8") as f:
-        value = json.load(f, object_pairs_hook=pairs, parse_constant=constant)
+    value = json.loads(raw, object_pairs_hook=pairs, parse_constant=constant)
     canonical_bytes(value)  # also catches overflowing JSON numbers, e.g. 1e999
     return value
+
+
+def read_json(path):
+    return parse_json(Path(path).read_bytes())
 
 
 def write_json(path, value) -> None:

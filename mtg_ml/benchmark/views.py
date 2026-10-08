@@ -143,7 +143,9 @@ def inputs(g, viewer, own_deck):
                 elif v[0] in {"activate", "mana"}:
                     data["ability"] = key[2]
                     if v[0] == "activate":
-                        data["cost"] = str(v[2].cost)
+                        data["cost"] = str(c.face.abilities[v[2]].cost)
+                    else:
+                        data["color"] = key[2]
         elif d.kind == "target":
             if v is None:
                 data["target"] = None

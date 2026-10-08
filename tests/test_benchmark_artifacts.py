@@ -119,8 +119,8 @@ def test_result_counts_duplicates_errors_and_roundtrip(tmp_path):
     result = build_result(m, candidate(), rows, code_revision=m.data["freeze"]["code_revision"], modes=["greedy"])
     assert result["status"] == "complete"
     assert result["partial_cells"][0]["score"] == 0.5
-    write_result(tmp_path / "result.json", result)
-    assert load_result(tmp_path / "result.json").data == result
+    stored = write_result(tmp_path / "result.json", result)
+    assert load_result(tmp_path / "result.json").data == stored
     for mutation in ("duplicate", "count", "seed", "missing", "error"):
         bad = copy.deepcopy(result)
         if mutation == "duplicate": bad["game_rows"].append(bad["game_rows"][0])
@@ -146,3 +146,44 @@ def test_cli_invalid_report_and_no_overwrite(tmp_path):
     with pytest.raises(SystemExit):
         main(["validate", "--manifest", "missing.json", "--out", str(out)])
     assert out.read_bytes() == before
+
+
+def test_registry_freeze_and_reserved_identities(tmp_path):
+    from mtg_ml.benchmark import AgentMetadata, AgentRegistry, FAIR, DIAGNOSTIC
+    from benchmark_fixtures import PassAgent, revision
+    registry = AgentRegistry()
+    reserved = AgentMetadata("benchmark-jund@1", "jund_wildfire", revision(), 1, digest({}), FAIR, "synthetic")
+    with pytest.raises(ValueError, match="reserved"):
+        registry.register(reserved, PassAgent, {})
+    legacy = AgentMetadata("legacy-jund@1", "jund_wildfire", revision(), 1, digest({}), FAIR, "legacy")
+    with pytest.raises(ValueError, match="diagnostic"):
+        registry.register(legacy, PassAgent, {})
+    legacy = __import__("dataclasses").replace(legacy, information_contract=DIAGNOSTIC)
+    registry.register(legacy, PassAgent, {})
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register(legacy, PassAgent, {})
+    m, r = fixture(tmp_path, puzzles=False)
+    bot = copy.deepcopy(m.data["bots"][0])
+    bot["parameters_sha256"] = "a" * 64
+    with pytest.raises(ValueError, match="freeze mismatch"):
+        r.verify(bot, FAIR)
+
+
+def test_validation_fails_missing_components_and_freeze(tmp_path, monkeypatch):
+    from mtg_ml.benchmark.validation import validate
+    m, r = fixture(tmp_path, puzzles=False)
+    wrong = copy.deepcopy(m.data)
+    wrong["freeze"]["card_spec_sha256"] = "0" * 64
+    p = tmp_path / "wrong.json"
+    write_json(p, wrong)
+    report = validate(p, engines=("python",), registry=r)
+    assert report["status"] == "invalid" and "card spec mismatch" in report["errors"][0]
+    monkeypatch.setattr("mtg_ml.benchmark.validation.check_freeze", lambda m: None)
+    monkeypatch.setattr("mtg_ml.benchmark.validation.native_available", lambda: False)
+    report = validate(m.path, registry=r)
+    assert report["status"] == "invalid" and "native engine unavailable" in report["errors"][0]
+    report = validate(m.path, engines=("python",))
+    assert report["status"] == "invalid" and "missing agent" in report["errors"][0]
+    (tmp_path / "bundle.json").unlink()
+    report = validate(m.path, engines=("python",), registry=r)
+    assert report["status"] == "invalid" and "missing file" in report["errors"][0]

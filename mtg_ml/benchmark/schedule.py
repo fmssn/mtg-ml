@@ -76,3 +76,27 @@ def episodes(manifest, cells=None, modes=None):
                     out.append(EpisodeSpec(mode, cell["id"], block, slot, s, actor_seed(d["stream"], cell["id"], block, slot, mode),
                                            seat, start, ids, tuple(expand(d["decks"][name]["cards"]) for name in ids), cell["opponent"]))
     return sorted(out, key=lambda x: x.identity)
+
+
+def puzzle_plan(manifest, cells=None, modes=None):
+    """Case identities only; this does not compile or attempt a puzzle."""
+    from .artifacts import reference, load, validate_bundle, load_puzzle
+    specs = episodes(manifest, cells, modes)
+    decks = {s.deck_ids[s.learner_seat] for s in specs}
+    selected_modes = sorted({s.mode for s in specs})
+    d = manifest.data
+    bundle = load(reference(manifest.path, d["puzzles"], "puzzles"), validate_bundle)
+    out, ids = [], set()
+    for ref in bundle.data["puzzles"]:
+        p = load_puzzle(reference(bundle.path, ref, "bundle.puzzles")).data
+        require(p["id"] not in ids, "bundle.puzzles", "duplicate puzzle identity")
+        ids.add(p["id"])
+        if p["deck"] not in decks:
+            continue
+        for mode in selected_modes:
+            for repetition in range(d["puzzle_repetitions"]):
+                s = puzzle_seed(d["stream"], p["id"], repetition, mode)
+                for case in p["cases"]:
+                    out.append(dict(mode=mode, puzzle=p["id"], case=case["id"], repetition=repetition, actor_seed=s,
+                                    deck=p["deck"], category=p["category"], template_id=p["template_id"], source_group_id=p["source_group_id"]))
+    return sorted(out, key=lambda r: (r["mode"], r["puzzle"], r["case"], r["repetition"]))

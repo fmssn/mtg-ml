@@ -1,7 +1,11 @@
 """Bounded development games. No candidate/puzzle campaign CLI."""
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
+from functools import partial
+import multiprocessing
+import pickle
+import gc
 import time
 
 from ..backend import game_class
@@ -18,7 +22,7 @@ def play_episode(spec, settings, learner_factory, opponent_factory, engine="pyth
     integer(settings["max_decisions"], "max_decisions")
     row = {k: v for k, v in asdict(spec).items() if k != "decks"}
     row.update(status="error", winner=None, reason=None, decisions=0, turns=0, latency_seconds=[], attempted_action=None)
-    g, frames, card_info = None, [], {}
+    g, frames, card_info, seen = None, [], {}, 0
     started = time.perf_counter()
     try:
         g = game_class(engine)(**spec.game_args(settings))
@@ -68,6 +72,10 @@ def play_episode(spec, settings, learner_factory, opponent_factory, engine="pyth
                                                             "seed": spec.simulator_seed, "viewer": spec.learner_seat,
                                                             "agents": ["learner" if s == spec.learner_seat else spec.opponent for s in (0, 1)],
                                                             "end_reason": row["reason"]}, "cards": card_info, "frames": frames}
+            if getattr(g, "NATIVE", False):
+                # Break cached Decision -> Game cycles on the owning thread.
+                g._cache.clear()
+                g._proxies.clear()
     return row
 
 
@@ -79,11 +87,25 @@ def run_episodes(specs, settings, learner_factory, opponent_factory, engine="pyt
     integer(workers, "workers")
     specs = list(specs)
     require(len({s.identity for s in specs}) == len(specs), "episodes", "duplicate identity")
-    def run(spec):
-        return play_episode(spec, settings, learner_factory, opponent_factory, engine, record)
+    run = partial(play_episode, settings=settings, learner_factory=learner_factory, opponent_factory=opponent_factory, engine=engine, record=record)
     if workers == 1:
         rows = list(map(run, specs))
     else:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
+        try:
+            pickle.dumps((learner_factory, opponent_factory))
+        except (TypeError, AttributeError, pickle.PicklingError) as e:
+            raise ValueError("workers: factories must be importable/picklable") from e
+        # ProcessPool's result thread may trigger cyclic GC. Dispose of earlier
+        # native test/development games on their owner before starting it.
+        gc.collect()
+        with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"), initializer=_worker_init) as pool:
             rows = list(pool.map(run, specs))
     return sorted(rows, key=lambda r: (r["mode"], r["cell"], r["block"], r["slot"]))
+
+
+def _worker_init():
+    try:
+        import torch
+        torch.set_num_threads(1)
+    except ImportError:
+        pass  # Scripted-only execution does not require the optional RL tools.

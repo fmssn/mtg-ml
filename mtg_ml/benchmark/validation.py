@@ -14,7 +14,7 @@ from .jsonio import file_digest, read_json, digest
 from .views import inputs, thaw
 
 ROOT = Path(__file__).resolve().parents[2]
-FREEZE_PATHS = ("mtg_ml/engine", "mtg_ml/encode.py", "mtg_ml/rl/features.py", "mtg_ml/benchmark", "native")
+FREEZE_PATHS = ("mtg_ml", "native")
 
 
 def check_freeze(manifest):

@@ -9,7 +9,7 @@ from ..replay import visible_events
 from ..rl.features import PUBLIC_KINDS
 from .artifacts import FAIR, DIAGNOSTIC, require, sha, integer
 from .jsonio import digest, file_digest
-from .views import VisibleEvent, freeze, inputs
+from .views import LegalAction, VisibleEvent, freeze, inputs, thaw
 
 
 @dataclass(frozen=True)
@@ -74,16 +74,23 @@ class CheckpointAdapter:
         from ..rl.agent import ModelAgent
         from ..rl.rollout import checkpoint_config
         from ..encode import check_features
+        checkpoint_sha = file_digest(path)
         features = check_features(checkpoint_config(str(path)).get("features", 1))
         actual = information_contract(features)
         require(contract in {FAIR, DIAGNOSTIC}, "checkpoint.contract", "unsupported contract")
         require(contract == DIAGNOSTIC or actual == "hidden_list", "checkpoint.contract", f"features {features} are not fair inputs")
         require(mode in {"sampled", "greedy"}, "checkpoint.mode", "unsupported mode")
-        self.path, self.sha256 = str(path), file_digest(path)
+        self.path, self.sha256 = str(path), checkpoint_sha
         self.features, self.information_contract = features, contract
         self.recorded_information_contract = actual
         self.seat = seat
         self.model = ModelAgent(str(path), seat, sample=mode == "sampled")
+        # The legacy process cache is path keyed; freeze identity is byte keyed.
+        # Loading directly prevents a replaced path from reusing stale weights.
+        from ..rl.rollout import load_net
+        self.model.net = load_net(str(path))
+        require(self.model.net.features == features and file_digest(path) == checkpoint_sha, "checkpoint", "file changed while loading")
+        self.model.features = features
 
     def reset(self, own_deck, actor_seed=0):
         require(file_digest(self.path) == self.sha256, "checkpoint", "file changed after loading")
@@ -130,6 +137,14 @@ def take(game, agents, index):
     for a in agents:
         if isinstance(a, ScriptedAdapter):
             action = actions.get(a.seat)
-            # Structured public references use the acting player's perspective.
+            if action is not None and a.seat != decider:
+                def reverse(value):
+                    if isinstance(value, dict):
+                        return {k: ("opponent" if v == "self" else "self" if v == "opponent" else v)
+                                if k in {"owner", "controller", "player"} and isinstance(v, str) else reverse(v) for k, v in value.items()}
+                    if isinstance(value, list):
+                        return [reverse(v) for v in value]
+                    return value
+                action = LegalAction(action.index, action.kind, action.key, action.label, freeze(reverse(thaw(action.data))))
             a.agent.observe(VisibleEvent("self" if a.seat == decider else "opponent", kind, action,
                                          tuple(visible_events(game.log[seen:], a.seat)), freeze(observe(game, a.seat))))
