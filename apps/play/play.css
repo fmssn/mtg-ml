@@ -285,6 +285,15 @@ button:disabled{cursor:default}
 #overlay .tile{display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:0;padding:0;max-width:170px}
 #overlay .tile .card{--w:150px;transition:transform .12s var(--ease)}
 #overlay .tile:hover .card{transform:translateY(-6px);box-shadow:0 0 0 2px var(--me),0 10px 24px #000c}
+#overlay .tile span em{display:block;font-style:normal;color:var(--muted);font-size:11px}
+#overlay .tile.is-tapped .card{rotate:8deg;filter:brightness(.8)}
+.obox.order .ordrow{display:flex;gap:12px;min-height:150px;padding:10px;border:1px dashed #ffffff26;border-radius:12px;margin-bottom:12px;flex-wrap:wrap}
+.orowlbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:6px 0}
+.otile{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:grab}
+.otile .card{--w:120px}
+.otile .obtns{display:flex;gap:4px}
+.otile .obtns button{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:0 8px;font-size:12px}
+#choices .choice kbd,#overlay .choice kbd{font-size:10px;margin-right:4px}
 #overlay .tile span{font-size:12px;color:var(--text);text-align:center}
 #overlay .textopts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px}
 #overlay .orow{display:flex;gap:8px;justify-content:center;margin-top:16px;flex-wrap:wrap}

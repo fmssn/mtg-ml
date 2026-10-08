@@ -50,10 +50,11 @@ The live server's frames keep the replay format, with two additions.
 | declare_blocker | `{type: block, blocker, attacker, attacker_name}` or `{blocker, none: true}` |
 | assign_damage | `{type: damage, split, to: [blocker oids], player}` |
 | choose_x | `{type: x, x}` |
-| card choices | `{type: <kind>, name, uid}` when the card is in plain view |
+| card choices | `{type: <kind>, name, uid or oid, tapped, verb}` when the card is in plain view (Highway Robbery's "Sacrifice Mountain" carries the Mountain's oid) |
+| order | `{type: order, top: [names], bottom: [names]}` |
 | mulligan | `{type: keep}` / `{type: mulligan}` |
 
-Two more fields for the player's own decisions: a `pay_mana` decision carries `auto`, the option the client takes when paying automatically (`live_proto.auto_pay_index`), and each cast / activate / plot ref at priority carries `taps`, the oids of the player's sources that this option plus automatic payment would tap. `taps` comes from simulating the option on a `Game.copy()` with the same `auto_pay_index` (other choices on the way take their first option), so the preview and the real payment cannot drift apart; `tests/test_live_proto.py` checks they are equal in played games on both engines.
+Decisions about the player's own known cards (scry, surveil, Ponder, explore, Delver) carry `cards`: those names (the player's own knowledge only), with their card text in `cards` data. Two more fields for the player's own decisions: a `pay_mana` decision carries `auto`, the option the client takes when paying automatically (`live_proto.auto_pay_index`), and each cast / activate / plot ref at priority carries `taps`, the oids of the player's sources that this option plus automatic payment would tap. `taps` comes from simulating the option on a `Game.copy()` with the same `auto_pay_index` (other choices on the way take their first option), so the preview and the real payment cannot drift apart; `tests/test_live_proto.py` checks they are equal in played games on both engines.
 
 **`actions`**: the frame's visible log lines parsed into events (`turn`, `step`, `play`, `cast`, `activate`, `trigger`, `resolve`, `enter`, `leave`, `dies`, `attack` with oids, `block` with pairs, `discard`, `sacrifice`, `mulligan`, `countered`, `game_over`, else `note`).
 
@@ -111,7 +112,10 @@ Drop and double-click mean "play it": they take only a land play or a normal cas
 | pay_mana | auto-pay; manual mode: click glowing sources, button "Auto-pay" |
 | declare_attacker / declare_blocker | batched, see above |
 | assign_damage | overlay with −/+ per recipient, starts from the split that kills most blockers in order |
-| choose_card, sacrifice, exile_from_graveyard, ... | card browser overlay (board peekable), text options below the cards |
+| choose_card, sacrifice, exile_from_graveyard, ... | card browser overlay (board peekable), text options ("Find nothing") below the cards; tapped permanents are tilted and say so, identical names get "permanent 2 of 3" |
+| order (Ponder, scry 2+) | drag the cards (or use the arrows) into a top row and, for scry, a bottom row; "Confirm order" sends the matching engine option |
+| scry 1, surveil, explore, Delver reveals | the card(s) shown large above the choices (number keys 1-9 pick a choice) |
+| order_triggers | identical triggers are ordered for you; otherwise one button per order |
 | yes_no, choose_mode, choose_x, order, order_triggers | option buttons above the primary button |
 | mulligan | "Keep 7" as the primary button, "Mulligan to 6" beside it |
 

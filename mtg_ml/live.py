@@ -33,8 +33,9 @@ from .agents import take
 from .backend import engine_name, game_class
 from .engine import DECKS, SIDEBOARDS, expand, plan_for, postboard
 from .match import MATCHUPS, game_args, matchup_decks
-from .live_proto import add_tap_previews, auto_pay_index, combat_and_life_lines, option_ref, option_refs, parse_events, status, visible_ids
-from .replay import DECK_TITLES, FORMAT, snapshot, visible_events
+from .live_proto import add_tap_previews, auto_pay_index, combat_and_life_lines, decision_cards, option_ref, option_refs, parse_events, status, visible_ids
+from .engine.cards import CARDS
+from .replay import DECK_TITLES, FORMAT, _card_info, snapshot, visible_events
 from .rl.features import PUBLIC_KINDS
 
 SCRIPTED = "scripted-bot"  # the deck's hand-written bot, offered with --scripted-bot (dev, no checkpoint needed)
@@ -178,6 +179,15 @@ class LiveGame:
                 decision["auto"] = auto_pay_index(g, d)
             elif d.kind == "priority":
                 add_tap_previews(g, decision["refs"], self.seat, visible_ids(state))
+            elif d.kind in ("order", "choose_mode", "yes_no", "choose_card"):
+                names = decision_cards(g, d, self.seat)
+                for r in decision["refs"]:
+                    names += [n for n in r.get("top", []) + r.get("bottom", []) if n not in names]
+                if names:
+                    decision["cards"] = names
+                    for n in names:  # the player's own cards: their text may be shown
+                        if n in CARDS:
+                            self.view_info.setdefault(n, _card_info(CARDS[n], False))
         self._view_frame(state, decision)
 
     def _view_state(self) -> dict:

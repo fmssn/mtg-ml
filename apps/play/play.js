@@ -235,6 +235,7 @@ function autoAnswer(d) {
     if (a != null) return a;
   }
   if (d.kind === 'pay_mana' && !PREF.manualPay) return autoPay(d);
+  if (d.kind === 'order_triggers' && new Set(d.options).size === 1) return 0;  // identical triggers: the order cannot matter
   if (d.kind === 'priority') {
     const pass = refs.findIndex(r => r.type === 'pass');
     if (pass < 0) return null;
@@ -1190,7 +1191,7 @@ function renderDock() {
   pr.className = 'mine';
   if (inputLocked()) P.classList.add('locked');
   const s = stateAt(ui.fi);
-  const choiceBtns = (idxs, cls = '') => idxs.map(i => `<button class="choice ${cls}" data-opt="${i}">${esc(clean(d.options[i]))}</button>`).join('');
+  const choiceBtns = (idxs, cls = "") => idxs.map((i, n) => `<button class="choice ${cls}" data-opt="${i}">${n < 9 ? `<kbd>${n + 1}</kbd> ` : ""}${esc(clean(d.options[i]))}</button>`).join("");
   P.dataset.act = 'primary';
   switch (d.kind) {
     case 'priority': {
@@ -1269,6 +1270,8 @@ const resultText = () => { const w = S.meta?.winner; return w == null ? `Draw ($
 // Kinds shown as a card browser: options that name cards.
 function overlayKind(d) {
   if (d.kind === 'mulligan') return true;
+  if (d.kind === 'order' && d.refs.some(r => r.top)) return true;
+  if ((d.kind === 'choose_mode' || d.kind === 'yes_no') && d.cards?.length) return true;
   if (['priority', 'declare_attacker', 'declare_blocker', 'target', 'pay_mana'].includes(d.kind)) return false;
   if (d.kind === 'assign_damage') return true;
   return d.refs.filter(r => r.name && S.cards[r.name]).length >= Math.max(1, d.refs.length - 1);
@@ -1303,15 +1306,72 @@ function renderOverlay() {
     el.innerHTML = `<div class="obox"><h2>${esc(clean(d.prompt))}</h2><div class="sub">Starts from a legal split (lethal to each blocker in order). + and − move a point between recipients · Space confirms.</div>${rows}
       <div class="dmgsum">${total} assigned${why ? ` · <span class="err">${esc(why)}</span>` : ''}</div>
       <div class="orow"><button class="primary" ${ok ? '' : 'disabled'} data-opt="${splitIndex(d, ui.dmg)}">${ok ? 'Assign damage' : 'Not legal yet'}</button></div></div>`;
+  } else if (d.kind === 'order') {
+    renderOrder(d, ui, el);
+    return;
+  } else if (d.cards?.length && (d.kind === 'choose_mode' || d.kind === 'yes_no')) {
+    // a decision about cards you know (scry, surveil, explore, Delver): show them
+    el.innerHTML = `<div class="obox"><h2>${esc(plainPrompt(d))}</h2><div class="sub">${d.cards.length > 1 ? 'The cards' : 'The card'} this is about</div>
+      <div class="grid">${d.cards.map(n => `<div class="tile">${cardHtml(n)}</div>`).join('')}</div>
+      <div class="textopts">${d.options.map((o, i) => `<button class="choice" data-opt="${i}"><kbd>${i + 1}</kbd> ${esc(clean(o))}</button>`).join('')}</div></div>
+      <button class="btn peekbtn" data-cmd="peek">Peek at the board</button>`;
   } else {
     const isCard = r => r.name && S.cards[r.name];
-    const tiles = d.refs.map((r, i) => isCard(r) ? `<button class="tile" data-opt="${i}">${cardHtml(r.name)}<span>${esc(clean(d.options[i]))}</span></button>` : '').join('');
+    // identical names get their position; tapped permanents say so; "nothing" options go last
+    const count = {}, seen = {};
+    d.refs.forEach(r => { if (isCard(r)) count[r.name] = (count[r.name] || 0) + 1; });
+    const tiles = d.refs.map((r, i) => {
+      if (!isCard(r)) return '';
+      seen[r.name] = (seen[r.name] || 0) + 1;
+      const tag = [r.tapped ? 'tapped' : '', count[r.name] > 1 ? `${r.zone === 'battlefield' ? 'permanent' : 'copy'} ${seen[r.name]} of ${count[r.name]}` : ''].filter(Boolean).join(' · ');
+      return `<button class="tile ${r.tapped ? 'is-tapped' : ''}" data-opt="${i}" ${r.oid != null ? `data-hl="${r.oid}"` : ''}>${cardHtml(r.name)}<span>${esc(clean(d.options[i]))}${tag ? `<em>${esc(tag)}</em>` : ''}</span></button>`;
+    }).join('');
     const texts = d.refs.map((r, i) => isCard(r) ? '' : `<button class="choice" data-opt="${i}">${esc(clean(d.options[i]))}</button>`).join('');
-    el.innerHTML = `<div class="obox"><h2>${esc(clean(d.prompt))}</h2><div class="sub">${esc(d.kind.replace(/_/g, ' '))} · click one</div><div class="grid">${tiles}</div>${texts ? `<div class="textopts">${texts}</div>` : ''}</div>
+    el.innerHTML = `<div class="obox"><h2>${esc(plainPrompt(d))}</h2><div class="sub">${esc(KIND_TEXT[d.kind] || 'Choose one')}</div><div class="grid">${tiles}</div>${texts ? `<div class="textopts">${texts}</div>` : ''}</div>
       <button class="btn peekbtn" data-cmd="peek">Peek at the board</button>`;
   }
   el.classList.add('on'); el.classList.remove('peek');
 }
+const KIND_TEXT = {choose_card: 'Choose a card', sacrifice: 'Choose what to sacrifice', exile_from_graveyard: 'Choose a card to exile from your graveyard', order_triggers: 'Which trigger goes on the stack first (it resolves last)'};
+function plainPrompt(d) {
+  return clean(d.prompt).replace(/\(([a-z_]+)\)/g, (_, k) => `(${k.replace(/_/g, ' ')})`).replace(/^Choose target \(([^)]*)\) for (.*)$/, 'Choose a target for $2: $1');
+}
+
+// ---- library orders (Ponder, scry 2+): drag the cards into the order you want
+function renderOrder(d, ui, el) {
+  const opts = d.refs.map(r => ({top: r.top || [], bottom: r.bottom || []}));
+  const canBottom = opts.some(o => o.bottom.length);
+  if (!ui.order) ui.order = {top: [...opts[0].top], bottom: [...opts[0].bottom]};
+  const o = ui.order;
+  const match = opts.findIndex(x => x.top.join('|') === o.top.join('|') && x.bottom.join('|') === o.bottom.join('|'));
+  const tile = (row, n, i) => `<div class="otile" draggable="true" data-row="${row}" data-i="${i}">${cardHtml(n)}<div class="obtns">
+      <button data-ord="${row}:${i}:-1" title="Earlier">◀</button>${canBottom ? `<button data-ord="${row}:${i}:x" title="${row === 'top' ? 'To the bottom' : 'To the top'}">${row === 'top' ? '▼' : '▲'}</button>` : ''}<button data-ord="${row}:${i}:1" title="Later">▶</button></div></div>`;
+  const rowHtml = (row, label) => `<div class="orowlbl">${label}</div><div class="ordrow" data-row="${row}">${o[row].map((n, i) => tile(row, n, i)).join('') || '<span class="sub">empty</span>'}</div>`;
+  el.innerHTML = `<div class="obox order"><h2>${esc(plainPrompt(d))}</h2><div class="sub">Drag the cards (or use the arrows). Leftmost ends on top of your library.</div>
+    ${rowHtml('top', 'Top of library: first card is drawn first')}${canBottom ? rowHtml('bottom', 'Bottom of library: last card is the very bottom') : ''}
+    <div class="orow"><button class="primary" ${match < 0 ? 'disabled' : ''} data-opt="${match}">${match < 0 ? 'Not an allowed order' : 'Confirm order'}</button></div></div>`;
+  el.classList.add('on'); el.classList.remove('peek');
+}
+function moveOrder(ui, row, i, how) {
+  const o = ui.order, [card] = o[row].splice(i, 1);
+  if (how === 'x') o[row === 'top' ? 'bottom' : 'top'].push(card);
+  else o[row].splice(Math.max(0, Math.min(o[row].length, i + how)), 0, card);
+}
+let ordDrag = null;
+document.addEventListener('dragstart', e => { const t = e.target.closest?.('.otile'); if (t) { ordDrag = {row: t.dataset.row, i: +t.dataset.i}; e.dataTransfer.effectAllowed = 'move'; } });
+document.addEventListener('dragover', e => { if (ordDrag && e.target.closest?.('.ordrow')) e.preventDefault(); });
+document.addEventListener('drop', e => {
+  const rowEl = e.target.closest?.('.ordrow'); if (!ordDrag || !rowEl || !S.ui?.order) return;
+  e.preventDefault();
+  const o = S.ui.order, [card] = o[ordDrag.row].splice(ordDrag.i, 1), row = rowEl.dataset.row;
+  const over = e.target.closest('.otile');
+  let at = over ? +over.dataset.i : o[row].length;
+  if (over && over.dataset.row === ordDrag.row && ordDrag.row === row && ordDrag.i < at) at -= 0;
+  o[row].splice(at, 0, card);
+  ordDrag = null;
+  renderOrder(S.ui.d, S.ui, $('#overlay'));
+});
+
 function closeOverlay() { const el = $('#overlay'); el.classList.remove('on', 'peek'); el.innerHTML = ''; delete el.dataset.zone; }
 
 function openZone(p, zone) {
@@ -1707,6 +1767,10 @@ document.addEventListener('keydown', e => {
     S.passMode = 'opp'; S.passTurn = stateAt(last()).active === S.seat ? stateAt(last()).turn : -1;
     return act(S.ui.d.refs.findIndex(r => r.type === 'pass'));
   }
+  if (/^[1-9]$/.test(k) && canAct() && !inputLocked()) {
+    const b = document.querySelector(`#overlay.on [data-opt] kbd, #choices [data-opt] kbd`) ? [...document.querySelectorAll('#overlay.on [data-opt], #choices [data-opt]')].find(x => x.querySelector('kbd')?.textContent === k) : null;
+    if (b) { b.click(); return; }
+  }
   if (k === 'h' || k === 'H') { S.holdOnce = !S.holdOnce; toast(S.holdOnce ? 'You keep priority after your next spell (to respond to it yourself).' : 'Hold priority off.'); renderDock(); return; }
   if (k === 'f' || k === 'F') { S.fullControl = !S.fullControl; toast(S.fullControl ? 'Full control: every priority stop is yours.' : 'Auto-pass back on.'); renderDock(); return; }
   if ((k === 'a' || k === 'A') && S.ui?.kind === 'declare_attacker') return command('all');
@@ -1731,6 +1795,10 @@ $('#bConcede').addEventListener('click', async () => {
 });
 $('#bSettings').addEventListener('click', () => openSettings());
 $('#bLog').addEventListener('click', () => { const l = $('#log'); l.classList.toggle('hide'); $('#bLog').textContent = l.classList.contains('hide') ? 'Show' : 'Hide'; });
+$('#overlay').addEventListener('click', e => {
+  const ob = e.target.closest('[data-ord]');
+  if (ob && S.ui?.order) { const [row, i, how] = ob.dataset.ord.split(':'); moveOrder(S.ui, row, +i, how === 'x' ? 'x' : +how); renderOrder(S.ui.d, S.ui, $('#overlay')); }
+});
 $('#overlay').addEventListener('click', e => { if (e.target.dataset.dmg) { const [j, dv] = e.target.dataset.dmg.split(':').map(Number); moveDamage(S.ui.dmg, j, dv); renderOverlay(); renderDock(); } });
 // + takes a point from another recipient (the last one that has some), − gives
 // it to the next one, so the split always adds up to the attacker's power.

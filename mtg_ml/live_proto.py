@@ -132,12 +132,44 @@ def option_ref(kind: str, label: str, key: tuple, value, vis: dict) -> dict:
         r["type"] = "x"
         r["x"] = value
         return r
+    # Library orderings: Ponder ("order", names...) and scry N ("scry",
+    # "top", names..., "bottom", names...). The names are the decider's own
+    # known cards; the label already lists them.
+    if kind == "order" and key and key[0] == "order":
+        r["type"] = "order"
+        r["top"], r["bottom"] = list(key[1:]), []
+        return r
+    if kind == "order" and key and key[0] == "scry" and "bottom" in key:
+        k = key.index("bottom")
+        r["type"] = "order"
+        r["top"], r["bottom"] = list(key[2:k]), list(key[k + 1 :])
+        return r
     # Card choices (sacrifice, discard, search, exile from graveyard, ...):
-    # the value is a card or None; ids only when the card is in plain view.
+    # the value is a card, a (verb, card) pair (Highway Robbery) or None;
+    # ids only when the card is in plain view.
     r["type"] = kind
+    if isinstance(value, tuple) and len(value) == 2 and hasattr(value[1], "uid"):
+        r["verb"] = value[0]
+        value = value[1]
     if hasattr(value, "uid"):
         _card_ref(value, vis, r)
+        if r.get("zone") == "battlefield" and getattr(value, "tapped", False):
+            r["tapped"] = True
     return r
+
+
+def decision_cards(g, d, seat: int) -> list[str]:
+    """Names of the decider's own known cards (top of library, hand) that a
+    decision talks about (scry, surveil, explore, Delver, Ponder), longest
+    first, so the client can show them. Only `seat`'s own knowledge."""
+    p = g.players[seat]
+    known = [c.name for c in list(p.library)[:5] if seat in c.known_to] + [c.name for c in p.hand]
+    text = d.prompt + " | " + " | ".join(o.label for o in d.options)
+    seen: list[str] = []
+    for n in sorted(set(known), key=len, reverse=True):
+        if n in text and not any(n in m for m in seen):
+            seen.append(n)
+    return seen
 
 
 def option_refs(decision, state: dict) -> list[dict]:
