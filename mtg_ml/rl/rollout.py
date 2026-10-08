@@ -279,6 +279,7 @@ class Result:
 
     samples: PackedSamples = field(default_factory=PackedSamples)  # (state, opts, events), packed
     lengths: list = field(default_factory=list)
+    trajectory_ids: list = field(default_factory=list)  # (game seed, seat), for stable residency-wave merging
     actions: list = field(default_factory=list)
     logps: list = field(default_factory=list)
     advantages: list = field(default_factory=list)
@@ -580,6 +581,8 @@ def _play(job: Job) -> Result:
                 if spec.seats[p] == LEARNER:
                     outcome = 0.0 if g.winner is None else (1.0 if g.winner == p else -1.0)
                     _finish(lv.trajs[p], outcome, job, out)
+                    if lv.trajs[p].actions:
+                        out.trajectory_ids.append((spec.seed, p))
         free.append(lv.slot)
 
     def prepare(k: int) -> list:
@@ -690,7 +693,54 @@ def create_pool(workers: int, inference: str = "local", server=None, worker_cpus
     return pool
 
 
+def residency_waves(specs: list[GameSpec], capacity: int):
+    """Schedule already sampled games; capacity includes one learner slot.
+
+    Every game stays whole, and each wave finishes before slots are reused.
+    Sorting groups minimizes reloads without trimming the opponent pool.
+    """
+    if capacity < 1:
+        raise ValueError("resident capacity must be positive")
+    wave, policies = [], set()
+    for spec in sorted(specs, key=_matchup):
+        need = set(_matchup(spec))
+        if len(need) + 1 > capacity:
+            raise ValueError("one game's policies exceed resident capacity (including learner)")
+        if wave and len(policies | need) + 1 > capacity:
+            yield wave
+            wave, policies = [], set()
+        policies |= need
+        wave.append(spec)
+    if wave:
+        yield wave
+
+
 def run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int = 64) -> Result:
+    server = getattr(pool, "server", None)
+    if server is None or not server.cfg.resident_limit:
+        return _run_specs(pool, specs, job, workers, inflight)
+    merged = Result()
+    for wave in residency_waves(specs, server.cfg.resident_limit):
+        keys = {(job.learner_path, job.learner_version)} | {(p, 0) for spec in wave for p in _matchup(spec)}
+        server.select_policies(sorted(keys))
+        res = _run_specs(pool, wave, job, workers, inflight)
+        for f in fields(Result):
+            getattr(merged, f.name).extend(getattr(res, f.name))
+    if merged.trajectory_ids:
+        order = sorted(range(len(merged.lengths)), key=lambda i: merged.trajectory_ids[i])
+        starts = list(itertools.accumulate(merged.lengths, initial=0))
+        ranges = [(starts[i], starts[i + 1]) for i in order]
+        merged.samples = merged.samples.take_ranges(ranges)
+        for name in ("actions", "logps", "advantages", "returns", "kinds"):
+            src = getattr(merged, name)
+            setattr(merged, name, [v for lo, hi in ranges for v in src[lo:hi]])
+        merged.lengths = [merged.lengths[i] for i in order]
+        merged.trajectory_ids = [merged.trajectory_ids[i] for i in order]
+    merged.games.sort(key=lambda g: g[-1])
+    return merged
+
+
+def _run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int = 64) -> Result:
     """Play `specs` on `pool` (from `create_pool`) through a shared game queue
     and merge the results; `job` gives everything but the games. Each of the
     `workers` jobs gets every spec (2048 pickle to ~60 KB) and keeps up to

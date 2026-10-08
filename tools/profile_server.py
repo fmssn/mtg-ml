@@ -33,15 +33,22 @@ def main(argv=None) -> None:
     ap.add_argument("--requests", type=int, default=31, help="requests per batch (one per worker group)")
     ap.add_argument("--rows", type=int, default=32, help="decisions per request")
     ap.add_argument("--iters", type=int, default=200)
+    ap.add_argument("--warmup", type=int, default=5)
     ap.add_argument("--profile", action="store_true")
     ap.add_argument("--policies", type=int, default=26, help="distinct checkpoints (training: learner + pool)")
     ap.add_argument("--hidden", type=int, default=128)
+    ap.add_argument("--entity-attn", type=int, default=0)
+    ap.add_argument("--features", type=int, default=0)
+    ap.add_argument("--init", help="inherit checkpoint architecture/weights, optionally adding attention")
+    ap.add_argument("--legacy-attention", action="store_true", help="same-code eager attention baseline")
     ap.add_argument("--trunk", default="entity")
     ap.add_argument("--value-net", default="shared")
     ap.add_argument("--no-graphs", action="store_true")
     ap.add_argument("--no-compile", action="store_true", help="no torch.compile of the forward (ServerConfig.compile)")
     ap.add_argument("--kernels", action="store_true", help="torch.profiler table of the GPU kernels (eager forward)")
     args = ap.parse_args(argv)
+    if min(args.requests, args.rows, args.policies, args.iters, args.warmup) < 1:
+        ap.error("requests, rows, policies, iters and warmup must be positive")
 
     import torch
 
@@ -50,13 +57,19 @@ def main(argv=None) -> None:
     from mtg_ml.rl.features import encode_event_hashes, featurize_flat
     from mtg_ml.rl.inference import InferenceClient, ServerConfig, _Server
 
-    from mtg_ml.rl.model import PolicyNet
+    from mtg_ml.rl.model import PolicyNet, load_partial
 
     tmp = tempfile.mkdtemp()
     keys = []
     for k in range(args.policies):
         torch.manual_seed(k)
-        net = PolicyNet(hidden=args.hidden, trunk=args.trunk, value_net=args.value_net)
+        kw = torch.load(args.init, map_location="cpu", weights_only=False)["config"] if args.init else dict(hidden=args.hidden, trunk=args.trunk, value_net=args.value_net)
+        kw = {**kw, "entity_attn": args.entity_attn or kw.get("entity_attn", 0)}
+        if args.features:
+            kw["features"] = args.features
+        net = PolicyNet(**kw)
+        if args.init:
+            load_partial(net, torch.load(args.init, map_location="cpu", weights_only=False)["model"])
         path = os.path.join(tmp, f"p{k}.pt")
         torch.save({"config": net.config, "model": net.state_dict()}, path)
         keys.append((path, 1 if k == 0 else 0))
@@ -65,11 +78,11 @@ def main(argv=None) -> None:
     while len(samples) < args.requests * args.rows:
         g = G(match_decks(1 + s % 2), seed=s, match_game=1 + s % 2)
         while not g.over and len(samples) < args.requests * args.rows:
-            st, ol, of = featurize_flat(g, g.decision.player)
+            st, ol, of = featurize_flat(g, g.decision.player, features=net.features)
             samples.append((st, ol, of, encode_event_hashes([r.randrange(1 << 15) for _ in range(r.randrange(8))])))
             g.step(r.randrange(len(ol)))
         s += 1
-    cfg = ServerConfig(device=args.device, graphs=not args.no_graphs, groups=1, compile=not args.no_compile)
+    cfg = ServerConfig(device=args.device, graphs=not args.no_graphs, groups=1, compile=not args.no_compile, stacked_attention=not args.legacy_attention)
     srv = _Server(cfg, args.requests)
     srv.resp_qs = [_ListQ() for _ in range(args.requests)]
     t = time.perf_counter()
@@ -99,7 +112,7 @@ def main(argv=None) -> None:
         srv.drain()
 
     t = time.perf_counter()
-    for _ in range(3):
+    for _ in range(args.warmup):
         batch()
     print(f"warm-up (captures): {time.perf_counter() - t:.2f}s, {srv.stats['graphs']} graphs")
     for k in ("busy_s", "prep_s", "launch_s", "infer_s"):

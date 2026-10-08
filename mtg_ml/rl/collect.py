@@ -29,6 +29,8 @@ import signal
 import sys
 import time
 import traceback
+import queue
+import threading
 from array import array
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -64,16 +66,18 @@ class SharedResult:
         self.name = shm.name
         shm.close()
         self.lengths, self.games, self.timing = res.lengths, res.games, res.timing
+        self.trajectory_ids = getattr(res, "trajectory_ids", [])
 
-    def attach(self) -> Result:
+    def attach(self, unlink: bool = True) -> Result:
         """The Result, its samples viewing the block. The block's name is
         unlinked at once (the mapping lives on until `release`), so a crash
         cannot leak it."""
         from multiprocessing import shared_memory
 
         shm = shared_memory.SharedMemory(name=self.name)
-        shm.unlink()
-        out = Result(lengths=self.lengths, games=self.games, timing=self.timing)
+        if unlink:
+            shm.unlink()
+        out = Result(lengths=self.lengths, games=self.games, timing=self.timing, trajectory_ids=self.trajectory_ids)
         out.samples = PackedSamples()
         pos, views = 0, []
         names = list(FIELDS) + [n for n, _ in _FLOATS]
@@ -141,7 +145,7 @@ def _serve(conn, workers: int, inference: str, server_cfg, worker_cpus, cpus, ni
                 server = InferenceServer(workers, server_cfg, worker_cpus)
             pool = create_pool(workers, inference, server, worker_cpus)
         except Exception as e:  # noqa: BLE001 - reported to the owner
-            conn.send(("err", None, _portable(e), time.monotonic()))
+            conn.send(("err", None, _portable(e), time.monotonic(), time.monotonic()))
             return
         while True:
             try:
@@ -152,13 +156,14 @@ def _serve(conn, workers: int, inference: str, server_cfg, worker_cpus, cpus, ni
                 clean = True
                 break
             tag, fn, args = msg
+            started = time.monotonic()
             try:
                 value = fn(pool, *args)
                 if isinstance(value, Result):
                     value = SharedResult(value)
-                reply = ("ok", tag, value, time.monotonic())
+                reply = ("ok", tag, value, time.monotonic(), started)
             except Exception as e:  # noqa: BLE001 - re-raised by the owner
-                reply = ("err", tag, _portable(e), time.monotonic())
+                reply = ("err", tag, _portable(e), time.monotonic(), started)
             conn.send(reply)
     finally:
         if pool is not None:
@@ -190,6 +195,7 @@ class Pending:
     def __init__(self, owner, tag, t_submit: float):
         self.owner, self.tag, self.t_submit = owner, tag, t_submit
         self.t_ready = 0.0
+        self.t_start = 0.0
         self._value = None
         self._done = False
 
@@ -198,7 +204,7 @@ class Pending:
 
     def wait(self):
         if not self._done:
-            status, value, self.t_ready = self.owner._take(self.tag)
+            status, value, self.t_ready, self.t_start = self.owner._take(self.tag)
             if status == "err":
                 self._done = True
                 raise value
@@ -224,24 +230,48 @@ class PoolProcess:
         self.name = name
         self._tag = 0
         self._replies: dict = {}
+        self._writer_error = None
+        self._outgoing = queue.Queue()
+        self._writer = threading.Thread(target=self._write, name=f"{name}-submit", daemon=True)
+        self._writer.start()
+
+    def _write(self):
+        try:
+            while True:
+                msg = self._outgoing.get()
+                self.conn.send(msg)
+                if msg is None:
+                    return
+        except Exception as e:  # serialization failures must reach Pending.wait too
+            self._writer_error = e
 
     def call(self, fn, *args) -> Pending:
         self._tag += 1
-        self.conn.send((self._tag, fn, args))
+        self._outgoing.put((self._tag, fn, args))
         return Pending(self, self._tag, time.monotonic())
 
     def _pump(self) -> None:
+        while not self.conn.poll(0.1):
+            self._check_alive()
         try:
-            status, tag, value, t = self.conn.recv()
+            status, tag, value, t, started = self.conn.recv()
         except EOFError:
             raise RuntimeError(f"{self.name} process died (exit code {self.proc.exitcode})") from None
         if tag is None:  # the pool could not be built
             raise value
-        self._replies[tag] = (status, value, t)
+        self._replies[tag] = (status, value, t, started)
+
+    def _check_alive(self):
+        if self._writer_error is not None:
+            raise RuntimeError(f"{self.name} submission failed: {self._writer_error}") from self._writer_error
+        if not self.proc.is_alive():
+            raise RuntimeError(f"{self.name} process died (exit code {self.proc.exitcode})")
 
     def _ready(self, tag) -> bool:
         while tag not in self._replies and self.conn.poll():
             self._pump()
+        if tag not in self._replies:
+            self._check_alive()
         return tag in self._replies
 
     def _take(self, tag):
@@ -252,13 +282,14 @@ class PoolProcess:
     def close(self, timeout: float = 60) -> None:
         if self.proc.is_alive():
             try:
-                self.conn.send(None)
+                self._outgoing.put(None)
             except OSError:
                 pass
             self.proc.join(timeout)
         if self.proc.is_alive():
             self.terminate()
         self.conn.close()
+        self._writer.join(1)
 
     def terminate(self) -> None:
         """Stop now, abandoning a call in flight; the process terminates its pool."""
@@ -268,6 +299,9 @@ class PoolProcess:
         if self.proc.is_alive():
             self.proc.kill()
             self.proc.join()
+        self._outgoing.put(None)
+        self.conn.close()
+        self._writer.join(1)
 
 
 class PoolThread:
@@ -283,10 +317,11 @@ class PoolThread:
 
     def call(self, fn, *args) -> Pending:
         def run():
+            started = time.monotonic()
             try:
-                return ("ok", fn(self.pool, *args), time.monotonic())
+                return ("ok", fn(self.pool, *args), time.monotonic(), started)
             except BaseException as e:  # noqa: BLE001 - re-raised by wait()
-                return ("err", e, time.monotonic())
+                return ("err", e, time.monotonic(), started)
 
         self._tag += 1
         self._futures[self._tag] = self._exec.submit(run)

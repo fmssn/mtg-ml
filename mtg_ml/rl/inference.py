@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import math
 import os
+import queue
 import time
 from array import array
 from dataclasses import dataclass, replace
@@ -59,11 +60,12 @@ REC = 9  # ints per decision record: slot, fresh, s_off, s_len, e_off, e_len, op
 GREEDY_FLAG = 2  # or-ed into a record's `fresh` word (bit 0): take the most likely option instead of sampling (`Job.greedy`)
 HDR = 128  # ints per request header
 H_TICKET, H_ROWS, H_OPTS, H_S, H_E, H_O, H_ENT, H_RUNS = range(8)
+H_WIDTH = 8  # largest entity count of an individual decision
 RUNS0 = 16  # header: (policy id, rows) per run of equal policy from here
 MAX_RUNS = (HDR - RUNS0) // 2
 RESP_STRIDE = 16  # ints between reply tickets (a cache line each)
 GLOBAL = 16  # ints of global words at the start of the control block: [0] the server failed, [1] its pid, [2] its heartbeat
-G_FAILED, G_PID, G_BEAT = range(3)
+G_FAILED, G_PID, G_BEAT, G_GENERATION = range(4)
 HEARTBEAT_S = 0.1  # the server's heartbeat thread bumps G_BEAT this often
 SERVER_TIMEOUT_S = 120.0  # a worker gives up on a server whose heartbeat stood still this long
 OUT_INTS = 3 * MAX_ROWS
@@ -143,6 +145,7 @@ class InferenceClient:
         self.d = self.data.buf.cast("i")
         self.f = self.data.buf.cast("f")
         self.ids: dict = {}  # policy key -> id on the server
+        self.generation = self.c[G_GENERATION]
         # Continue from the slot's last reply: a ticket must differ from the
         # one the server saw last (a new pool can reuse a slot).
         self.tickets = [self.c[layout.resp0 + (wid * layout.groups + g) * RESP_STRIDE] for g in range(layout.groups)]
@@ -154,6 +157,9 @@ class InferenceClient:
             self.np = None
 
     def _id(self, key) -> int:
+        if self.generation != self.c[G_GENERATION]:
+            self.ids.clear()  # resident slots were reassigned at a rollout boundary
+            self.generation = self.c[G_GENERATION]
         pid = self.ids.get(key)
         if pid is None:
             self.req_q.put(("register", self.wid, key))
@@ -224,12 +230,19 @@ class InferenceClient:
             d[pos : pos + len(part)] = part
             pos += len(part)
         if self.np is not None and len(s):
-            n_ent = int(self.np.count_nonzero(self.np.frombuffer(s, dtype=self.np.int32) == self.sep))
+            np = self.np
+            sep = np.frombuffer(s, dtype=np.int32) == self.sep
+            prefix = np.concatenate((np.zeros(1, dtype=np.int32), np.cumsum(sep, dtype=np.int32)))
+            records = np.frombuffer(rec, dtype=np.int32).reshape(n, REC)
+            counts = prefix[records[:, 2] + records[:, 3]] - prefix[records[:, 2]]
+            n_ent, ent_width = int(prefix[-1]), int(counts.max(initial=0))
         else:
             n_ent = s.count(self.sep)
+            ent_width = max((list(row[3]).count(self.sep) for row in rows), default=0)
         h = L.hdr0 + k * HDR
         c = self.c
         c[h + 1 : h + RUNS0] = array("i", (n, len(olen), len(s), len(e), len(o), n_ent, len(runs) // 2) + (0,) * (RUNS0 - 8))
+        c[h + H_WIDTH] = ent_width
         c[h + RUNS0 : h + RUNS0 + len(runs)] = runs
         ticket = self.tickets[group] = self.tickets[group] % 0x3FFFFFFF + 1
         c[h] = ticket  # publish last: the server reads the header once it sees the ticket
@@ -413,6 +426,10 @@ class ServerConfig:
     groups: int = 4  # request slots per worker (Job.groups must not exceed it)
     request_ints: int = 1 << 18  # int32 words per request slot (a decision takes ~260)
     policy_slots: int = 32  # policies the stack holds before it grows (growing drops the CUDA graphs)
+    resident_limit: int = 0  # 0: historical growing stack; >0: fixed slots, scheduled by rollout.play
+    stacked_attention: bool = True  # disable only for same-code baseline measurements
+    devices: tuple[str, ...] = ()
+    server_cpus: tuple[tuple[int, ...], ...] = ()
     graphs: bool = True  # CUDA graphs over padded shape buckets (CUDA only)
     compile: bool = True  # torch.compile the forward (fuses its ~300 small kernels; CUDA only; ~10 s at the first batch)
     max_graphs: int = 48  # per stream
@@ -466,6 +483,8 @@ class _Server:
         self.np, self.torch = np, torch
         torch.set_num_threads(cfg.threads)
         self.cfg = cfg
+        if cfg.policy_slots < 1 or cfg.resident_limit < 0:
+            raise ValueError("policy_slots must be positive and resident_limit nonnegative")
         self.device = torch.device(cfg.device)
         if self.device.type == "cuda" and self.device.index is None:
             self.device = torch.device("cuda", torch.cuda.current_device())
@@ -515,6 +534,7 @@ class _Server:
         self.dev_nets: dict = {}  # id -> on the device (legacy path)
         self.free: list[int] = []
         self.next_legacy = LEGACY
+        self.resident_keys = None  # immutable selected keys while one wave is running
         self.hidden = None  # (n_workers * SLOTS_PER_WORKER + 1, state size); the last row is the padded rows' dummy
         self.state_size = None
         self.pad_eager = False  # eager forward at the padded shapes (profiling the graphs' kernels)
@@ -535,6 +555,8 @@ class _Server:
     def register_key(self, key: tuple) -> int:
         if key in self.ids:
             return self.ids[key]
+        if self.resident_keys is not None and key not in self.resident_keys:
+            raise ValueError(f"policy {key} was not selected for this residency wave")
         from .features import OPTION_DIM, STATE_DIM
         from .rollout import load_net
         from .stacked import PolicyStack, stack_config
@@ -555,10 +577,11 @@ class _Server:
                 self.hidden = self.torch.zeros(self.n_workers * SLOTS_PER_WORKER + 1, net.state_size, device=self.device)
             elif net.state_size != self.state_size:
                 raise ValueError("all recurrent policies served together must share the hidden size")
-        stackable = PolicyStack.supports(net.config) and net.config["state_dim"] == STATE_DIM and net.config["option_dim"] == OPTION_DIM and not self.cfg.dry_run
+        stackable = PolicyStack.supports(net.config) and (self.cfg.stacked_attention or not net.config.get("entity_attn")) and net.config["state_dim"] == STATE_DIM and net.config["option_dim"] == OPTION_DIM and not self.cfg.dry_run
         if stackable and self.stack is None:
-            self.stack = PolicyStack(net.config, self.cfg.policy_slots, self.device)
-            self.free = list(range(self.cfg.policy_slots - 1, -1, -1))
+            capacity = self.cfg.resident_limit or self.cfg.policy_slots
+            self.stack = PolicyStack(net.config, capacity, self.device)
+            self.free = list(range(capacity - 1, -1, -1))
         if stackable and stack_config(net.config) == self.stack.config:
             if not self.free:
                 self._grow()
@@ -574,6 +597,8 @@ class _Server:
         return pid
 
     def _grow(self) -> None:
+        if self.cfg.resident_limit:
+            raise RuntimeError("resident policy capacity exhausted; schedule games with rollout.play")
         from .stacked import PolicyStack
 
         old = self.stack
@@ -589,6 +614,30 @@ class _Server:
         for lane in self.lanes:
             lane.graphs.clear()  # they point at the old tensors
             lane.pool = None  # and a fresh pool for the new captures: capturing into the dropped graphs' pool fails the allocator's use_count assert
+
+    def select_policies(self, keys):
+        """At a completed-wave barrier, reuse stable slots without changing graphs.
+
+        No worker may have a game or request in flight at this point. The
+        collector owns this barrier; direct clients must provide it too.
+        """
+        keys = set(map(tuple, keys))
+        if self.cfg.resident_limit and len(keys) > self.cfg.resident_limit:
+            raise ValueError("selected policies exceed resident_limit (including learner)")
+        self.drain()
+        for key in set(self.ids) - keys:
+            pid = self.ids.pop(key)
+            self.cpu_nets.pop(pid, None)
+            self.dev_nets.pop(pid, None)
+            if pid < LEGACY:
+                self.free.append(pid)
+        if self.hidden is not None:
+            self.hidden.zero_()  # all games ended; no recurrent state crosses waves
+        self.resident_keys = keys
+        self.c[G_GENERATION] = self.c[G_GENERATION] % 0x3FFFFFFF + 1
+        # Preload the learner first: its architecture chooses the fast stack.
+        for key in sorted(keys, key=lambda key: (not key[1], key)):
+            self.register_key(key)
 
     # -- batches ---------------------------------------------------------
 
@@ -649,7 +698,12 @@ class _Server:
             self._dry(pend, row_req, row_loc)
             lane.busy = (pend, tickets, t1)
             self._finish(lane)
-        elif self.stack is not None and pid.size and int(pid.max()) < LEGACY:
+        elif self.stack is not None and pid.size and int(pid.min()) < LEGACY:
+            fast = row_pol < LEGACY
+            if not fast.all():
+                self._legacy(pend, row_req[~fast], row_loc[~fast], row_pol[~fast])
+                row_req, row_loc, row_pol = row_req[fast], row_loc[fast], row_pol[fast]
+                tot = self._totals(pend, row_req, row_loc)
             self._stacked(pend, H, tot, row_req, row_loc, row_pol, lane)
             lane.busy = (pend, tickets, t1)
             if lane.event is None:
@@ -669,6 +723,20 @@ class _Server:
         s["prep_s"] += t1 - t0
         s["launch_s"] += t2 - t1
 
+    def _totals(self, pend, row_req, row_loc):
+        """Exact sizes of a subset of request rows (mixed architecture batch)."""
+        np = self.np
+        bases = self.in_base[pend][row_req]
+        rec = self.dn[(bases + REC * row_loc)[:, None] + np.arange(REC)]
+        hd = self.hdr[pend][row_req]
+        opt_area = bases + REC * hd[:, H_ROWS]
+        olen = [self.dn[b + r[6] : b + r[6] + r[7]] for b, r in zip(opt_area, rec)]
+        state_area = opt_area + hd[:, H_OPTS]
+        from .features import STATE_DIM
+
+        ents = sum(np.count_nonzero(self.dn[b + r[2] : b + r[2] + r[3]] == STATE_DIM) for b, r in zip(state_area, rec))
+        return np.array([len(rec), rec[:, 7].sum(), rec[:, 3].sum(), rec[:, 5].sum(), sum(o.sum() for o in olen), ents])
+
     def _dry(self, pend, row_req, row_loc) -> None:
         np = self.np
         rb = self.in_base[pend][row_req] + REC * row_loc
@@ -686,6 +754,9 @@ class _Server:
         need = (R + 1, N + 1, S, Ev, O, E + 1)
         use_graphs = self.device.type == "cuda" and self.cfg.graphs
         dims = _level_dims(need) if use_graphs or self.pad_eager else need
+        if self.stack.config.get("entity_attn"):
+            width = max(1, int(H[:, H_WIDTH].max(initial=0)))
+            dims += (1 << (width - 1).bit_length(),)
         R_p = dims[0]
         Q, n = self.Q, len(pend)
         hl = 8 + 7 * Q + 3 * R_p
@@ -762,7 +833,7 @@ class _Server:
             self.hidden.index_copy_(0, gslot, hn)
         self.region_f[pos] = out
 
-    def _body(self, hdr, noise, R_p: int, N_p: int, S_p: int, Ev_p: int, O_p: int, E_p: int):
+    def _body(self, hdr, noise, R_p: int, N_p: int, S_p: int, Ev_p: int, O_p: int, E_p: int, ent_width: int = 1):
         """`_forward` without its writes: (replies, their positions in the
         data block, new hidden states, their rows)."""
         torch = self.torch
@@ -803,7 +874,7 @@ class _Server:
         x = StepInput(
             pol=pol, gslot=torch.where(rvalid, slot + wbase[req], self.n_workers * SLOTS_PER_WORKER), fresh=(fresh != 0) | ~rvalid,
             s_len=s_len, e_len=e_len, n_opt=n_opt, s_tok=s_tok, s_row=s_row, s_valid=s_valid, ev_tok=ev_tok, ev_valid=ev_valid,
-            o_len=o_len, o_row=o_row, ot_tok=ot_tok, ot_opt=ot_opt, ot_valid=ot_valid, n_ent=E_p,
+            o_len=o_len, o_row=o_row, ot_tok=ot_tok, ot_opt=ot_opt, ot_valid=ot_valid, n_ent=E_p, ent_width=ent_width,
         )  # fmt: skip
         # greedy rows: constant noise exp(-1) makes the Gumbel perturbation 0, so the draw is the argmax
         noise = torch.where((flags & GREEDY_FLAG != 0)[o_row], math.exp(-1.0), noise)
@@ -957,6 +1028,12 @@ def _serve_loop(cfg: ServerConfig, srv: _Server, req_q, stats_q) -> None:
                     return
                 if m[0] == "stats":
                     stats_q.put(dict(srv.stats, policies=len(srv.ids), device=cfg.device))
+                elif m[0] == "select":
+                    try:
+                        srv.select_policies(m[1])
+                        stats_q.put(None)
+                    except Exception as e:
+                        stats_q.put("".join(traceback.format_exception(e)))
                 elif m[0] == "register":
                     _, wid, key = m
                     try:
@@ -1007,7 +1084,8 @@ class InferenceServer:
 
         self.ctx = mp.get_context("spawn")
         self.cfg = cfg or ServerConfig()
-        self.devices = list(devices) if devices else [self.cfg.device]
+        self.devices = list(devices or self.cfg.devices or [self.cfg.device])
+        server_cpus = server_cpus or self.cfg.server_cpus
         k = len(self.devices)
         if not 1 <= k <= n_workers:
             raise ValueError("need between 1 and n_workers devices")
@@ -1046,16 +1124,37 @@ class InferenceServer:
     def pool(self):
         pool = self.ctx.Pool(self.n_workers, initializer=init_worker, initargs=(self.worker_ids, self.shards, self.worker_cpus, self.claim))
         pool.claim = self.claim
+        pool.server = self
         return pool
+
+    def select_policies(self, keys):
+        for sh in self.shards:
+            sh[4].put(("select", keys))
+        errors = self._control_replies()
+        if any(errors):
+            raise RuntimeError(f"inference residency selection failed: {errors}")
 
     def stats(self) -> dict:
         """Counters summed over the servers ("servers": each one's)."""
         for sh in self.shards:
             sh[4].put(("stats",))
-        each = [self.stats_q.get() for _ in self.shards]
+        each = self._control_replies()
         out = {k: sum(e[k] for e in each) for k, v in each[0].items() if isinstance(v, (int, float))}
         out["servers"] = each
         return out
+
+    def _control_replies(self, timeout=600):
+        deadline, replies = time.monotonic() + timeout, []
+        while len(replies) < len(self.shards):
+            try:
+                replies.append(self.stats_q.get(timeout=0.1))
+            except queue.Empty:
+                dead = [(p.pid, p.exitcode) for p in self.procs if not p.is_alive()]
+                if dead:
+                    raise RuntimeError(f"inference server died during control request: {dead}")
+                if time.monotonic() > deadline:
+                    raise TimeoutError("inference server control request timed out")
+        return replies
 
     def close(self) -> None:
         for sh, p in zip(self.shards, self.procs):

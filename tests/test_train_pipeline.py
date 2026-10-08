@@ -30,7 +30,7 @@ from mtg_ml.rl.train import Trainer, parse_args  # noqa: E402
 TINY = ["--hidden", "16", "--games-per-iter", "4", "--workers", "2", "--max-turns", "6"]
 NO_EVAL = ["--eval-every", "0"]
 SMALL_EVAL = ["--eval-games", "4", "--eval-bo3-matches", "2", "--bench-games", "4", "--bench-greedy-games", "4", "--bench-bo3-matches", "2", "--eval-workers", "1"]
-TIMING = {"rollout_s", "update_s", "wait_s", "wall_s", "decisions_per_s", "eval_s", "eval_lag"}
+TIMING = {"rollout_s", "queue_s", "update_s", "ppo_s", "publish_s", "wait_s", "wall_s", "decisions_per_s", "eval_s", "eval_lag"}
 IN_PROCESS = ["--collector", "thread", "--eval-process", "0"]
 
 
@@ -50,7 +50,7 @@ def _rows(run, name="metrics.jsonl") -> list[dict]:
     return [json.loads(line) for line in (run / name).read_text().splitlines()]
 
 
-@pytest.mark.parametrize("pipeline", [0, 1])
+@pytest.mark.parametrize("pipeline", [0, 1, 2])
 def test_smoke_and_resume(tmp_path, monkeypatch, pipeline):
     run = tmp_path / "run"
     cfg = _cfg(run, "--pipeline", str(pipeline), "--iterations", "4", "--snapshot-every", "2", "--eval-every", "2", *SMALL_EVAL)
@@ -70,7 +70,7 @@ def test_smoke_and_resume(tmp_path, monkeypatch, pipeline):
     rows = _rows(run)
     assert [r["iteration"] for r in rows] == [1, 2, 3, 4] and [r["games_total"] for r in rows] == [4, 8, 12, 16]
     assert all({"rollout_s", "update_s", "wait_s", "wall_s", "policy_lag"} <= r.keys() for r in rows)
-    assert [r["policy_lag"] for r in rows] == ([0, 1, 1, 1] if pipeline else [0, 0, 0, 0])
+    assert [r["policy_lag"] for r in rows] == ([0, 1, 2, 2] if pipeline == 2 else [0, 1, 1, 1] if pipeline else [0, 0, 0, 0])
     assert pipeline or all(r["wait_s"] == 0 for r in rows)
     # the evaluations, merged into the rows of the iterations they evaluated
     assert "eval/random/jund" in rows[1] and rows[3]["bench/jund_vs_bot_n"] == 4 and rows[1]["eval_lag"] >= 0
@@ -163,6 +163,19 @@ def test_cpu_layout(monkeypatch):
     assert parse_cpus("32-34,40") == (32, 33, 34, 40) and collect.fmt_cpus((32, 33, 34, 40)) == "32-34,40"
 
 
+def test_training_layout_reserves_every_gpu_process(monkeypatch):
+    monkeypatch.setattr(train_mod, "available_cpus", lambda: tuple(range(16)))
+    cfg = train_mod.TrainConfig(workers=4, device="cuda:0", learner_devices="cuda:0,cuda:1", learner_cpus="0;1",
+                               inference="server", server_devices="cuda:2,cuda:3", server_cpus="2;3")
+    lay, lc, sc = train_mod.training_cpu_layout(cfg, False)
+    assert lc == ((0,), (1,)) and sc == ((2,), (3,))
+    assert lay.trainer == (0,) and lay.server == (2, 3)
+    assert not set(lay.workers) & {0, 1, 2, 3}
+    cfg.worker_cpus = "1,4-6"
+    with pytest.raises(ValueError, match="overlap"):
+        train_mod.training_cpu_layout(cfg, False)
+
+
 @pytest.fixture
 def in_process(monkeypatch):
     """Rollouts and evaluations in one thread of this process, on one torch
@@ -235,7 +248,7 @@ def test_resume_replays_the_games_of_a_lost_rollout(tmp_path, in_process, monkey
     assert again.games == lost.games and len(lost.games) == 4
 
 
-@pytest.mark.parametrize("pipeline", [0, 1])
+@pytest.mark.parametrize("pipeline", [0, 1, 2])
 def test_checkpoint_every_and_resume_after_a_crash(tmp_path, in_process, monkeypatch, pipeline):
     """latest.pt only every --checkpoint-every iterations: a run killed in
     the update of iteration 5 restarts from iteration 4, drops the rows and

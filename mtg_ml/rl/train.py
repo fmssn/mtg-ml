@@ -117,7 +117,7 @@ import torch
 from ..backend import ENV_VAR, engine_name
 from ..encode import FEATURE_VERSIONS, FEATURES
 from ..match import matchup_decks, parse_matchups
-from .collect import PoolProcess, PoolThread, cpu_layout, release
+from .collect import PoolProcess, PoolThread, cpu_layout, fmt_cpus, parse_cpus, release
 from .evaluate import DECK_KEYS, EVAL_BLOCKS, evaluate_policy
 from .model import PolicyNet, load_partial
 from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update, set_lr
@@ -199,9 +199,15 @@ class TrainConfig:
     auto_pass: int = 0  # 1: auto-pass priority when the only other options are side-effect-free sacrifice-for-mana abilities
     seed: int = 0
     device: str = "cpu"
+    learner_devices: str = ""  # comma-separated devices; first matches --device, others are persistent replicas
+    learner_cpus: str = ""  # semicolon-separated CPU lists, one per learner rank
     engine: str = "python"  # rules engine for rollouts: python (reference) or native (Rust, mtg_ml_native)
     inference: str = "local"  # policy inference: local (CPU torch in each worker) or server (one GPU process, rl/inference.py)
     server_device: str = ""  # device of the inference server ("" = --device, or cuda when --device is cpu and a GPU exists)
+    server_devices: str = ""  # comma-separated inference devices; learner uses --device
+    server_cpus: str = ""  # semicolon-separated CPU lists, one per inference device
+    server_resident_limit: int = 0  # bounded residency waves; start new large-model runs with 64
+    server_stacked_attention: int = 1  # 0: eager per-policy attention baseline, 1: stacked graphs
     server_max_rows: int = 16384  # largest batch the server builds from queued requests
     server_request_ints: int = 0  # int32 words per worker request slot (0 = auto: `request_ints_for`, from the games each request carries)
     server_policy_slots: int = 32  # policies the server's stack holds before it grows (pool snapshots + learner versions; each ~68 MB for h128 entity)
@@ -221,6 +227,7 @@ class _Rollout:
     rng: tuple  # trainer rng state before its games were drawn: the checkpoint of its iteration stores it
     data: object = None  # the Result once waited for
     waited: float = 0.0  # seconds the trainer blocked on it
+    descriptor: dict | None = None  # exact immutable rollout inputs, for lag-2 resume
 
     def wait(self) -> _Rollout:
         if self.data is None:
@@ -231,7 +238,7 @@ class _Rollout:
 
     @property
     def rollout_s(self) -> float:
-        return self.pending.t_ready - self.pending.t_submit
+        return self.pending.t_ready - (self.pending.t_start or self.pending.t_submit)
 
 
 @dataclass
@@ -292,6 +299,15 @@ class Trainer:
         self.saver = ThreadPoolExecutor(1, thread_name_prefix="checkpoint")
         self.saving = None  # the latest.pt write in flight
         self.pinned: dict[str, int] = {}  # policy files an evaluation still needs
+        self.checkpoint_policies = []
+        self.retiring_checkpoint_policies = []
+        self.resume_rollouts = ck.get("pending_rollouts", []) if ck is not None else []
+        if self.resume_rollouts and cfg.pipeline != 2:
+            raise ValueError("checkpoint has queued lag-2 rollouts; resume with --pipeline 2")
+        for desc in self.resume_rollouts:
+            path = desc["job"].learner_path
+            self._pin(path)
+            self.checkpoint_policies.append(path)
         if ck is not None:
             self.net.load_state_dict(ck["model"])
             load_optimizer_state(self.opt, ck["optim"])
@@ -318,8 +334,7 @@ class Trainer:
         if not self.pool:
             self._snapshot(weights)
             self._checkpoint(weights, self.rng.getstate())
-        self.layout = cpu_layout(cfg.workers, cfg.device, cfg.inference == "server", bool(self.evaluating and cfg.eval_process),
-                                 cfg.trainer_cpus, cfg.worker_cpus, cfg.eval_cpus, available_cpus())
+        self.layout, self.learner_cpus, self.server_cpus = training_cpu_layout(cfg, self.evaluating)
         print(self.layout.describe(), flush=True)
         self.server = None
         self.collector = self._collector()
@@ -329,6 +344,23 @@ class Trainer:
             self.eval_workers = cfg.eval_workers or (4 if self.layout.shared_eval else max(1, min(8, len(ev))))
             self.evaluator = PoolProcess(self.eval_workers, "local", worker_cpus=ev or None, cpus=ev or None, nice=10, name="evaluator")
         self.evals: list[_Eval] = []  # running first, then at most one waiting
+        self.learner = None
+        if cfg.learner_devices:
+            from .distributed import DistributedLearner
+
+            devices = tuple(cfg.learner_devices.split(","))
+            if len(devices) > 1:
+                try:
+                    self.learner = DistributedLearner(self.net, self.opt, cfg.ppo, devices, self.learner_cpus)
+                except BaseException:
+                    self.collector.terminate()
+                    if self.evaluator is not None:
+                        self.evaluator.terminate()
+                    if self.server is not None:
+                        self.server.close()
+                    self._join_checkpoint()
+                    self.saver.shutdown()
+                    raise
 
     def _init_from(self, path: str) -> None:
         """Start from the weights of checkpoint `path` (a policy file or
@@ -354,7 +386,11 @@ class Trainer:
             from .inference import ServerConfig, default_device
 
             dev = c.server_device or (c.device if c.device != "cpu" else default_device())
-            server_cfg = ServerConfig(device=dev, max_rows=c.server_max_rows, request_ints=c.server_request_ints or request_ints_for(c.games_per_iter, c.workers), policy_slots=c.server_policy_slots, cpus=lay.server or None)
+            devices = tuple(c.server_devices.split(",")) if c.server_devices else (dev,)
+            per_cpu = self.server_cpus
+            server_cfg = ServerConfig(device=dev, devices=devices, server_cpus=per_cpu, resident_limit=c.server_resident_limit, stacked_attention=bool(c.server_stacked_attention),
+                                      max_rows=c.server_max_rows, request_ints=c.server_request_ints or request_ints_for(c.games_per_iter, c.workers),
+                                      policy_slots=c.server_policy_slots, cpus=lay.server or None)
         if c.collector == "process":  # merging as jobs end, off the trainer's NUMA node if it can
             return PoolProcess(c.workers, c.inference, server_cfg, lay.workers or None, lay.collector or None)
         if c.collector != "thread":
@@ -389,10 +425,15 @@ class Trainer:
         """Freeze the weights into the opponent pool (only rollout workers load them)."""
         self.pool.append(_save({"config": self.net.config, "model": weights}, os.path.join(self.cfg.run, "pool", f"iter_{self.iteration:05d}.pt")))
 
-    def _checkpoint(self, weights: dict, rng: tuple) -> None:
+    def _checkpoint(self, weights: dict, rng: tuple, pending_rollouts=()) -> None:
         """Write the resume checkpoint `latest.pt` in the background: with the
         Adam state it is ~3x the weights, and the next update need not wait."""
         self._join_checkpoint()
+        new_policies = [desc["job"].learner_path for desc in pending_rollouts]
+        for path in new_policies:
+            self._pin(path)
+        self.retiring_checkpoint_policies = self.checkpoint_policies
+        self.checkpoint_policies = new_policies
         ck = {
             "config": self.net.config,
             "model": weights,
@@ -405,6 +446,7 @@ class Trainer:
             "lr_anneal_origin": self.lr_origin,
             "pfsp": dict(self.pfsp),
             "train_config": asdict(self.cfg),
+            "pending_rollouts": list(pending_rollouts),
         }
         self.saving = self.saver.submit(_save, ck, self.latest)
         self.checkpointed = self.iteration
@@ -413,6 +455,9 @@ class Trainer:
         if self.saving is not None:
             self.saving.result()  # re-raises a failed write
             self.saving = None
+            for path in self.retiring_checkpoint_policies:
+                self._unpin(path)
+            self.retiring_checkpoint_policies = []
 
     def _remove_partial_writes(self) -> None:
         """Delete `*.tmp` files a killed run left behind mid-`_save`."""
@@ -453,7 +498,18 @@ class Trainer:
                   value_clamp=c.value_clamp, gamma_turn=c.gamma_turn, lam_turn=c.lam_turn, auto_mana=bool(c.auto_mana), auto_pass=bool(c.auto_pass),
                   features=self.pool_features)
         specs = self._train_specs(it)
-        return _Rollout(self.collector.call(play, specs, job, c.workers), shaping, it - self.iteration, rng)
+        desc = {"it": it, "job": job, "specs": specs, "rng": rng}
+        if c.pipeline == 2:
+            self._pin(job.learner_path)
+        return _Rollout(self.collector.call(play, specs, job, c.workers), shaping, it - self.iteration, rng, descriptor=desc)
+
+    def _resubmit(self, desc):
+        job, specs = desc["job"], desc["specs"]
+        self._pin(job.learner_path)
+        if len(self.matchups) > 1:
+            self.spec_matchup.update({s.seed: s.matchup for s in specs})
+        pending = self.collector.call(play, specs, job, self.cfg.workers)
+        return _Rollout(pending, job.shaping, desc["it"] - job.learner_version + 1, desc["rng"], descriptor=desc)
 
     def _train_specs(self, it: int) -> list[GameSpec]:
         """The games of a training rollout. Exploiter mode: the learner on
@@ -564,6 +620,9 @@ class Trainer:
             e.t_submit = time.monotonic()
             e.pending = self.evaluator.call(evaluate_policy, *self._eval_args(e, self.eval_workers, "local"))
 
+    def _pin(self, path: str) -> None:
+        self.pinned[path] = self.pinned.get(path, 0) + 1
+
     def _unpin(self, path: str) -> None:
         self.pinned[path] -= 1
         if not self.pinned[path]:
@@ -602,22 +661,31 @@ class Trainer:
             if affinity is not None and self.layout.trainer:
                 os.sched_setaffinity(0, set(self.layout.trainer))
         roll = None  # the collected rollout for the coming update, if it was played during the last one
+        queue = [self._resubmit(desc) for desc in self.resume_rollouts]
+        self.resume_rollouts = []
         ok = False
         try:
             while self._more(self.iteration, self.games_total):
                 t0 = time.monotonic()
-                if roll is None:
+                if c.pipeline == 2 and queue:
+                    roll = queue.pop(0).wait()
+                elif roll is None:
                     roll = self._submit(self.iteration).wait()
                 data = roll.data
                 if c.pool_sampling == "pfsp":  # before the next games are drawn, so a resume draws the same ones
                     self._update_pfsp(data.games)
                 nxt = None
-                if c.pipeline and self._more(self.iteration + 1, self.games_total + len(data.games)):
+                if c.pipeline == 2:
+                    while len(queue) < 2 and self._more(self.iteration + 1 + len(queue), self.games_total + len(data.games) + len(queue) * c.games_per_iter):
+                        queue.append(self._submit(self.iteration + 1 + len(queue)))
+                    nxt = queue[0] if queue else None
+                elif c.pipeline and self._more(self.iteration + 1, self.games_total + len(data.games)):
                     nxt = self._submit(self.iteration + 1)  # plays with the current weights during the update
                 t1 = time.monotonic()
                 lr = self._lr()
                 set_lr(self.opt, lr)
-                stats = ppo_update(self.net, self.opt, data, c.ppo, device=c.device)
+                stats = self.learner.update(self.net, self.opt, data, c.ppo, lr) if self.learner else ppo_update(self.net, self.opt, data, c.ppo, device=c.device)
+                t_learned = time.monotonic()
                 release(data)  # unmaps the shared block of the samples
                 self.iteration += 1
                 self.games_total += len(data.games)
@@ -626,7 +694,10 @@ class Trainer:
                 if self.iteration % c.snapshot_every == 0:
                     self._snapshot(weights)
                 if c.checkpoint_every and self.iteration % c.checkpoint_every == 0:
-                    self._checkpoint(weights, nxt.rng if nxt else self.rng.getstate())
+                    if c.pipeline == 2:
+                        self._checkpoint(weights, self.rng.getstate(), [r.descriptor for r in queue])
+                    else:
+                        self._checkpoint(weights, nxt.rng if nxt else self.rng.getstate())
                 t2 = time.monotonic()
 
                 row = {
@@ -643,6 +714,9 @@ class Trainer:
                     "pool_size": len(self.pool),
                     "rollout_s": round(roll.rollout_s, 2),
                     "update_s": round(t2 - t1, 2),
+                    "ppo_s": round(t_learned - t1, 3),
+                    "publish_s": round(t2 - t_learned, 3),
+                    "learner_precision": c.ppo.precision,
                     "policy_lag": roll.lag,
                     "decisions_per_s": round(len(data.actions) / max(roll.rollout_s, 1e-9)),
                     **{k: round(v, 4) if isinstance(v, float) else v for k, v in stats.items()},
@@ -653,14 +727,17 @@ class Trainer:
                     row["win_vs_main"] = row["win_vs_pool"]
                 if self._eval_due(len(data.games)):
                     row.update(self._request_eval())
-                if nxt:
+                if nxt and c.pipeline != 2:
                     nxt.wait()
-                row["wait_s"] = round(nxt.waited if nxt else 0.0, 2)
+                row["wait_s"] = round(roll.waited if c.pipeline == 2 else nxt.waited if nxt else 0.0, 2)
+                row["queue_s"] = round(max(0, roll.pending.t_start - roll.pending.t_submit), 3)
                 row["wall_s"] = round(time.monotonic() - t0, 2)
                 _append(self.metrics, row)
                 print(_fmt(row), flush=True)
                 if self.evaluator is not None:
                     self._collect_evals()
+                if c.pipeline == 2:
+                    self._unpin(roll.descriptor["job"].learner_path)
                 roll = nxt
             if self.checkpointed != self.iteration:
                 self._checkpoint(self._weights(), self.rng.getstate())
@@ -668,6 +745,8 @@ class Trainer:
                 self._collect_evals(block=True)
             ok = True
         finally:
+            if self.learner is not None:
+                self.learner.close()
             for p in (self.collector, self.evaluator):
                 if p is not None:
                     p.close() if ok else p.terminate()  # terminate: abandon a rollout or evaluation in flight
@@ -715,6 +794,45 @@ def _cpu(x):
 def available_cpus() -> tuple[int, ...]:
     """CPUs this process may use (its affinity)."""
     return tuple(sorted(os.sched_getaffinity(0))) if hasattr(os, "sched_getaffinity") else tuple(range(os.cpu_count() or 1))
+
+
+def training_cpu_layout(cfg, evaluating):
+    """Reserve every GPU driver process before assigning rollout workers."""
+    avail = available_cpus()
+    learners = tuple(cfg.learner_devices.split(",")) if cfg.learner_devices else (cfg.device,)
+    servers = tuple(cfg.server_devices.split(",")) if cfg.server_devices else (cfg.server_device or cfg.device,)
+    lc = tuple(parse_cpus(c) for c in cfg.learner_cpus.split(";")) if cfg.learner_cpus else ()
+    sc = tuple(parse_cpus(c) for c in cfg.server_cpus.split(";")) if cfg.server_cpus else ()
+    given = [parse_cpus(c) for c in (cfg.trainer_cpus, cfg.worker_cpus, cfg.eval_cpus) if c]
+    if lc and cfg.trainer_cpus and lc[0] != parse_cpus(cfg.trainer_cpus):
+        raise ValueError("trainer_cpus must match the first learner_cpus list")
+    reserved = {c for group in (*lc[1:], *sc) for c in group}
+    primary = lc[0] if lc else parse_cpus(cfg.trainer_cpus)
+    if reserved & {c for group in (*given, primary) for c in group}:
+        raise ValueError("GPU process CPU lists overlap the trainer, workers or evaluation")
+    groups = (*lc, *sc)
+    if groups and (any(not g for g in groups) or any(c not in avail for g in groups for c in g)):
+        raise ValueError("GPU CPU lists must be nonempty and inside the process affinity")
+    flat = [c for g in (*lc[1:], *sc) for c in g]
+    if len(set(flat)) != len(flat):
+        raise ValueError("GPU process CPU lists must not overlap")
+    free = [c for c in avail if c not in reserved and not any(c in g for g in given) and c not in primary]
+    if len(learners) > 1 and not lc:
+        if len(free) < len(learners):
+            raise ValueError("not enough CPUs for learner ranks; provide learner_cpus")
+        primary = parse_cpus(cfg.trainer_cpus) or (free.pop(0),)
+        lc = (primary, *((free.pop(0),) for _ in learners[1:]))
+        reserved.update(c for g in lc[1:] for c in g)
+    if cfg.inference == "server" and len(servers) > 1 and not sc:
+        if len(free) < len(servers):
+            raise ValueError("not enough CPUs for inference servers; provide server_cpus")
+        sc = tuple((free.pop(0),) for _ in servers)
+        reserved.update(c for g in sc for c in g)
+    lay = cpu_layout(cfg.workers, cfg.device, cfg.inference == "server" and not sc, bool(evaluating and cfg.eval_process),
+                     fmt_cpus(primary) if primary else cfg.trainer_cpus, cfg.worker_cpus, cfg.eval_cpus, tuple(c for c in avail if c not in reserved))
+    if sc:
+        lay.server = tuple(c for g in sc for c in g)
+    return lay, lc, sc
 
 
 def _append(path: str, row: dict) -> None:
@@ -807,6 +925,24 @@ def _check(cfg: TrainConfig) -> None:
         raise FileNotFoundError(f"--exploit {cfg.exploit}: no such policy file")
     if cfg.lr_anneal_games < 0 or cfg.gamma_turn < 0 or cfg.lam_turn < 0 or cfg.value_clamp < 0:
         raise ValueError("lr_anneal_games, gamma_turn, lam_turn and value_clamp must be >= 0")
+    if cfg.server_resident_limit < 0:
+        raise ValueError("server_resident_limit must be nonnegative")
+    if cfg.pipeline not in (0, 1, 2):
+        raise ValueError("pipeline must be 0, 1 or 2")
+    if cfg.server_devices and cfg.inference != "server":
+        raise ValueError("server_devices requires inference=server")
+    if cfg.server_cpus:
+        devices = cfg.server_devices.split(",") if cfg.server_devices else [cfg.server_device or cfg.device]
+        if len(cfg.server_cpus.split(";")) != len(devices):
+            raise ValueError("server_cpus needs one CPU list per inference device")
+    if cfg.ppo.precision not in ("fp32", "bf16"):
+        raise ValueError("ppo precision must be fp32 or bf16")
+    if cfg.learner_devices:
+        devices = cfg.learner_devices.split(",")
+        if torch.device(devices[0]) != torch.device(cfg.device):
+            raise ValueError("first learner device must match --device")
+        if cfg.learner_cpus and len(cfg.learner_cpus.split(";")) != len(devices):
+            raise ValueError("learner_cpus needs one CPU list per learner device")
 
 
 def _fmt(row: dict) -> str:
