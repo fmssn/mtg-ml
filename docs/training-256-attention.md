@@ -1,7 +1,9 @@
 # Width-256 attention: implementation and experiment protocol
 
-The optimized path is implemented; the 3–5× end-to-end target still needs the
-full training comparison. Existing r6 training processes were preserved.
+The optimized path is implemented. Dedicated H100 computational screens measured
+4.60× baseline throughput with stacked attention and 6.85× with a dedicated
+inference GPU, preserving PPO settings. Policy strength per hour still needs the
+paired training comparison. Existing r6 training processes were preserved.
 
 ## Implemented behavior
 
@@ -142,6 +144,57 @@ cores local to the learner/inference GPUs' NUMA nodes. The dedicated campaign
 was subsequently started after the user released the project GPUs; see the
 experiment ledger for its live directory and allocation.
 
+## Completed dedicated computational screens
+
+The campaign on `h100-private` ran from 15:47:23 to 16:43:24 UTC on 2026-10-08,
+using immutable code `e8662a5`, the frozen parent above, seed 0, 26 workers on
+CPU cores 0–31, and H100 buses 18/0A. Each completed arm trained 25 iterations
+of 2,048 games: five warm-up and twenty timed iterations. Rates below divide
+real recorded games/learner decisions by whole-iteration wall time; stages
+overlap. Evaluation was disabled for timing. All ten launched screens completed
+without failure, totaling 512,000 games. Two/four-learner timing arms were skipped
+by the planned bottleneck gate: after BF16, collection exceeded learner time.
+Four-rank correctness separately passed all three eager FP32, graph FP32 and
+compiled BF16 cases with unequal/empty shards (87.77 s).
+
+| Arm | Games/hour | Learner decisions/s | Baseline ratio | Charged GPU-hours |
+|---|---:|---:|---:|---:|
+| legacy | 138,123 | 6,212 | 1.00× | 0.383 |
+| stacked | 635,422 | 28,344 | 4.60× | 0.085 |
+| separate | 946,019 | 41,981 | 6.85× | 0.137 |
+| resident64 | 770,448 | 34,372 | 5.58× | 0.144 |
+| resident128 | 777,230 | 34,237 | 5.63× | 0.136 |
+| bf16 | 1,048,986 | 46,782 | 7.59× | 0.123 |
+| batch8192-lr150 | 1,554,951 | 71,328 | 11.26× | 0.091 |
+| batch8192-lr300 | 1,162,261 | 56,992 | 8.41× | 0.103 |
+| epochs2 | 1,500,214 | 65,706 | 10.86× | 0.097 |
+| lag2 | 1,397,025 | 61,379 | 10.11× | 0.098 |
+
+These are single-seed short-screen rates, not estimates of stronger policies per
+hour. KL stopping and new graph captures remain active: median optimizer steps
+per iteration vary from 617.5 (legacy) to 386 (stacked), 159.5 (separate), 609
+(resident64), 162.5 (BF16), and 41 (batch8192-lr150). The latter stopped on KL in
+all twenty timed iterations. Different sampled actions produce different
+trajectories even with paired seeds. These differences prevent attributing each
+arm's entire speedup to faster kernels or interpreting the small residency/BF16
+differences as established hardware effects. Longer paired strength comparisons
+and identical-data learner timings are needed before changing defaults.
+
+Only 22 policies were resident, including the learner; every residency arm used
+one wave. This tests the bounded path but does not establish eviction-wave cost
+for pools larger than 64/128. Stacked padding allocated approximately 2.75–2.83
+rows per real row. Learner peaks were 20.35–24.58 GiB; inference peaks and all
+stage/publication timings are retained in `outcomes.jsonl`. The live dashboard
+at <http://127.0.0.1:55012> shows completed results and keeps polling every 15 s.
+
+Artifacts are under
+`/home/taiga-support/mtg-ml-256-opt/campaigns/screens-20261008-dedicated/`.
+All ten final checkpoints, policies, metrics, commands and outcome records are
+archived as `~/mtg-ml-checkpoints/20261008-h256-screen-ARM-seed0/`.
+Sampled/greedy benchmarks, L1 Elo and final paired evaluations remain pending
+for the strength stage; these timing archives explicitly record that limitation.
+The five project GPUs were idle after completion; ComfyUI remained untouched.
+
 ## Preliminary stage measurements
 
 These checks use `05103c4` on `h100-private`, buses 18/0A, one nice-19 thread on
@@ -199,8 +252,9 @@ BF16 moment errors are bounded to 1% in both norm and largest entry because
 sharded dense GEMMs round gradients separately. Observed maximum relative norm
 error was 0.59%; loss and parameter checks keep their original tolerances.
 The final coordination/campaign CPU checks passed 22 tests. Four-rank CUDA
-correctness and scaling still require the
-dedicated resources. Campaign validation also covers occupied compute contexts,
+correctness subsequently passed three additional checks on the dedicated
+allocation. Multi-learner throughput was gated off as described above.
+Campaign validation also covers occupied compute contexts,
 excluded GPUs, invalid allocations, and refusing to overwrite manifests.
 
 The isolated deployment is under `/home/taiga-support/mtg-ml-256-opt/`, with an
@@ -208,9 +262,10 @@ environment and native build for each deployed code ref. Existing r6 jobs and
 ComfyUI were preserved. The separate video-evidence vLLM job released bus 0A;
 isolated checks use buses 18/0A, one low-priority thread on CPU 63. Host-side
 timings under that contention are not an end-to-end training estimate. Full
-campaign execution waits for dedicated GPU/CPU resources.
+computational campaign execution subsequently completed on dedicated resources.
 
-The real width-256-attention unoptimized training baseline, 3–5× end-to-end
-target, learning-rate/batch/epoch/lag selection, and three-seed strength results
-remain unmeasured. CPU bookkeeping has not been moved into Rust because its
-post-optimization bottleneck has not been established.
+The real width-256-attention baseline and optimized throughput are now measured
+in short screens, exceeding the 3–5× throughput target. Learning-rate/batch/epoch/
+lag selection and three-seed strength results remain open. CPU bookkeeping has
+not been moved into Rust because its post-optimization bottleneck has not been
+established.

@@ -2,7 +2,7 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
-## 20261008-h256-attention-scaling · implementation and preliminary screens
+## 20261008-h256-attention-scaling · implementation and completed throughput screens
 
 - **Parent:** r6-h256 `pool/iter_02440.pt`, 4,997,120 games, source code
   `30d9ef640`, SHA-256 `0dd482bcd68e846cc7221a894b2fef711303cc183b1f4230666a5098930fbea7`.
@@ -29,8 +29,8 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
   error for shard-specific GEMM rounding (observed relative norm ≤0.59%);
   parameter/loss checks and strict FP32 moment comparisons remain unchanged.
   The final focused CPU checks passed 22 tests. Failed checks remain in the
-  deployment logs. Four-rank CUDA checks and scaling measurements await
-  dedicated resources.
+  deployment logs. Dedicated four-rank CUDA checks subsequently passed all
+  three eager FP32, graph FP32 and compiled BF16 cases in 87.77 seconds.
 - **Preliminary timing:** one shared nice-19 CPU core, five warm-up / twenty
   timed batches. Eager attention: 447.53 ms for 608 decisions across 26 policies;
   stacked: 6.20–64.69 ms under variable host scheduling, with consistent
@@ -60,15 +60,40 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
   excluded. These timing screens disable evaluation; strength comparisons and
   three paired two-hour finalists have not started.
   Four-rank parity passed all three cases (eager FP32, graph FP32, compiled
-  BF16), including unequal and empty shards, in 87.77 seconds. The baseline
-  remains active; throughput results are pending.
+  BF16), including unequal and empty shards, in 87.77 seconds. The campaign
+  finished at 16:43:24 UTC: ten completed screens, no failures, 512,000 games,
+  1.397 charged GPU-hours across training screens (excludes separate validation).
+  Two/four-learner throughput screens were skipped by the planned bottleneck
+  gate because BF16 collection exceeded learner time. All five project GPUs
+  were idle afterward.
+- **Measured throughput:** legacy 138,123 games/hour / 6,212 real learner
+  decisions/s; stacked 635,422 / 28,344 (**4.60×**); separate 946,019 / 41,981
+  (**6.85×**); resident64 770,448 / 34,372; resident128 777,230 / 34,237;
+  BF16 1,048,986 / 46,782 (**7.59×**); batch8192-lr150 1,554,951 / 71,328
+  (**11.26×**); batch8192-lr300 1,162,261 / 56,992; epochs2 1,500,214 / 65,706;
+  lag2 1,397,025 / 61,379. Ratios use whole-iteration timed throughput against
+  legacy; publication and learning overlap collection. Full GPU-hours, padding,
+  memory and stage timings are in the protocol and outcome records.
+- **Limits:** one seed, 20 timed iterations, no strength evaluation. KL stops
+  and new graph captures produced unequal learner work (median steps 617.5
+  legacy, 386 stacked, 159.5 separate, 609 resident64, 162.5 BF16, 41 larger
+  batch). Batch8192-lr150 hit KL stopping in all twenty timed iterations.
+  Consequently the hardware-only rate comparisons also need confirmation with
+  longer paired runs. The 21 historical opponents plus learner fit in one
+  residency wave, so eviction beyond 64/128 policies remains unmeasured.
+- **Archives:** all ten completed screens are archived on `h100-private` as
+  `20261008-h256-screen-ARM-seed0`, with final/resume policies, metrics, exact
+  campaign manifest and outcomes. `evals.txt` records that these are timing-only
+  screens. The standard archive helper emitted an unmatched snapshot-glob warning
+  because 25 iterations produced no new 122-iteration pool snapshot; final and
+  policy files were saved successfully, and hashes were verified.
 - **Training strength:** not measured; sampled/greedy benchmark and L1 Elo are
   unavailable pending the paired continuation experiments.
-- **Verdict: inconclusive.** The 3–5× end-to-end target remains unmeasured. Adopt
-  optimizations only after correctness, throughput and matched-game/elapsed-time
-  policy-strength comparisons. The campaign records failures and GPU-hours;
-  finished training arms must still be archived and receive the standard final
-  2,000-game evaluations.
+- **Verdict: throughput target met in short screens; strength inconclusive.**
+  Stacked/separate inference exceeds the 3–5× target without changing PPO
+  settings. Select defaults only after matched-game/elapsed-time policy-strength
+  comparisons across three paired seeds. Larger batch, reduced epochs and lag
+  remain experimental; the standard 2,000-game final evaluations remain pending.
 
 ## Open (handoff 2026-10-07)
 
