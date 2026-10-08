@@ -348,6 +348,7 @@ def test_hidden_world_labels_resets_and_ties(engine):
     assert b.choose(v, tie) == 0
 
 
+@pytest.mark.slow
 def test_complete_games_and_mode_identity(engine):
     for opponent in ("jund_wildfire", "mono_blue_terror"):
         for seat in (0,1):
@@ -418,3 +419,92 @@ def test_cantrip_avoids_self_decking_and_scour_uses_safe_target():
     assert key(g) == ("target", "player", "player", "opponent")
     g.step(choice(g)); pay(g); resolve_stack(g)
     assert not g.over and len(g.players[0].hand) == 1
+
+
+@pytest.mark.parametrize("zone,lands,draws", [("hand",2,1), ("graveyard",4,2)])
+def test_plunder_complete_normal_and_flashback_lines(zone, lands, draws):
+    g = scenario(p0={zone: ["Plunder the Trollshaws"], "battlefield": ISLANDS(lands)})
+    line(g)
+    assert len(g.players[0].hand) == draws
+    assert "Plunder the Trollshaws" in names(g.players[0].exile if zone == "graveyard" else g.players[0].graveyard)
+
+
+def test_escape_takes_lethal_despite_graveyard_cost():
+    g = scenario(p0={"battlefield": ISLANDS(3)+[("Tolarian Terror", {"sick": False})],
+                     "graveyard": ["Sleep of the Dead", "Brainstorm", "Ponder", "Mental Note"]},
+                 p1={"battlefield": ["Cryptic Serpent"], "life": 5})
+    assert key(g)[0:2] == ("cast", "Sleep of the Dead")
+    line(g)
+    assert len(g.players[0].exile) == 3
+    assert names(g.players[0].graveyard) == ["Sleep of the Dead"]
+    for _ in range(100):
+        if g.over: break
+        g.step(choice(g) if g.decision.player == 0 else 0)
+    assert g.over and g.winner == 0
+
+
+def test_payment_spends_floating_mana_before_another_island():
+    # A legal Spawn activation supplies floating generic mana. This synthetic
+    # cost fixture covers the protocol's generic mana handler outside the list.
+    g = scenario(p0={"hand": ["Plunder the Trollshaws"], "battlefield": ISLANDS(2)+["Eldrazi Spawn"]})
+    g.step(next(i for i,o in enumerate(g.legal_options()) if o.key[0] == "mana"))
+    g.step(next(i for i,o in enumerate(g.legal_options()) if o.key[:2] == ("cast", "Plunder the Trollshaws")))
+    assert g.decision.kind == "pay_mana" and key(g) == ("pay", "pool", "C")
+    g.step(choice(g))
+    assert sum(c.tapped for c in g.battlefield if c.controller == 0) == 0
+    g.step(choice(g))
+    assert sum(c.tapped for c in g.battlefield if c.controller == 0) == 1
+
+
+def test_counter_stops_shaman_toxin_wipe_complete_line():
+    # Toxin targets the opponent's Shaman, yet its pending damage would kill
+    # our Terror through deathtouch. Target ownership alone misses this threat.
+    g = scenario(p0={"hand": ["Counterspell"], "battlefield": ISLANDS(2)+["Tolarian Terror"]},
+                 p1={"hand": ["Toxin Analysis"], "battlefield": ["Krark-Clan Shaman", "Ichor Wellspring", "Swamp"]}, active=1)
+    choose(g, "Krark-Clan Shaman: 1 damage")
+    choose(g, "Cast Toxin Analysis"); choose(g, "Target Krark-Clan Shaman"); pay(g); pass_priority(g)
+    assert key(g)[:2] == ("cast", "Counterspell")
+    line(g)
+    while g.stack:
+        g.step(choice(g) if g.decision.player == 0 else 0)
+    assert "Tolarian Terror" in names(g.battlefield)
+    assert "Toxin Analysis" in names(g.players[1].graveyard)
+
+
+def test_shaman_toxin_does_not_threaten_flying_delver():
+    g = scenario(p0={"hand": ["Counterspell"], "battlefield": ISLANDS(2)+["Delver of Secrets"],
+                     "library": ["Ponder"]+ISLANDS(10)},
+                 p1={"hand": ["Toxin Analysis"], "battlefield": ["Krark-Clan Shaman", "Ichor Wellspring", "Swamp"]}, step="upkeep")
+    while g.decision.kind != "yes_no": g.step(0)
+    g.step(choice(g)); resolve_stack(g)
+    pass_priority(g)
+    choose(g, "Krark-Clan Shaman: 1 damage")
+    choose(g, "Cast Toxin Analysis"); choose(g, "Target Krark-Clan Shaman"); pay(g); pass_priority(g)
+    assert key(g) == ("pass",)
+    while g.stack: g.step(choice(g) if g.decision.player == 0 else 0)
+    assert "Insectile Aberration" in names(g.battlefield)
+    assert names(g.players[0].hand) == ["Counterspell"]
+
+
+def test_reservation_requires_colored_blue_not_just_total_mana():
+    g = scenario(p0={"hand": ["Counterspell", "Mental Note"],
+                     "battlefield": ISLANDS(2)+["Delver of Secrets"]+["Eldrazi Spawn"]*2},
+                 p1={"hand": ["Cast Down"]})
+    for _ in range(2):
+        g.step(next(i for i,o in enumerate(g.legal_options()) if o.key[0] == "mana"))
+    assert sum(g.players[0].pool.values()) == 2
+    assert key(g) == ("pass",)  # Four mana, but the cantrip would leave only U.
+
+
+def test_own_list_object_order_is_not_strategy_input():
+    g = scenario(p0={"hand": ["Ponder"], "battlefield": ISLANDS(1)})
+    v, actions = inputs(g, 0, MONO_BLUE_TERROR)
+    shuffled = replace(v, own_deck=freeze(dict(reversed(list(MONO_BLUE_TERROR.items())))))
+    assert bot().choose(v, actions) == bot().choose(shuffled, actions)
+
+
+def test_factory_modes_and_actor_seeds_do_not_change_choices():
+    g = scenario(p0={"hand": ["Ponder", "Brainstorm"], "battlefield": ISLANDS(1)})
+    greedy = blue_factory(0, "greedy"); greedy.reset(MONO_BLUE_TERROR, actor_seed=1)
+    sampled = blue_factory(0, "sampled"); sampled.reset(MONO_BLUE_TERROR, actor_seed=999)
+    assert greedy.act(g) == sampled.act(g)

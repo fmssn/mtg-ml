@@ -218,7 +218,7 @@ class BenchmarkBlue:
     def choose(self, view, actions):
         if self.own_deck is None:
             raise ValueError("reset required")
-        if view.own_deck != self.own_deck:
+        if dict(view.own_deck) != dict(self.own_deck):
             raise ValueError("own-list changed without reset")
         if not actions or any(a.index != i or a.kind != actions[0].kind for i, a in enumerate(actions)):
             raise ValueError("invalid current action sequence")
@@ -287,6 +287,17 @@ class BenchmarkBlue:
         if item["kind"] != "spell" or item["controller"] != "opponent" or self._handled(view, item):
             return NEG
         value = PARAMETERS["spells"].get(item["name"], 1.0)
+        if item["name"] == "Toxin Analysis":
+            ground = [c for c in creatures(view, "self") if not keyword(c, "flying")]
+            for ref in item["targets"]:
+                source = permanent(view, ref.get("oid"))
+                if source is None or source["name"] != "Krark-Clan Shaman" or source["controller"] != "opponent":
+                    continue
+                damage_pending = any(s["kind"] == "ability" and (s["source"] or {}).get("oid") == source["oid"]
+                                     for s in view.context["stack"])
+                fodder = any(c["controller"] == "opponent" and "Artifact" in c["types"] for c in view.state["battlefield"])
+                if ground and (damage_pending or fodder):
+                    value = max(value, 8 + max(creature_value(c) for c in ground))
         for target in item["targets"]:
             if "oid" in target:
                 c = permanent(view, target["oid"])
@@ -319,7 +330,8 @@ class BenchmarkBlue:
         # Two mana on an empty enemy hand is not automatically productive.
         return (protecting and view.state["opponent"]["hand_count"] > 0 and
                 "Counterspell" in view.state["self"]["hand"] and
-                blue_available(view) >= 2 and available(view) - cost < PARAMETERS["reserve_blue"])
+                blue_available(view) >= PARAMETERS["reserve_blue"] and not can_afford(
+                    view, str(ManaCost.parse(cost).plus(ManaCost.parse("{U}{U}")))))
 
     def _tempo(self, view, card, sleep=False, escape=False):
         if card["controller"] != "opponent" or (sleep and "Creature" not in card["types"]):
@@ -397,11 +409,11 @@ class BenchmarkBlue:
             if name in THREATS:
                 score = 45.0 if cost <= PARAMETERS["cheap_threat_cost"] else 25.0
                 # Rebuild pressure on an empty board instead of saving every UU.
-                if self._reserve(view, cost) and creatures(view, "self"):
+                if self._reserve(view, a.data["cost"]) and creatures(view, "self"):
                     score = NEG
                 out.append(score if main else NEG)
             elif name == "Delver of Secrets":
-                out.append(42.0 if main and not self._reserve(view, cost) else NEG)
+                out.append(42.0 if main and not self._reserve(view, a.data["cost"]) else NEG)
             elif name in {"Deem Inferior", "Sleep of the Dead"}:
                 scores = []
                 for c in view.state["battlefield"]:
@@ -410,15 +422,19 @@ class BenchmarkBlue:
                     tax = view.cards[c["name"]].get("ward", 0)
                     if available(view) < cost + tax:
                         continue
-                    scores.append(self._tempo(view, c, name == "Sleep of the Dead", mode == "escape"))
+                    value = self._tempo(view, c, name == "Sleep of the Dead", mode == "escape")
+                    payment = str(ManaCost.parse(a.data["cost"]).plus(ManaCost(tax)))
+                    if value < 90 and self._reserve(view, payment):
+                        continue
+                    scores.append(value)
                 out.append(max(scores, default=NEG) if main else NEG)
             elif name == "Lorien Revealed":
-                out.append(20.0 if main and view.state["self"]["library_count"] >= 3 and not self._reserve(view, cost) else NEG)
+                out.append(20.0 if main and view.state["self"]["library_count"] >= 3 and not self._reserve(view, a.data["cost"]) else NEG)
             elif name == "Plunder the Trollshaws":
                 if mode not in {"normal", "flashback"}:
                     self._bad(a)
                 enough = view.state["self"]["library_count"] >= (2 if mode == "flashback" else 1)
-                out.append(21.0 if enough and (end or (main and not self._reserve(view, cost))) else NEG)
+                out.append(21.0 if enough and (end or (main and not self._reserve(view, a.data["cost"]))) else NEG)
             elif name in CANTRIPS:
                 minimum = 3 if name in {"Brainstorm", "Mental Note"} else 1
                 if view.state["self"]["library_count"] < minimum:
@@ -432,7 +448,7 @@ class BenchmarkBlue:
                     score += 4.0
                 if name == "Brainstorm" and self._lands(view) >= 2 and len(hand) <= 2:
                     score -= 8.0  # avoid locking a small hand without a shuffle
-                out.append(score if end or (main and not self._reserve(view, cost)) else NEG)
+                out.append(score if end or (main and not self._reserve(view, a.data["cost"])) else NEG)
             else:
                 self._bad(a)
         return out
