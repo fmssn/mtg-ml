@@ -1,6 +1,7 @@
 """The play client's protocol (mtg_ml.live_proto): structured option refs
 and parsed events, and that neither leaks what the player may not see."""
 
+import json
 import random
 import threading
 import urllib.error
@@ -172,7 +173,7 @@ def test_play_app_is_served_and_contained(tmp_path):
         srv.shutdown()
 
 
-@pytest.mark.parametrize("scenario,seed", [("crowded", 1), ("floating", 2), (None, 4), (None, 7)])
+@pytest.mark.parametrize("scenario,seed", [("crowded", 1), ("floating", 2), ("instant", 3), (None, 4), (None, 7)])
 def test_tap_preview_is_what_auto_pay_taps(manager, scenario, seed):
     """Each cast's `taps` preview equals the sources the client's automatic
     payment (decision["auto"]) really taps, other choices taking option 0
@@ -188,10 +189,11 @@ def test_tap_preview_is_what_auto_pay_taps(manager, scenario, seed):
         d = frames[-1]["decision"]
         if d["kind"] == "priority":
             land = next((k for k, r in enumerate(d["refs"]) if r["type"] == "play_land"), 0)
-            i = land or next((k for k, r in enumerate(d["refs"]) if r.get("taps")), 0)
+            i = land or next((k for k, r in enumerate(d["refs"]) if "taps" in r), 0)
             if i and not land:
                 untapped = {c["oid"] for c in frames[-1]["state"]["battlefield"] if c["controller"] == seat and not c.get("tapped")}
-                pending.append((f, set(d["refs"][i]["taps"]), untapped))
+                mine = {c["oid"] for c in frames[-1]["state"]["battlefield"] if c["controller"] == seat}
+                pending.append((f, set(d["refs"][i]["taps"]), set(d["refs"][i].get("sacs", [])), untapped, mine))
         elif d["kind"] == "pay_mana":
             assert 0 <= d["auto"] < len(d["options"])
             i = d["auto"]
@@ -200,15 +202,41 @@ def test_tap_preview_is_what_auto_pay_taps(manager, scenario, seed):
         view = manager.choose(gid, {"frame": f, "index": i, "since": f})
         frames[view["live"]["since"] :] = view["frames"]
         while pending:  # the first frame after the cast's own decisions shows what was tapped
-            start, taps, untapped = pending[0]
+            start, taps, sacs, untapped, mine = pending[0]
             after = next((g for g in range(start + 1, len(frames)) if not frames[g]["decision"] or frames[g]["decision"]["player"] != seat or frames[g]["decision"]["kind"] == "priority"), None)
             if after is None:
                 break
             tapped = {c["oid"] for c in frames[after]["state"]["battlefield"] if c["oid"] in untapped and c.get("tapped")}
             assert tapped == taps, (frames[start]["decision"]["options"], taps, tapped)
+            gone = mine - {c["oid"] for c in frames[after]["state"]["battlefield"]}
+            assert gone == sacs, (frames[start]["decision"]["options"], sacs, gone)
             pending.pop(0)
             checked += 1
     assert checked
+
+
+def test_life_changes_and_combat_damage_are_logged(manager):
+    """Every life change between two frames has `life` events in the later
+    frame that chain from the old total to the new one; unblocked attackers
+    get `hit` events; the saved replay has the same lines."""
+    view = manager.new({"model": SCRIPTED, "seed": 5, "seat": 1, "matchup": "madness_elves"})
+    frames = play_out(manager, view, random.Random(2), prefer_plays)
+    hits = 0
+    for prev, f in zip(frames, frames[1:]):
+        lives = [e for e in f["actions"] if e["t"] == "life"]
+        hits += sum(e["t"] == "hit" for e in f["actions"])
+        for p in (0, 1):
+            old, new = prev["state"]["players"][p]["life"], f["state"]["players"][p]["life"]
+            mine = [e for e in lives if e["p"] == p]
+            if old == new:
+                assert all(e["old"] != e["new"] for e in mine)
+                continue
+            assert mine and mine[0]["old"] == old and mine[-1]["new"] == new
+            assert all(a["new"] == b["old"] for a, b in zip(mine, mine[1:]))
+    assert hits
+    final = manager.view(view["live"]["id"])
+    rep = json.loads((manager.replay_dir / final["live"]["replay"]).read_text())
+    assert any(line.startswith("life: ") for f in rep["frames"] for line in f["events"])
 
 
 def test_dev_scenarios_only_on_dev_servers(tmp_path):

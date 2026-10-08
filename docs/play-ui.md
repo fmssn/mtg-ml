@@ -20,13 +20,13 @@ The replay viewer (`/`) and its own live mode are unchanged. A finished game is 
 | activate an ability | click the permanent (blue glow) → menu; double-click if it has one ability |
 | flashback, plotted cards | click the glowing Grave / Exile counter on your plate |
 | choose a target | click a glowing (cyan) permanent, player plate or stack item; the arrow follows the pointer |
-| see what a spell will tap | hover or drag a castable card: the lands and sources auto-pay will use light up ("tap", "tap ×2" on a stack) |
+| see what a spell will tap | hover or drag a castable card: the lands and sources auto-pay will use light up ("tap", "tap ×2" on a stack), and anything it would sacrifice is marked red |
 | attack | click creatures (or drag them forward), **A** all attack, then **Space** "Attack with N" |
 | block | drag your creature onto an attacker (or click yours, then theirs); **Space** "Block (N)" |
 | undo before confirming | right-click a selected attacker or assigned blocker (right-click an attacker drops all its blockers); **Esc** clears every selection. Nothing is undone once sent: no server-side undo |
 | assign combat damage | the panel opens on a legal split; + and − move a point between recipients (the total stays the attacker's power), it says why a split is not allowed |
 | pass priority | **Space**: the button says what happens ("Pass → Combat", "Resolve Lightning Bolt", "End turn") |
-| pass until the opponent acts | **R** or **Enter**; **Esc** cancels |
+| pass until the opponent acts | **R**; **Esc** cancels. Space and Enter on a focused button or option press that control, never the global hotkeys |
 | full control (never auto-pass) | **F** |
 | everything else | **O** or "All options": the plain list of the engine's options, always there |
 | inspect a card | hover (preview on the right); right-click pins it |
@@ -85,9 +85,18 @@ A priority decision is answered "pass" by the client unless:
 - full control is on (**F**);
 - some option is a real play: anything but pass and side-effect mana abilities (Treasure). Only then can any of the rest stop it;
 - the opponent's spell or ability is on top of the stack, or the opponent cast, activated, attacked or blocked in the current step since your last decision;
-- the step has a stop (phase rail; defaults: your main 1 and main 2, the opponent's end step), unless "pass until the opponent acts" is running.
+- it is the first priority after blockers were declared (the combat-trick window): always on the opponent's turn, on yours when something blocked, whatever the stop settings say;
+- the step has a stop (phase rail; defaults: your main 1 and main 2, the opponent's declare-blockers and end steps), unless "pass until the opponent acts" is running.
 
 Your own spell on top of the stack passes (it resolves unless they respond, and a response stops you).
+
+Batched plans (an attack, blocks, a drop-to-target) answer only decisions of the turn and step they were made in; a plan left over from an earlier combat is dropped, never applied. "Pass until the opponent acts" ends at the first stop.
+
+Input belongs to the decision it was made on: when a new decision differs in kind or turn from the last one, keys and the primary button are locked for 350 ms (the button shows it), and held-key repeats never answer anything. A Space pressed for one decision cannot land on the next after the engine auto-ran ahead.
+
+Double-clicking a permanent whose ability sacrifices, discards or exiles as a cost opens its menu instead of firing it.
+
+Drop and double-click mean "play it": they take only a land play or a normal cast. When a card has anything else (cycling, flashback, an alternative or additional cost, modes) or no plain play, the option menu opens instead.
 
 ### Decision kind → interaction
 
@@ -106,12 +115,21 @@ Your own spell on top of the stack passes (it resolves unless they respond, and 
 
 Each battlefield row (creatures in front, lands and other permanents behind) gets its share of the side's height and picks the largest card size that fits in one to three lines, up to a cap, measured after layout. Cards never overlap. Identical permanents stack with a ×N count (lands, tokens, and creatures outside combat declarations; while declaring attackers or blockers every creature is its own card). Opponent actions since your last move are listed in full in the side panel, each with a ⚑; the latest also shows on the opponent's plate.
 
+The page is exactly the viewport (`100dvh`, every grid track `minmax(0, …)`) and re-fits on resize and zoom, down to 1280×720. While the stack is non-empty it has its own lane on the right (the rows make room); more than four items collapse to the top three plus "+N more" (an item that is a legal target is never hidden).
+
+Feedback effects (life change, damage numbers, damage flash, a permanent entering) are recorded when a frame is first shown and kept for 0.45 to 1.4 s across re-renders, resuming their animation instead of restarting.
+
+Combat damage and life changes are not in the engine's log; the live layer adds `combat: <attacker> deals N damage to <player or blocker>` and `life: pN old -> new` lines (parsed as `hit` and `life` events) to the player's log and the saved replay. Life lines are exact; combat lines use the powers before damage.
+
 ### Known gaps
 
-- The tap preview assumes the first choice for anything decided while casting (targets, X, additional costs), so an X spell is previewed at its smallest X.
+- The tap preview assumes the first choice for anything decided while casting (targets, X, additional costs), so an X spell is previewed at its smallest X. A playtest saw empty previews for instants on the opponent's turn; not reproduced in 112 checked casts against the model on both engines (`tests/test_live_proto.py` covers an opponent-turn instant).
+- Combat lines are approximate for first strike, pump effects in the damage step and multi-blocks (life lines are exact).
+- Combat and resolution still appear as finished states between decisions (no lunge/impact/death animation timeline yet).
 - No server-side undo, no "always yes/no", no smart stops per card, no manual-mana undo.
 - The combat preview ignores first strike and tricks; it is a hint.
 - Motion covers zone changes on the board and hand (FLIP); draws, deaths and damage get simple effects, not full flights to the graveyard.
 - A board of 25+ different permanents on one side gets small cards (three lines); hover still shows the full card on the right.
-- Card art comes from Scryfall on first sight; until it arrives a card shows a text face.
+- Card art comes from Scryfall on first sight; until it arrives a card shows a text face. When Scryfall is unreachable the client backs off for two minutes (text faces, no waiting before the opponent's spells).
+- A game lives only in the server's memory: after a server restart the page says so and offers a new game.
 - Phone layout is not done; the target is desktop 1280×800 and up.

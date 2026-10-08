@@ -36,6 +36,21 @@ SCENARIOS: dict[str, dict] = {
         "me": {"battlefield": [("Nyxborn Hydra", {"counters": 5}), "Forest", "Forest", "Forest"], "hand": ["Forest"]},
         "opp": {"battlefield": ["Sneaky Snacker", "Voldaren Epicure", "Mountain"], "life": 4},
     },
+    "regress": {
+        "title": "Regression: drop an uncastable card, attack two turns running",
+        "matchup": "madness_elves",
+        "seat": 1,
+        "me": {"battlefield": ["Masked Vandal", "Forest"], "hand": ["Generous Ent"]},
+        "opp": {"battlefield": ["Mountain", "Mountain"], "library": ["Mountain"] * 20},
+    },
+    "instant": {
+        "title": "Instant on their turn (Bolt with mana up, they attack)",
+        "matchup": "jund_madness",
+        "seat": 1,
+        "active": "opp",
+        "me": {"battlefield": ["Mountain", "Mountain", "Kessig Flamebreather"], "hand": ["Lightning Bolt", "Lightning Bolt"]},
+        "opp": {"battlefield": ["Swamp", "Forest", "Mountain", "Tolarian Terror", "Gixian Infiltrator"]},
+    },
     "floating": {
         "title": "Floating mana (Tron lands pay a one-drop)",
         "matchup": "jund_tron",
@@ -70,5 +85,6 @@ def new_game(name: str, seed: int, engine: str | None):
                 g.add_card(card, idx, "library")
             g.players[idx].life = spec.get("life", 20)
 
-    g = game_class(engine)(([], []), seed=seed, starting_player=seat, setup=setup, start_step=sc.get("step", "main1"), log=True, deck_names=deck_names(matchup))
+    first = 1 - seat if sc.get("active") == "opp" else seat
+    g = game_class(engine)(([], []), seed=seed, starting_player=first, setup=setup, start_step=sc.get("step", "main1"), log=True, deck_names=deck_names(matchup))
     return g, matchup, seat

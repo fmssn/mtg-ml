@@ -24,16 +24,17 @@ const SPEEDS = {'0.5': 2, '1': 1, '2': 0.5, instant: 0};
 // ---------------------------------------------------------------- preferences
 const PREF = Object.assign({
   speed: '1', manualPay: false, confirmEmptyAttack: true, sound: true, autoTarget: false,
-  stops: {me: {main1: true, main2: true}, opp: {end: true}},
+  stops: {me: {main1: true, main2: true}, opp: {declare_blockers: true, end: true}}, stopsVersion: 2,
 }, loadJSON('mtgml-play-pref', {}));
 function loadJSON(k, d) { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch (e) { return d; } }
 function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private window */ } }
 const savePref = () => saveJSON('mtgml-play-pref', PREF);
+if ((PREF.stopsVersion || 1) < 2) { PREF.stops.opp.declare_blockers = true; PREF.stopsVersion = 2; savePref(); }  // new default: the after-blockers window
 
 // ---------------------------------------------------------------- game state
 const S = {
   gid: null, seat: 0, raw: [], cards: {}, meta: null, over: false, replay: null,
-  shown: -1, prev: null, queue: [], pumping: false, busy: false, error: null, skip: false,
+  shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], pumping: false, busy: false, error: null, skip: false,
   plan: null, ui: null, lastMine: -1, passMode: null, fullControl: false, feed: [], logDone: 0,
 };
 const opp = () => 1 - S.seat;
@@ -52,7 +53,9 @@ function addSf(c, alias) {
 }
 let imgBusy = null;
 // Wait (at most `ms`) until a card's image is known and loaded, so the spotlight shows art, not a text face.
+let imgBackoffUntil = 0;
 async function ensureImg(name, ms) {
+  if (performance.now() < imgBackoffUntil) return;  // offline: text faces, no waiting
   const end = performance.now() + ms;
   if (!(name in IMG)) resolveImages();
   while (!(name in IMG) && performance.now() < end) await sleep(40);
@@ -68,7 +71,7 @@ function resolveImages() {
 }
 async function fetchImages() {
   const want = Object.keys(S.cards).filter(n => !(n in IMG));
-  if (!want.length) return;
+  if (!want.length || performance.now() < imgBackoffUntil) return;
   try {
     const normal = want.filter(n => !S.cards[n].token), tokens = want.filter(n => S.cards[n].token);
     for (let i = 0; i < normal.length; i += 75) {
@@ -87,7 +90,7 @@ async function fetchImages() {
       await sleep(110);
     }
     saveJSON(IMG_KEY, IMG);
-  } catch (e) { console.warn('scryfall', e); }
+  } catch (e) { console.warn('scryfall', e); imgBackoffUntil = performance.now() + 120000; }  // retry in two minutes
   refreshImages();
 }
 // Swap text faces for images in place: a re-render now would break a drag or a double-click.
@@ -141,7 +144,7 @@ function applyView(view) {
 
 function resetGame(id) {
   // Every auto-pass mode and plan resets at a game boundary (Forge bug: End Turn carried over).
-  Object.assign(S, {gid: id, raw: [], shown: -1, prev: null, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
+  Object.assign(S, {gid: id, lastPriority: -1, raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
     fullControl: false, feed: [], logDone: 0, error: null, skip: false});
   $('#log').innerHTML = '';
   renderFeed();
@@ -152,8 +155,10 @@ async function send(index) {
   S.busy = true; S.error = null; S.ui = null; closePop(); closeOverlay(); renderDock();
   if (S.shown >= 0) render(S.shown, {noAnim: true});  // drop the highlights of the decision just made
   try {
+    const kind = S.raw[frame].decision.kind;
     const v = await api(`${encodeURIComponent(S.gid)}/choose`, {frame, index, since: frame});
     S.lastMine = frame;
+    if (kind === 'priority') S.lastPriority = frame;
     applyView(v);
   } catch (e) {
     S.error = e.message;
@@ -161,9 +166,14 @@ async function send(index) {
 }
 
 // Pick an option (from a gesture) and run the game on to the next prompt.
-async function act(index, plan) {
+function stamp(plan) {  // scope a plan to the current turn and step
+  const s = stateAt(last());
+  return plan && {...plan, turn: s.turn, step: s.step};
+}
+async function act(index, plan, frame) {
   if (S.busy || S.pumping || !myDecision()) return;
-  if (plan !== undefined) S.plan = plan;
+  if (frame != null && frame !== last()) return;  // made for a decision that is gone
+  if (plan !== undefined) S.plan = stamp(plan);
   S.feed = [];
   renderFeed();
   await send(index);
@@ -184,7 +194,7 @@ async function pump() {
       if (S.over || !d) { finishGame(); break; }
       let a = null;
       try { a = autoAnswer(d); } catch (e) { console.error(e); a = null; }
-      if (a == null || autos > 400) { S.plan = null; S.skip = false; enterDecision(true); break; }
+      if (a == null || autos > 400) { S.plan = null; S.skip = false; S.passMode = null; enterDecision(true); break; }
       autos++;
       await send(a);
     }
@@ -231,6 +241,13 @@ function autoAnswer(d) {
     if (S.passMode === 'opp') {
       if (mine && s.turn !== S.passTurn) S.passMode = null; else return pass;
     }
+    // Combat tricks: the first priority after blockers are declared, in either
+    // player's turn, stops whenever an instant-speed play exists (whatever
+    // the stop settings say). Later priorities in the same step don't.
+    const prevS = S.lastPriority >= 0 ? stateAt(S.lastPriority) : null;
+    const firstInStep = !prevS || prevS.turn !== s.turn || prevS.step !== s.step;
+    const blocked = s.battlefield.some(c => c.blocking != null);
+    if (s.step === 'declare_blockers' && firstInStep && s.battlefield.some(c => c.attacking) && (!mine || blocked)) return null;
     if (S.passMode) return null;
     return PREF.stops[mine ? 'me' : 'opp'][s.step] ? null : pass;
   }
@@ -245,6 +262,10 @@ function autoAnswer(d) {
 function planAnswer(d) {
   const P = S.plan, refs = d.refs || [];
   const s = stateAt(last());
+  // A plan answers only decisions of the turn and step it was made in: an
+  // attack or block plan must never reach a later combat (it would answer
+  // "no attack" / "no block" for you).
+  if (P.turn !== s.turn || P.step !== s.step) { S.plan = null; return null; }
   const nameOf = oid => s.battlefield.find(c => c.oid === oid)?.name;
   if (P.kind === 'attack' && d.kind === 'declare_attacker') {
     let i = refs.findIndex(r => P.want.includes(r.attacker));
@@ -315,7 +336,6 @@ async function wait(ms) {
 
 async function playFrame(i) {
   const f = S.raw[i];
-  appendLog(i);
   const acts = f.actions || [];
   const theirs = acts.filter(a => a.p === opp());
   const prevD = i > 0 ? S.raw[i - 1].decision : null;
@@ -323,7 +343,7 @@ async function playFrame(i) {
   for (const a of acts) if (a.p === opp() && ['discard', 'mulligan', 'sacrifice'].includes(a.t)) pushFeed(quietText(a), i, true);
   const notable = acts.some(a => ['cast', 'play', 'activate', 'attack', 'block', 'resolve', 'trigger', 'enter', 'leave', 'dies', 'turn', 'discard'].includes(a.t));
   const isLast = i === last();
-  if (!notable && !isLast && i !== 0) return;
+  if (!notable && !isLast && i !== 0) { appendLog(i); return; }
   const cast = theirs.find(a => a.t === 'cast' || a.t === 'activate' || a.t === 'plot');
   if (cast && !S.skip && beatScale() > 0) {
     const name = cast.t === 'activate' ? cast.name.split(':')[0].trim() : cast.name;
@@ -333,6 +353,7 @@ async function playFrame(i) {
     hideSpot();
   }
   render(i);
+  appendLog(i);
   if (isLast) return;
   let beat = 0;
   if (theirs.some(a => a.t === 'play')) beat = Math.max(beat, 420);
@@ -407,6 +428,18 @@ function appendLog(i) {
     if (/^ {2}p\d (priority|pay_mana|declare_attacker|mulligan|order_triggers):/.test(line)) continue;  // the action has a line of its own
     const m = /^=== Turn (\d+): player (\d) ===$/.exec(line);
     if (m) { out.push(`<div class="th">Turn ${m[1]} · ${+m[2] === S.seat ? 'your turn' : "opponent's turn"}</div>`); continue; }
+    const hm = /^combat: (.+)#\d+ deals (\d+) damage to (?:p(\d)|(.+)#\d+)$/.exec(line);
+    if (hm) {
+      const to = hm[3] != null ? (+hm[3] === S.seat ? 'you' : 'the opponent') : hm[4];
+      out.push(`<div class="combat">${esc(`${hm[1]} deals ${hm[2]} damage to ${to}`)}</div>`);
+      continue;
+    }
+    const lm = /^life: p(\d) (-?\d+) -> (-?\d+)$/.exec(line);
+    if (lm) {
+      const d = +lm[3] - +lm[2];
+      out.push(`<div class="life ${d < 0 ? 'neg' : 'pos'}">${esc(`${+lm[1] === S.seat ? 'Your' : "Opponent's"} life ${lm[2]} → ${lm[3]} (${d > 0 ? '+' : '−'}${Math.abs(d)})`)}</div>`);
+      continue;
+    }
     const bm = /^p(\d) blocks: \{(.*)\}$/.exec(line);
     if (bm) {
       const name = o => f.state.battlefield.find(c => c.oid === o)?.name || S.prev?.battlefield.find(c => c.oid === o)?.name || '?';
@@ -463,10 +496,36 @@ function highlights(d, s) {
 
 // ---------------------------------------------------------------- render
 let H = highlights(null);
+// Transient feedback (life deltas, damage numbers, flashes, entries) is
+// recorded once, when a frame is first shown, with its start time, and
+// re-applied by every render until it expires; animations resume where they
+// were (negative animation-delay) instead of restarting or vanishing.
+const FX_MS = {life: 1400, dmg: 900, flash: 450, enter: 600};
+function recordFx(s, prev) {
+  if (!prev) return;
+  const now = performance.now();
+  s.players.forEach((P, p) => { const d = P.life - prev.players[p].life; if (d) S.fx.life[p] = {n: d, t: now}; });
+  const before = new Map(prev.battlefield.map(c => [c.oid, c]));
+  for (const c of s.battlefield) {
+    const pc = before.get(c.oid);
+    if (!pc) S.fx.enter[c.uid] = {t: now};
+    else if ((c.damage || 0) > (pc.damage || 0)) { S.fx.dmg[c.oid] = {n: c.damage - (pc.damage || 0), t: now}; S.fx.flash[c.oid] = {t: now}; }
+  }
+}
+function fx(kind, key) {  // the live effect, or null; with `ago` (ms since it started)
+  const e = S.fx[kind][key];
+  if (!e) return null;
+  const ago = performance.now() - e.t;
+  if (ago > FX_MS[kind]) { delete S.fx[kind][key]; return null; }
+  return {...e, ago};
+}
+const fxDelay = e => ` style="animation-delay:-${Math.round(e.ago)}ms"`;
+
 function render(i, o = {}) {
   const f = S.raw[i], s = f.state;
   const before = o.noAnim ? null : rects();
   const prev = S.prev;
+  if (i !== S.shown) { recordFx(s, prev); S.prev = s; }
   S.shown = i;
   const d = S.ui ? S.ui.d : null;
   H = highlights(d, s);
@@ -477,8 +536,36 @@ function render(i, o = {}) {
   fitRows();
   fitHand();
   if (before) flip(before, prev);
-  S.prev = s;
   requestAnimationFrame(drawArrows);
+  scheduleFxCleanup();
+}
+let fxTimer = null;
+function scheduleFxCleanup() {
+  clearTimeout(fxTimer);
+  const now = performance.now();
+  let next = Infinity;
+  for (const kind of Object.keys(S.fx)) {
+    for (const [k, e] of Object.entries(S.fx[kind])) {
+      const left = e.t + FX_MS[kind] - now;
+      if (left < -50) delete S.fx[kind][k]; else next = Math.min(next, left);  // expired: drop (its element may be gone)
+    }
+  }
+  if (next < Infinity) fxTimer = setTimeout(expireFx, Math.max(30, next + 20));
+}
+// Remove expired effects from the DOM in place: re-rendering the board here
+// would drop a hovered card's lift, an open menu's anchor or a drag's target.
+function expireFx() {
+  for (const p of [0, 1]) if (!fx('life', p)) {
+    const el = $(`#plate${p === S.seat ? 0 : 1} .life`);
+    if (el) { el.classList.remove('hit', 'heal'); el.querySelector('.delta')?.remove(); }
+  }
+  for (const el of $$('#board .perm')) {
+    const oid = +el.dataset.oid, uid = el.querySelector(':scope > .card')?.dataset.uid;
+    if (!fx('dmg', oid)) el.querySelector('.b.dmg')?.remove();
+    if (!fx('flash', oid)) el.classList.remove('flash');
+    if (uid != null && !fx('enter', +uid)) el.classList.remove('entered');
+  }
+  scheduleFxCleanup();
 }
 
 function rects() {
@@ -518,7 +605,8 @@ function renderPlate(p, s, prev) {
   const P = s.players[p], el = $(`#plate${p === S.seat ? 0 : 1}`);
   const isMe = p === S.seat;
   const pv = prev?.players[p];
-  const delta = pv ? P.life - pv.life : 0;
+  const lf = fx('life', p), delta = lf ? lf.n : 0;
+  void pv;
   const pool = Object.entries(P.pool || {}).flatMap(([c, n]) => Array(n).fill(`<i class="${esc(c)}">${esc(c)}</i>`)).join('');
   const d = S.ui?.d;
   const tgt = H.target.has('p' + p);
@@ -529,7 +617,7 @@ function renderPlate(p, s, prev) {
   el.innerHTML = `
     <div class="who"><span class="dot"></span>${isMe ? 'You' : esc(agentName(S.meta?.agents[p]))}</div>
     <div class="deck">${esc(S.meta?.decks[p] || '')}</div>
-    <div class="life ${P.life <= 5 ? 'low' : ''} ${delta < 0 ? 'hit' : delta > 0 ? 'heal' : ''}">${P.life}${delta ? `<span class="delta ${delta < 0 ? 'neg' : 'pos'}">${delta > 0 ? '+' : ''}${delta}</span>` : ''}</div>
+    <div class="life ${P.life <= 5 ? 'low' : ''} ${delta < 0 ? 'hit' : delta > 0 ? 'heal' : ''}"${lf ? fxDelay(lf) : ''}>${P.life}${delta ? `<span class="delta ${delta < 0 ? 'neg' : 'pos'}"${fxDelay(lf)}>${delta > 0 ? '+' : ''}${delta}</span>` : ''}</div>
     ${preview != null ? `<div class="preview-life">→ ${preview} after combat</div>` : ''}
     <div class="zones">
       <div class="zone" title="Cards in hand">Hand <b>${P.hand.length}</b></div>
@@ -584,8 +672,10 @@ function permHtml(g, s, prevBy, attachedTo) {
   if (c.attacking) cls.push('attacking');
   if (c.blocking != null) cls.push('blocking');
   if (n > 1) cls.push('grouped');
-  if (!pc && prevBy.size) cls.push('entered');
-  if (pc && (c.damage || 0) > (pc.damage || 0)) cls.push('flash');
+  const fEnter = fx('enter', c.uid), fFlash = fx('flash', c.oid), fDmg = fx('dmg', c.oid);
+  if (fEnter) cls.push('entered');
+  if (fFlash) cls.push('flash');
+  void pc;
   if (oids.some(o => H.perm.has(o))) cls.push('activatable');
   if (oids.some(o => H.target.has('o' + o))) cls.push('targetable');
   if (oids.some(o => H.pay.has(o))) cls.push('payable');
@@ -609,7 +699,7 @@ function permHtml(g, s, prevBy, attachedTo) {
   if (c.attacking || (ui?.kind === 'declare_attacker' && ui.sel.has(c.oid))) b += `<span class="b sword" title="Attacking">⚔</span>`;
   else if (c.blocking != null || (ui?.kind === 'declare_blocker' && ui.blocks.has(c.oid))) b += `<span class="b shield" title="Blocking">⛨</span>`;
   if (preview.dies.has(c.oid)) b += `<span class="b skull" title="Dies in this combat (if nothing changes)">☠</span>`;
-  if (pc && (c.damage || 0) > (pc.damage || 0)) b += `<span class="b dmg">-${c.damage - (pc.damage || 0)}</span>`;
+  if (fDmg) b += `<span class="b dmg"${fxDelay(fDmg)}>-${fDmg.n}</span>`;
   const att = (attachedTo.get(c.oid) || []).map(a => `<div class="attached" data-oid="${a.oid}">${cardHtml(a.name, {uid: a.uid})}</div>`).join('');
   return `<div class="${cls.join(' ')}" data-oid="${c.oid}" data-oids="${oids.join(' ')}" data-name="${esc(c.name)}" data-ctl="${c.controller}">${att}${cardHtml(c.name, {uid: c.uid})}<div class="badges">${b}</div></div>`;
 }
@@ -646,6 +736,7 @@ function fitRows() {
   const u = Math.min(innerHeight * 0.01, innerWidth * 0.006);
   for (const k of [0, 1]) {
     const field = $('#field' + k), front = $('#crea' + k), back = $('#lands' + k);
+    front.style.height = back.style.height = '0px';  // the track decides the field's size, not last layout's rows
     const cs = getComputedStyle(field);
     const H = field.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - GAP;
     const W = field.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
@@ -694,16 +785,21 @@ function renderMid(s) {
     <span>${esc(STEP_LABEL[st])}</span><span class="stops"><button class="stop me ${PREF.stops.me[st] ? 'on' : ''}" data-stop="me:${st}" title="Stop here on your turn"></button><button class="stop opp ${PREF.stops.opp[st] ? 'on' : ''}" data-stop="opp:${st}" title="Stop here on the opponent's turn"></button></span></div>`).join('');
 }
 
+let stackOpen = false;
 function renderStack(s) {
   const el = $('#stack');
-  if (!s.stack.length) { el.innerHTML = ''; return; }
-  const items = [...s.stack].reverse();
-  el.innerHTML = `<div class="sh">Stack · top first</div>` + items.map((it, j) => {
+  $('#board').classList.toggle('has-stack', s.stack.length > 0);
+  if (!s.stack.length) { el.innerHTML = ''; stackOpen = false; return; }
+  const all = [...s.stack].reverse(), SHOW = 3;
+  // Targets below the fold stay reachable: an item that is a legal target is never hidden.
+  const items = stackOpen || all.length <= SHOW + 1 ? all : all.filter((it, j) => j < SHOW || H.target.has('s' + it.sid));
+  const more = all.length - items.length;
+  el.innerHTML = `<div class="sh">Stack · ${all.length} · top first</div>` + items.map((it, j) => {
     const tgt = H.target.has('s' + it.sid);
     const name = it.card || it.name;
     return `<div class="sitem ${it.controller === S.seat ? 'c-me' : 'c-opp'} ${j === 0 ? 'top' : ''} ${tgt ? 'targetable' : ''}" data-sid="${it.sid}" data-name="${esc(name)}">
       ${cardHtml(name)}<div class="st"><b>${esc(it.name)}</b>${it.controller === S.seat ? 'yours' : 'opponent'}${it.x ? ` · X=${it.x}` : ''}${it.targets.length ? `<div class="tg">→ ${esc(it.targets.map(t => clean(t.replace(/^player (\d)/, (_, p) => +p === S.seat ? 'you' : 'opponent'))).join(', '))}</div>` : ''}</div></div>`;
-  }).join('');
+  }).join('') + (more > 0 ? `<button class="smore" data-cmd="stack-more">+${more} more below</button>` : stackOpen && all.length > SHOW + 1 ? '<button class="smore" data-cmd="stack-more">Show fewer</button>' : '');
 }
 
 // ---------------------------------------------------------------- combat helpers
@@ -811,10 +907,29 @@ function drawArrows() {
   $('#arrowg').innerHTML = h;
 }
 window.addEventListener('resize', () => { if (S.shown >= 0) { fitRows(); fitHand(); drawArrows(); } });
+// Zoom, panel changes and anything else that resizes the board re-fit it too.
+let lastBoard = '';
+new ResizeObserver(() => {
+  const r = $('#board').getBoundingClientRect(), key = `${Math.round(r.width)}x${Math.round(r.height)}`;
+  if (key === lastBoard || S.shown < 0) return;
+  lastBoard = key; fitRows(); fitHand(); drawArrows();
+}).observe($('#board'));
 
 // ---------------------------------------------------------------- the decision in front of the player
+// Input is stamped with the decision on screen. A decision that differs in
+// kind or turn from the previous one locks keys and the primary button for
+// a moment, so a press meant for the last decision (or a held key) cannot
+// answer the new one after the engine ran ahead.
+const INPUT_LOCK_MS = 350;
+let shownKey = '', lockUntil = 0;
+const inputLocked = () => performance.now() < lockUntil;
 function enterDecision(fresh) {
   const d = myDecision();
+  if (d) {
+    const st = stateAt(last()), key = `${d.kind}|${st.turn}`;
+    if (key !== shownKey) { lockUntil = performance.now() + INPUT_LOCK_MS; setTimeout(renderDock, INPUT_LOCK_MS + 10); }
+    shownKey = key;
+  }
   if (!d) { S.ui = null; if (S.shown !== last() && S.raw.length) render(last()); renderDock(); return; }
   const fi = last(), s = stateAt(fi);
   const ui = {kind: d.kind, d, fi, sel: new Set(), blocks: new Map(), blockSel: null, armed: null, eligible: new Set(), blockers: new Set(), source: S.ui?.source};
@@ -837,7 +952,7 @@ function enterDecision(fresh) {
 
 function passLabel(s) {
   const top = s.stack[s.stack.length - 1];
-  if (top) return `Resolve ${top.name}`;
+  if (top) return `Resolve ${top.name.split(':')[0]}`;  // "Resolve Guttersnipe", not the whole trigger text
   const mine = s.active === S.seat;
   if (mine && s.step === 'main2') return 'End turn';
   if (s.step === 'end' || s.step === 'cleanup') return mine ? "Pass → Opponent's turn" : 'Pass → Your turn';
@@ -865,9 +980,12 @@ function renderDock() {
   $('#modehint').innerHTML = modeHint(d, ui);
   $('#bAll').style.visibility = d && ui ? 'visible' : 'hidden';
   if (S.error) {
-    pr.innerHTML = `<span class="k">Problem</span><span class="err">${esc(S.error)}</span>`;
-    ch.innerHTML = `<button class="choice" data-resync="1">Reload the game from the server</button>`;
-    P.textContent = 'Retry'; P.disabled = false; P.dataset.act = 'resync';
+    const gone = /no such game/i.test(S.error), down = /failed to fetch|networkerror|load failed/i.test(S.error);
+    const msg = gone ? 'This game is no longer on the server (the server restarted or the game expired).' : down ? 'Lost the connection to the game server.' : S.error;
+    pr.innerHTML = `<span class="k">${gone ? 'Game ended' : 'Problem'}</span><span class="err">${esc(msg)}</span>`;
+    ch.innerHTML = gone ? '' : `<button class="choice" data-resync="1">Reload the game from the server</button>`;
+    if (gone) { P.textContent = 'New game'; P.dataset.act = 'new'; } else { P.textContent = down ? 'Reconnect' : 'Retry'; P.dataset.act = 'resync'; }
+    P.disabled = false;
     return;
   }
   if (S.over) { pr.innerHTML = '<span class="k">Game over</span>' + esc(resultText()); P.textContent = 'New game'; P.disabled = false; P.dataset.act = 'new'; return; }
@@ -878,6 +996,7 @@ function renderDock() {
     return;
   }
   pr.className = 'mine';
+  if (inputLocked()) P.classList.add('locked');
   const s = stateAt(ui.fi);
   const choiceBtns = (idxs, cls = '') => idxs.map(i => `<button class="choice ${cls}" data-opt="${i}">${esc(clean(d.options[i]))}</button>`).join('');
   P.dataset.act = 'primary';
@@ -1022,6 +1141,7 @@ function showMenu(anchor, idxs, title) {
   y = Math.max(8, Math.min(window.innerHeight - ph - 8, y));
   pop.style.left = x + 'px'; pop.style.top = y + 'px';
   pop._source = anchor;
+  pop._plan = undefined;  // a caller that drops onto a target sets it after
 }
 function closePop() { $('#pop').classList.remove('on'); }
 
@@ -1030,6 +1150,21 @@ const canAct = () => !!(myDecision() && S.ui && !S.busy && !S.pumping);
 function handOpts(name) { return H.hand.get(name) || []; }
 function permOpts(el) { const oids = el.dataset.oids.split(' ').map(Number); for (const o of oids) if (H.perm.has(o)) return H.perm.get(o); return []; }
 
+// Drop and double-click mean "play it": only a land play or a normal cast.
+// Anything else (cycling, flashback, alternative or extra costs, modes) or
+// several such options open the menu instead, so nothing surprising happens.
+function plainPlay(idxs) {
+  const d = myDecision();
+  const plain = idxs.filter(i => { const r = d.refs[i]; return r.type === 'play_land' || (r.type === 'cast' && r.mode === 'normal' && !r.spell_mode); });
+  return plain.length === 1 && idxs.every(i => ['play_land', 'cast', 'plot', 'activate'].includes(d.refs[i].type)) && !idxs.some(i => i !== plain[0] && d.refs[i].type === 'cast') ? plain[0] : null;
+}
+function playGesture(el, idxs, plan) {
+  if (!idxs.length) return;
+  const i = plainPlay(idxs);
+  if (i == null) { showMenu(el, idxs, el.dataset.name || 'Choose'); $('#pop')._plan = plan; return; }
+  S.srcOid = null;
+  act(i, plan);
+}
 function chooseFromCard(el, idxs, plan) {
   if (!idxs.length) return;
   S.srcOid = el.dataset.oid != null ? +el.dataset.oid : null;
@@ -1099,7 +1234,7 @@ function startHandDrag(e) {
   drag.w = drag.el.offsetWidth; drag.h = drag.el.offsetHeight;
   drag.vx = 0; drag.lx = e.clientX;
   $('#field0').classList.add('drop');
-  drag.targets = mentionsTarget(drag.el.dataset.name) && handOpts(drag.el.dataset.name).length === 1;
+  drag.targets = mentionsTarget(drag.el.dataset.name) && plainPlay(handOpts(drag.el.dataset.name)) != null;
 }
 function moveHandDrag(e) {
   const g = $('#ghost');
@@ -1125,7 +1260,7 @@ function endHandDrag(dg, e) {
     dg.el.classList.remove('dragging');
     let plan;
     if (dg.targets) { const t = targetAt(e.clientX, e.clientY); if (t && (t.player != null || t.el.closest('#side1, #side0'))) plan = {kind: 'target', t: t.player != null ? {player: t.player} : {oid: t.oid}}; }
-    chooseFromCard(dg.el, idxs, plan);
+    playGesture(dg.el, idxs, plan);
     return;
   }
   // Snap back to the hand slot.
@@ -1167,7 +1302,7 @@ document.addEventListener('click', e => {
   if (cmd) return command(cmd.dataset.cmd);
   const opt = t.closest('[data-opt]');
   if (opt && canAct()) {
-    const i = +opt.dataset.opt; if (i < 0) return;
+    const i = +opt.dataset.opt; if (i < 0 || inputLocked()) return;
     const plan = t.closest('#pop')?._plan;
     closePop(); closeDrawer();
     return act(i, plan);
@@ -1208,8 +1343,12 @@ document.addEventListener('dblclick', e => {
   if (!canAct() || S.ui.kind !== 'priority') return;
   const hc = e.target.closest('#hand .card'), pm = e.target.closest('#board .perm');
   closePop();
-  if (hc && handOpts(hc.dataset.name).length) return chooseFromCard(hc, handOpts(hc.dataset.name));
-  if (pm && permOpts(pm).length) return chooseFromCard(pm, permOpts(pm));
+  if (hc && handOpts(hc.dataset.name).length) return playGesture(hc, handOpts(hc.dataset.name));
+  if (pm && permOpts(pm).length) {
+    const d = myDecision(), idxs = permOpts(pm);
+    const risky = idxs.some(i => /sacrific|discard|exile/i.test(d.refs[i].ability || d.options[i]));
+    return risky || idxs.length > 1 ? showMenu(pm, idxs, pm.dataset.name) : chooseFromCard(pm, idxs);
+  }
 });
 document.addEventListener('contextmenu', e => {
   const ui = S.ui, pm = e.target.closest('#board .perm');
@@ -1232,18 +1371,21 @@ document.addEventListener('contextmenu', e => {
 function tapsFor(idxs) {
   const d = myDecision();
   if (!d || !S.ui || S.ui.kind !== 'priority') return null;
-  for (const i of idxs || []) if (d.refs[i]?.taps) return d.refs[i].taps;
+  for (const i of idxs || []) if (d.refs[i]?.taps) return {taps: d.refs[i].taps, sacs: d.refs[i].sacs || []};
   return null;
 }
-function showTaps(taps) {
-  $$('#board .will-tap').forEach(el => { el.classList.remove('will-tap'); el.querySelector('.b.tap')?.remove(); });
-  if (!taps || !taps.length) return;
-  const want = new Set(taps);
+function showTaps(p) {
+  $$('#board .will-tap').forEach(el => { el.classList.remove('will-tap', 'will-sac'); el.querySelectorAll('.b.tap').forEach(b => b.remove()); });
+  if (!p) return;
+  const taps = new Set(p.taps), sacs = new Set(p.sacs);
   for (const el of $$('#board .perm')) {
-    const n = el.dataset.oids.split(' ').filter(o => want.has(+o)).length;
-    if (!n) continue;
+    const oids = el.dataset.oids.split(' ').map(Number);
+    const n = oids.filter(o => taps.has(o)).length, m = oids.filter(o => sacs.has(o)).length;
+    if (!n && !m) continue;
     el.classList.add('will-tap');
-    el.querySelector('.badges').insertAdjacentHTML('beforeend', `<span class="b tap">${n > 1 ? `tap ×${n}` : 'tap'}</span>`);
+    if (m) el.classList.add('will-sac');
+    const label = [n ? (n > 1 ? `tap ×${n}` : 'tap') : '', m ? (m > 1 ? `sacrifice ×${m}` : 'sacrifice') : ''].filter(Boolean).join(' · ');
+    el.querySelector('.badges').insertAdjacentHTML('beforeend', `<span class="b tap">${label}</span>`);
   }
 }
 
@@ -1265,6 +1407,10 @@ document.addEventListener('pointerover', e => {
   if (c && !pinned) hoverTimer = setTimeout(() => showPreview(c.dataset.name), hc ? 120 : 250);
 });
 document.addEventListener('pointerleave', () => $$('#hand .card').forEach(x => x.classList.remove('hover')));
+document.addEventListener('pointerout', e => {  // leaving a hand card for anything outside the hand drops its lift
+  const hc = e.target.closest('#hand .card');
+  if (hc && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('#hand .card'))) { hc.classList.remove('hover'); showTaps(null); }
+});
 function showPreview(name, pin) {
   if (pin) pinned = !pinned;
   const i = S.cards[name]; if (!i) return;
@@ -1277,6 +1423,7 @@ async function command(c) {
   const ui = S.ui;
   if (c === 'peek') { $('#overlay').classList.toggle('peek'); setTimeout(() => { if ($('#overlay').classList.contains('peek')) document.addEventListener('click', () => $('#overlay').classList.remove('peek'), {once: true}); }, 0); return; }
   if (c === 'close') { closeOverlay(); return; }
+  if (c === 'stack-more') { stackOpen = !stackOpen; render(S.shown, {noAnim: true}); return; }
   if (!ui) return;
   if (c === 'all' && ui.kind === 'declare_attacker') { ui.eligible.forEach(o => ui.sel.add(o)); ui.armed = null; render(S.shown, {noAnim: true}); renderDock(); }
   if (c === 'clear') { ui.sel.clear(); ui.blocks.clear(); ui.blockSel = null; render(S.shown, {noAnim: true}); renderDock(); }
@@ -1284,6 +1431,7 @@ async function command(c) {
 
 function primary() {
   if (S.queue.length && S.pumping) { S.skip = true; return; }
+  if (inputLocked()) return;
   const P = $('#primary');
   if (P.disabled) return;
   const a = P.dataset.act || '';
@@ -1304,12 +1452,12 @@ function primary() {
       return act(d.refs.findIndex(r => r.done));
     }
     const want = [...ui.sel];
-    S.plan = {kind: 'attack', want};
+    S.plan = stamp({kind: 'attack', want});
     const i = planAnswer(d);
     return act(i);
   }
   if (ui.kind === 'declare_blocker') {
-    S.plan = {kind: 'block', map: new Map(ui.blocks)};
+    S.plan = stamp({kind: 'block', map: new Map(ui.blocks)});
     return act(planAnswer(d));
   }
 }
@@ -1317,6 +1465,10 @@ function primary() {
 document.addEventListener('keydown', e => {
   if (e.target.closest('input, select, textarea') || $('#modal').classList.contains('on')) return;
   const k = e.key;
+  if (e.repeat && (k === ' ' || k === 'Enter' || k === 'r' || k === 'R' || k === 'a' || k === 'n')) { e.preventDefault(); return; }  // a held key is not a decision
+  if (inputLocked() && [' ', 'Enter', 'r', 'R', 'a', 'A', 'n', 'N'].includes(k)) { e.preventDefault(); return; }
+  // A focused button, link or option keeps Space and Enter (activate it), never the global hotkeys.
+  if ((k === ' ' || k === 'Enter') && e.target !== document.body && e.target.closest('button, a, [role=button], [tabindex]')) return;
   if (k === ' ') { e.preventDefault(); if ($('#overlay').classList.contains('on') && S.ui?.kind === 'assign_damage') { const b = $('#overlay .primary'); if (b && !b.disabled) b.click(); return; } primary(); return; }
   if (k === 'Escape') {
     if (drag) { const dg = drag; drag = null; $('#field0').classList.remove('drop', 'hot'); $('#ghost').style.display = 'none'; dg.el.classList.remove('dragging'); dg.el.style.translate = ''; clearHot(); }
@@ -1327,7 +1479,7 @@ document.addEventListener('keydown', e => {
     renderDock();
     return;
   }
-  if ((k === 'Enter' || k === 'r' || k === 'R') && canAct() && S.ui.kind === 'priority') {
+  if ((k === 'r' || k === 'R') && canAct() && S.ui.kind === 'priority') {
     S.passMode = 'opp'; S.passTurn = stateAt(last()).active === S.seat ? stateAt(last()).turn : -1;
     return act(S.ui.d.refs.findIndex(r => r.type === 'pass'));
   }
@@ -1336,11 +1488,12 @@ document.addEventListener('keydown', e => {
   if ((k === 'n' || k === 'N') && canAct()) {
     const d = S.ui.d;
     if (S.ui.kind === 'declare_attacker') return act(d.refs.findIndex(r => r.done));
-    if (S.ui.kind === 'declare_blocker') { S.plan = {kind: 'block', map: new Map()}; return act(planAnswer(d)); }  // no blocks at all
+    if (S.ui.kind === 'declare_blocker') { S.plan = stamp({kind: 'block', map: new Map()}); return act(planAnswer(d)); }  // no blocks at all
   }
   if (k === 'o' || k === 'O') { $('#drawer').classList.contains('on') ? closeDrawer() : openDrawer(); }
 });
 $('#primary').addEventListener('click', e => { e.stopPropagation(); primary(); });
+document.addEventListener('mouseup', e => { const b = e.target.closest('button'); if (b && e.detail > 0) b.blur(); });  // mouse clicks don't park focus
 $('#bAll').addEventListener('click', e => { e.stopPropagation(); openDrawer(); });
 $('#bNew').addEventListener('click', () => openNewGame());
 $('#bSettings').addEventListener('click', () => openSettings());
@@ -1482,13 +1635,13 @@ async function resync() {
 
 (async function init() {
   const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get('g')) { S.gid = h.get('g'); try { await resync(); if (!S.error) return; } catch (e) { /* fall through */ } S.error = null; S.gid = null; }
+  if (h.get("g")) { S.gid = h.get("g"); try { await resync(); if (!S.error) return; } catch (e) { /* fall through */ } S.error = null; S.gid = null; toast("Your last game is no longer on the server (it was restarted or the game expired)."); }
   openNewGame();
 })();
 
 // For tests and debugging: the state and a way to read the current decision.
 window.PLAY = {
   S, myDecision, act,
-  info: () => ({ready: canAct() && !S.queue.length, over: S.over, busy: S.busy || S.pumping, error: S.error, frame: last(), kind: S.ui?.kind || null,
+  info: () => ({ready: canAct() && !S.queue.length && !inputLocked(), over: S.over, busy: S.busy || S.pumping, error: S.error, frame: last(), kind: S.ui?.kind || null,
     options: myDecision()?.options || [], overlay: $('#overlay').classList.contains('on'), turn: S.shown >= 0 ? stateAt(S.shown).turn : 0}),
 };

@@ -172,8 +172,11 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^(?P<name>.+) is countered$"), "countered"),
     (re.compile(r"^(?P<name>.+) fizzles .*$"), "fizzle"),
     (re.compile(r"^GAME OVER: winner=(?P<winner>\w+) \((?P<reason>.*)\)$"), "game_over"),
+    (re.compile(r"^combat: (?P<name>.+)#(?P<oid>\d+) deals (?P<n>\d+) damage to p(?P<p>\d)$"), "hit"),
+    (re.compile(r"^combat: (?P<name>.+)#(?P<oid>\d+) deals (?P<n>\d+) damage to (?P<to_name>.+)#(?P<to_oid>\d+)$"), "hit"),
+    (re.compile(r"^life: p(?P<p>\d) (?P<old>-?\d+) -> (?P<new>-?\d+)$"), "life"),
 ]
-_INTS = {"p", "turn", "oid", "n"}
+_INTS = {"p", "turn", "oid", "n", "to_oid", "old", "new"}
 
 
 def parse_event(line: str) -> dict | None:
@@ -202,6 +205,61 @@ def parse_events(lines: list[str]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Combat damage and life changes: the engine does not log them, so the live
+# layer adds lines (to the player's log and the saved replay) by comparing
+# the game before and after each action. Life lines are exact; combat hits
+# use the powers before damage (pump effects in the damage step and first
+# strike are approximated).
+# ---------------------------------------------------------------------------
+
+
+def status(g) -> dict:
+    return {
+        "life": [p.life for p in g.players],
+        "perms": {c.oid: (c.name, g.power(c) if g.is_creature(c) else 0, c.controller) for c in g.battlefield},
+        "attackers": list(g.attackers),
+        "blocks": dict(g.blocks),
+        "active": g.active,
+    }
+
+
+_BLOCKS = re.compile(r"^p\d blocks: \{(.*)\}$")
+
+
+def combat_and_life_lines(before: dict, after: dict, new_lines: list[str]) -> list[str]:
+    """Log lines for what happened between two statuses: combat hits (when
+    the combat damage step began) and every life change."""
+    out = []
+    if "-- combat_damage" in new_lines and before["attackers"]:
+        blocks = dict(before["blocks"])
+        for line in new_lines:
+            m = _BLOCKS.match(line)
+            if m:
+                blocks.update({int(b): int(a) for b, a in re.findall(r"(\d+): (\d+)", m.group(1))})
+        perms, defender = before["perms"], 1 - before["active"]
+        for a in before["attackers"]:
+            if a not in perms:
+                continue
+            name, power, _ = perms[a]
+            mine = [b for b, at in blocks.items() if at == a and b in perms]
+            if not mine:
+                if power > 0:
+                    out.append(f"combat: {name}#{a} deals {power} damage to p{defender}")
+                continue
+            if len(mine) == 1 and power > 0:
+                bname = perms[mine[0]][0]
+                out.append(f"combat: {name}#{a} deals {power} damage to {bname}#{mine[0]}")
+            for b in mine:
+                bname, bpower, _ = perms[b]
+                if bpower > 0:
+                    out.append(f"combat: {bname}#{b} deals {bpower} damage to {name}#{a}")
+    for p, (old, new) in enumerate(zip(before["life"], after["life"])):
+        if old != new:
+            out.append(f"life: p{p} {old} -> {new}")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Mana: the auto-pay choice, and which sources a cast would tap
 # ---------------------------------------------------------------------------
 
@@ -211,8 +269,9 @@ BASICS = frozenset({"Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"}
 def auto_pay_index(g, d) -> int:
     """The pay_mana option the play client takes when paying automatically:
     floating mana first; then the source that keeps the most options open
-    (lands before artifacts before creatures, single-colour sources, basics);
-    sacrifices and filters last; ties in option order. The engine offers only
+    (lands before artifacts before creatures, sources without another {T}
+    ability (a Bridge before Twisted Landscape), single-colour sources,
+    basics); sacrifices and filters last; ties in option order. The engine offers only
     options that keep the payment completable, so greedy is safe."""
     counts: dict[int, int] = {}
     for o in d.options:
@@ -222,23 +281,27 @@ def auto_pay_index(g, d) -> int:
     for i, o in enumerate(d.options):
         v = o.value
         if v[0] == "pool":
-            key = (0, 0, 0, 0, 0, 0, i)
+            key = (0, 0, 0, 0, 0, 0, 0, i)
         else:
             card = v[1]
             types = g.types(card)
             kind = 2 if "Creature" in types else 0 if "Land" in types else 1
-            key = (1, int(o.label.startswith("Sacrifice")), int(v[0] == "filter"), kind, counts[card.oid], int(card.name not in BASICS), i)
+            other_tap = any(a.tap and a.mana is None and a.zone == "battlefield" for a in card.face.abilities)
+            key = (1, int(o.label.startswith("Sacrifice")), int(v[0] == "filter"), kind, int(other_tap), counts[card.oid], int(card.name not in BASICS), i)
         if best_key is None or key < best_key:
             best, best_key = i, key
     return best
 
 
-def tap_preview(g, index: int, seat: int, limit: int = 60) -> list[int] | None:
-    """The oids of `seat`'s permanents that taking priority option `index`
-    and paying with `auto_pay_index` would tap (other choices on the way take
-    their first option). Runs on a copy; None if it cannot be simulated."""
+def tap_preview(g, index: int, seat: int, limit: int = 60) -> tuple[list[int], list[int]] | None:
+    """(tapped, sacrificed): the oids of `seat`'s permanents that taking
+    priority option `index` and paying with `auto_pay_index` would tap, and
+    those it would sacrifice (a Spawn for mana, an additional cost; other
+    choices on the way take their first option). Runs on a copy; None if it
+    cannot be simulated."""
     try:
         before = {c.oid for c in g.battlefield if c.controller == seat and not c.tapped}
+        mine = {c.oid for c in g.battlefield if c.controller == seat}
         c = g.copy()
         c.step(index)
         for _ in range(limit):
@@ -246,7 +309,8 @@ def tap_preview(g, index: int, seat: int, limit: int = 60) -> list[int] | None:
             if d is None or d.player != seat or d.kind == "priority":
                 break
             c.step(auto_pay_index(c, d) if d.kind == "pay_mana" else 0)
-        return sorted(x.oid for x in c.battlefield if x.oid in before and x.tapped)
+        after = {x.oid: x for x in c.battlefield}
+        return sorted(o for o in before if o in after and after[o].tapped), sorted(o for o in mine if o not in after)
     except Exception:  # a preview must never break the game
         return None
 
@@ -263,8 +327,10 @@ def add_tap_previews(g, refs: list[dict], seat: int, vis: dict, max_options: int
         if r["type"] not in PREVIEWED or done >= max_options:
             continue
         done += 1
-        taps = tap_preview(g, i, seat)
-        if taps is not None:
-            r["taps"] = [o for o in taps if o in vis["oid"]]
+        res = tap_preview(g, i, seat)
+        if res is not None:
+            r["taps"] = [o for o in res[0] if o in vis["oid"]]
+            if res[1]:
+                r["sacs"] = [o for o in res[1] if o in vis["oid"]]
     if done:
         gc.collect()  # the copies hold reference cycles; native objects must die on this (the game's) thread

@@ -32,7 +32,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .agents import take
 from .backend import engine_name, game_class
 from .match import MATCHUPS, game_args, matchup_decks
-from .live_proto import add_tap_previews, auto_pay_index, option_ref, option_refs, parse_events, visible_ids
+from .live_proto import add_tap_previews, auto_pay_index, combat_and_life_lines, option_ref, option_refs, parse_events, status, visible_ids
 from .replay import DECK_TITLES, FORMAT, snapshot, visible_events
 from .rl.features import PUBLIC_KINDS
 
@@ -93,14 +93,38 @@ class LiveGame:
         self.full_frames: list[dict] = []  # omniscient, one per decision (the saved replay)
         self.frames: list[dict] = []  # the player's view, one per player decision
         self.full_seen = self.view_seen = 0  # log lines already in a frame
+        # The engine's log plus lines the live layer adds (combat damage, life
+        # changes: live_proto.combat_and_life_lines); frames read this one.
+        self.log: list[str] = []
+        self.engine_seen = 0  # engine log lines copied into self.log
         self.replay_file: str | None = None
         self._advance()
+
+    def _sync_log(self) -> list[str]:
+        new = list(self.g.log[self.engine_seen :])
+        self.engine_seen += len(new)
+        self.log.extend(new)
+        return new
+
+    def _take(self, index: int) -> None:
+        """Take option `index` and log the combat damage and life changes it led to."""
+        g = self.g
+        self._sync_log()
+        before = status(g)
+        take(g, self.agents, index)
+        new = self._sync_log()
+        extra = combat_and_life_lines(before, status(g), new)
+        if new and new[-1].startswith("GAME OVER"):  # the damage comes before the result
+            self.log[-1:-1] = extra
+        else:
+            self.log.extend(extra)
 
     # -- game loop
     def _record(self, decision: dict | None) -> None:
         g = self.g
-        self.full_frames.append({"state": snapshot(g, self.full_info), "events": g.log[self.full_seen :], "decision": decision})
-        self.full_seen = len(g.log)
+        self._sync_log()
+        self.full_frames.append({"state": snapshot(g, self.full_info), "events": self.log[self.full_seen :], "decision": decision})
+        self.full_seen = len(self.log)
 
     def _advance(self) -> None:
         """Let the model play until the player decides or the game ends."""
@@ -120,7 +144,7 @@ class LiveGame:
             else:
                 shown, refs = [f"(hidden {d.kind.replace('_', ' ')})"], [{"type": "hidden"}]
             self._view_frame(state, {"player": d.player, "kind": d.kind, "prompt": "", "options": shown, "refs": refs, "chosen": 0})
-            take(g, self.agents, choice)
+            self._take(choice)
         decision = None
         state = self._view_state()
         if not g.over:
@@ -139,9 +163,10 @@ class LiveGame:
         """A frame of the player's view: the state, the visible log lines since
         the last frame, the same lines parsed for animation (`actions`), and
         the decision (with structured option `refs`)."""
-        events = visible_events(self.g.log[self.view_seen :], self.seat)
+        self._sync_log()
+        events = visible_events(self.log[self.view_seen :], self.seat)
         self.frames.append({"state": state, "events": events, "actions": parse_events(events), "decision": decision})
-        self.view_seen = len(self.g.log)
+        self.view_seen = len(self.log)
 
     def choose(self, frame: int, index: int) -> None:
         """Take option `index` at the player's decision `frame` (the frame
@@ -156,7 +181,7 @@ class LiveGame:
             raise LiveError("no such option")
         d["chosen"] = index
         self._record({k: d[k] for k in ("player", "kind", "prompt", "options")} | {"chosen": index})
-        take(g, self.agents, index)
+        self._take(index)
         self._advance()
 
     # -- output
@@ -177,7 +202,8 @@ class LiveGame:
 
     def replay(self) -> dict:
         """The finished game as an ordinary omniscient replay."""
-        frames = self.full_frames + [{"state": snapshot(self.g, self.full_info), "events": self.g.log[self.full_seen :], "decision": None}]
+        self._sync_log()
+        frames = self.full_frames + [{"state": snapshot(self.g, self.full_info), "events": self.log[self.full_seen :], "decision": None}]
         return {"format": FORMAT, "meta": self._meta(), "cards": self.full_info, "frames": frames}
 
     def view(self, since: int = 0) -> dict:
