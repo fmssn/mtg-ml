@@ -91,11 +91,40 @@ def card_ref(g, c, viewer, choice=False):
 def _rules(face, token=False):
     return {"types": sorted(face.types), "subtypes": sorted(face.subtypes), "cost": str(face.cost), "text": face.text,
             "power": face.power, "toughness": face.toughness, "token": token,
+            "ward": face.ward, "enters_tapped": face.enters_tapped,
+            "additional_sac": face.additional_sac,
+            "bestow": None if face.bestow is None else str(face.bestow),
+            "flashback": None if face.flashback is None else str(face.flashback),
             "keywords": sorted(face.keywords),
             "abilities": [{"name": a.name, "cost": str(a.cost), "tap": a.tap, "sac_self": a.sac_self, "sac_other": a.sac_other,
                            "mana": a.mana, "zone": a.zone, "sorcery_speed": a.sorcery_speed,
                            "targets": [t.kind for t in a.targets]} for a in face.abilities],
             "modes": [{"name": m.name, "targets": [t.kind for t in m.targets]} for m in face.modes]}
+
+
+def stack_view(g, viewer):
+    """Public stack facts, including live or last-known source characteristics.
+
+    Only explicitly public scalar trigger data crosses this boundary. In
+    particular, never serialize the engine's arbitrary StackItem.data mapping.
+    """
+    def ref(r):
+        tag, value = r
+        return (tag, ("self" if value == viewer else "opponent") if tag == "player" else value)
+
+    out = []
+    for it in g.stack:
+        source = it.card if it.card is not None else it.source
+        live = None if source is None else g.perm(source.oid)
+        c = live if live is not None else source
+        src = None if c is None else {
+            "name": c.name, "oid": c.oid, "controller": "self" if c.controller == viewer else "opponent",
+            "keywords": sorted(g.keywords(c)), "power": g.power(c), "toughness": g.toughness(c),
+        }
+        out.append({"sid": it.sid, "kind": it.kind, "controller": "self" if it.controller == viewer else "opponent",
+                    "source": src, "targets": [ref(r) for r in it.targets], "x": it.x, "method": it.method,
+                    "data": {k: it.data[k] for k in ("sid", "spell_sid", "source_oid", "amount") if k in it.data}})
+    return out
 
 
 def inputs(g, viewer, own_deck):
@@ -104,7 +133,7 @@ def inputs(g, viewer, own_deck):
     require(d is not None and d.player == viewer, "decision", "view requested for nondecider")
     require(d.kind in KINDS, "decision.kind", f"unsupported semantics {d.kind}")
     state = observe(g, viewer)
-    context = {}
+    context = {"stack": stack_view(g, viewer)}
     combat = g.combat_subjects if d.kind in {"declare_attacker", "declare_blocker", "assign_damage"} else None
     if combat is not None:
         require(len(combat) == len(d.options), "decision.subject", "missing structured combat subjects")
@@ -125,6 +154,10 @@ def inputs(g, viewer, own_deck):
     permitted = {c.name: c for c in g.battlefield}
     permitted.update({c.name: c for p in g.players for z in ("graveyard", "exile", "hand", "library") for c in getattr(p, z)
                       if z in {"graveyard", "exile"} or (z == "hand" and p.idx == viewer) or viewer in c.known_to})
+    for it in g.stack:
+        c = it.card if it.card is not None else it.source
+        if c is not None:
+            permitted.setdefault(c.name, c)  # spells and ability sources are public
     for i, o in enumerate(g.legal_options()):
         key, v = o.key, o.value
         data = {"choice": key}
@@ -142,10 +175,11 @@ def inputs(g, viewer, own_deck):
                         data["spell_mode"] = key[4]
                 elif v[0] in {"activate", "mana"}:
                     data["ability"] = key[2]
+                    data["ability_index"] = v[2]
                     if v[0] == "activate":
                         data["cost"] = str(c.face.abilities[v[2]].cost)
                     else:
-                        data["color"] = key[2]
+                        data["color"] = c.face.abilities[v[2]].mana[0]
         elif d.kind == "target":
             if v is None:
                 data["target"] = None
