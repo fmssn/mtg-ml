@@ -133,6 +133,17 @@ def test_collector_serialization_failure_is_reported():
         collector.terminate()
 
 
+def test_a_collector_never_closed_stops_when_collected():
+    """A Trainer built but never trained leaves its collector unclosed; once
+    collected it must stop, or multiprocessing waits for it at exit."""
+    collector = collect.PoolProcess(1)
+    proc = collector.proc
+    del collector
+    gc.collect()
+    proc.join(60)
+    assert proc.exitcode == 0
+
+
 def test_abandoned_thread_call_cannot_block_the_exit():
     """A call left running by `terminate` (a rollout whose pool was torn down
     mid-`map`) must not keep the interpreter alive."""
