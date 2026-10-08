@@ -223,7 +223,7 @@ pub struct SearchFilter {
 #[derive(Clone, Debug)]
 pub enum Op {
     /// each_controlling: each player who controls a permanent with this name draws instead.
-    Draw { n: i32, n_cast_from_graveyard: Option<i32>, each_controlling: Option<String> },
+    Draw { n: i32, n_cast_from_graveyard: Option<i32>, each_controlling: Option<String>, target_player: bool },
     Mill { target_player: bool, n: i32 },
     /// if_color: colour bit the target spell must have (0 = any).
     CounterTarget { if_color: u8 },
@@ -454,6 +454,7 @@ pub struct CardDef {
     pub additional_sac: Option<SacFilter>,
     pub cost_reduction: Option<CostRed>,
     pub flashback: Option<ManaCost>,
+    pub flashback_life: i32,
     pub escape: Option<ManaCost>,
     pub escape_exile: i32,
     pub bestow: Option<ManaCost>,
@@ -724,7 +725,7 @@ fn check_keys(t: &Table, allowed: &[&str], what: &str) -> Result<(), String> {
 /// (`test_spec_field_sets_identical`).
 pub const SHAPE_CARD_FIELDS: &[&str] = &[
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow", "plot",
-    "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect", "modes",
+    "overload", "flashback_life", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect", "modes",
     "overload_effect", "abilities", "triggers", "bargain", "collect_evidence", "equipped_power", "equipped_toughness", "equipped_keywords",
     "omen", "enters_tapped_unless_forests", "additional_power", "prototype", "station", "additional_choose_creature",
 ];
@@ -777,7 +778,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
         let t = v.as_table().ok_or("ops must be tables")?;
         let op = req_str(t, "op")?;
         let keys: &[&str] = match op {
-            "draw" => &["op", "n", "n_cast_from_graveyard", "each_controlling"],
+            "draw" => &["op", "n", "n_cast_from_graveyard", "each_controlling", "who"],
             "mill" => &["op", "who", "n"],
             "counter_target_unless_paid" => &["op", "cost"],
             "tap_target" => &["op", "skip_untap"],
@@ -813,7 +814,17 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
         check_keys(t, keys, &format!("op {op:?}"))?;
         let n = || get_int(t, "n")?.ok_or_else(|| format!("op {op:?} needs n"));
         ops.push(match op {
-            "draw" => Op::Draw { n: n()?, n_cast_from_graveyard: get_int(t, "n_cast_from_graveyard")?, each_controlling: get_str(t, "each_controlling")?.map(|s| s.to_string()) },
+            "draw" => {
+                if t.contains_key("who") && t.contains_key("each_controlling") {
+                    return Err("draw: who and each_controlling are mutually exclusive".into());
+                }
+                let target_player = match get_str(t, "who")? {
+                    None | Some("you") => false,
+                    Some("target_player") => true,
+                    Some(w) => return Err(format!("draw: unknown who {w:?}")),
+                };
+                Op::Draw { n: n()?, n_cast_from_graveyard: get_int(t, "n_cast_from_graveyard")?, each_controlling: get_str(t, "each_controlling")?.map(|s| s.to_string()), target_player }
+            },
             "mill" => Op::Mill {
                 target_player: match req_str(t, "who")? {
                     "you" => false,
@@ -1204,6 +1215,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         name: req_str(t, "name")?.to_string(),
         phyrexian_cost: if phy.colored.is_empty() { None } else { Some(cost.minus_colored(&phy)) },
         phyrexian_life: 2 * phy.mana_value(),
+        flashback_life: get_int(t, "flashback_life")?.unwrap_or(0),
         bargain: get_bool(t, "bargain")?,
         cost,
         types,
@@ -1384,6 +1396,9 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
             v.push(format!("e:cost:{k}"));
         }
     }
+    if truthy(t, "flashback_life") {
+        v.push("e:cost:flashback_life".into());
+    }
     if t.contains_key("flashback_cost") {
         v.push("e:cost:flashback".into());
         v.push("e:cost:sac_lands".into());
@@ -1540,6 +1555,7 @@ fn parse_dungeon(id: DefId, t: &Table, db: &CardDb, tokens: &HashMap<String, Def
         additional_sac: None,
         cost_reduction: None,
         flashback: None,
+        flashback_life: 0,
         escape: None,
         escape_exile: 0,
         bestow: None,

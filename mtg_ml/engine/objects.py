@@ -168,6 +168,7 @@ class CardDef(_Immutable):
     additional_sac: str | None = None  # 'artifact_or_creature'
     cost_reduction: Callable[..., int] | None = None  # (game, player) -> int
     flashback: ManaCost | None = None
+    flashback_life: int = 0
     escape: ManaCost | None = None
     escape_exile: int = 0
     bestow: ManaCost | None = None
