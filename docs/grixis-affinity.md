@@ -49,8 +49,8 @@ Rows in `engine/sideboard_plans.toml` (format: [sideboarding.md](sideboarding.md
 | Affinity vs Red | 4 Hydroblast, 1 Blue Elemental Blast, 1 Krark-Clan Shaman | 2 Black Mage's Rod, 3 Nihil Spellbomb, 1 Sewer-veillance Cam |
 | Red vs Affinity | 2 End the Festivities, 2 Cast into the Fire, 2 Pyroblast | 2 Highway Robbery, 2 Grab the Prize, 2 Sneaky Snacker |
 
-Rows for Elves and Tron (both directions) are at the end of the file,
-commented out until those decks are in `decks.DECKS`.
+Rows for Elves and Tron (both directions) are in those decks' sections of
+the file.
 
 ## Rules added
 

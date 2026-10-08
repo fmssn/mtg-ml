@@ -60,8 +60,8 @@ why = "Pyroblast and Red Elemental Blast answer every blue card, Relic of Progen
 in = { "Pyroblast" = 4, "Red Elemental Blast" = 2, "Relic of Progenitus" = 2 }
 out = { "Highway Robbery" = 4, "Grab the Prize" = 2, "Voldaren Epicure" = 2 }
 
-# Grixis Affinity (docs/grixis-affinity.md). Its rows against Tron follow
-# Tron's; those against Elves are at the end, commented out until Elves is registered.
+# Grixis Affinity (docs/grixis-affinity.md). Its rows against Elves and Tron
+# are in those decks' sections.
 
 [[plan]]
 deck = "grixis_affinity"

@@ -57,24 +57,10 @@ equipment rules; both are back, and equipment is in both engines.
 | Tron vs Red | 3 Breath Weapon, 1 Kaervek's Torch, 1 Pulse of Murasa | 2 Unfathomable Truths, 2 Maelstrom Colossus, 1 Bonder's Ornament | sweep the small creatures, kill one at instant speed, gain life; the slowest cards out |
 | Red vs Tron | 2 Cast into the Fire | 2 Voldaren Epicure | exiles a Map, Candy Trail or Barrels (Q3 sideboard has no Gorilla Shaman) |
 
-Rows for Affinity (in sideboard_plans.toml since the r6 integration, with Affinity's own row vs Tron) and Elves (to add when Elves lands; the
-loader requires both decks to exist):
-
-```toml
-[[plan]]
-deck = "tron"
-opponent = "grixis_affinity"
-why = "Breath Weapon kills Refurbished Familiar, Krark-Clan Shaman and Kenku Artificer, Kaervek's Torch a Myr Enforcer; Candy Trail is too slow."
-in = { "Breath Weapon" = 2, "Kaervek's Torch" = 1 }
-out = { "Candy Trail" = 2, "Haunted Fengraf" = 1 }
-
-[[plan]]
-deck = "tron"
-opponent = "elves"
-why = "Breath Weapon wipes the mana elves, Priest of Titania and Timberwatch Elf; Monstrous Emergence kills Avenging Hunter or a Hydra; the slow card draw goes out."
-in = { "Breath Weapon" = 2, "Monstrous Emergence" = 2 }
-out = { "Unfathomable Truths" = 2, "Candy Trail" = 2 }
-```
+| Tron vs Affinity | 2 Breath Weapon, 1 Kaervek's Torch | 2 Candy Trail, 1 Haunted Fengraf | Breath Weapon kills Familiar, Shaman and Kenku, the Torch a Myr Enforcer |
+| Affinity vs Tron | 2 Extract a Confession, 1 Envelop | 3 Krark-Clan Shaman | a race: the edict for a lone fatty, Envelop for a sorcery-speed answer |
+| Tron vs Elves | 2 Breath Weapon, 2 Monstrous Emergence | 2 Unfathomable Truths, 2 Candy Trail | Breath Weapon wipes the Elves, Emergence kills Avenging Hunter or a Hydra |
+| Elves vs Tron | 2 Spinewoods Paladin, 1 Deglamer | 1 Winding Way, 2 Lead the Stampede | a race; Deglamer answers Ornament or a Golem |
 
 ## Rules added (both engines)
 
