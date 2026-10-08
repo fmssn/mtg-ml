@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import statistics
 import subprocess
@@ -42,6 +43,16 @@ def prepare(args):
     manifest = json.loads((frozen / "manifest.json").read_text())
     if not manifest.get("opponents"):
         raise ValueError("freeze the historical opponent pool with --opponent-pool first")
+    continuation = manifest.get("continuation")
+    if not continuation:
+        raise ValueError("freeze parent schedule metadata with --training-checkpoint first")
+    training = continuation["train_config"]
+    ppo = training["ppo"]
+    anneal = training["lr_anneal_games"]
+    position = continuation["lr_position"]
+    fraction = min(1, position / anneal) if anneal else 0
+    if training["lr_schedule"] == "cosine":
+        fraction = 0.5 * (1 - math.cos(math.pi * fraction))
     cpus, gpus = parse_cpus(args.cpus), args.gpus.split(",")
     if len(cpus) < 8:
         raise ValueError("reserve at least 8 CPUs: four learners, inference, workers, evaluation")
@@ -50,7 +61,13 @@ def prepare(args):
     entries = []
     for arm in arms:
         settings = ARMS[arm]
-        learners = settings.get("learners", 1)
+        lr = ppo["lr"]
+        if "lr" in settings:
+            if fraction >= 1:
+                raise ValueError("larger-batch LR tests require an unfinished parent schedule")
+            # Set the requested starting LR at the parent's schedule position.
+            lr = (float(settings["lr"]) - fraction * ppo["lr_final"]) / (1 - fraction)
+        learners = settings.get("learners", args.base_learners if arm in ("bf16", "batch8192-lr150", "batch8192-lr300", "epochs2", "lag2") else 1)
         same = settings.get("same_gpu", False)
         gpu_count = learners if same else learners + 1
         if len(gpus) < gpu_count:
@@ -74,15 +91,21 @@ def prepare(args):
                 "server-stacked-attention": int(not settings.get("legacy")), "games-per-iter": 2048,
                 "matchup": MATCHUPS, "postboard-frac": 0.2, "seed": seed, "pipeline": settings.get("pipeline", 1),
                 "ppo-precision": settings.get("precision", "fp32"), "ppo-minibatch": settings.get("minibatch", 2048),
-                "ppo-epochs": settings.get("epochs", 4), "ppo-lr": settings.get("lr", "1.5e-4"),
-                "ppo-lr-final": float(settings.get("lr", "1.5e-4")) / 10,
-                "lr-anneal-games": 10000000, "snapshot-every": 122, "checkpoint-every": 25,
+                "ppo-epochs": settings.get("epochs", 4), "ppo-lr": lr, "ppo-lr-final": ppo["lr_final"],
+                "lr-anneal-games": anneal, "lr-anneal-offset-games": position, "lr-schedule": training["lr_schedule"],
+                "shaping": training["shaping"], "shaping-anneal-iters": training["shaping_anneal_iters"],
+                "shaping-offset-iters": continuation["shaping_position"], "snapshot-every": 122, "checkpoint-every": 25,
                 "iterations": 100000000 if args.hours else 25, "duration-seconds": args.hours * 3600,
                 "eval-every": 0, "eval-every-games": 250000 if args.hours else 0,
+                "eval-final": int(bool(args.hours)),
                 "bench-games": 1000, "bench-greedy-games": 1000, "bench-bo3-matches": 0, "eval-bo3-matches": 0,
                 "ladder-games": 200, "ladder": ",".join(str(Path(args.ladder) / f"iter_{k:05d}.pt") for k in (488, 1464, 2440, 3904)),
                 "ladder-ratings": str(Path(args.ladder) / "ladder.json"),
             }
+            for key in ("gamma", "lam", "gamma_turn", "lam_turn", "value_clamp", "self_play_frac", "bot_frac", "bot_seat", "pool_recent_frac", "pool_sampling", "pfsp_power", "pfsp_ema", "max_turns", "auto_mana", "auto_pass"):
+                flags[key.replace("_", "-")] = training[key]
+            for key in ("clip", "vf_coef", "ent_coef", "max_grad_norm", "target_kl", "capture"):
+                flags["ppo-" + key.replace("_", "-")] = ppo[key] if ppo[key] is not None else "none"
             command = [str(code / ".venv/bin/python"), "-m", "mtg_ml.rl.train"]
             command += [word for k, v in flags.items() for word in (f"--{k}", str(v))]
             entries.append(dict(name=name, arm=arm, seed=seed, run=str(run), command=command, settings=settings,
@@ -146,6 +169,7 @@ def summarize(entry, charged_s):
                   charged_gpu_hours=charged_s * len(entry["gpus"]) / 3600,
                   timed_gpu_hours=wall * len(entry["gpus"]) / 3600,
                   learner_peak_bytes=max(r["learner_peak_bytes"] for r in rows),
+                  learner_peak_bytes_by_rank=rows[-1].get("learner_peak_bytes_by_rank", [max(r["learner_peak_bytes"] for r in rows)]),
                   median_ppo_s=statistics.median(r["ppo_s"] for r in timed),
                   median_rollout_s=statistics.median(r["rollout_s"] for r in timed),
                   median_publication_s=statistics.median(r["publish_s"] for r in timed),
@@ -185,7 +209,7 @@ def run(args):
         with open(Path(entry["run"]) / "train.log", "w") as log:
             proc = subprocess.Popen(["taskset", "-c", ",".join(map(str, entry["cpus"])), *entry["command"]], cwd=entry["code"], env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
             try:
-                rc = proc.wait(timeout=entry["hours"] * 3600 + 1800 if entry["hours"] else 7200)
+                rc = proc.wait(timeout=entry["hours"] * 3600 + 7200 if entry["hours"] else 7200)
             except subprocess.TimeoutExpired:
                 proc.terminate()
                 try:
@@ -197,6 +221,8 @@ def run(args):
                     proc.wait()
                 rc = -1
         charged = time.monotonic() - t
+        if rc:
+            stop_group(proc.pid)
         try:
             report = summarize(entry, charged) if rc == 0 else dict(name=entry["name"], verdict="failed", exit_code=rc, charged_gpu_hours=charged * len(entry["gpus"]) / 3600)
         except Exception as e:
@@ -209,6 +235,27 @@ def run(args):
             return  # fix a failure before spending more GPUs
 
 
+def stop_group(pid):
+    """Escalate only within the arm's newly created process group."""
+    import signal
+
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="operation", required=True)
@@ -217,6 +264,7 @@ def main():
         p.add_argument("--" + name, required=True)
     p.add_argument("--arms", default=",".join(ARMS))
     p.add_argument("--hours", type=float, default=0, help="0: 5 warm-up + 20 timed iterations; 2 or 6: three paired learning seeds")
+    p.add_argument("--base-learners", type=int, choices=(1, 2, 4), default=1, help="hardware chosen by the screens, for learning finalists")
     r = sub.add_parser("run")
     r.add_argument("--manifest", required=True)
     r.add_argument("--arms")

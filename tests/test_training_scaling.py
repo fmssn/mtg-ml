@@ -18,9 +18,9 @@ def _decision(entities=2):
     return tuple(array("i", x) for x in (state, [1, 1], opts, [10]))
 
 
-def _save(tmp_path, k, attention=1, memory="none"):
+def _save(tmp_path, k, attention=1, memory="none", hidden=16):
     torch.manual_seed(k)
-    net = PolicyNet(hidden=16, memory=memory, trunk="entity", entity_attn=attention)
+    net = PolicyNet(hidden=hidden, memory=memory, trunk="entity", entity_attn=attention)
     with torch.no_grad():
         for p in net.parameters():
             p.add_(torch.randn_like(p) * 0.02)
@@ -29,8 +29,9 @@ def _save(tmp_path, k, attention=1, memory="none"):
     return path, net
 
 
-def test_mixed_attention_batch_keeps_fast_rows_stacked(tmp_path):
-    paths, nets = zip(_save(tmp_path, 0), _save(tmp_path, 1, attention=2))
+@pytest.mark.parametrize("memory,hidden", [("none", 16), ("gru", 32)])
+def test_mixed_attention_batch_keeps_fast_rows_stacked(tmp_path, memory, hidden):
+    paths, nets = zip(_save(tmp_path, 0, memory=memory), _save(tmp_path, 1, attention=2, memory=memory, hidden=hidden))
     srv = _Server(ServerConfig(device="cpu", threads=1, compile=False, graphs=False), 1)
     cl = InferenceClient(0, None, None, srv.names, srv.layout)
     try:

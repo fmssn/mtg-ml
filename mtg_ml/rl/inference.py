@@ -536,6 +536,7 @@ class _Server:
         self.resident_keys = None  # immutable selected keys while one wave is running
         self.hidden = None  # (n_workers * SLOTS_PER_WORKER + 1, state size); the last row is the padded rows' dummy
         self.state_size = None
+        self.hidden_by_size = {}
         self.pad_eager = False  # eager forward at the padded shapes (profiling the graphs' kernels)
         self._compiled = None
         self.stats = {"batches": 0, "rows": 0, "requests": 0, "busy_s": 0.0, "prep_s": 0.0, "launch_s": 0.0, "infer_s": 0.0, "padded_rows": 0, "graphs": 0, "eager": 0, "legacy": 0, "capture_s": 0.0}
@@ -569,17 +570,19 @@ class _Server:
                 self.dev_nets.pop(pid, None)
                 if pid < LEGACY:
                     self.free.append(pid)
+        if self.cfg.resident_limit and len(self.ids) >= self.cfg.resident_limit:
+            raise RuntimeError("resident policy capacity exhausted; select the next residency wave")
         net = load_net(path)
         if net.memory == "gru":
-            if self.hidden is None:
-                self.state_size = net.state_size
-                self.hidden = self.torch.zeros(self.n_workers * SLOTS_PER_WORKER + 1, net.state_size, device=self.device)
-            elif net.state_size != self.state_size:
-                raise ValueError("all recurrent policies served together must share the hidden size")
+            if net.state_size not in self.hidden_by_size:
+                self.hidden_by_size[net.state_size] = self.torch.zeros(self.n_workers * SLOTS_PER_WORKER + 1, net.state_size, device=self.device)
         stackable = PolicyStack.supports(net.config) and (self.cfg.stacked_attention or not net.config.get("entity_attn")) and net.config["state_dim"] == STATE_DIM and net.config["option_dim"] == OPTION_DIM and not self.cfg.dry_run
         if stackable and self.stack is None:
             capacity = self.cfg.resident_limit or self.cfg.policy_slots
             self.stack = PolicyStack(net.config, capacity, self.device)
+            if net.memory == "gru":
+                self.state_size = net.state_size
+                self.hidden = self.hidden_by_size[net.state_size]
             self.free = list(range(capacity - 1, -1, -1))
         if stackable and stack_config(net.config) == self.stack.config:
             if not self.free:
@@ -630,8 +633,12 @@ class _Server:
             self.dev_nets.pop(pid, None)
             if pid < LEGACY:
                 self.free.append(pid)
-        if self.hidden is not None:
-            self.hidden.zero_()  # all games ended; no recurrent state crosses waves
+        active_sizes = {net.state_size for net in self.cpu_nets.values() if net.memory == "gru"} | {self.state_size}
+        for size in list(self.hidden_by_size):
+            if size not in active_sizes:
+                del self.hidden_by_size[size]
+            else:
+                self.hidden_by_size[size].zero_()  # all games ended; no recurrent state crosses waves
         self.resident_keys = keys
         self.c[G_GENERATION] = self.c[G_GENERATION] % 0x3FFFFFFF + 1
         # Preload the learner first: its architecture chooses the fast stack.
@@ -921,10 +928,11 @@ class _Server:
                 hidden = None
                 if net.memory == "gru":
                     gs = torch.tensor(gslots, device=self.device)
-                    hidden = torch.where(torch.tensor(fresh, device=self.device).bool()[:, None], 0.0, self.hidden[gs])
+                    table = self.hidden_by_size[net.state_size]
+                    hidden = torch.where(torch.tensor(fresh, device=self.device).bool()[:, None], 0.0, table[gs])
                 logits, values, hn = net(batch, hidden, max_options=width)
                 if hn is not None:
-                    self.hidden[gs] = hn
+                    table[gs] = hn
                 dist = torch.distributions.Categorical(logits=logits, validate_args=False)
                 a = torch.where(torch.tensor(greedy, device=self.device), logits.argmax(-1), dist.sample())
                 res = torch.stack([a.to(torch.float32), dist.log_prob(a), values], 1).cpu().numpy()

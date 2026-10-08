@@ -307,6 +307,29 @@ def test_imported_opponents_survive_resume_and_snapshot_name_collisions(tmp_path
     assert (imported / "iter_00999.pt").exists()
 
 
+def test_duration_stop_preserves_pipeline1_prefetch_rng(tmp_path, in_process, monkeypatch):
+    run = tmp_path / "run"
+    cfg = _cfg(run, "--iterations", "3", *IN_PROCESS, *NO_EVAL)
+    update = train_mod.ppo_update
+
+    def stop_after_update(*args, **kwargs):
+        out = update(*args, **kwargs)
+        cfg.duration_seconds = 1e-12
+        return out
+
+    monkeypatch.setattr(train_mod, "ppo_update", stop_after_update)
+    Trainer(cfg).train()
+    lost = [r for r in in_process if r.train][-1]
+    ck = torch.load(run / "latest.pt", weights_only=False)
+    assert ck["iteration"] == 1
+    monkeypatch.setattr(train_mod, "ppo_update", update)
+    cfg.duration_seconds = 0
+    n = len(in_process)
+    Trainer(cfg).train()
+    replay = [r for r in in_process[n:] if r.train][0]
+    assert replay.games == lost.games
+
+
 @pytest.mark.parametrize("pipeline", [0, 1, 2])
 def test_checkpoint_every_and_resume_after_a_crash(tmp_path, in_process, monkeypatch, pipeline):
     """latest.pt only every --checkpoint-every iterations: a run killed in

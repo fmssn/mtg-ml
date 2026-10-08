@@ -52,13 +52,17 @@ class _BackwardGraphs(_StepGraphs):
         return (tuple((p.data_ptr(), p.grad.data_ptr() if p.grad is not None else None) for p in net.parameters()),
                 cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.capture, cfg.precision)
 
-    def backward(self, net, cfg, shapes, gru, ints, flts):
+    def prepare(self, shapes):
         key = tuple(sorted(shapes.items()))
         if key not in self.graphs:
             if len(self.graphs) >= self.MAX_SHAPES:
                 old = next(iter(self.graphs))
                 del self.graphs[old], self.pools[old]
             self.graphs[key], self.pools[key] = {}, torch.cuda.graph_pool_handle()
+        return key
+
+    def backward(self, net, cfg, shapes, gru, ints, flts):
+        key = self.prepare(shapes)
         if gru not in self.graphs[key]:
             self.graphs[key][gru] = self._capture_backward(net, cfg, shapes, gru, ints, flts, self.pools[key])
         graph, si, sf = self.graphs[key][gru]
@@ -173,7 +177,16 @@ def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
             grad = torch.zeros(sum(p.numel() for p in params), device=dev)
         for m, batch in enumerate(schedule):
             if graphs:
-                graphs.backward(net, cfg, shapes, gru[m], ints[m], flts[m])
+                graphs.prepare(shapes)
+                if any(p not in opt.state for p in params):
+                    # Match ordinary PPO: Adam's first step uses the uncompiled padded loss.
+                    grad.zero_()
+                    loss, stats = _padded_losses(net, cfg, shapes, gru[m], ints[m], flts[m])
+                    loss.backward()
+                    acc.add_(stats)
+                    del loss
+                else:
+                    graphs.backward(net, cfg, shapes, gru[m], ints[m], flts[m])
             else:
                 grad.zero_()
                 opt.zero_grad(set_to_none=True)
@@ -225,6 +238,10 @@ def distributed_update(net, opt, data, cfg, rank, world, gen=None, graphs=None):
             out.update({f"kind/{name}/share": count / nt_n, f"kind/{name}/entropy": ent / count, f"kind/{name}/approx_kl": kl / count})
     if graphs:
         out.update(captures=graphs.captures - caps0, graph_shapes=len(graphs.graphs))
+    if dev.type == "cuda":
+        peaks = [torch.zeros(1, dtype=torch.long, device=dev) for _ in range(world)]
+        dist.all_gather(peaks, torch.tensor([torch.cuda.max_memory_allocated(dev)], dtype=torch.long, device=dev))
+        out["learner_peak_bytes_by_rank"] = [int(p.item()) for p in peaks]
     return out
 
 

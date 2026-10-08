@@ -166,7 +166,9 @@ class TrainConfig:
     lam_turn: float = 0.0  # > 0: GAE lambda per game turn; replaces lam
     shaping: float = 0.2  # life-difference potential shaping, linearly annealed to 0
     shaping_anneal_iters: int = 100
+    shaping_offset_iters: int = 0  # continuation position in the parent's shaping schedule
     lr_anneal_games: int = 0  # > 0: anneal --ppo-lr to --ppo-lr-final over this many training games (from the run's start or the first resume with annealing on)
+    lr_anneal_offset_games: int = 0  # continuation position with a fresh optimizer/game counter
     lr_schedule: str = "linear"  # "linear" or "cosine"
     self_play_frac: float = 0.5
     bot_frac: float = 0.0  # share of games against the scripted bots (taken out of the pool share)
@@ -183,6 +185,7 @@ class TrainConfig:
     exploit: str = ""  # exploiter mode: every training game is the learner on --exploit-deck vs this frozen policy file
     exploit_deck: str = "jund"  # the learner's deck: "jund", "blue", "red", "affinity", "elves" or "tron", one of --matchup's (evaluate.DECK_KEYS)
     eval_every: int = 10  # evaluate every this many iterations (0 = only by eval_every_games)
+    eval_final: int = 0  # evaluate the final policy even when the stop is between regular evaluation points
     eval_every_games: int = 0  # also evaluate whenever the training games cross a multiple of this (e.g. 250000)
     eval_process: int = 1  # 1: evaluate in a process of its own, never waiting for it; 0: on the training pool, blocking
     eval_workers: int = 0  # workers of the evaluation process (0: one per evaluation core, at most 8)
@@ -270,7 +273,7 @@ class Trainer:
             if not os.path.exists(path):
                 raise FileNotFoundError(f"ladder file {path} does not exist")
         self.ladder_ratings = cfg.ladder_ratings or os.path.join(cfg.run, "ladder.json")
-        self.evaluating = bool(cfg.eval_every or cfg.eval_every_games)
+        self.evaluating = bool(cfg.eval_every or cfg.eval_every_games or cfg.eval_final)
         self.matchups = parse_matchups(cfg.matchup)
         self.exploit_seat = exploit_seat(cfg)  # also validates --matchup
         self.spec_matchup: dict[int, str] = {}  # seed -> matchup of the training games in flight (a mix only)
@@ -326,7 +329,7 @@ class Trainer:
         elif init:
             self._init_from(init)
         if cfg.lr_anneal_games and self.lr_origin is None:
-            self.lr_origin = self.games_total
+            self.lr_origin = self.games_total - cfg.lr_anneal_offset_games
         set_lr(self.opt, self._lr())
         self._remove_partial_writes()
         pool_dir = os.path.join(cfg.run, "pool")
@@ -507,7 +510,7 @@ class Trainer:
         with the newest policy file, without waiting for it. The games are
         drawn here, in the main thread (`self.rng`)."""
         c, rng = self.cfg, self.rng.getstate()
-        shaping = c.shaping * max(0.0, 1 - it / max(c.shaping_anneal_iters, 1))
+        shaping = c.shaping * max(0.0, 1 - (it + c.shaping_offset_iters) / max(c.shaping_anneal_iters, 1))
         job = Job([], self.policy, self.iteration + 1, record=True, gamma=c.gamma, lam=c.lam, shaping=shaping, max_turns=c.max_turns, inference=c.inference,
                   value_clamp=c.value_clamp, gamma_turn=c.gamma_turn, lam_turn=c.lam_turn, auto_mana=bool(c.auto_mana), auto_pass=bool(c.auto_pass),
                   features=self.pool_features)
@@ -763,7 +766,12 @@ class Trainer:
                     self._unpin(roll.descriptor["job"].learner_path)
                 roll = nxt
             if self.checkpointed != self.iteration or queue:
-                self._checkpoint(self._weights(), self.rng.getstate(), [r.descriptor for r in queue])
+                rng = roll.rng if c.pipeline == 1 and roll is not None else self.rng.getstate()
+                self._checkpoint(self._weights(), rng, [r.descriptor for r in queue])
+            if c.eval_final and self.iteration and not self._eval_due(c.games_per_iter):
+                final_eval = self._request_eval()
+                if final_eval:
+                    _amend(self.metrics, self.iteration, final_eval)
             if self.evaluator is not None:
                 self._collect_evals(block=True)
             ok = True
@@ -948,6 +956,8 @@ def _check(cfg: TrainConfig) -> None:
         raise FileNotFoundError(f"--exploit {cfg.exploit}: no such policy file")
     if cfg.duration_seconds < 0:
         raise ValueError("duration_seconds must be nonnegative")
+    if cfg.lr_anneal_offset_games < 0 or cfg.shaping_offset_iters < 0:
+        raise ValueError("continuation schedule offsets must be nonnegative")
     if cfg.lr_anneal_games < 0 or cfg.gamma_turn < 0 or cfg.lam_turn < 0 or cfg.value_clamp < 0:
         raise ValueError("lr_anneal_games, gamma_turn, lam_turn and value_clamp must be >= 0")
     if cfg.server_resident_limit < 0:
@@ -985,7 +995,7 @@ def parse_args(argv=None) -> TrainConfig:
             if f.name == "ppo":
                 continue
             v = getattr(obj, f.name)
-            typ = float if f.name == "target_kl" else type(v)
+            typ = (lambda x: None if x.lower() == "none" else float(x)) if f.name == "target_kl" else type(v)
             ap.add_argument(f"--{prefix}{f.name.replace('_', '-')}", type=typ, default=v, choices=CHOICES.get(f.name) if obj is cfg else None)
     a = vars(ap.parse_args(argv))
     for f in fields(ppo):

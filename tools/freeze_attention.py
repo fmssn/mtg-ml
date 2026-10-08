@@ -19,7 +19,7 @@ def digest(path):
         return hashlib.file_digest(f, "sha256").hexdigest()
 
 
-def freeze(source, out, source_ref, opponent_pool=None):
+def freeze(source, out, source_ref, opponent_pool=None, training_checkpoint=None):
     import torch
 
     from mtg_ml.rl.model import PolicyNet, load_partial
@@ -55,6 +55,16 @@ def freeze(source, out, source_ref, opponent_pool=None):
     manifest = dict(source=str(source), source_ref=source_ref, source_sha256=digest(source),
                     parent_sha256=digest(out / "parent.pt"), attention_sha256=digest(out / "attention.pt"),
                     config=net.config, new_parameters=new, optimizer="fresh", attention_heads=4, ffn_width=512, opponents=opponents)
+    if training_checkpoint:
+        metadata = torch.load(training_checkpoint, map_location="cpu", weights_only=False)
+        training = metadata["train_config"]
+        iteration = int(source.stem.removeprefix("iter_"))
+        metrics = source.parent.parent / "metrics.jsonl"
+        rows = [json.loads(line) for line in metrics.read_text().splitlines()]
+        games = next(row["games_total"] for row in rows if row["iteration"] == iteration)
+        manifest["continuation"] = dict(train_config=training, iteration=iteration, games_total=games,
+                                         lr_position=max(0, games - (metadata.get("lr_anneal_origin") or 0)),
+                                         shaping_position=iteration + training.get("shaping_offset_iters", 0))
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 
@@ -65,8 +75,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--source-ref", required=True)
     ap.add_argument("--opponent-pool", help="freeze completed historical opponents through the parent snapshot; add identity attention to preserve behavior")
+    ap.add_argument("--training-checkpoint", help="read parent schedule settings; source iteration's game count comes from metrics.jsonl")
     args = ap.parse_args()
-    print(json.dumps(freeze(args.source, args.out, args.source_ref, args.opponent_pool), indent=2))
+    print(json.dumps(freeze(args.source, args.out, args.source_ref, args.opponent_pool, args.training_checkpoint), indent=2))
 
 
 if __name__ == "__main__":
