@@ -86,7 +86,7 @@ MAX_MATCHUPS = 1024  # claim counters a pool shares (run_specs)
 # Decision kinds as recorded per decision (`Result.kinds`, small ints); id 0
 # is any kind not listed. The PPO statistics break entropy and KL down by them.
 KINDS = ("other", PRIORITY, PAY_MANA, TARGET, DECLARE_ATTACKER, DECLARE_BLOCKER, YES_NO, CHOOSE_CARD, CHOOSE_X, SACRIFICE,
-         EXILE_FROM_GY, ORDER, ORDER_TRIGGERS, ASSIGN_DAMAGE, CHOOSE_MODE, MULLIGAN)  # fmt: skip
+         EXILE_FROM_GY, ORDER, ORDER_TRIGGERS, ASSIGN_DAMAGE, CHOOSE_MODE, MULLIGAN, "assign_damage_amount")  # fmt: skip
 KIND_ID = {k: i for i, k in enumerate(KINDS)}
 
 _DECKS: dict[tuple, dict] = {}
@@ -223,7 +223,25 @@ class GameSpec:
     seats: tuple[str, str]  # policy spec per seat
     starting_player: int | None = None
     match_game: int = 1  # 1 = maindecks, 2/3 = after sideboarding
-    matchup: str = DEFAULT_MATCHUP  # match.MATCHUPS: the deck in each seat
+    matchup: str = DEFAULT_MATCHUP  # canonical deck positions, independent of physical seats
+    swap_seats: bool = False
+
+    @property
+    def physical_seats(self) -> tuple[str, str]:
+        return self.seats[::-1] if self.swap_seats else self.seats
+
+    def game_args(self) -> dict:
+        args = _game_args(self.match_game, self.matchup)
+        if self.swap_seats:
+            for name in ("decks", "registered_main", "registered_sideboards"):
+                args[name] = args[name][::-1]
+            # Legacy policies still need labels relative to their physical seats.
+            from ..match import DECK_NAMES
+            decks = matchup_decks(self.matchup)[::-1]
+            args["deck_names"] = tuple(d if d != DECK_NAMES[s] else None for s, d in enumerate(decks))
+        start = self.starting_player
+        args["starting_player"] = 1 - start if self.swap_seats and start is not None else start
+        return args
 
 
 @dataclass
@@ -235,8 +253,8 @@ class Job:
     gamma: float = 0.995
     lam: float = 0.95
     shaping: float = 0.0
-    # GAE bootstraps from values clamped to +-(value_clamp + |shaping|), the
-    # range of the returns (0 = off). An unbounded value head drifts past +-1.
+    # GAE clamps unshaped value to +-value_clamp, then shifts by -shaping * phi.
+    # 0 disables clamping. Raw predictions remain available for logging.
     value_clamp: float = 1.0
     # > 0: discount per game turn instead of per decision: between consecutive
     # decisions gamma_turn ** (turns elapsed) (lam_turn likewise), so a line's
@@ -321,13 +339,15 @@ def _finish(traj: Trajectory, outcome: float, job: Job, out: Result) -> None:
     rewards = [0.0] * n
     rewards[-1] = outcome
     if job.shaping:
+        if len(traj.potentials) != n:
+            raise ValueError("shaping needs the potential of every recorded decision")
         phis = traj.potentials + [0.0]  # terminal potential 0, so shaping telescopes to -phi(s0)
         for t in range(n):
             rewards[t] += job.shaping * (gam[t] * phis[t + 1] - phis[t])
     values = traj.values  # raw, as the network said them (traj.values stays untouched)
     if job.value_clamp > 0:
-        hi = job.value_clamp + abs(job.shaping)
-        values = [min(hi, max(-hi, v)) for v in values]
+        shifts = [job.shaping * phi for phi in traj.potentials] if job.shaping else [0.0] * n
+        values = [min(job.value_clamp - shift, max(-job.value_clamp - shift, v)) for v, shift in zip(values, shifts)]
     adv = [0.0] * n
     last = 0.0
     for t in reversed(range(n)):
@@ -365,8 +385,8 @@ class _Live:
         self.spec, self.game, self.slot = spec, game, slot
         self.trajs = (Trajectory(), Trajectory())
         self.seats = (_Seat(), _Seat())
-        decks = matchup_decks(spec.matchup)
-        self.agents = tuple(RandomAgent(seed=spec.seed * 2 + s) if pol == RANDOM else make_bot(s, decks[s]) if pol == BOT else None for s, pol in enumerate(spec.seats))
+        decks = matchup_decks(spec.matchup)[::-1] if spec.swap_seats else matchup_decks(spec.matchup)
+        self.agents = tuple(RandomAgent(seed=spec.seed * 2 + s) if pol == RANDOM else make_bot(s, decks[s]) if pol == BOT else None for s, pol in enumerate(spec.physical_seats))
 
 
 def _step(g: Game, seats: tuple[_Seat, _Seat], a: int) -> None:
@@ -550,6 +570,8 @@ def _play(job: Job) -> Result:
     t_start = time.perf_counter()
     if job.greedy and job.record:
         raise ValueError("greedy games are for evaluation: PPO needs games of the sampling policy (record=False)")
+    if job.record and job.shaping and checkpoint_config(job.learner_path).get("value_bound") == "tanh":
+        raise ValueError("active shaping requires an unbounded value head")
     Game = game_class(job.engine)
     cap = job.inflight or len(job.games)
     if cap > MAX_LIVE:
@@ -570,15 +592,16 @@ def _play(job: Job) -> Result:
 
     def start(i: int) -> _Live:
         spec = job.games[i]
-        g = Game(**_game_args(spec.match_game, spec.matchup), seed=spec.seed, starting_player=spec.starting_player, max_turns=job.max_turns, auto_mana=job.auto_mana, auto_pass=job.auto_pass)
+        g = Game(**spec.game_args(), seed=spec.seed, max_turns=job.max_turns, auto_mana=job.auto_mana, auto_pass=job.auto_pass)
         return _Live(spec, g, free.pop())
 
     def finish(lv: _Live) -> None:
         g, spec = lv.game, lv.spec
-        out.games.append((spec.seats, g.winner, g.end_reason, g.turn, len(g.actions), spec.seed))
+        winner = 1 - g.winner if spec.swap_seats and g.winner is not None else g.winner
+        out.games.append((spec.seats, winner, g.end_reason, g.turn, len(g.actions), spec.seed))
         if job.record:
             for p in (0, 1):
-                if spec.seats[p] == LEARNER:
+                if spec.physical_seats[p] == LEARNER:
                     outcome = 0.0 if g.winner is None else (1.0 if g.winner == p else -1.0)
                     _finish(lv.trajs[p], outcome, job, out)
                     if lv.trajs[p].actions:
@@ -592,7 +615,7 @@ def _play(job: Job) -> Result:
         items, live, todo = [], [], groups[k]
         while True:
             for lv in todo:
-                g, seats = lv.game, lv.spec.seats
+                g, seats = lv.game, lv.spec.physical_seats
                 while not g.over:
                     p = g.decision.player
                     pol = seats[p]

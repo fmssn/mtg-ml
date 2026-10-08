@@ -19,12 +19,13 @@ feature set is versioned and travels with the model:
 | 4 | + the rules-level gaps found by the r4-control game review ([below](#feature-set-4)): combat relations (who blocks whom, blocked / unblocked attackers, block previews), incoming combat damage, `choose_x` previews and an X option -> spell pointer, mana colours (sources, hand needs, colour previews on land plays, basic searches and mana payment). Only adds strings: every set-3 string is still there. New rows start untrained, so a set-3 checkpoint needs a fine-tune with `--features 4` |
 | 5 | + cards described by what they do ([below](#card-shapes-and-hand-entities-set-5)): shape tokens from the card spec on permanents and stack items, the ops a stack item will resolve, the decider's own hand cards as entities, and cast / play-land / plot options pointing at them. Step 4 of the representation plan (PR #32, `docs/representation-plan.md`) |
 | 6 | + simulated option previews ([below](#simulated-option-previews-set-6)): every option of every decision is applied to a copy of the game, advanced while that needs no hidden information and no choice of the opponent, and the observable change is featurized (`pv:sim:*`: life, creatures and permanents lost / gained, zones, mana and colours left, lethal flags, why it stopped), and the same assuming the opponent passes (`pv:simp:*`). Step 3 of the representation plan. Option tokens only, so the model is unchanged |
+| 7 | hidden-list inputs: own registered main/sideboard and current-main counts, no archetype labels or absolute seat token; all entities retained; previews for every candidate regardless of candidate count. See [set 7](#feature-set-7-corrected-information-and-coverage). |
 
 - `PolicyNet(features=...)` stores it in `config["features"]`, only when it
   is not 1, so a config without the key (every checkpoint before this) is
   set 1.
 - Training (`--features`, default 0 = unset): a new run takes the latest
-  (6); `--init` and `--exploit` keep the source checkpoint's version (no
+  (7); `--init` and `--exploit` keep the source checkpoint's version (no
   weights depend on it, so `--features N` may move a fine-tune to another
   set, but then the parent sees inputs it never learned); a resumed run keeps
   its checkpoint's, and `--features N` on a resume overrides it and writes it
@@ -479,3 +480,120 @@ calls equivalent (random play, 8 games per matchup), 2 get different sim
 tokens, both momentary public differences the audit's longer successor
 washes out (which land stays untapped until the next untap step; a damage
 split before cleanup).
+
+## Feature set 7: corrected information and coverage
+
+PR 57 reproduced a missing legal combat win, opponent-archetype disclosure,
+hand/action-pointer loss above 64 entities, and skipped simulations above 32
+candidates. Set 7 is the default for new training runs. Sets 1–6 retain their
+input contract and historical caps; loading a checkpoint does not upgrade it.
+Training/evaluation output records `features` and `information_contract`:
+`hidden_list` for 7, `legacy_archetype_disclosed` for earlier versions (including
+the historical fixed deck/seat convention). Legacy opponents retain their
+own features and can therefore remain privileged opponents of a hidden-list
+learner. No claim of hidden-list strength follows from merely upgrading inputs.
+
+Set 7 supplies no `self:deck:*`, `opp:deck:*`, or absolute `seat:*` tokens.
+It supplies only the viewer's immutable registration and starting composition:
+`self:list:{registered_main,registered_sideboard,current_main}:{card}#{k}` for
+**every** copy `k = 1…count`, with no eight-copy saturation. These tokens still
+use the existing hashes, so hash collisions remain possible. The original
+registered main, original sideboard, and the current game's main stay separate;
+current-main counts do not mean the true remaining library after hidden movement.
+Existing public-zone, own-hand and known-library features remain available.
+
+Both game constructors accept optional `registered_main` and
+`registered_sideboards`, pairs of card-name sequences, copied to tuples.
+Without metadata they default to the supplied starting decks and empty
+sideboards. Match, rollout, trace and live-play construction supply registration
+from the selected lists while passing the actual sideboarded current decks.
+Synthetic setups must supply registration explicitly when they need it; setup
+cards are never used to reconstruct an undisclosed registration. Custom replay
+decks and synthetic trace card-coverage variants default to their supplied
+list with an empty sideboard; custom replay callers can pass explicit original
+registration when supplying a sideboarded current list.
+
+`GameSpec.swap_seats` defaults to false. Its `seats` and `starting_player` are
+canonical matchup positions; `physical_seats` and `game_args()` map decks,
+registration, policies, bots and starts together. Rollout results map winners
+back to canonical positions, preserving existing per-deck metrics. Set-7
+training swaps with probability 0.5 using the trainer RNG. Set-7 evaluation
+cycles through both physical deck positions and both starts, with both learner
+roles when unrestricted; complete balance requires multiples of four games for
+one role or eight for both. BO3 keeps its mapping for the complete match and
+maps the losing player's next start consistently. Legacy training and evaluation involving only legacy policies
+keep their original seat schedule.
+
+Entities use the existing ragged and padded batching paths without the legacy
+64-object cap: all battlefield objects, stack items and own-hand cards retain
+their action pointers. Every candidate receives both preview streams even above
+32 candidates. Snapshot-unavailable decisions still carry `skipped`; hidden
+transitions and the 64-step limit retain their distinct stop tags. `pv:simp:`
+continues to mean "if the opponent passes", not an expected outcome.
+
+To upgrade a checkpoint, fine-tune into a **new run directory** using
+`--init <checkpoint> --features 7`. Model dimensions and weights are compatible,
+but the new features and removed disclosures change its inputs and require
+learning. `--features 7` during evaluation alone is an input-distribution
+stress test; do not interpret it as a properly trained hidden-list result.
+Archived checkpoints and runs remain unchanged.
+
+### Exact large combat assignments
+
+This is a rules fix for every feature version. Small damage decisions retain
+complete split enumeration when the composition count is at most 1,024.
+Larger ones use `assign_damage_amount` decisions instead of the old capped
+lethal-subset approximation, so nonlethal allocations and all blockers remain
+reachable. Trample first chooses a defender share; a positive share reserves
+lethal damage for every blocker. The remaining damage is assigned blocker by
+blocker, with the last share forced. Damage is dealt simultaneously only after
+all attackers' allocations are complete (CR 510.1c, 702.19b).
+
+`Game.damage_allocation` exposes a frozen public context: attacker, blocker
+ids, lethal requirements, committed shares, recipient (`-1` for the defender),
+remaining power, defender, and defender share (`-1` before its choice). Keys
+include the progress and amount without object ids; labels supply attacker and
+recipient pointers. Set 7 also puts exact lethal/committed amounts and current
+recipient/attacker markers on their corresponding entities. Early previews
+stop at the next allocation choice; shares are not treated as dealt damage
+before the whole allocation completes. The new decision is supported by both engines, snapshots,
+public events, bots, and the live client. Scripted bots maximize their existing
+kill/value/trample score using suffix dynamic programming. Old policies can
+load but have not learned the new decision; engine-version changes must be
+recorded when comparing historical results.
+
+### Life shaping and bootstrap values
+
+The life potential remains `(my_life - opponent_life) / 20`, with terminal
+potential zero and the same discounted shaping objective. It is unbounded by
+one. For shaping weight `w`, potential `phi` and `value_clamp = V`, bootstrap
+values are clamped to `[-V - w*phi, V - w*phi]`, the bounded terminal-return
+interval shifted by the telescoping potential. Raw predictions and terminal
+rewards remain unchanged. `value_clamp = 0` still disables clamping. Active
+shaping with a `tanh` value head is rejected because its fixed range cannot
+represent these shifted returns; use an unbounded head or disable shaping.
+
+### Encoding cost check
+
+Warm `featurize_flat` medians on **Apple M3, Mac15,3, macOS 26.6.2**, code
+`d1b20b6`, interleaving versions 6 and 7. Other CPU verification was active;
+these are encoding microbenchmarks, not training-throughput or strength results.
+
+| engine / fixture | set 6, ms | set 7, ms |
+|---|---:|---:|
+| Python, ordinary decisions | 1.323 | 1.292 |
+| Native, ordinary decisions | 0.037 | 0.046 |
+| Python, 73 entities | 12.288 | 12.192 |
+| Native, 73 entities | 0.215 | 0.216 |
+| Python, 40 candidates | 0.732 | 15.865 |
+| Native, 40 candidates | 0.074 | 0.721 |
+
+Ordinary: 151 decisions from Jund–Blue, Jund–Elves and Affinity–Tron games,
+seed 570, maximum 10 turns and 120 decisions per game, option choices from
+`random.Random(57)`. Crowded: 40 repetitions with 70 own Spawn, Mountain,
+Lightning Bolt in hand, and an opposing Island. High-candidate: 20 repetitions
+of the first allocation of a 50-power Hydra against eleven Spawn at 100 life
+(40 defender-share options). Set 6 skips both simulations in that last case;
+set 7 computes every candidate, so its additional cost is expected. The crowded
+case retains 64 entities in set 6 versus all 73 in set 7. No speed improvement
+is inferred from the small noisy differences in the Python medians.

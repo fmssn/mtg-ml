@@ -653,7 +653,7 @@ function plainTarget(label, p) {  // "Target Sagu Wildling#12 (opponent)" from p
   const theirs = (rel[1] === 'self') === (p !== S.seat);  // relative to the chooser
   return `${theirs ? "the opponent's" : 'your'} ${name}`;
 }
-const LOG_KINDS_SKIP = new Set(['priority', 'pay_mana', 'declare_attacker', 'declare_blocker', 'mulligan', 'order_triggers', 'assign_damage', 'sacrifice']);
+const LOG_KINDS_SKIP = new Set(['priority', 'pay_mana', 'declare_attacker', 'declare_blocker', 'mulligan', 'order_triggers', 'assign_damage', 'assign_damage_amount', 'sacrifice']);
 function logEntry(cls, text, extra = '') { return {cls, text, extra}; }
 function frameLog(i) {
   const f = S.raw[i], prevS = i > 0 ? S.raw[i - 1].state : null, out = [];
@@ -1423,6 +1423,12 @@ function renderDock() {
       ch.innerHTML = d.refs.map((r, i) => r.type === 'mulligan' ? `<button class="choice" data-opt="${i}">${esc(d.options[i].replace(/^Mulligan \(to (\d+)\)$/, 'Mulligan to $1'))}</button>` : '').join('');
       break;
     }
+    case 'assign_damage_amount': {
+      pr.innerHTML = `<span class="k">Assign combat damage</span>${esc(clean(d.prompt))}`;
+      ch.innerHTML = d.refs.map((r, i) => `<button class="choice" data-opt="${i}">${r.amount} damage</button>`).join('');
+      P.textContent = 'Choose damage amount'; P.disabled = true;
+      break;
+    }
     case 'assign_damage': {
       pr.innerHTML = `<span class="k">Assign combat damage</span>${esc(clean(d.prompt))}`;
       const i = splitIndex(d, ui.dmg);
@@ -1448,6 +1454,7 @@ const resultText = () => { const w = S.meta?.winner; return w == null ? `Draw ($
 
 // Kinds shown as a card browser: options that name cards.
 function overlayKind(d) {
+  if (d.kind === 'assign_damage_amount') return false;
   if (d.kind === 'mulligan') return true;
   if (d.kind === 'order' && d.refs.some(r => r.top)) return true;
   if ((d.kind === 'choose_mode' || d.kind === 'yes_no') && d.cards?.length) return true;
