@@ -573,9 +573,8 @@ function renderPaying() {
   const filled = P.pips.filter(p => p.by).length;
   el.innerHTML = `<div class="ph">${esc(P.verb)}</div>${cardHtml(P.name)}
     <div class="pips cost">${P.pips.map(p => `<span class="pip ${p.by ? 'paid ' + esc(p.by.color) : p.generic ? 'gen' : esc(p.sym)}" title="${p.by ? esc(`${p.by.color} from ${p.by.pool ? 'your mana pool' : p.by.name || 'a land'}`) : 'unpaid'}">${esc(p.by ? p.by.color : p.sym)}</span>`).join('')}</div>
-    <div class="pstep">${P.step === 'target' ? 'Choose a target (glowing).' : `${filled}/${P.pips.length} paid. Click lands to tap them, or Auto pay.`}</div>
-    <div class="pbtns"><button class="primary" data-pay="auto">Auto pay <kbd>Space</kbd></button><button class="btn" data-pay="cancel">Cancel <kbd>Esc</kbd></button></div>`;
-  el.querySelector('[data-pay=auto]').disabled = P.step === 'target';
+    <div class="pstep">${P.step === 'target' ? 'Choose a target (glowing).' : `${filled}/${P.pips.length} paid. Click lands to tap them, or Auto pay (Space).`}</div>
+    <div class="pbtns"><button class="btn small" data-pay="cancel" title="Put the card back (Esc, right-click)">Cancel <kbd>Esc</kbd></button></div>`;
 }
 
 function lexLess(a, b) {
@@ -1642,7 +1641,6 @@ function renderDock() {
       if (S.paying) {
         const Pg = S.paying;
         pr.innerHTML = `<span class="k">${esc(Pg.verb)} ${esc(Pg.name)}</span>${Pg.step === 'target' ? 'Choose a target, or Esc to cancel.' : `Pay ${esc(Pg.cost)}: click lands to tap them, or Auto pay. Esc or right-click cancels.`}`;
-        ch.innerHTML = '<button class="choice sec" data-pay="cancel">Cancel</button>';
         P.textContent = 'Auto pay'; P.dataset.act = 'paycommit'; P.disabled = Pg.step === 'target'; P.classList.add('ask');
         break;
       }

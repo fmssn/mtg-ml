@@ -520,8 +520,8 @@ button:disabled{cursor:default}
 #paying .pip.paid.W{background:#f6f0d0}#paying .pip.paid.U{background:#9ccfee}#paying .pip.paid.B{background:#a99e9a}#paying .pip.paid.R{background:#f29b7c}#paying .pip.paid.G{background:#94c9a0}#paying .pip.paid.C{background:#cbc2bf}
 @keyframes pipin{from{scale:1.5}to{scale:1}}
 #paying .pstep{font-size:12.5px;color:var(--muted);text-align:center}
-#paying .pbtns{display:flex;flex-direction:column;gap:6px}
-#paying .pbtns button{flex:1;font-size:12.5px;padding:7px 6px}
+#paying .pbtns{display:flex;justify-content:center}
+#paying .pbtns button{font-size:12px;padding:4px 12px}
 #paying kbd{font-size:10px;opacity:.7}
 #hand .card.casting{opacity:.18;filter:grayscale(.6)}
 #board .perm.paysrc{cursor:pointer}
