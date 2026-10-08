@@ -358,8 +358,7 @@ class BenchmarkBlue:
         return max(candidates, key=lambda s: self._spell_value(view, s), default=None)
 
     def _spike_live(self, view, item):
-        return available(view, item["controller"]) < 1 + sum(
-            w["ward"]["amount"] for w in view.context["stack"] if w.get("ward", {}).get("sid") == item["sid"])
+        return available(view, item["controller"]) < 1 + self._obligations(view, item["sid"])
 
     def _reserve(self, view, cost):
         protecting = any(c["power"] >= 3 or c["name"] == "Delver of Secrets" for c in creatures(view, "self"))

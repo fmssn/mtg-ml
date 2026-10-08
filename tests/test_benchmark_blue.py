@@ -338,6 +338,29 @@ def test_counter_chain_preserves_the_lower_spells_ward_budget(mana, protect):
         assert [c for c in g.battlefield if c.controller == 1 and c.name == "Tolarian Terror"]
 
 
+@pytest.mark.parametrize("mana,add_spike", [(3,True), (4,False)])
+def test_force_spike_includes_an_existing_spike_payment(mana, add_spike):
+    # A puzzle start may already contain a payable Spike. Adding another must
+    # use the total public bill, without relying on how the first was cast.
+    g = scenario(p0={"hand": ["Force Spike", "Force Spike"], "battlefield": ISLANDS(2)+["Delver of Secrets"]},
+                 p1={"hand": ["Cast Down"], "battlefield": ["Swamp"]*mana}, active=1)
+    choose(g, "Cast Cast Down"); pay(g); pass_priority(g)
+    choose(g, "Cast Force Spike"); pay(g)
+    assert (key(g)[0:2] == ("cast", "Force Spike")) == add_spike
+    while g.stack:
+        if g.decision.player == 0:
+            g.step(choice(g))
+        elif g.decision.kind == "yes_no":
+            _, actions = inputs(g, 1, MONO_BLUE_TERROR)
+            yes = next((a.index for a in actions if a.key == ("pay_optional", "yes")), 0)
+            g.step(yes)
+        else:
+            g.step(0)
+    assert ("Delver of Secrets" in names(g.battlefield)) == add_spike
+    assert names(g.players[0].hand) == ([] if add_spike else ["Force Spike"])
+    assert "Cast Down" in names(g.players[1].graveyard)
+
+
 def test_target_ward_budget_avoids_unpayable_bounce():
     g = scenario(p0={"hand": ["Deem Inferior"], "battlefield": ISLANDS(2), "drawn": 2},
                  p1={"battlefield": ["Tolarian Terror"]})
