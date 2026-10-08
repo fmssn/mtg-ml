@@ -125,6 +125,7 @@ def state_features(game, viewer: int, features: int = FEATURES) -> list[str]:
         if allocation is not None:
             f += [f"damage:recipient:{allocation.recipient}", f"damage:remaining:{allocation.remaining}", f"damage:player:{allocation.player_damage}"]
             f += [f"damage:assigned:{i}:{n}" for i, n in enumerate(allocation.assigned)]
+            f += [f"damage:lethal:{i}:{n}" for i, n in enumerate(allocation.lethal)]
     f += _thermo("turn", o["turn"], TURN_STEPS)
     if o["lands_played"] is not None:
         f.append(f"land_played:{o['lands_played'] > 0}")
@@ -367,6 +368,17 @@ def entity_features(game, viewer: int, features: int = FEATURES) -> tuple[list[l
             e += _combat_entity(game, c, slots)
         if v5:
             e += card.face.shape
+        if features >= 7 and game.damage_allocation is not None:
+            allocation = game.damage_allocation
+            if p["oid"] == allocation.attacker:
+                e.append("e:damage:source")
+            if p["oid"] in allocation.blockers:
+                j = allocation.blockers.index(p["oid"])
+                e += [f"e:damage:slot:{j}", f"e:damage:assigned:{allocation.assigned[j]}", f"e:damage:lethal:{allocation.lethal[j]}"]
+                if j == allocation.recipient:
+                    e.append("e:damage:recipient")
+                if j < allocation.recipient:
+                    e.append("e:damage:committed")
         index[p["oid"]] = len(ents)
         ents.append(e)
     for i, (it, item) in enumerate(zip(reversed(o["stack"]), reversed(game.stack))):

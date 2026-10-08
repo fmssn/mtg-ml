@@ -550,7 +550,8 @@ all attackers' allocations are complete (CR 510.1c, 702.19b).
 ids, lethal requirements, committed shares, recipient (`-1` for the defender),
 remaining power, defender, and defender share (`-1` before its choice). Keys
 include the progress and amount without object ids; labels supply attacker and
-recipient pointers. The new decision is supported by both engines, snapshots,
+recipient pointers. Set 7 also puts exact lethal/committed amounts and current
+recipient/attacker markers on their corresponding entities. The new decision is supported by both engines, snapshots,
 public events, bots, and the live client. Scripted bots maximize their existing
 kill/value/trample score using suffix dynamic programming. Old policies can
 load but have not learned the new decision; engine-version changes must be

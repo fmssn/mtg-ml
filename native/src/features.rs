@@ -100,6 +100,7 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
             direct!(o, "damage:remaining:{}", a.remaining);
             direct!(o, "damage:player:{}", a.player_damage);
             for (i, n) in a.assigned.iter().enumerate() { direct!(o, "damage:assigned:{i}:{n}"); }
+            for (i, n) in a.lethal.iter().enumerate() { direct!(o, "damage:lethal:{i}:{n}"); }
         }
     }
     thermo(o, "turn", st.turn as i64, TURN_STEPS);
@@ -452,6 +453,16 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, 
         }
         if v5 {
             shape(c.face(), o);
+        }
+        if let Some(a) = st.damage_allocation.as_ref().filter(|_| features >= 7) {
+            if c.oid == a.attacker { tok!(o, "e:damage:source"); }
+            if let Some(j) = a.blockers.iter().position(|&b| b == c.oid) {
+                tok!(o, "e:damage:slot:{j}");
+                tok!(o, "e:damage:assigned:{}", a.assigned[j]);
+                tok!(o, "e:damage:lethal:{}", a.lethal[j]);
+                if j as i32 == a.recipient { tok!(o, "e:damage:recipient"); }
+                if (j as i32) < a.recipient { tok!(o, "e:damage:committed"); }
+            }
         }
         ids.push(c.oid);
     }

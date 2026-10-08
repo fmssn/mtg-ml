@@ -30,7 +30,8 @@ def test_featurize_one_entry_per_legal_option():
     state, opts = featurize(g, g.decision.player)
     glob = state[: state.index(STATE_DIM)]  # then one segment per entity: from set 5 on the decider's hand
     assert glob == sorted(set(glob)) and state.count(STATE_DIM) == 7
-    assert featurize(g, g.decision.player, features=4)[0] == glob  # no permanents or stack yet
+    legacy, _ = featurize(g, g.decision.player, features=6)
+    assert featurize(g, g.decision.player, features=4)[0] == legacy[: legacy.index(STATE_DIM)]  # legacy sets share the global bag here
     assert opts and all(opts)
     assert len(opts) == len(g.legal_options())
 

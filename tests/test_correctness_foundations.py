@@ -54,6 +54,11 @@ def test_nonlethal_divisions_include_every_blocker_and_copy():
     amount(g, 0)
     clone = g.copy()
     assert clone.damage_allocation == g.damage_allocation
+    ents, index = entity_features(g, 0, 7)
+    a = g.damage_allocation
+    assert "e:damage:source" in ents[index[a.attacker]]
+    assert {"e:damage:committed", "e:damage:assigned:0", "e:damage:lethal:1"} <= set(ents[index[a.blockers[0]]])
+    assert "e:damage:recipient" in ents[index[a.blockers[1]]]
     assert event_hashes(clone, 0) == event_hashes(g, 0)
     for engine in (g, clone):
         # Leave ten blockers alive and assign everything to blocker eleven.
