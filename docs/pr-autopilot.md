@@ -14,6 +14,24 @@ Ready PRs are reviewed, fixed and merged without the developer. A cheap model fi
 
 Drafts, forks and PRs by anyone but the repo owner are ignored. Pushes by the autopilot itself don't start a review; CI judges them.
 
+## Stacked PRs
+
+Autopilot only handles ready PRs targeting the current protected default branch.
+Before starting a review it checks the live default branch and effective rules:
+PRs plus up-to-date `lint`, `python` and `native` checks must be required. Missing
+rules or failed API reads hold the run with auto-merge off. The trusted controller
+rechecks the live PR base, draft/open state and protection before pushing and
+before enabling auto-merge; its final check also matches the reviewed head.
+
+Keep a PR targeting another feature branch **draft**. Name its prerequisite PR
+in the description and handoff. After that prerequisite merges, the leaf's owner
+retargets to the default branch, reconciles the diff (especially after a squash),
+updates the handoff and reruns validation/CI. Only then request readiness under
+the normal user-confirmed workflow. Retargeting alone does not trigger review:
+use the draft-to-ready transition after validation. Do not mark the leaf ready
+to merge it into its parent's unprotected branch. The branch-update sweep handles
+default-branch PRs; stack maintenance remains with the workspace owner.
+
 ## Guard rails
 
 - The cheap model may not edit `tests/` (golden digests included), `mtg_ml/engine/cards.toml` or `.github/`, except to resolve a merge conflict in that exact file. If it does, nothing is pushed and the PR escalates. This blocks "fix" commits that bend an assertion to match a bug.

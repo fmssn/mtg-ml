@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from review_result import InvalidResult, completion_problems, parse_result as validate_result, read_json
+from policy import PolicyError, require_target
 
 # The cheap model may not touch these (except to resolve a conflict in that file).
 # For the escalation model, edits here are allowed but stop auto-merge.
@@ -43,6 +44,17 @@ def output(**kv):
             f.write(f"{k}<<EOF_AUTOPILOT\n{v}\nEOF_AUTOPILOT\n")
 
 
+def target_allowed(pr, base, head=None):
+    try:
+        require_target(pr, expected_base=base, expected_head=head)
+    except (PolicyError, KeyError, TypeError) as exc:
+        gh("pr", "merge", pr, "--disable-auto")
+        output(outcome="blocked", reason=str(exc))
+        print(f"Autopilot held: {exc}", file=sys.stderr)
+        return False
+    return True
+
+
 def parse_result(tmp):
     try:
         return validate_result(read_json(tmp / "claude.json"))
@@ -69,13 +81,15 @@ def comment(pr, title, result, extra=""):
     gh("pr", "comment", pr, "--body", "\n".join(lines))
 
 
-def push(head, base):
+def push(head, base, pr):
     """Push HEAD to the PR branch. Returns None on success, else the outcome to report.
 
     If the branch moved during the run only because the base branch was merged in
     (update-branch after something landed on the default branch), merge that in and
     push again instead of throwing the whole review away.
     """
+    if not target_allowed(pr, base):
+        return "blocked"
     try:
         sh("git", "push", "origin", f"HEAD:refs/heads/{head}")
         return None
@@ -92,6 +106,8 @@ def push(head, base):
     if subprocess.run(("git", "merge", "--no-edit", f"origin/{head}"), capture_output=True).returncode:
         sh("git", "merge", "--abort", check=False)
         return "retry"
+    if not target_allowed(pr, base):
+        return "blocked"
     try:
         sh("git", "push", "origin", f"HEAD:refs/heads/{head}")
         return None
@@ -102,6 +118,8 @@ def push(head, base):
 def main():
     stage, pr, head, rnd = sys.argv[1:5]
     base = sys.argv[5] if len(sys.argv) > 5 else os.environ["BASE_REF"]
+    if not target_allowed(pr, base):
+        return 0
     tmp = Path(os.environ["RUNNER_TEMP"])
     conflicts = set((tmp / "conflicts.txt").read_text().splitlines())
     if stage == "fix":
@@ -169,7 +187,9 @@ def main():
         msg = f"autopilot ({stage}): {result.get('summary', 'fixes')}"[:200]
         sh("git", "commit", "--no-verify", "-m", msg)
     if sh("git", "rev-list", f"origin/{head}..HEAD").strip():
-        moved = push(head, base)
+        moved = push(head, base, pr)
+        if moved == "blocked":
+            return 0
         if moved:
             # Drop this round. A developer push starts its own review run; anything
             # else (a base update we couldn't merge cleanly) is re-dispatched.
@@ -191,7 +211,10 @@ def main():
         output(outcome="human", reason="escalation model changed tests or card data")
         return 0
     gh("pr", "edit", pr, "--remove-label", "needs-opus")
-    gh("pr", "merge", pr, "--auto", "--squash", "--match-head-commit", sh("git", "rev-parse", "HEAD").strip())
+    reviewed_head = sh("git", "rev-parse", "HEAD").strip()
+    if not target_allowed(pr, base, reviewed_head):
+        return 0
+    gh("pr", "merge", pr, "--auto", "--squash", "--match-head-commit", reviewed_head)
     output(outcome="automerge", reason=result.get("summary", ""))
     return 0
 
