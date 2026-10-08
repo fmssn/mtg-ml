@@ -59,6 +59,13 @@ def handler(monitor):
                 body, mime = (HERE / page).read_bytes(), 'text/html; charset=utf-8'
             elif self.path == '/api/state':
                 body, mime = monitor.state(), 'application/json'
+            elif self.path in ('/morning-report.json', '/morning-report.md'):
+                path = Path(monitor.campaign) / self.path.removeprefix('/')
+                if monitor.source != 'local' or not path.is_file():
+                    self.send_error(404)
+                    return
+                body = path.read_bytes()
+                mime = 'application/json' if path.suffix == '.json' else 'text/plain; charset=utf-8'
             elif self.path == '/healthz':
                 body, mime = json.dumps({'ok': True, 'last_attempt': monitor.value['last_attempt'], 'error': monitor.value['error']}).encode(), 'application/json'
             elif self.path == '/favicon.ico':
