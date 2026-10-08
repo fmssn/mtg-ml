@@ -111,6 +111,16 @@ Drop and double-click mean "play it": they take only a land play or a normal cas
 | yes_no, choose_mode, choose_x, order, order_triggers | option buttons above the primary button |
 | mulligan | "Keep 7" as the primary button, "Mulligan to 6" beside it |
 
+### Match flow
+
+Games are best of three (`mtg_ml.match`): game 1 with the maindecks, games 2 and 3 sideboarded. The model takes the plan table's plan (`engine/sideboard_plans.toml`); between games the result card lets you take the same table's standard plan for your deck (its swaps are listed) or keep the maindeck, and if you lost you choose to play or draw (the model always plays first after a loss). After the match the button is a rematch: a new match with the same settings. The header shows "Game 2 of 3 · 0–1", each plate "on the play" / "on the draw".
+
+**Concede** (header, with a confirm) ends a game as a loss; **New game** asks before leaving a running game. A game ends with a VICTORY / DEFEAT banner, then the result card: the reason in words, damage dealt and taken, cards played, flags, the match score, the full replay link.
+
+The opening hand opens a mulligan screen: the seven cards large, the land count (amber at 0-1 or 6-7), play or draw, and Keep / Mulligan as two buttons. Click a deck name on a plate for both decklists (maindeck and sideboard).
+
+Endpoints: `POST /api/live/<id>/concede`, `POST /api/live/<id>/next {plan, play}`, `GET /api/live/sideboard?matchup=&seat=`, `GET /api/live/decks?matchup=&seat=`. A full server never drops a game that is being played (touched in the last 10 minutes and not over): it refuses a new game with a message instead.
+
 ### Log and feed
 
 The log is written in Magic's words, one line per action, from the parsed events, the decisions and the difference between two states: "Opponent casts Lightning Bolt → your Sagu Wildling", "Cryptic Serpent deals 6 damage to you", "Your life 18 → 12 (−6)", "Tolarian Terror dies", "You draw Ponder", "Mountain, Ponder are put into the opponent's graveyard from the library". Targets and X join the line of their spell; steps, mana, priority passes and engine tokens (p0/p1, choose_card, (normal), winner=1) never show. Triggers and resolutions are dimmed.

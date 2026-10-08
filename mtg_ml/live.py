@@ -31,14 +31,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .agents import take
 from .backend import engine_name, game_class
+from .engine import DECKS, SIDEBOARDS, expand, plan_for, postboard
 from .match import MATCHUPS, game_args, matchup_decks
 from .live_proto import add_tap_previews, auto_pay_index, combat_and_life_lines, option_ref, option_refs, parse_events, status, visible_ids
 from .replay import DECK_TITLES, FORMAT, snapshot, visible_events
 from .rl.features import PUBLIC_KINDS
 
 SCRIPTED = "scripted-bot"  # the deck's hand-written bot, offered with --scripted-bot (dev, no checkpoint needed)
-MAX_GAMES = 8  # games held at once; the oldest idle one makes room
+MAX_GAMES = 8  # games held at once; only an idle or finished game makes room
 IDLE_SECONDS = 3600  # a game nobody touched for this long is dropped
+ACTIVE_SECONDS = 600  # a game touched within this long is being played: never evicted
 
 
 def live_dev_options() -> dict[str, str]:
@@ -64,10 +66,18 @@ def find_models(directory: pathlib.Path) -> dict[str, pathlib.Path]:
 
 
 class LiveGame:
-    def __init__(self, gid: str, model_name: str, model_path: pathlib.Path | None, seat: int, matchup: str, greedy: bool, seed: int, engine: str | None, scenario: str | None = None):
+    def __init__(self, gid: str, model_name: str, model_path: pathlib.Path | None, seat: int, matchup: str, greedy: bool, seed: int, engine: str | None,
+                 scenario: str | None = None, match: dict | None = None, game_no: int = 1, start: int | None = None, plan: str = "standard"):
         """`model_path` None: the deck's scripted bot plays instead (`SCRIPTED`).
-        `scenario`: a `live_dev` scenario (dev servers only); it sets the matchup and seat."""
+        `scenario`: a `live_dev` scenario (dev servers only); it sets the matchup and seat.
+        `match`: the best-of-three this game belongs to (shared with its other
+        games); `game_no` 2 and 3 are sideboarded: the model plays the plan
+        table's plan, the player `plan` ("standard": the same table's plan
+        for their deck, "maindeck": no changes). `start`: the starting player."""
         game = None
+        self.match, self.game_no, self.plan = match, game_no, plan
+        self.conceded = False
+        self.model_name, self.greedy, self.scenario = model_name, greedy, scenario
         if scenario is not None:
             from . import live_dev
 
@@ -86,7 +96,16 @@ class LiveGame:
         self.agents[seat], self.agents[1 - seat] = Human(), self.model
         self.names = ["", ""]
         self.names[seat], self.names[1 - seat] = "you", f"model:{model_name}" + (" (greedy)" if greedy else "")
-        self.g = game if game is not None else game_class(engine)(**game_args(1, matchup), seed=seed, log=True)
+        if game is None:
+            args = game_args(game_no, matchup)
+            if game_no > 1:  # sideboarded: the model takes the table's plan, the player the plan they chose
+                decks = list(matchup_decks(matchup))
+                mine = postboard(decks[seat], decks[1 - seat]) if plan == "standard" else DECKS[decks[seat]]
+                lists = [None, None]
+                lists[seat], lists[1 - seat] = expand(mine), expand(postboard(decks[1 - seat], decks[seat]))
+                args["decks"] = tuple(lists)
+            game = game_class(engine)(**args, seed=seed, log=True, **({} if start is None else {"starting_player": start}))
+        self.g = game
         self.seed = seed
         self.full_info: dict = {}  # card data for the saved replay
         self.view_info: dict = {}  # card data the player has seen
@@ -173,11 +192,30 @@ class LiveGame:
         self.frames.append({"state": state, "events": events, "actions": parse_events(events), "decision": decision})
         self.view_seen = len(self.log)
 
+    # -- result (a concession ends the game without the engine)
+    @property
+    def over(self) -> bool:
+        return self.conceded or self.g.over
+
+    @property
+    def winner(self) -> int | None:
+        return 1 - self.seat if self.conceded else self.g.winner if self.g.over else None
+
+    @property
+    def end_reason(self) -> str:
+        return "concede" if self.conceded else self.g.end_reason if self.g.over else ""
+
+    def concede(self) -> None:
+        if self.over:
+            raise LiveError("the game is over")
+        self.conceded = True
+        self.log.append(f"p{self.seat} concedes")
+        self._view_frame(self._view_state(), None)
+
     def choose(self, frame: int, index: int) -> None:
         """Take option `index` at the player's decision `frame` (the frame
         number guards against a repeated or stale click)."""
-        g = self.g
-        if g.over:
+        if self.over:
             raise LiveError("the game is over")
         if frame != len(self.frames) - 1:
             raise LiveError("that decision was already made")
@@ -197,13 +235,24 @@ class LiveGame:
             "engine": engine_name(self.engine),
             "agents": self.names,
             "decks": [DECK_TITLES[d] for d in matchup_decks(self.matchup)],
-            "match_game": 1,
+            "match_game": self.game_no,
             "starting_player": g.starting_player,
-            "winner": g.winner if g.over else None,
-            "end_reason": g.end_reason if g.over else "",
+            "winner": self.winner,
+            "end_reason": self.end_reason,
+            "match": self._match_meta(),
             "turns": g.turn,
             "recorded": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
+
+    def _match_meta(self) -> dict | None:
+        m = self.match
+        if m is None:
+            return None
+        results = m["results"]
+        wins = [sum(1 for _, w in results if w == p) for p in (0, 1)]
+        over = max(wins) >= 2 or len(results) >= 3
+        last_loser = None if not results or results[-1][1] is None else 1 - results[-1][1]
+        return {"game_no": self.game_no, "results": results, "wins": wins, "over": over, "you_choose_play": last_loser == self.seat, "plan": self.plan}
 
     def replay(self) -> dict:
         """The finished game as an ordinary omniscient replay."""
@@ -220,7 +269,7 @@ class LiveGame:
             "meta": self._meta(),
             "cards": self.view_info,
             "frames": self.frames[since:],
-            "live": {"id": self.id, "seat": self.seat, "since": since, "over": self.g.over, "replay": self.replay_file},
+            "live": {"id": self.id, "seat": self.seat, "since": since, "over": self.over, "replay": self.replay_file, "scenario": self.scenario, "matchup": self.matchup},
         }
 
 
@@ -269,10 +318,68 @@ class LiveManager:
     def choose(self, gid: str, req: dict) -> dict:
         return self._run(self._choose, gid, req)
 
+    def concede(self, gid: str) -> dict:
+        return self._run(self._concede, gid)
+
+    def next_game(self, gid: str, req: dict) -> dict:
+        return self._run(self._next, gid, req)
+
+    def sideboard(self, matchup: str, seat: int) -> dict:
+        """The standard plan for the player's deck in `matchup` (what "standard" swaps)."""
+        if matchup not in MATCHUPS or seat not in (0, 1):
+            raise LiveError("unknown matchup or seat")
+        decks = matchup_decks(matchup)
+        plan = plan_for(decks[seat], decks[1 - seat])
+        return {"in": dict(plan.cards_in), "out": dict(plan.cards_out), "deck": DECK_TITLES[decks[seat]]}
+
+    def decklists(self, matchup: str, seat: int, game_no: int = 1) -> dict:
+        """Both decks of `matchup` (maindeck and sideboard): public in Pauper, and
+        what a player wants to know about the opponent."""
+        if matchup not in MATCHUPS or seat not in (0, 1):
+            raise LiveError("unknown matchup or seat")
+        decks = matchup_decks(matchup)
+        from .engine.cards import CARDS
+
+        def deck(d: str) -> dict:
+            names = {**DECKS[d], **SIDEBOARDS[d]}
+            return {"title": DECK_TITLES[d], "main": dict(DECKS[d]), "side": dict(SIDEBOARDS[d]),
+                    "types": {n: sorted(CARDS[n].types) for n in names if n in CARDS}}
+
+        return {"mine": deck(decks[seat]), "theirs": deck(decks[1 - seat])}
+
+    def _concede(self, gid: str) -> dict:
+        game = self._get(gid)
+        game.concede()
+        self._finish(game)
+        return game.view(len(game.frames) - 2)
+
+    def _next(self, gid: str, req: dict) -> dict:
+        """The next game of the match (or a rematch: a new match, same settings)."""
+        prev = self._get(gid)
+        if not prev.over:
+            raise LiveError("finish or concede this game first")
+        if prev.scenario is not None:
+            return self._new({"model": prev.model_name, "scenario": prev.scenario, "greedy": prev.greedy})
+        mm = prev._match_meta()
+        if mm is None or mm["over"]:
+            return self._new({"model": prev.model_name, "seat": prev.seat, "matchup": prev.matchup, "greedy": prev.greedy})
+        plan = req.get("plan", "standard")
+        if plan not in ("standard", "maindeck"):
+            raise LiveError("plan must be 'standard' or 'maindeck'")
+        last_start, last_winner = prev.match["results"][-1]
+        if last_winner is None:
+            start = last_start
+        elif last_winner == prev.seat:  # the model lost: it chooses to play first
+            start = 1 - prev.seat
+        else:  # you lost: you choose
+            start = prev.seat if req.get("play", True) else 1 - prev.seat
+        return self._new({"model": prev.model_name, "seat": prev.seat, "matchup": prev.matchup, "greedy": prev.greedy},
+                         match=prev.match, game_no=prev.game_no + 1, start=start, plan=plan)
+
     def _models(self) -> dict[str, pathlib.Path]:
         return {} if self.models_dir is None else find_models(self.models_dir)
 
-    def _new(self, req: dict) -> dict:
+    def _new(self, req: dict, match: dict | None = None, game_no: int = 1, start: int | None = None, plan: str = "standard") -> dict:
         models: dict = self._models()
         if self.scripted:
             models[SCRIPTED] = None
@@ -290,22 +397,31 @@ class LiveManager:
         seed = secrets.randbelow(2**31) if seed is None else int(seed)
         gid = secrets.token_urlsafe(9)
         try:
-            game = LiveGame(gid, name, models[name], seat, matchup, bool(req.get("greedy")), seed, self.engine, scenario)
+            if match is None and scenario is None:
+                match = {"id": secrets.token_urlsafe(6), "results": []}
+            self._evict()  # make room first: a full server refuses before any work
+            game = LiveGame(gid, name, models[name], seat, matchup, bool(req.get("greedy")), seed, self.engine, scenario, match, game_no, start, plan)
         except LiveError:
             raise
         except Exception as e:  # a checkpoint this code cannot run (old features, other config)
             raise LiveError(f"cannot play {name}: {e}") from e
-        self._evict()
         self.games[gid] = game
         self._finish(game)
         return game.view()
 
     def _evict(self) -> None:
+        """Drop expired games, then make room for one more by dropping idle or
+        finished games (oldest first). A game being played is never dropped:
+        when every slot holds one, the new game is refused."""
         now = time.monotonic()
-        old = sorted(self.games, key=lambda k: self.games[k].touched)
-        n = max(len(old) - self.max_games + 1, sum(now - self.games[k].touched > IDLE_SECONDS for k in old))
-        if n > 0:
-            self._drop(old[:n])
+        self._drop([k for k, g in self.games.items() if now - g.touched > IDLE_SECONDS])
+        if len(self.games) < self.max_games:
+            return
+        spare = sorted((k for k, g in self.games.items() if g.over or now - g.touched > ACTIVE_SECONDS), key=lambda k: self.games[k].touched)
+        need = len(self.games) - self.max_games + 1
+        if len(spare) < need:
+            raise LiveError(f"The server is full: {len(self.games)} games are being played. Please try again in a few minutes.")
+        self._drop(spare[:need])
 
     def _get(self, gid: str) -> LiveGame:
         game = self.games.get(gid)
@@ -324,8 +440,10 @@ class LiveManager:
         """Write the replay of a game that just ended."""
         import json
 
-        if not game.g.over or game.replay_file:
+        if not game.over or game.replay_file:
             return
+        if game.match is not None:
+            game.match["results"].append((game.g.starting_player, game.winner))
         model = game.names[1 - game.seat].split(":", 1)[1].split(" ")[0].replace("/", "_")
         name = f"human-vs-{model}-{game.id}.json" if game.seat == 0 else f"{model}-vs-human-{game.id}.json"
         self.replay_dir.mkdir(parents=True, exist_ok=True)

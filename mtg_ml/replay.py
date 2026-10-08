@@ -243,6 +243,10 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
             try:
                 if method == "GET" and parts == ["options"]:
                     return self._json(live.options())
+                if method == "GET" and parts == ["sideboard"]:
+                    return self._json(live.sideboard(query.get("matchup", [""])[0], int(query.get("seat", ["0"])[0])))
+                if method == "GET" and parts == ["decks"]:
+                    return self._json(live.decklists(query.get("matchup", [""])[0], int(query.get("seat", ["0"])[0]), int(query.get("game", ["1"])[0])))
                 if method == "GET" and len(parts) == 1:
                     return self._json(live.view(parts[0], int(query.get("since", ["0"])[0])))
                 if method == "POST":
@@ -256,6 +260,10 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                         return self._json(live.new(req))
                     if len(parts) == 2 and parts[1] == "choose":
                         return self._json(live.choose(parts[0], req))
+                    if len(parts) == 2 and parts[1] == "concede":
+                        return self._json(live.concede(parts[0]))
+                    if len(parts) == 2 and parts[1] == "next":
+                        return self._json(live.next_game(parts[0], req))
             except (LiveError, ValueError) as e:  # JSON and int() errors are ValueErrors too
                 return self._json({"error": str(e)}, 400)
             except Exception as e:  # keep the connection: the viewer shows the message

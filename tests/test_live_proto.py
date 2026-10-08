@@ -256,3 +256,47 @@ def test_dev_scenarios_only_on_dev_servers(tmp_path):
             assert view["frames"][-1]["decision"]["player"] == view["live"]["seat"]
     finally:
         m.close()
+
+
+def test_match_flow_concede_sideboard_rematch(manager):
+    """Concede ends a game as a loss; the match goes on with sideboarded games
+    (the loser chooses play or draw) until someone has two wins; then "next"
+    is a rematch: a new match."""
+    view = manager.new({"model": SCRIPTED, "seed": 3, "seat": 0, "matchup": "jund_blue"})
+    gid = view["live"]["id"]
+    assert view["meta"]["match"]["game_no"] == 1 and view["meta"]["match_game"] == 1
+    view = manager.concede(gid)
+    assert view["live"]["over"] and view["meta"]["winner"] == 1 and view["meta"]["end_reason"] == "concede"
+    assert view["frames"][-1]["decision"] is None and view["frames"][-1]["actions"][-1] == {"t": "concede", "p": 0}
+    m = view["meta"]["match"]
+    assert m["wins"] == [0, 1] and m["you_choose_play"] and not m["over"]
+    with pytest.raises(LiveError):
+        manager.concede(gid)
+    g2 = manager.next_game(gid, {"plan": "maindeck", "play": False})
+    assert g2["meta"]["match"]["game_no"] == 2 and g2["meta"]["starting_player"] == 1  # chose to draw
+    g2 = manager.concede(g2["live"]["id"])
+    assert g2["meta"]["match"]["over"] and g2["meta"]["match"]["wins"] == [0, 2]
+    again = manager.next_game(g2["live"]["id"], {})
+    assert again["meta"]["match"]["game_no"] == 1 and again["meta"]["match"]["results"] == []
+    with pytest.raises(LiveError):
+        manager.next_game(again["live"]["id"], {})  # not finished yet
+
+
+def test_sideboarded_decks(manager):
+    """Game 2 decks: the model plays the plan table's plan; the player the
+    standard plan or the maindeck, as chosen."""
+    from mtg_ml.engine import DECKS, expand, postboard
+
+    view = manager.new({"model": SCRIPTED, "seed": 4, "seat": 1, "matchup": "jund_blue"})
+    view = manager.concede(view["live"]["id"])
+    for plan in ("standard", "maindeck"):
+        nxt = manager.next_game(view["live"]["id"], {"plan": plan})
+        g = manager.games[nxt["live"]["id"]].g
+
+        def cards(p, g=g):  # read on the worker: native games belong to its thread
+            return sorted(c.name for c in list(g.players[p].library) + list(g.players[p].hand))
+
+        decks, model = manager._run(cards, 1), manager._run(cards, 0)
+        want = expand(postboard("mono_blue_terror", "jund_wildfire")) if plan == "standard" else expand(DECKS["mono_blue_terror"])
+        assert decks == sorted(want)
+        assert model == sorted(expand(postboard("jund_wildfire", "mono_blue_terror")))

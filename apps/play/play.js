@@ -34,7 +34,7 @@ if ((PREF.stopsVersion || 1) < 2) { PREF.stops.opp.declare_blockers = true; PREF
 // ---------------------------------------------------------------- game state
 const S = {
   gid: null, seat: 0, raw: [], cards: {}, meta: null, over: false, replay: null,
-  shown: -1, prev: null, lastCast: {}, seenUids: new Set(), pendingSpells: [], fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], pumping: false, busy: false, error: null, skip: false,
+  shown: -1, prev: null, stats: {dealt: 0, taken: 0, played: 0}, lastCast: {}, seenUids: new Set(), pendingSpells: [], fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], pumping: false, busy: false, error: null, skip: false,
   plan: null, ui: null, lastMine: -1, passMode: null, fullControl: false, feed: [], logDone: 0,
 };
 const opp = () => 1 - S.seat;
@@ -132,7 +132,7 @@ async function api(path, body) {
 function applyView(view) {
   const L = view.live;
   if (S.gid !== L.id) resetGame(L.id);
-  Object.assign(S, {seat: L.seat, over: L.over, replay: L.replay, meta: view.meta});
+  Object.assign(S, {seat: L.seat, over: L.over, replay: L.replay, meta: view.meta, matchup: L.matchup || S.matchup});
   Object.assign(S.cards, view.cards);
   const before = S.raw.length;
   S.raw.splice(L.since, Infinity, ...view.frames);
@@ -144,7 +144,7 @@ function applyView(view) {
 
 function resetGame(id) {
   // Every auto-pass mode and plan resets at a game boundary (Forge bug: End Turn carried over).
-  Object.assign(S, {gid: id, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
+  Object.assign(S, {gid: id, stats: {dealt: 0, taken: 0, played: 0}, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
     fullControl: false, feed: [], logDone: 0, error: null, skip: false});
   $('#log').innerHTML = '';
   renderFeed();
@@ -513,11 +513,11 @@ function frameLog(i) {
     const p = a.p;
     switch (a.t) {
       case 'turn': out.push(logEntry('th', `Turn ${a.turn} · ${a.p === S.seat ? 'your turn' : "opponent's turn"}`)); break;
-      case 'play': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'play' : 'plays'} ${a.name}`, p !== S.seat ? flagFor() : '')); break;
+      case 'play': if (p === S.seat) S.stats.played++; out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'play' : 'plays'} ${a.name}`, p !== S.seat ? flagFor() : '')); break;
       case 'cast': {
         const how = a.mode && a.mode !== 'normal' ? ` (${a.mode})` : '', from = a.zone && a.zone !== 'hand' ? ` from ${a.zone === 'graveyard' ? whose(p) + ' graveyard' : a.zone}` : '';
         const e = logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'cast' : 'casts'} ${a.name}${how}${from}`, p !== S.seat ? flagFor() : '');
-        e.castBy = p; out.push(e); S.lastCast[p] = e; break;
+        e.castBy = p; out.push(e); S.lastCast[p] = e; if (p === S.seat) S.stats.played++; break;
       }
       case 'activate': { const e = logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'activate' : 'activates'} ${a.name}`, p !== S.seat ? flagFor() : ''); out.push(e); S.lastCast[p] = e; break; }
       case 'plot': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'plot' : 'plots'} ${a.name}`)); break;
@@ -548,6 +548,7 @@ function frameLog(i) {
       }
       case 'life': {
         const d = a.new - a.old;
+        if (d < 0) S.stats[a.p === S.seat ? 'taken' : 'dealt'] -= d;
         out.push(logEntry(`life ${d < 0 ? 'neg' : 'pos'}`, `${a.p === S.seat ? 'Your' : "Opponent's"} life ${a.old} → ${a.new} (${d > 0 ? '+' : '−'}${Math.abs(d)})`));
         if (a.p === S.seat && d < 0) pushFeed(`You lost ${-d} life (${a.new} left)`, cause ?? i, true, 'impact');
         break;
@@ -556,6 +557,7 @@ function frameLog(i) {
       case 'sacrifice': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'sacrifice' : 'sacrifices'} ${a.name}`)); break;
       case 'mulligan': out.push(logEntry(p === S.seat ? 'me' : 'opp', `${who(p)} ${p === S.seat ? 'mulligan' : 'mulligans'} to ${7 - a.n}`)); break;
       case 'game_over': out.push(logEntry('th', `Game over: ${resultText()}`)); break;
+      case 'concede': out.push(logEntry('th', `${who(p)} ${p === S.seat ? 'concede' : 'concedes'}`)); break;
       case 'note': out.push(logEntry('dim', cleanName(a.text).replace(/\bp(\d)\b/g, (_, q) => +q === S.seat ? 'you' : 'the opponent'))); break;
       default: break;  // step, mana, dies (the leave line says it)
     }
@@ -762,7 +764,10 @@ function flip(before, prev) {
 function renderMeta() {
   const m = S.meta; if (!m) return;
   const me = S.seat, op = opp();
-  $('#meta').innerHTML = `<b>${esc(m.decks[me])}</b> (you) vs <b>${esc(m.decks[op])}</b> (${esc(agentName(m.agents[op]))}) · ${esc(m.engine)} engine`;
+  const mm = m.match;
+  const score = mm ? ` · Game ${mm.game_no} of 3 · ${mm.wins[me]}–${mm.wins[op]}` : '';
+  $('#meta').innerHTML = `<b>${esc(m.decks[me])}</b> (you) vs <b>${esc(m.decks[op])}</b> (${esc(agentName(m.agents[op]))})${score}`;
+  $('#bConcede').style.display = S.over ? 'none' : '';
 }
 
 function renderPlate(p, s, prev) {
@@ -780,7 +785,8 @@ function renderPlate(p, s, prev) {
   el.dataset.player = p;
   el.innerHTML = `
     <div class="who"><span class="dot"></span>${isMe ? 'You' : esc(agentName(S.meta?.agents[p]))}</div>
-    <div class="deck">${esc(S.meta?.decks[p] || '')}</div>
+    <div class="deck"><button class="decklink" data-decks="${p}" title="See the decklist">${esc(S.meta?.decks[p] || '')}</button></div>
+    <div class="playdraw">${S.meta && S.meta.starting_player === p ? 'on the play' : 'on the draw'}</div>
     <div class="life ${P.life <= 5 ? 'low' : ''} ${delta < 0 ? 'hit' : delta > 0 ? 'heal' : ''}"${lf ? fxDelay(lf) : ''}>${P.life}${delta ? `<span class="delta ${delta < 0 ? 'neg' : 'pos'}"${fxDelay(lf)}>${delta > 0 ? '+' : ''}${delta}</span>` : ''}</div>
     ${preview != null ? (preview <= 0 ? `<div class="lethal" title="This combat would be lethal if nothing changes">LETHAL</div>` : `<div class="preview-life">→ ${preview} after combat</div>`) : ''}
     <div class="zones">
@@ -1229,11 +1235,19 @@ function renderDock() {
   }
 }
 const agentName = a => !a ? 'Opponent' : a.replace(/^model:/, '').replace(/\/(model|latest)\b/, '').replace('scripted-bot', 'Scripted bot');
-const resultText = () => { const w = S.meta?.winner; return w == null ? `Draw (${S.meta?.end_reason || ''})` : w === S.seat ? `You win (${S.meta.end_reason})` : `You lose (${S.meta.end_reason})`; };
+const REASONS = {life: 'life reached 0', concede: 'conceded', decked: 'drew from an empty library', poison: 'ten poison counters', turns: 'turn limit'};
+function reasonText() {
+  const m = S.meta, r = m?.end_reason || '', loser = m?.winner == null ? null : 1 - m.winner;
+  if (r === 'concede') return loser === S.seat ? 'you conceded' : 'the opponent conceded';
+  const why = REASONS[r] || r;
+  return loser == null ? why : `${loser === S.seat ? 'your' : "the opponent's"} ${why}`;
+}
+const resultText = () => { const w = S.meta?.winner; return w == null ? `Draw (${reasonText()})` : w === S.seat ? `You win: ${reasonText()}` : `You lose: ${reasonText()}`; };
 
 // Kinds shown as a card browser: options that name cards.
 function overlayKind(d) {
-  if (['priority', 'declare_attacker', 'declare_blocker', 'target', 'pay_mana', 'mulligan'].includes(d.kind)) return false;
+  if (d.kind === 'mulligan') return true;
+  if (['priority', 'declare_attacker', 'declare_blocker', 'target', 'pay_mana'].includes(d.kind)) return false;
   if (d.kind === 'assign_damage') return true;
   return d.refs.filter(r => r.name && S.cards[r.name]).length >= Math.max(1, d.refs.length - 1);
 }
@@ -1242,6 +1256,19 @@ function renderOverlay() {
   const d = myDecision(), ui = S.ui, el = $('#overlay');
   if (!d || !ui || !overlayKind(d)) { if (!el.dataset.zone) closeOverlay(); return; }
   delete el.dataset.zone;
+  if (d.kind === 'mulligan') {
+    const s = stateAt(ui.fi), hand = s.players[S.seat].hand;
+    const lands = hand.filter(c => (S.cards[c.name]?.types || []).includes('Land')).length;
+    const onPlay = S.meta?.starting_player === S.seat;
+    const keep = d.refs.findIndex(r => r.type === 'keep'), mull = d.refs.findIndex(r => r.type === 'mulligan');
+    const taken = s.players[S.seat].mulligans || 0;
+    el.innerHTML = `<div class="obox mull"><h2>Opening hand${taken ? ` (after ${taken} mulligan${taken > 1 ? 's' : ''})` : ''}</h2>
+      <div class="sub">You are <b>${onPlay ? 'on the play' : 'on the draw'}</b> · <span class="landchip ${lands <= 1 || lands >= 6 ? 'warn' : ''}">${lands} land${lands === 1 ? '' : 's'}</span>${taken ? ` · you will put ${taken} card${taken > 1 ? 's' : ''} on the bottom` : ''}</div>
+      <div class="grid">${hand.map(c => `<div class="tile">${cardHtml(c.name, {uid: c.uid})}</div>`).join('')}</div>
+      <div class="orow"><button class="primary" data-opt="${keep}">Keep ${hand.length - taken}</button>${mull >= 0 ? `<button class="primary alt" data-opt="${mull}">Mulligan to ${hand.length - taken - 1}</button>` : ''}</div></div>`;
+    el.classList.add('on'); el.classList.remove('peek');
+    return;
+  }
   if (d.kind === 'assign_damage') {
     const r = d.refs[0], s = stateAt(ui.fi);
     const names = (r.to || []).map(o => s.battlefield.find(c => c.oid === o));
@@ -1477,6 +1504,8 @@ document.addEventListener('click', e => {
     if (idxs.length && canAct()) showMenu(zc, idxs, zc.dataset.zcard);
     return;
   }
+  const dl = t.closest('[data-decks]');
+  if (dl) { openDecks(); return; }
   const zone = t.closest('.zone[data-zone]');
   if (zone) { openZone(+zone.dataset.p, zone.dataset.zone); return; }
   if (!t.closest('#pop')) closePop();
@@ -1560,7 +1589,7 @@ document.addEventListener('pointerover', e => {
     const hcard = e.target.closest('#hand .card'), pcard = e.target.closest('#board .perm.activatable'), mitem = e.target.closest('#pop [data-opt]');
     showTaps(hcard ? tapsFor(handOpts(hcard.dataset.name)) : pcard ? tapsFor(permOpts(pcard)) : mitem ? tapsFor([+mitem.dataset.opt]) : null);
   }
-  const c = e.target.closest('.card[data-name], .sitem[data-name]');
+  const c = e.target.closest('.card[data-name], .sitem[data-name], .dline[data-name]');
   const hc = e.target.closest('#hand .card');
   $$('#hand .card').forEach(x => { x.classList.toggle('hover', x === hc && !drag); });
   if (hc && !drag) {
@@ -1633,7 +1662,7 @@ document.addEventListener('keydown', e => {
   if (inputLocked() && [' ', 'Enter', 'r', 'R', 'a', 'A', 'n', 'N'].includes(k)) { e.preventDefault(); return; }
   // A focused button, link or option keeps Space and Enter (activate it), never the global hotkeys.
   if ((k === ' ' || k === 'Enter') && e.target !== document.body && e.target.closest('button, a, [role=button], [tabindex]')) return;
-  if (k === ' ') { e.preventDefault(); if ($('#overlay').classList.contains('on') && S.ui?.kind === 'assign_damage') { const b = $('#overlay .primary'); if (b && !b.disabled) b.click(); return; } primary(); return; }
+  if (k === ' ') { e.preventDefault(); if ($('#overlay').classList.contains('on') && (S.ui?.kind === 'assign_damage' || S.ui?.kind === 'mulligan')) { const b = $('#overlay .primary'); if (b && !b.disabled) b.click(); return; } primary(); return; }
   if (k === 'Escape') {
     if (drag) { const dg = drag; drag = null; $('#field0').classList.remove('drop', 'hot'); $('#ghost').style.display = 'none'; dg.el.classList.remove('dragging'); dg.el.style.translate = ''; clearHot(); }
     closePop(); closeDrawer();
@@ -1659,7 +1688,15 @@ document.addEventListener('keydown', e => {
 $('#primary').addEventListener('click', e => { e.stopPropagation(); primary(); });
 document.addEventListener('mouseup', e => { const b = e.target.closest('button'); if (b && e.detail > 0) b.blur(); });  // mouse clicks don't park focus
 $('#bAll').addEventListener('click', e => { e.stopPropagation(); openDrawer(); });
-$('#bNew').addEventListener('click', () => openNewGame());
+$('#bNew').addEventListener('click', () => {
+  if (S.gid && !S.over && S.raw.length && !confirm('Leave this game? It counts as a loss and cannot be resumed.')) return;
+  openNewGame();
+});
+$('#bConcede').addEventListener('click', async () => {
+  if (!S.gid || S.over || S.busy || S.pumping) return;
+  if (!confirm('Concede this game?')) return;
+  try { applyView(await api(`${encodeURIComponent(S.gid)}/concede`, {})); pump(); } catch (e) { toast(e.message); }
+});
 $('#bSettings').addEventListener('click', () => openSettings());
 $('#bLog').addEventListener('click', () => { const l = $('#log'); l.classList.toggle('hide'); $('#bLog').textContent = l.classList.contains('hide') ? 'Show' : 'Hide'; });
 $('#overlay').addEventListener('click', e => { if (e.target.dataset.dmg) { const [j, dv] = e.target.dataset.dmg.split(':').map(Number); moveDamage(S.ui.dmg, j, dv); renderOverlay(); renderDock(); } });
@@ -1711,15 +1748,69 @@ function finishGame() {
   S.ui = null;
   if (S.raw.length) render(last(), {noAnim: true});
   renderDock();
-  if (!S.over) return;
+  renderMeta();
+  if (!S.over || S.resultShown === S.gid) return;
+  S.resultShown = S.gid;
   const w = S.meta?.winner, win = w === S.seat;
+  const banner = document.createElement('div');
+  banner.className = `banner ${w == null ? '' : win ? 'win' : 'loss'}`;
+  banner.textContent = w == null ? 'DRAW' : win ? 'VICTORY' : 'DEFEAT';
+  $('#board').appendChild(banner);
+  sound(w == null ? 'draw' : win ? 'win' : 'lose');
+  setTimeout(() => { banner.remove(); showResult(); }, beatScale() === 0 ? 300 : 1700);
+}
+
+// Both decklists (public in Pauper): click a deck name on a plate.
+async function openDecks() {
+  if (!S.matchup) return;
+  let d;
+  try { d = await api(`decks?matchup=${encodeURIComponent(S.matchup)}&seat=${S.seat}`); } catch (e) { toast(e.message); return; }
+  const group = (list, types) => {
+    const by = {};
+    for (const [n, k] of Object.entries(list)) { const t = types[n] || S.cards[n]?.types || []; const g = t.includes('Creature') ? 'Creatures' : t.includes('Land') ? 'Lands' : 'Spells'; (by[g] = by[g] || []).push([n, k]); }
+    return Object.entries(by).map(([g, xs]) => `<div class="dgrp"><h4>${g} (${xs.reduce((a, [, k]) => a + k, 0)})</h4>${xs.map(([n, k]) => `<div class="dline" data-name="${esc(n)}"><span>${k}</span> ${esc(n)}</div>`).join('')}</div>`).join('');
+  };
+  const col = (x, label) => `<div class="dcol"><h3>${label}: ${esc(x.title)}</h3>${group(x.main, x.types || {})}<div class="dgrp side"><h4>Sideboard (15)</h4>${Object.entries(x.side).map(([n, k]) => `<div class="dline" data-name="${esc(n)}"><span>${k}</span> ${esc(n)}</div>`).join('')}</div></div>`;
   const m = $('#modal');
-  m.innerHTML = `<div class="mbox"><div class="note">Game over · turn ${S.meta?.turns}</div><div class="big ${w == null ? '' : win ? 'win' : 'loss'}">${w == null ? 'Draw' : win ? 'You win' : 'You lose'}</div>
-    <div class="note">${esc(S.meta?.end_reason || '')}</div>
-    <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">${S.replay ? `<a class="btn" href="../#r=${encodeURIComponent(S.replay)}" target="_blank">Watch the full replay (both hands)</a>` : ''}
-    <button class="btn" id="bLook">Look at the board</button><button class="primary" id="bAgain">New game</button></div></div>`;
+  m.innerHTML = `<div class="mbox decks"><h2>Decklists</h2><div class="dcols">${col(d.mine, 'You')}${col(d.theirs, 'Opponent')}</div>
+    <div class="note">Games 2 and 3 are sideboarded: the opponent plays its standard plan for this matchup.</div>
+    <div style="margin-top:12px"><button class="primary" id="bDecksClose">Close</button></div></div>`;
   m.classList.add('on');
-  $('#bAgain').onclick = () => openNewGame();
+  $('#bDecksClose').focus();
+  $('#bDecksClose').onclick = () => m.classList.remove('on');
+}
+
+async function showResult() {
+  const m = $('#modal'), meta = S.meta, mm = meta?.match, w = meta?.winner, win = w === S.seat;
+  const me = S.seat, op = opp();
+  const matchOver = !mm || mm.over;
+  let sb = null;
+  if (mm && !mm.over) { try { sb = await api(`sideboard?matchup=${encodeURIComponent(S.matchup || '')}&seat=${me}`); } catch (e) { sb = null; } }
+  const swaps = sb && Object.keys(sb.in).length ? `<div class="sbplan"><div><b>In</b> ${Object.entries(sb.in).map(([n, k]) => `${k}× ${esc(n)}`).join(', ')}</div><div><b>Out</b> ${Object.entries(sb.out).map(([n, k]) => `${k}× ${esc(n)}`).join(', ')}</div></div>` : '';
+  const flags = FLAGS().filter(f => f.game === S.gid).length;
+  m.innerHTML = `<div class="mbox result"><div class="note">${mm ? `Game ${mm.game_no} of 3 · ` : ''}turn ${meta?.turns}</div>
+    <div class="big ${w == null ? '' : win ? 'win' : 'loss'}">${w == null ? 'Draw' : win ? 'You win' : 'You lose'}</div>
+    <div class="note">${esc(reasonText())}</div>
+    <div class="stats"><div><b>${S.stats.dealt}</b><span>damage dealt</span></div><div><b>${S.stats.taken}</b><span>damage taken</span></div><div><b>${S.stats.played}</b><span>cards played</span></div><div><b>${flags}</b><span>plays flagged</span></div></div>
+    ${mm ? `<div class="matchline">Match: you ${mm.wins[me]} – ${mm.wins[op]} ${esc(agentName(meta.agents[op]))}${matchOver ? (mm.wins[me] > mm.wins[op] ? ' · you win the match' : mm.wins[me] < mm.wins[op] ? ' · they win the match' : '') : ''}</div>` : ''}
+    ${!matchOver ? `<form id="fNext" class="nextgame">
+        <label>Sideboard</label><span class="seg"><label><input type="radio" name="plan" value="standard" checked>standard plan</label><label><input type="radio" name="plan" value="maindeck">keep the maindeck</label></span>
+        ${swaps ? `<div class="full">${swaps}</div>` : ''}
+        ${mm.you_choose_play ? `<label>You lost, so you choose</label><span class="seg"><label><input type="radio" name="play" value="1" checked>play first</label><label><input type="radio" name="play" value="0">draw first</label></span>` : `<div class="full note">They lost the last game, so they play first.</div>`}
+      </form>` : ''}
+    <div class="rbtns">${S.replay ? `<a class="btn" href="../#r=${encodeURIComponent(S.replay)}" target="_blank">Full replay (both hands)</a>` : ''}
+      <button class="btn" id="bLook">Look at the board</button><button class="btn" id="bChange">Change opponent or decks</button>
+      <button class="primary" id="bAgain">${matchOver ? 'Rematch' : `Next game (${mm.game_no + 1} of 3)`}</button></div></div>`;
+  m.classList.add('on');
+  $('#bAgain').focus();
+  $('#bAgain').onclick = async () => {
+    const f = $('#fNext');
+    const req = f ? {plan: f.plan.value, play: f.play ? f.play.value === '1' : true} : {};
+    $('#bAgain').disabled = true;
+    try { const v = await api(`${encodeURIComponent(S.gid)}/next`, req); m.classList.remove('on'); S.gid = null; applyView(v); pump(); }
+    catch (e) { toast(e.message); $('#bAgain').disabled = false; }
+  };
+  $('#bChange').onclick = () => openNewGame();
   $('#bLook').onclick = () => m.classList.remove('on');
 }
 
@@ -1750,6 +1841,7 @@ async function openNewGame() {
   f.onsubmit = async e => {
     e.preventDefault();
     const req = {model: f.model.value, matchup: f.matchup.value, seat: +(f.seat.value || 0), greedy: f.greedy.checked};
+    S.matchup = req.matchup;
     if (f.scenario && f.scenario.value) req.scenario = f.scenario.value;
     saveJSON('mtgml-play-last', req);
     const b = f.querySelector('button[type=submit]'); b.disabled = true; b.textContent = 'Starting…';

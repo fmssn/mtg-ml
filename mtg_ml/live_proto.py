@@ -172,6 +172,7 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^(?P<name>.+) is countered$"), "countered"),
     (re.compile(r"^(?P<name>.+) fizzles .*$"), "fizzle"),
     (re.compile(r"^GAME OVER: winner=(?P<winner>\w+) \((?P<reason>.*)\)$"), "game_over"),
+    (re.compile(r"^p(?P<p>\d) concedes$"), "concede"),
     (re.compile(r"^combat: (?P<name>.+)#(?P<oid>\d+) deals (?P<n>\d+) damage to p(?P<p>\d)$"), "hit"),
     (re.compile(r"^combat: (?P<name>.+)#(?P<oid>\d+) deals (?P<n>\d+) damage to (?P<to_name>.+)#(?P<to_oid>\d+)$"), "hit"),
     (re.compile(r"^life: p(?P<p>\d) (?P<old>-?\d+) -> (?P<new>-?\d+)$"), "life"),
