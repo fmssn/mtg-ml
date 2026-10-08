@@ -99,8 +99,6 @@ def _rules(face, token=False):
             "additional_sacrifice": face.additional_sac, "additional_discard": face.additional_discard,
             "escape_exile": face.escape_exile, "shape": face.shape,
             "power": face.power, "toughness": face.toughness, "token": token,
-            "ward": face.ward, "enters_tapped": face.enters_tapped,
-            "additional_sac": face.additional_sac,
             "bestow": None if face.bestow is None else str(face.bestow),
             "flashback": None if face.flashback is None else str(face.flashback),
             "keywords": sorted(face.keywords),
@@ -143,7 +141,7 @@ def inputs(g, viewer, own_deck):
     require(d is not None and d.player == viewer, "decision", "view requested for nondecider")
     require(d.kind in KINDS, "decision.kind", f"unsupported semantics {d.kind}")
     state = observe(g, viewer)
-    context = {"stack": stack_view(g, viewer)}
+    context = {"stack": stack_view(g, viewer), "blocked": sorted(g.blocked)}
     combat = g.combat_subjects if d.kind in {"declare_attacker", "declare_blocker", "assign_damage"} else None
     if combat is not None:
         require(len(combat) == len(d.options), "decision.subject", "missing structured combat subjects")

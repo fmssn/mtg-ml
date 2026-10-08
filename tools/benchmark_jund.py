@@ -25,7 +25,7 @@ from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR
 from mtg_ml.engine.cards import SPEC_PATH
 
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE = "beb19099133985ebe10636d105c2ac01a412bdcd"
+BASELINE = "66345da4c5bff4a1a31ab0047ff8b1abf3869c49"
 SETTINGS = dict(max_turns=100, max_decisions=10000, auto_single=False, auto_mana=False, auto_pass=False)
 STREAM = "benchmark-v1/dev"
 
@@ -90,24 +90,34 @@ def paired_summary(rows, blocks, mode="greedy", replicates=10000):
     expected = {(pilot, cell, b, slot) for pilot in ("specialist", "legacy") for cell in ("jund_vs_jund", "jund_vs_blue")
                 for b in range(blocks) for slot in range(4)}
     keyed = {(r["pilot"], r["cell"], r["block"], r["slot"]): r for r in rows}
-    if len(keyed) != len(rows) or set(keyed) != expected or any(r["status"] != "completed" for r in rows):
+    _, specs = schedule(blocks, mode)
+    scheduled = {(s.cell, s.block, s.slot): s for s in specs}
+    fields = ("mode", "simulator_seed", "actor_seed", "learner_seat", "starting_player")
+    valid = all((r["cell"], r["block"], r["slot"]) in scheduled and all(
+        r.get(k) == getattr(scheduled[r["cell"], r["block"], r["slot"]], k) for k in fields) for r in rows)
+    if not valid or len(keyed) != len(rows) or set(keyed) != expected or any(r["status"] != "completed" for r in rows):
         return {"status": "incomplete", "claim": None, "cells": {}, "mean_difference": None, "ci95": None}
     rng = random.Random(bootstrap_seed(STREAM, "jund-specialist-development-v1", mode))
-    cells, draws = {}, []
+    cells = {}
     for cell in ("jund_vs_jund", "jund_vs_blue"):
         differences = []
         for block in range(blocks):
             differences.append(sum(game_score(keyed["specialist", cell, block, s]) - game_score(keyed["legacy", cell, block, s]) for s in range(4)) / 4)
-        sampled = [sum(rng.choices(differences, k=blocks)) / blocks for _ in range(replicates)]
-        draws.append(sampled)
-        cells[cell] = dict(difference=sum(differences) / blocks, ci95=[quantile(sampled, .025), quantile(sampled, .975)],
-                           block_differences=differences)
-    overall = [(a + b) / 2 for a, b in zip(*draws)]
+        cells[cell] = dict(difference=sum(differences) / blocks, block_differences=differences)
+    draws = {cell: [] for cell in cells}
+    for _ in range(replicates):
+        indices = rng.choices(range(blocks), k=blocks)
+        # PR62 requires the same resampled block indices across fixed cells.
+        for cell, summary in cells.items():
+            draws[cell].append(sum(summary["block_differences"][i] for i in indices) / blocks)
+    for cell, summary in cells.items():
+        summary["ci95"] = [quantile(draws[cell], .025), quantile(draws[cell], .975)]
+    overall = [(a + b) / 2 for a, b in zip(*draws.values())]
     interval = [quantile(overall, .025), quantile(overall, .975)]
     loss = any(c["ci95"][1] < -.03 for c in cells.values())
     claim = "stronger-on-this-panel" if interval[0] > 0 and not loss else "regression-on-this-panel" if loss or interval[1] < 0 else "inconclusive"
     return dict(status="complete", claim=claim, cells=cells, mean_difference=sum(c["difference"] for c in cells.values()) / 2,
-                ci95=interval, bootstrap_replicates=replicates, bootstrap_unit="four-slot seed block, stratified by cell")
+                ci95=interval, bootstrap_replicates=replicates, bootstrap_unit="four-slot seed block; shared resampled indices across cells")
 
 
 def run(args):
@@ -129,7 +139,8 @@ def run(args):
             completed = [r for r in games if r["status"] == "completed"]
             summaries[pilot + ":" + cell] = dict(games=len(games), completed=len(completed), errors=len(games)-len(completed),
                 wins=sum(r["winner"] == r["learner_seat"] for r in completed), draws=sum(r["winner"] is None for r in completed),
-                score=sum(map(game_score, completed)) / len(completed) if completed else None,
+                losses=sum(r["winner"] == 1-r["learner_seat"] for r in completed),
+                score=sum(map(game_score, completed)) / len(completed) if len(completed) == len(games) else None,
                 latency_median_seconds=quantile(latency, .5), latency_p95_seconds=quantile(latency, .95))
             for r in games:
                 r["pilot"] = pilot

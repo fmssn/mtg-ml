@@ -64,6 +64,32 @@ def test_registration_and_unsupported_decisions():
         a.choose(v, (replace(actions[0], kind="future_decision"),))
 
 
+def test_reset_replaces_registration_and_ties_choose_lowest_index():
+    g = scenario(p0={"battlefield": ["Twisted Landscape"]})
+    a = adapter()
+    a.reset({"Twisted Landscape": 1, "Forest": 1})
+    assert a.own_deck == a.agent.own_deck and "Swamp" not in a.agent.own_deck
+    v, actions = inputs(g, 0, a.own_deck)
+    # Equal generic exile choices preserve the first current index, without
+    # relying on names or physical ordering from an earlier decision.
+    ties = tuple(replace(actions[0], index=i, kind="exile_from_graveyard", data=freeze({"card": None})) for i in range(3))
+    assert a.agent.choose(v, ties) == 0
+    a.reset({"Swamp": 60})
+    assert a.agent.own_deck == freeze({"Swamp": 60})
+
+
+def test_bottom_preserves_unique_early_color():
+    from mtg_ml.benchmark.bots.jund import Position
+    g = scenario(p0={"hand": ["Swamp", "Forest", "Forest", "Mountain", "Cast Down", "Writhing Chrysalis", "Ichor Wellspring"]})
+    v, _ = inputs(g, 0, JUND_WILDFIRE)
+    p = Position(v)
+    retained = list(p.hand)
+    retained.remove("Forest")
+    losing_black = list(p.hand)
+    losing_black.remove("Swamp")
+    assert p.retained_value(retained) > p.retained_value(losing_black)
+
+
 def test_wildfire_ramps_bridge_and_fixes_green():
     """Keep the Bridge and obtain green for Chrysalis, completing all costs."""
     g = scenario(p0={"hand": ["Cleansing Wildfire", "Writhing Chrysalis"],
@@ -191,11 +217,53 @@ def test_munitions_repeated_face_lethal():
 
 
 def test_spawn_growth_produces_combat_lethal():
-    g = scenario(p0={"battlefield": [("Writhing Chrysalis", {"sick": False}), "Eldrazi Spawn"]}, p1={"life": 3}, step="begin_combat")
-    # begin_combat is not a main phase; the eventual attack alone cannot yet win.
     g = scenario(p0={"battlefield": [("Writhing Chrysalis", {"sick": False}), "Eldrazi Spawn"]}, p1={"life": 3})
     drive(g)
     assert g.over and g.winner == 0
+
+
+def test_tapped_bridge_enables_affinity_before_next_turn():
+    """Bridge's immediate artifact count makes Familiar affordable with Swamp."""
+    g = scenario(p0={"hand": ["Drossforge Bridge", "Forest", "Refurbished Familiar"],
+                     "battlefield": ["Swamp", "Ichor Wellspring", "Ichor Wellspring"]})
+    actions = drive(g, until=end)
+    assert actions[0][2] == ("play_land", "Drossforge Bridge")
+    assert "Refurbished Familiar" in bf(g) and find(g, "Drossforge Bridge").tapped
+
+
+def test_blocker_lifelink_prevents_false_lethal():
+    """A lifelink gang block saves life while two other attackers connect."""
+    from mtg_ml.benchmark.bots import combat
+    g = scenario(p0={"life": 3, "hand": ["Toxin Analysis"], "battlefield": ["Swamp", ("Gixian Infiltrator", {"counters": 1})]},
+                 p1={"battlefield": [("Gixian Infiltrator", {"sick": False})] * 3}, active=1, step="declare_attackers")
+    while g.decision.kind == "declare_attacker":
+        choose(g, "Attack with Gixian Infiltrator")
+    drive(g, until=lambda g: "lifelink" in g.keywords(find(g, "Gixian Infiltrator", 0)) and not g.stack)
+    creatures = observe(g, 0)["battlefield"]
+    attacker = next(c for c in creatures if c["controller"] == "opponent")
+    defender = next(c for c in creatures if c["controller"] == "self" and c["power"] is not None)
+    assert combat.exchange(attacker, [defender])[3] == 3
+    drive(g, until=lambda g: g.step_name == "end_combat")
+    assert not g.over and g.players[0].life == 2
+
+
+def test_vanished_blocker_does_not_make_spawn_growth_lethal():
+    """The nontrampling Infiltrator stays blocked after the Spawn pays mana."""
+    g = scenario(p0={"battlefield": [("Gixian Infiltrator", {"sick": False}), "Eldrazi Spawn"]},
+                 p1={"life": 3, "battlefield": ["Eldrazi Spawn"]}, step="declare_attackers")
+    choose(g, "Attack with Gixian Infiltrator")
+    while g.decision.kind != "declare_blocker":
+        g.step(0)
+    choose(g, "blocks Gixian Infiltrator")
+    while not (g.decision.kind == "priority" and g.decision.player == 1):
+        g.step(0)
+    i = next(i for i, o in enumerate(g.legal_options()) if o.key[0] == "mana")
+    g.step(i)
+    while g.decision.player != 0:
+        g.step(0)
+    assert key(g) == ("pass",)
+    drive(g, until=lambda g: g.step_name == "end_combat")
+    assert g.players[1].life == 3 and "Eldrazi Spawn" in bf(g, 0)
 
 
 def test_gang_blocks_kill_larger_attacker_and_survive():
@@ -255,6 +323,29 @@ def test_duplicate_card_refs_choose_actual_threat():
     drive(g, until=end)
     survivors = [c for c in g.battlefield if c.controller == 1]
     assert len(survivors) == 1 and survivors[0].counters == 0
+
+
+@pytest.mark.slow
+def test_scheduled_modes_and_engine_trace_parity(engine):
+    """Identical decision traces for both pilots, both opponents and both modes."""
+    if engine != "native":
+        pytest.skip("paired engine check runs once with native installed")
+    from tools.benchmark_jund import schedule, BotFactory, SETTINGS
+    from mtg_ml.benchmark.runner import play_episode
+    for specialist in (True, False):
+        for opponent in ("jund_wildfire", "mono_blue_terror"):
+            reference = None
+            for backend in ("python", "native"):
+                for mode in ("sampled", "greedy"):
+                    _, specs = schedule(1, mode)
+                    spec = next(s for s in specs if s.slot == 0 and s.deck_ids[1] == opponent)
+                    row = play_episode(spec, SETTINGS, BotFactory("jund_wildfire", specialist), BotFactory(opponent), backend, record=True)
+                    assert row["status"] == "completed", row.get("reason")
+                    trace = (row["winner"], row["reason"], row["decisions"], row["replay"]["frames"], row["replay"]["cards"])
+                    if reference is None:
+                        reference = trace
+                    else:
+                        assert trace == reference
 
 
 @pytest.mark.slow

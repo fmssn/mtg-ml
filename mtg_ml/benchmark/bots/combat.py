@@ -3,13 +3,17 @@
 from itertools import accumulate
 from collections import deque
 
+from .parameters import PARAMETERS
+
+C = PARAMETERS["combat"]
+
 
 def value(c):
     if c is None or c.get("power") is None:
         return 0.0
     if c["token"] and c["power"] == 0:
-        return 0.3
-    return max(0, c["power"]) * 1.5 + max(0, c["toughness"]) * .5 + 1.5 * ("flying" in c["keywords"])
+        return C["empty_token"]
+    return max(0, c["power"]) * C["power"] + max(0, c["toughness"]) * C["toughness"] + C["flying"] * ("flying" in c["keywords"])
 
 
 def can_block(a, b):
@@ -43,22 +47,23 @@ def suffix_values(power, thresholds, weights, must_kill=False):
     return dp
 
 
-def exchange(a, blockers):
-    """(damage to defender, attacker material gain, attacker lifegain).
+def exchange(a, blockers, blocked=False):
+    """(damage to defender, attacker material gain, both players' lifegain).
 
     Assign damage to maximize kills after reserving maximum legal trample.
     Combat in the frozen lists has no first/double strike.
     """
     power = max(0, a["power"])
     if not blockers:
-        return power, 0., power if "lifelink" in a["keywords"] else 0
+        dealt = power if not blocked or "trample" in a["keywords"] else 0
+        return dealt, 0., dealt if "lifelink" in a["keywords"] else 0, 0
     thresholds = [lethal(a, b) for b in blockers]
     face = max(0, power - sum(thresholds)) if "trample" in a["keywords"] else 0
     weights = [0. if "indestructible" in b["keywords"] else value(b) for b in blockers]
     material = suffix_values(power - face, thresholds, weights)[power - face]
     if dies(a, sum(max(0, b["power"]) for b in blockers), any("deathtouch" in b["keywords"] and b["power"] > 0 for b in blockers)):
         material -= value(a)
-    return face, material, power if "lifelink" in a["keywords"] else 0
+    return face, material, power if "lifelink" in a["keywords"] else 0, sum(max(0, b["power"]) for b in blockers if "lifelink" in b["keywords"])
 
 
 def block_plan(attackers, blockers, life, fixed=None):
@@ -74,8 +79,9 @@ def block_plan(attackers, blockers, life, fixed=None):
     def score(p):
         results = [exchange(a, p[a["oid"]]) for a in attackers]
         damage = sum(r[0] for r in results)
+        gain = sum(r[3] for r in results)
         # Avoid a lethal attack first; otherwise preserve material over chumps.
-        return (-10000 if damage >= life else 0) - sum(r[1] for r in results) - .35 * damage
+        return (-C["survival"] if damage >= life + gain else 0) - sum(r[1] for r in results) - C["block_life"] * (damage - gain)
 
     while free:
         best, chosen = score(plan), None
@@ -111,15 +117,16 @@ def attack_plan(eligible, committed, defenders, reserves, enemies, own_life, ene
         attack = committed + group
         blocks = block_plan(attack, defenders, enemy_life)
         result = [exchange(a, blocks[a["oid"]]) for a in attack]
-        damage, material, gain = (sum(r[i] for r in result) for i in range(3))
+        damage, material, gain, enemy_gain = (sum(r[i] for r in result) for i in range(4))
         tapped = {a["oid"] for a in attack if "vigilance" not in a["keywords"]}
         left = [c for c in reserves if c["oid"] not in tapped and not c["tapped"]]
         # Do not credit opponents killed by a predicted block as certain losses.
         crack = [dict(c, tapped=False) for c in enemies]
         defense = block_plan(crack, left, own_life + gain)
-        incoming = sum(exchange(a, defense[a["oid"]])[0] for a in crack)
-        score = (100000 if damage >= enemy_life else 0) - (10000 if incoming >= own_life + gain else 0)
-        score += material + damage * .7 + gain * .4 - incoming * .15
+        retaliation = [exchange(a, defense[a["oid"]]) for a in crack]
+        incoming = sum(r[0] - r[3] for r in retaliation)
+        score = (C["lethal"] if damage >= enemy_life + enemy_gain else 0) - (C["survival"] if incoming >= own_life + gain else 0)
+        score += material + (damage - enemy_gain) * C["attack_life"] + gain * C["attack_gain"] - incoming * C["crackback"]
         if score > best + 1e-9:
             best, picked = score, group
     return {c["oid"] for c in picked}

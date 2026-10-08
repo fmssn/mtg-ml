@@ -12,24 +12,17 @@ from functools import lru_cache
 from ...engine.mana import ManaCost, RemainingCost, can_pay, pool_units
 from ..adapters import AgentMetadata
 from ..artifacts import FAIR
-from ..jsonio import digest
 from ..views import KINDS, freeze, thaw
 from . import combat
+from .parameters import PARAMETERS, PARAMETERS_SHA256
+
+T = PARAMETERS["tactics"]
+P = PARAMETERS["priority"]
+S = PARAMETERS["sacrifice"]
+C = PARAMETERS["combat"]
 
 NEG = -1e12
-PARAMETERS = freeze({
-    "keep_lands": {"7": [2, 4], "6": [2, 4]}, "land_goal": 5,
-    "removal_min": 4., "spellbomb_fuel": 4, "lembas_life": 8,
-    "curve": {"Writhing Chrysalis": 9., "Refurbished Familiar": 8., "Gixian Infiltrator": 7.,
-              "Nyxborn Hydra": 6., "Ichor Wellspring": 5., "Lembas": 4.5,
-              "Krark-Clan Shaman": 4., "Nihil Spellbomb": 4., "Makeshift Munitions": 3.},
-    "cards": {"Cast Down": 5., "Writhing Chrysalis": 4.5, "Refurbished Familiar": 4.,
-              "Cleansing Wildfire": 3.5, "Fanatical Offering": 3., "Eviscerator's Insight": 3.,
-              "Gixian Infiltrator": 3., "Toxin Analysis": 2.5, "Nyxborn Hydra": 2.5,
-              "Krark-Clan Shaman": 2., "Ichor Wellspring": 2., "Makeshift Munitions": 2.,
-              "Lembas": 1.5, "Nihil Spellbomb": 1.5},
-})
-PARAMETERS_SHA256 = digest(thaw(PARAMETERS))
+
 BASICS = {"Swamp": "B", "Mountain": "R", "Forest": "G"}
 DRAW = {"Fanatical Offering", "Eviscerator's Insight"}
 
@@ -81,12 +74,12 @@ class Position:
     def payable(self, payment, gone=(), pool=None):
         return can_pay(RemainingCost.of(payment), self.mana(gone, pool))
 
-    def spell_cost(self, name, mode="normal", x=0):
+    def spell_cost(self, name, mode="normal", x=0, extra_artifacts=0):
         r = self.rules[name]
         base = r[mode] if mode in {"flashback", "bestow"} else r["cost"]
         c = cost(base).with_x(x)
         if name == "Refurbished Familiar":
-            c = c.reduced(sum("Artifact" in p["types"] for p in self.own))
+            c = c.reduced(extra_artifacts + sum("Artifact" in p["types"] for p in self.own))
         return c
 
     def remaining_basics(self):
@@ -105,32 +98,32 @@ class Position:
         if name == "Cleansing Wildfire" and not any("indestructible" in c["keywords"] for c in self.lands):
             v -= 1.5
         if name == "Toxin Analysis" and any(c["name"] == "Krark-Clan Shaman" for c in self.creatures):
-            v += 2
+            v += T["engine_threat"]
         return v
 
     def growth(self, fodder):
-        return sum(1.5 for c in self.creatures if c["oid"] != fodder["oid"] and
+        return sum(T["growth"] for c in self.creatures if c["oid"] != fodder["oid"] and
                    (c["name"] == "Gixian Infiltrator" or c["name"] == "Writhing Chrysalis" and "Eldrazi" in self.rules[fodder["name"]]["subtypes"]))
 
     def sacrifice_cost(self, c):
         n = c["name"]
         if "Land" in c["types"]:
-            v = 20. if len(self.lands) < PARAMETERS["land_goal"] else 4.
+            v = S["needed_land"] if len(self.lands) < PARAMETERS["land_goal"] else S["extra_land"]
         elif n == "Ichor Wellspring":
-            v = .2
+            v = S["wellspring"]
         elif n == "Nihil Spellbomb":
-            v = .6 if self.payable(cost("{B}")) else 1.5
+            v = S["cantrip"] if self.payable(cost("{B}")) else S["spellbomb_unpaid"]
         elif n in {"Clue", "Map", "Lembas"}:
-            v = .6
+            v = S["cantrip"]
         elif c["token"]:
-            v = .3 + combat.value(c)
+            v = S["token"] + combat.value(c)
         elif c["power"] is not None:
-            v = 3 + combat.value(c)
+            v = S["creature"] + combat.value(c)
         else:
-            v = 3.
+            v = S["other"]
         # A threatened permanent is cheap to cash in; a required blocker isn't.
         if any(it["controller"] == "opponent" and ("perm", c["oid"]) in it["targets"] for it in self.stack):
-            v = min(v, .2)
+            v = min(v, S["threatened"])
         return v - self.growth(c)
 
     def fodder(self, artifact=False, payment=None):
@@ -159,11 +152,11 @@ class Position:
             return NEG
         v = combat.value(c)
         if c["attacking"]:
-            v += 5
+            v += T["ward_attack"]
             if sum(max(0, a["power"]) for a in self.threats if a["attacking"]) >= self.me["life"]:
-                v += 10000
+                v += C["survival"]
         if c["name"] in {"Krark-Clan Shaman", "Gixian Infiltrator"}:
-            v += 2
+            v += T["engine_threat"]
         return v
 
     def reserve(self):
@@ -184,6 +177,11 @@ class Position:
         def outcome(n, buffed=True):
             gone = {c["oid"] for c in fodder[:n]}
             creatures = [dict(c) for c in self.board if c["power"] is not None and c["oid"] not in gone]
+            for c in creatures:
+                if c["controller"] == "self" and c["name"] == "Gixian Infiltrator":
+                    growth = n + sum(it["kind"] == "trigger" and it["source"] and it["source"]["oid"] == c["oid"] for it in self.stack)
+                    c["power"] += growth
+                    c["toughness"] += growth
             total = -sum(self.sacrifice_cost(c) for c in fodder[:n])
             gain = 0
             for _ in range(n + pending):
@@ -199,12 +197,12 @@ class Position:
                         c["damage"] += 1
                         survivors.append(c)
                 creatures = survivors
-            total += gain * (.8 if self.me["life"] < 10 else .25)
+            total += gain * (T["gain_low"] if self.me["life"] < T["low_life"] else T["gain_normal"])
             if any(c["attacking"] for c in self.threats):
                 before = sum(max(0, c["power"]) for c in self.threats if c["attacking"])
                 after = sum(max(0, c["power"]) for c in creatures if c["controller"] == "opponent" and c["attacking"])
                 if before >= self.me["life"] and after < self.me["life"] + gain:
-                    total += 10000
+                    total += C["survival"]
             return total
 
         base = outcome(0, buffed=False)
@@ -219,15 +217,24 @@ class Position:
         if c["controller"] != "self" or "deathtouch" in c["keywords"]:
             return NEG
         if c["name"] == "Krark-Clan Shaman":
-            return self.sweep(c, toxin=True)[0] - 1
+            return self.sweep(c, toxin=True)[0] - T["toxin_cost"]
         score = 0.
+        attackers = [t for t in self.threats if t["attacking"]]
+        if attackers and self.s["step"] == "declare_attackers" and not c["tapped"]:
+            buffed = [dict(b, keywords=tuple(set(b["keywords"]) | {"deathtouch", "lifelink"})) if b["oid"] == c["oid"] else b for b in self.creatures]
+            def loss(blockers):
+                plan = combat.block_plan(attackers, blockers, self.me["life"])
+                results = [combat.exchange(a, plan[a["oid"]]) for a in attackers]
+                return sum(r[0] - r[3] for r in results)
+            if loss(self.creatures) >= self.me["life"] > loss(buffed):
+                score += C["survival"]
         for other in self.threats:
             if c["blocking"] == other["oid"] or other["blocking"] == c["oid"]:
                 if c["power"] > 0 and not combat.dies(other, c["power"]):
                     score += combat.value(other)
         if c["attacking"] or c["blocking"] is not None:
-            score += max(0, c["power"]) * (.8 if self.me["life"] < 10 else .25)
-        return score - 1
+            score += max(0, c["power"]) * (T["gain_low"] if self.me["life"] < T["low_life"] else T["gain_normal"])
+        return score - T["toxin_cost"]
 
     def mana_pressure(self, gone=()):
         units = self.mana(gone)
@@ -236,6 +243,27 @@ class Position:
             for col, n in cost(self.rules[name]["cost"]).colored:
                 need[col] += n * (2 if "Instant" in self.rules[name]["types"] else 1)
         return {col: n / max(1, sum(col in u for u in units)) for col, n in need.items()}
+
+    def known_counter(self):
+        """Evidence only: known card plus enough untapped public blue sources."""
+        units = pool_units(dict(self.opp["pool"]))
+        for c in self.enemy:
+            if not c["tapped"]:
+                units.extend(tuple(ab["mana"]) for ab in self.rules[c["name"]]["abilities"] if ab["mana"] and ab["tap"])
+        return "Counterspell" in self.opp["hand_known"] and can_pay(RemainingCost.of(cost("{U}{U}")), units)
+
+    def retained_value(self, names):
+        """Bottom against the retained hand's land count, colors and early plays."""
+        lands = [n for n in names if "Land" in self.rules[n]["types"]]
+        units = [tuple(ab["mana"]) for n in lands for ab in self.rules[n]["abilities"] if ab["mana"]]
+        if "Twisted Landscape" in lands and any(self.remaining_basics().values()):
+            units.remove(("C",))
+            units.append(tuple(BASICS[n] for n, count in self.remaining_basics().items() if count))
+        spells = [n for n in names if n not in lands]
+        early = sum(can_pay(RemainingCost.of(self.spell_cost(n, x=int(n == "Nyxborn Hydra"))), units) for n in spells)
+        colors = {color for n in spells for color, _ in cost(self.rules[n]["cost"]).colored}
+        missing = sum(not any(color in unit for unit in units) for color in colors)
+        return sum(self.card_value(n) for n in spells) + T["early_play"] * early - T["color_access"] * missing - P["land"] * max(0, 2 - len(lands)) - max(0, len(lands) - 3)
 
     def fetch_value(self, name):
         color = BASICS.get(name)
@@ -287,10 +315,10 @@ class BenchmarkJundBot:
             rules = p.rules[name]
             new_units = p.mana() + ([] if rules["enters_tapped"] else [tuple(next(ab["mana"] for ab in rules["abilities"] if ab["mana"]))])
             enabled = max((PARAMETERS["curve"].get(n, 5.) for n in p.hand if "Land" not in p.rules[n]["types"]
-                           and can_pay(RemainingCost.of(p.spell_cost(n, x=int(n == "Nyxborn Hydra"))), new_units)
+                           and can_pay(RemainingCost.of(p.spell_cost(n, x=int(n == "Nyxborn Hydra"), extra_artifacts=int("Artifact" in rules["types"]))), new_units)
                            and not p.payable(p.spell_cost(n, x=int(n == "Nyxborn Hydra")))), default=0.)
             bridge = "indestructible" in rules["keywords"]
-            return 100 + enabled + (3 if bridge and "Cleansing Wildfire" in p.hand else 1 if bridge else 0)
+            return P["land"] + enabled + (3 if bridge and "Cleansing Wildfire" in p.hand else 1 if bridge else 0)
         if verb == "mana":
             return self.spawn_value(p, p.by_id[c["oid"]])
         if verb == "activate":
@@ -301,12 +329,12 @@ class BenchmarkJundBot:
         mode = a.data["mode"]
         if name == "Cast Down":
             v = max((p.removal_value(c, payment) for c in p.threats), default=NEG)
-            return 30 + v if v >= PARAMETERS["removal_min"] else NEG
+            return P["removal"] + v if v >= PARAMETERS["removal_min"] else NEG
         if name == "Toxin Analysis":
             v = max((p.toxin_value(c) for c in p.creatures), default=NEG)
             # Do not invest a combo into a source already targeted by a known
             # removal spell unless the actual combat trick itself saves it.
-            return 40 + v if v > 0 else NEG
+            return P["toxin"] + v if v > 0 else NEG
         if name in DRAW:
             fodder = p.fodder(payment=payment)
             if not fodder:
@@ -314,13 +342,13 @@ class BenchmarkJundBot:
             loss = p.sacrifice_cost(fodder[0])
             threatened = any(it["controller"] == "opponent" and ("perm", fodder[0]["oid"]) in it["targets"] for it in p.stack)
             if threatened:
-                return 35 - loss
-            if loss > 2.5 or not (p.end or p.main):
+                return P["save_fodder"] - loss
+            if loss > T["cheap_fodder"] or not (p.end or p.main):
                 return NEG
-            return 8 - loss + (2 if fodder[0]["name"] == "Ichor Wellspring" else 0) - (1 if mode == "flashback" else 0)
+            return P["draw"] - loss + (2 if fodder[0]["name"] == "Ichor Wellspring" else 0) - (1 if mode == "flashback" else 0)
         if name == "Cleansing Wildfire":
             bridge = any("indestructible" in c["keywords"] for c in p.lands)
-            return 18. if p.main and bridge and any(p.remaining_basics().values()) else NEG
+            return P["wildfire"] if p.main and bridge and any(p.remaining_basics().values()) else NEG
         if not p.main:
             return NEG
         if name not in PARAMETERS["curve"]:
@@ -334,8 +362,11 @@ class BenchmarkJundBot:
                 return NEG
             if mode == "bestow":
                 ready = [c for c in p.creatures if not c["sick"] and not c["tapped"]]
-                return 10. if ready and p.s["step"] == "main1" else 4.
-        return PARAMETERS["curve"][name] + .1 * payment.mana_value
+                return P["bestow_attack"] if ready and p.s["step"] == "main1" else P["bestow_later"]
+        # When an actual Counterspell is known and castable, prefer the cheaper
+        # development spell as bait. Unknown hand cards carry no inferred identity.
+        risk = T["counter_risk"] * payment.mana_value if p.known_counter() else 0
+        return PARAMETERS["curve"][name] + .1 * payment.mana_value - risk
 
     def spawn_value(self, p, spawn):
         if spawn["name"] != "Eldrazi Spawn":
@@ -344,17 +375,19 @@ class BenchmarkJundBot:
                  for c in p.creatures if c["oid"] != spawn["oid"]]
         before_combat = p.s["active"] == "self" and p.s["step"] in {"main1", "begin_combat"}
         attacks = [c for c in grown if c["attacking"] or before_combat and not c["sick"] and not c["tapped"]]
-        blocks = combat.block_plan(attacks, p.threats, p.opp["life"])
-        damage = sum(combat.exchange(c, blocks[c["oid"]])[0] for c in attacks)
+        declared = p.s["step"] in {"declare_blockers", "combat_damage", "end_combat"}
+        blocks = {c["oid"]: [b for b in p.threats if b["blocking"] == c["oid"]] for c in attacks} if declared else combat.block_plan(attacks, p.threats, p.opp["life"])
+        results = [combat.exchange(c, blocks[c["oid"]], declared and c["oid"] in p.view.context["blocked"]) for c in attacks]
+        damage = sum(r[0] - r[3] for r in results)
         if damage >= p.opp["life"]:
-            return 100000.
+            return C["lethal"]
         for c in grown:
             if c["blocking"] is not None:
                 a = p.by_id.get(c["blocking"])
                 if a and c["power"] >= combat.lethal(c, a) and c["toughness"] - c["damage"] > a["power"]:
                     old = p.by_id[c["oid"]]
                     if combat.dies(old, a["power"]):
-                        return 10000.
+                        return C["survival"]
         return NEG
 
     def activation(self, p, a):
@@ -365,38 +398,38 @@ class BenchmarkJundBot:
             if any(it["source"] and it["source"]["name"] == "Toxin Analysis" and ("perm", c["oid"]) in it["targets"] for it in p.stack):
                 return NEG
             v, n = p.sweep(c)
-            return 45 + v if n and v > 0 else NEG
+            return P["sweep"] + v if n and v > 0 else NEG
         if name == "Makeshift Munitions":
             fodder = p.fodder(payment=cost("{1}"))
-            cheap = [c for c in fodder if p.sacrifice_cost(c) <= 2.5]
+            cheap = [c for c in fodder if p.sacrifice_cost(c) <= T["cheap_fodder"]]
             # Fodder Spawns are unavailable as mana for this line.
             units = p.mana([c["oid"] for c in cheap if c["name"] == "Eldrazi Spawn"])
             budget = min(len(cheap), len(units))
             pending = sum(it["source"] and it["source"]["name"] == name and ("player", "opponent") in it["targets"] for it in p.stack)
             if budget and 0 < p.opp["life"] - pending <= budget:
-                return 100000.
+                return C["lethal"]
             targets = [t for t in p.threats if combat.dies(t, 1 + p.pending_damage(t["oid"])) and not combat.dies(t, p.pending_damage(t["oid"]))
                        and p.removal_value(t, cost("{1}")) > 0]
-            return 25 + max(map(combat.value, targets)) if cheap and targets else NEG
+            return P["munitions"] + max(map(combat.value, targets)) if cheap and targets else NEG
         if name == "Nihil Spellbomb":
             fuel = sum(bool({"Instant", "Sorcery"}.intersection(p.rules[n]["types"])) for n in p.opp["graveyard"])
-            return 14. if fuel >= PARAMETERS["spellbomb_fuel"] or "Eviscerator's Insight" in p.opp["graveyard"] or "Sleep of the Dead" in p.opp["graveyard"] else NEG
+            return P["graveyard"] if fuel >= PARAMETERS["spellbomb_fuel"] or "Eviscerator's Insight" in p.opp["graveyard"] or "Sleep of the Dead" in p.opp["graveyard"] else NEG
         if name == "Lembas":
             incoming = sum(t["power"] for t in p.threats if t["attacking"])
-            return 10000. if incoming >= p.me["life"] else 10. if p.me["life"] <= PARAMETERS["lembas_life"] and p.end else NEG
+            return C["survival"] if incoming >= p.me["life"] else P["life"] if p.me["life"] <= PARAMETERS["lembas_life"] and p.end else NEG
         if name == "Clue":
-            return 3. if p.end or p.main and len(p.hand) <= 1 else NEG
+            return P["utility"] if p.end or p.main and len(p.hand) <= 1 else NEG
         if name == "Map":
-            return 3. if p.main and p.creatures else NEG
+            return P["utility"] if p.main and p.creatures else NEG
         if name == "Twisted Landscape":
             if ref["zone"] == "hand":
-                return 3. if p.end and p.land_need() < 0 else NEG
+                return P["utility"] if p.end and p.land_need() < 0 else NEG
             need = any(p.fetch_value(n) >= 5 and count for n, count in p.remaining_basics().items())
-            return 16. if need and (p.main or p.end) else 2. if p.end and any(p.remaining_basics().values()) else NEG
+            return P["fetch"] if need and (p.main or p.end) else 2. if p.end and any(p.remaining_basics().values()) else NEG
         raise UnsupportedDecision(f"unsupported preboard activation {a.key}")
 
     def face_lethal(self, p):
-        cheap = [c for c in p.fodder(payment=cost("{1}")) if p.sacrifice_cost(c) <= 2.5]
+        cheap = [c for c in p.fodder(payment=cost("{1}")) if p.sacrifice_cost(c) <= T["cheap_fodder"]]
         units = p.mana([c["oid"] for c in cheap if c["name"] == "Eldrazi Spawn"])
         pending = sum(it["source"] and it["source"]["name"] == "Makeshift Munitions" and
                       ("player", "opponent") in it["targets"] for it in p.stack)
@@ -419,8 +452,8 @@ class BenchmarkJundBot:
                 return p.toxin_value(c) if c else NEG
             if name == "Makeshift Munitions":
                 if t.get("player"):
-                    return 100000. if t["player"] == "opponent" and self.face_lethal(p) else NEG
-                return 30 + combat.value(c) if c and p.removal_value(c, cost("{1}")) > 0 and combat.dies(c, 1 + p.pending_damage(c["oid"])) else NEG
+                    return C["lethal"] if t["player"] == "opponent" and self.face_lethal(p) else NEG
+                return P["removal"] + combat.value(c) if c and p.removal_value(c, cost("{1}")) > 0 and combat.dies(c, 1 + p.pending_damage(c["oid"])) else NEG
             if name == "Nihil Spellbomb":
                 return 1. if t.get("player") == "opponent" else NEG
             if name in {"Map", "Nyxborn Hydra"}:
@@ -481,7 +514,11 @@ class BenchmarkJundBot:
             name = None if c is None else c["name"]
             if verb == "search":
                 scores.append(p.fetch_value(name))
-            elif verb in {"discard", "bottom", "put_back"}:
+            elif verb == "bottom":
+                retained = list(p.hand)
+                retained.remove(name)
+                scores.append(p.retained_value(retained))
+            elif verb in {"discard", "put_back"}:
                 scores.append(-p.card_value(name))
             elif verb in {"put", "dig"}:
                 scores.append(0. if name is None else p.card_value(name))
@@ -560,19 +597,19 @@ class BenchmarkJundBot:
             blockers = [p.by_id[b["oid"]] for b in a.data["blockers"]]
             split = a.data["split"]
             face = split[-1] if len(split) > len(blockers) else 0
-            scores.append((100000 if face >= p.opp["life"] else 0) + face + sum(10 + combat.value(b) for b, n in zip(blockers, split) if combat.dies(b, n, "deathtouch" in src["keywords"])))
+            scores.append((C["lethal"] if face >= p.opp["life"] else 0) + face + sum(C["kill"] + combat.value(b) for b, n in zip(blockers, split) if combat.dies(b, n, "deathtouch" in src["keywords"])))
         return scores
 
     def choose_assign_damage_amount(self, p, actions):
         d = p.view.context["damage"]
-        weights = [0. if "indestructible" in p.by_id[oid]["keywords"] else 10 + combat.value(p.by_id[oid]) for oid in d["blockers"]]
+        weights = [0. if "indestructible" in p.by_id[oid]["keywords"] else C["kill"] + combat.value(p.by_id[oid]) for oid in d["blockers"]]
         start = 0 if d["recipient"] == -1 else d["recipient"] + 1
         dp = combat.suffix_values(d["remaining"], d["lethal"][start:], weights[start:], d["player_damage"] > 0)
         out = []
         for a in actions:
             n = a.data["amount"]
             if d["recipient"] == -1:
-                out.append((100000 if n >= p.opp["life"] else 0) + sum(weights) + n if n > 0 else dp[d["remaining"]])
+                out.append((C["lethal"] if n >= p.opp["life"] else 0) + sum(weights) + n if n > 0 else dp[d["remaining"]])
             else:
                 i = d["recipient"]
                 out.append((weights[i] if n >= d["lethal"][i] else 0) + dp[d["remaining"] - n])
