@@ -262,6 +262,82 @@ def test_countered_counter_does_not_spend_another_backup():
     assert "Cast Down" in names(g.players[1].graveyard)
 
 
+@pytest.mark.parametrize("mana,protect", [(6,False), (8,True)])
+def test_counter_protection_includes_pending_own_ward(mana, protect):
+    # Deem threatens lethal. Its {2} ward still needs payment after a counter
+    # war; two remaining Islands cannot fund both Counterspell and ward.
+    g = scenario(p0={"hand": ["Deem Inferior", "Counterspell"],
+                     "battlefield": ISLANDS(mana)+[("Tolarian Terror", {"sick":False})]},
+                 p1={"hand": ["Counterspell"], "battlefield": ISLANDS(2)+["Tolarian Terror"], "life":5})
+    choose(g, "Cast Deem Inferior"); g.step(choice(g)); pay(g); pass_priority(g)
+    choose(g, "Cast Counterspell"); pay(g); pass_priority(g)
+    assert (key(g)[0] == "cast") == protect
+    while g.stack:
+        g.step(choice(g) if g.decision.player == 0 else 0)
+    if protect:
+        assert "Counterspell" not in names(g.players[0].hand)
+        assert not [c for c in g.battlefield if c.controller == 1 and c.name == "Tolarian Terror"]
+        for _ in range(100):
+            if g.over: break
+            g.step(choice(g) if g.decision.player == 0 else 0)
+        assert g.over and g.winner == 0
+    else:
+        assert names(g.players[0].hand) == ["Counterspell"]
+        assert sum(not c.tapped for c in g.battlefield if c.controller == 0 and c.name == "Island") == 2
+        assert [c for c in g.battlefield if c.controller == 1 and c.name == "Tolarian Terror"]
+
+
+@pytest.mark.parametrize("mana,pay_all", [(6,False), (7,True)])
+def test_optional_spike_payment_keeps_pending_ward_funded(mana, pay_all):
+    # Paying Spike alone wastes mana if the remaining ward will counter Deem.
+    g = scenario(p0={"hand": ["Deem Inferior"],
+                     "battlefield": ISLANDS(mana)+[("Tolarian Terror", {"sick":False})]},
+                 p1={"hand": ["Force Spike"], "battlefield": ISLANDS(1)+["Tolarian Terror"], "life":5})
+    choose(g, "Cast Deem Inferior"); g.step(choice(g)); pay(g); pass_priority(g)
+    choose(g, "Cast Force Spike"); pay(g)
+    while g.decision.kind != "yes_no": g.step(0)
+    assert key(g) == ("pay_optional", "yes" if pay_all else "no")
+    while g.stack:
+        g.step(choice(g) if g.decision.player == 0 else 0)
+    if pay_all:
+        assert not [c for c in g.battlefield if c.controller == 1 and c.name == "Tolarian Terror"]
+        for _ in range(100):
+            if g.over: break
+            g.step(choice(g) if g.decision.player == 0 else 0)
+        assert g.over and g.winner == 0
+    else:
+        assert sum(not c.tapped for c in g.battlefield if c.controller == 0 and c.name == "Island") == 2
+        assert [c for c in g.battlefield if c.controller == 1 and c.name == "Tolarian Terror"]
+
+
+@pytest.mark.parametrize("mana,protect", [(8,False), (10,True)])
+def test_counter_chain_preserves_the_lower_spells_ward_budget(mana, protect):
+    # Deem <- Spike <- our counter <- opposing counter. Protecting our counter
+    # must leave {2} for Deem's ward. Spike will disappear if protection works.
+    g = scenario(p0={"hand": ["Deem Inferior", "Counterspell", "Counterspell"],
+                     "battlefield": ISLANDS(mana)+[("Tolarian Terror", {"sick":False})]},
+                 p1={"hand": ["Force Spike", "Counterspell"],
+                     "battlefield": ISLANDS(3)+["Tolarian Terror"], "life":5})
+    choose(g, "Cast Deem Inferior"); g.step(choice(g)); pay(g); pass_priority(g)
+    choose(g, "Cast Force Spike"); pay(g); pass_priority(g)
+    assert key(g)[0:2] == ("cast", "Counterspell")
+    choose(g, "Cast Counterspell"); g.step(choice(g)); pay(g); pass_priority(g)
+    choose(g, "Cast Counterspell"); choose(g, "Target spell Counterspell"); pay(g); pass_priority(g)
+    assert (key(g)[0] == "cast") == protect
+    while g.stack:
+        g.step(choice(g) if g.decision.player == 0 else 0)
+    if protect:
+        assert not [c for c in g.battlefield if c.controller == 1 and c.name == "Tolarian Terror"]
+        for _ in range(100):
+            if g.over: break
+            g.step(choice(g) if g.decision.player == 0 else 0)
+        assert g.over and g.winner == 0
+    else:
+        assert names(g.players[0].hand) == ["Counterspell"]
+        assert sum(not c.tapped for c in g.battlefield if c.controller == 0 and c.name == "Island") == 2
+        assert [c for c in g.battlefield if c.controller == 1 and c.name == "Tolarian Terror"]
+
+
 def test_target_ward_budget_avoids_unpayable_bounce():
     g = scenario(p0={"hand": ["Deem Inferior"], "battlefield": ISLANDS(2), "drawn": 2},
                  p1={"battlefield": ["Tolarian Terror"]})

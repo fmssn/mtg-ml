@@ -264,7 +264,7 @@ class BenchmarkBlue:
     def _stack(self, view, sid):
         return next((s for s in view.context["stack"] if s["sid"] == sid), None)
 
-    def _handled(self, view, item):
+    def _handled(self, view, item, cancelled=None):
         # Only definite successful counters count. A payable Force Spike does
         # not settle the spell. A counter underneath its target cannot resolve
         # in time. Ward taxes are cumulative and tied to actual spell IDs.
@@ -273,6 +273,8 @@ class BenchmarkBlue:
 
         @lru_cache(maxsize=None)
         def failed(sid):
+            if sid == cancelled:
+                return True
             pos = positions[sid]
             tax = 0
             for s in stack[pos + 1:]:
@@ -290,6 +292,31 @@ class BenchmarkBlue:
             return tax > available(view, stack[pos]["controller"])
 
         return failed(item["sid"])
+
+    def _obligations(self, view, sid, cancelled=None):
+        return sum(s["ward"]["amount"] if s.get("ward", {}).get("sid") == sid else
+                   1 if s["name"] == "Force Spike" and any(t.get("sid") == sid for t in s["targets"])
+                   and not self._handled(view, s, cancelled) else 0 for s in view.context["stack"])
+
+    def _counter_budget(self, view, item, cost):
+        # Restoring a counter can protect a lower spell indirectly. Follow only
+        # existing stack references and reserve its outstanding public fees.
+        todo, seen, protected = [item], set(), set()
+        while todo:
+            current = todo.pop()
+            if current["sid"] in seen:
+                continue
+            seen.add(current["sid"])
+            if current["name"] not in COUNTERS:
+                continue
+            for ref in current["targets"]:
+                lower = self._stack(view, ref.get("sid"))
+                if lower is not None:
+                    if lower["controller"] == "self":
+                        protected.add(lower["sid"])
+                    todo.append(lower)
+        tax = sum(self._obligations(view, sid, item["sid"]) for sid in protected)
+        return can_afford(view, str(ManaCost.parse(cost).plus(ManaCost(tax))))
 
     def _spell_value(self, view, item):
         if item["kind"] != "spell" or item["controller"] != "opponent" or self._handled(view, item):
@@ -323,10 +350,11 @@ class BenchmarkBlue:
             value += item["x"] * .7
         return value
 
-    def _counter_target(self, view, spike=False):
+    def _counter_target(self, view, spike=False, cost="{0}"):
         candidates = [s for s in view.context["stack"] if s["kind"] == "spell" and s["controller"] == "opponent"]
         if spike:
             candidates = [s for s in candidates if self._spike_live(view, s)]
+        candidates = [s for s in candidates if self._counter_budget(view, s, cost)]
         return max(candidates, key=lambda s: self._spell_value(view, s), default=None)
 
     def _spike_live(self, view, item):
@@ -406,7 +434,7 @@ class BenchmarkBlue:
             if mode not in allowed:
                 self._bad(a)
             if name in {"Counterspell", "Force Spike"}:
-                target = self._counter_target(view, name == "Force Spike")
+                target = self._counter_target(view, name == "Force Spike", a.data["cost"])
                 threshold = PARAMETERS["spike_min_value" if name == "Force Spike" else "counter_min_value"]
                 out.append((65.0 if name == "Force Spike" else 60.0) + self._spell_value(view, target) * .1
                            if target is not None and self._spell_value(view, target) >= threshold else NEG)
@@ -474,7 +502,8 @@ class BenchmarkBlue:
             elif "sid" in t:
                 item = self._stack(view, t["sid"])
                 out.append(self._spell_value(view, item) if item is not None and
-                           (spell != "Force Spike" or self._spike_live(view, item)) else NEG)
+                           (spell != "Force Spike" or self._spike_live(view, item)) and
+                           (spell not in COUNTERS or self._counter_budget(view, item, view.cards[spell]["cost"])) else NEG)
             elif "player" in t:
                 if spell == "Thought Scour":
                     side = "opponent" if view.state["self"]["library_count"] < 3 else "self"
@@ -577,6 +606,8 @@ class BenchmarkBlue:
                 threatened = self._stack(view, sid)
                 want = threatened is not None and threatened["controller"] == "self" and (not threatened["targets"] or any(
                     "oid" not in t or permanent(view, t["oid"]) is not None for t in threatened["targets"]))
+                if want:
+                    want = available(view) >= self._obligations(view, threatened["sid"])
                 out.append(float((answer == "yes") == want))
             elif tag == "explore":
                 keep = self._value(view, known.get(0)) >= 2.0
