@@ -29,6 +29,8 @@ from .match import DEFAULT_MATCHUP, game_args, matchup_decks
 FORMAT = 1
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VIEWER = ROOT / "viz" / "viewer.html"
+PLAY_APP = ROOT / "apps" / "play"  # the play-vs-model client, served at /play
+_PLAY_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
 DECK_TITLES = {"jund_wildfire": "Jund Wildfire", "mono_blue_terror": "Mono Blue Terror", "red_madness": "Red Madness", "grixis_affinity": "Grixis Affinity", "elves": "Elves", "tron": "Tron"}
 
 
@@ -273,6 +275,16 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                 return self._live("GET", path, urllib.parse.parse_qs(url.query))
             if path in ("/", "/index.html"):
                 return self._send(VIEWER.read_bytes(), "text/html; charset=utf-8")
+            if path == "/play":
+                self.send_response(301)
+                self.send_header("Location", "/play/")
+                self.end_headers()
+                return
+            if path.startswith("/play/"):
+                name = path[len("/play/"):] or "index.html"
+                f = (PLAY_APP / name).resolve()
+                if f.parent == PLAY_APP.resolve() and f.suffix in _PLAY_TYPES and f.is_file():
+                    return self._send(f.read_bytes(), _PLAY_TYPES[f.suffix])
             if path == "/api/replays":
                 files = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
                 return self._send(json.dumps([_replay_summary(p) for p in files]).encode(), "application/json")
@@ -329,6 +341,7 @@ def main(argv=None) -> None:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--models", default=None, help="directory of checkpoints to play against in the viewer (needs torch)")
+    s.add_argument("--scripted-bot", action="store_true", help="also offer the decks' scripted bots as opponents (dev; works without --models and torch)")
     s.add_argument("--engine", default=None, help="engine for live games: python or native; default: $MTG_ENGINE, else python")
     args = ap.parse_args(argv)
 
@@ -348,11 +361,14 @@ def main(argv=None) -> None:
             print(f"{path}: {len(rep['frames'])} frames, {m['turns']} turns, winner {m['winner']} ({m['end_reason']})")
     else:
         live = None
-        if args.models:
+        if args.models or args.scripted_bot:
             from .live import LiveManager, find_models
 
-            live = LiveManager(pathlib.Path(args.models), pathlib.Path(args.dir), engine=args.engine)
-            print(f"{len(find_models(pathlib.Path(args.models)))} checkpoints in {args.models}")
+            models = pathlib.Path(args.models) if args.models else None
+            live = LiveManager(models, pathlib.Path(args.dir), engine=args.engine, scripted=args.scripted_bot)
+            if models:
+                print(f"{len(find_models(models))} checkpoints in {args.models}")
+            print(f"play against them at http://{args.host}:{args.port}/play/")
         serve(pathlib.Path(args.dir), args.host, args.port, live=live)
 
 

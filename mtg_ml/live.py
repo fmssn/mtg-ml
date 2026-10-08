@@ -32,9 +32,11 @@ from concurrent.futures import ThreadPoolExecutor
 from .agents import take
 from .backend import engine_name, game_class
 from .match import MATCHUPS, game_args, matchup_decks
+from .live_proto import option_ref, option_refs, parse_events, visible_ids
 from .replay import DECK_TITLES, FORMAT, snapshot, visible_events
 from .rl.features import PUBLIC_KINDS
 
+SCRIPTED = "scripted-bot"  # the deck's hand-written bot, offered with --scripted-bot (dev, no checkpoint needed)
 MAX_GAMES = 8  # games held at once; the oldest idle one makes room
 IDLE_SECONDS = 3600  # a game nobody touched for this long is dropped
 
@@ -56,12 +58,18 @@ def find_models(directory: pathlib.Path) -> dict[str, pathlib.Path]:
 
 
 class LiveGame:
-    def __init__(self, gid: str, model_name: str, model_path: pathlib.Path, seat: int, matchup: str, greedy: bool, seed: int, engine: str | None):
-        from .rl.agent import ModelAgent
-
+    def __init__(self, gid: str, model_name: str, model_path: pathlib.Path | None, seat: int, matchup: str, greedy: bool, seed: int, engine: str | None):
+        """`model_path` None: the deck's scripted bot plays instead (`SCRIPTED`)."""
         self.id, self.seat, self.matchup, self.engine = gid, seat, matchup, engine
         self.touched = time.monotonic()
-        self.model = ModelAgent(str(model_path), 1 - seat, sample=not greedy, seed=seed)
+        if model_path is None:
+            from .bots import make_bot
+
+            self.model = make_bot(1 - seat, matchup_decks(matchup)[1 - seat])
+        else:
+            from .rl.agent import ModelAgent
+
+            self.model = ModelAgent(str(model_path), 1 - seat, sample=not greedy, seed=seed)
         self.agents = [None, None]
         self.agents[seat], self.agents[1 - seat] = Human(), self.model
         self.names = ["", ""]
@@ -89,26 +97,35 @@ class LiveGame:
             d = g.decision
             choice = self.model.act(g)
             options = [o.label for o in d.options]
-            self._record({"player": d.player, "kind": d.kind, "prompt": d.prompt, "options": options, "chosen": choice, **(self.model.last_info or {})})
+            self._record({"player": d.player, "kind": d.kind, "prompt": d.prompt, "options": options, "chosen": choice, **(getattr(self.model, "last_info", None) or {})})
             # The chosen option of a public kind is safe to show; the prompt is
             # not: it can name a card only the decider knows (Delver of
             # Secrets: "reveal <top of my library>?"), so it stays on the server.
+            state = self._view_state()
             if d.kind in PUBLIC_KINDS:
-                shown = [options[choice]]
+                o = d.options[choice]
+                shown, refs = [options[choice]], [option_ref(d.kind, o.label, o.key, o.value, visible_ids(state))]
             else:
-                shown = [f"(hidden {d.kind.replace('_', ' ')})"]
-            self._view_frame({"player": d.player, "kind": d.kind, "prompt": "", "options": shown, "chosen": 0})
+                shown, refs = [f"(hidden {d.kind.replace('_', ' ')})"], [{"type": "hidden"}]
+            self._view_frame(state, {"player": d.player, "kind": d.kind, "prompt": "", "options": shown, "refs": refs, "chosen": 0})
             take(g, self.agents, choice)
         decision = None
+        state = self._view_state()
         if not g.over:
             d = g.decision
-            decision = {"player": d.player, "kind": d.kind, "prompt": d.prompt, "options": [o.label for o in d.options], "chosen": None}
-        self._view_frame(decision)
+            decision = {"player": d.player, "kind": d.kind, "prompt": d.prompt, "options": [o.label for o in d.options], "refs": option_refs(d, state), "chosen": None}
+        self._view_frame(state, decision)
 
-    def _view_frame(self, decision: dict | None) -> None:
-        g = self.g
-        self.frames.append({"state": snapshot(g, self.view_info, viewer=self.seat), "events": visible_events(g.log[self.view_seen :], self.seat), "decision": decision})
-        self.view_seen = len(g.log)
+    def _view_state(self) -> dict:
+        return snapshot(self.g, self.view_info, viewer=self.seat)
+
+    def _view_frame(self, state: dict, decision: dict | None) -> None:
+        """A frame of the player's view: the state, the visible log lines since
+        the last frame, the same lines parsed for animation (`actions`), and
+        the decision (with structured option `refs`)."""
+        events = visible_events(self.g.log[self.view_seen :], self.seat)
+        self.frames.append({"state": state, "events": events, "actions": parse_events(events), "decision": decision})
+        self.view_seen = len(self.g.log)
 
     def choose(self, frame: int, index: int) -> None:
         """Take option `index` at the player's decision `frame` (the frame
@@ -166,17 +183,19 @@ class LiveManager:
     thread that made them, and the HTTP server answers each request on a
     thread of its own. A move takes milliseconds, so one thread is plenty."""
 
-    def __init__(self, models_dir: pathlib.Path, replay_dir: pathlib.Path, engine: str | None = None, max_games: int = MAX_GAMES):
-        import torch
+    def __init__(self, models_dir: pathlib.Path | None, replay_dir: pathlib.Path, engine: str | None = None, max_games: int = MAX_GAMES, scripted: bool = False):
+        """`models_dir` None: no checkpoints (only the scripted bot, with `scripted`)."""
+        if models_dir is not None:
+            import torch
 
-        torch.set_num_threads(1)  # one forward pass per decision; threads only contend
-        self.models_dir, self.replay_dir, self.engine, self.max_games = models_dir, replay_dir, engine, max_games
+            torch.set_num_threads(1)  # one forward pass per decision; threads only contend
+        self.models_dir, self.replay_dir, self.engine, self.max_games, self.scripted = models_dir, replay_dir, engine, max_games, scripted
         self.games: dict[str, LiveGame] = {}
         self.worker = ThreadPoolExecutor(1, thread_name_prefix="live")
 
     def options(self) -> dict:
         return {
-            "models": sorted(find_models(self.models_dir)),
+            "models": sorted(self._models()) + ([SCRIPTED] if self.scripted else []),
             "matchups": {k: [DECK_TITLES[d] for d in v] for k, v in MATCHUPS.items()},
         }
 
@@ -202,8 +221,13 @@ class LiveManager:
     def choose(self, gid: str, req: dict) -> dict:
         return self._run(self._choose, gid, req)
 
+    def _models(self) -> dict[str, pathlib.Path]:
+        return {} if self.models_dir is None else find_models(self.models_dir)
+
     def _new(self, req: dict) -> dict:
-        models = find_models(self.models_dir)
+        models: dict = self._models()
+        if self.scripted:
+            models[SCRIPTED] = None
         name, seat, matchup = req.get("model"), req.get("seat", 0), req.get("matchup", "jund_blue")
         if name not in models:
             raise LiveError(f"unknown model {name!r}")
