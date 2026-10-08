@@ -616,6 +616,7 @@ pub struct State {
     /// a pending pay_mana decision; read only by the payment preview.
     pub paying: Option<(Remaining, Option<SacFilter>, Vec<u32>)>,
     pub damage_allocation: Option<DamageAllocation>,
+    pub combat_subjects: Vec<Vec<u32>>,
     pub active: u8,
     pub starting_player: u8,
     pub skip_first_draw: bool,
@@ -695,6 +696,7 @@ impl State {
             decision: None,
             paying: None,
             damage_allocation: None,
+            combat_subjects: vec![],
             active: 0,
             starting_player: 0,
             skip_first_draw: false,
@@ -1968,6 +1970,9 @@ impl State {
             return false;
         }
         if d.additional_discard && (self.players[p as usize].hand.len() as i32 - (c.zone == Zone::Hand) as i32) < 1 {
+            return false;
+        }
+        if mode == Method::Flashback && self.players[p as usize].life < d.flashback_life {
             return false;
         }
         if mode == Method::Phyrexian && self.players[p as usize].life < d.phyrexian_life {

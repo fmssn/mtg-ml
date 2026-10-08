@@ -221,7 +221,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 
 | op | parameters | effect |
 |---|---|---|
-| `draw` | `n`, `n_cast_from_graveyard`, `each_controlling` | the controller draws `n` (or `n_cast_from_graveyard` when the spell was cast from a graveyard); `each_controlling`: instead each player who controls a permanent with that name (Bonder's Ornament) |
+| `draw` | `n`, `who = "you"` (default) or `"target_player"`, `n_cast_from_graveyard`, `each_controlling` | the controller draws `n` (or `n_cast_from_graveyard` when the spell was cast from a graveyard); `each_controlling`: instead each player who controls a permanent with that name (Bonder's Ornament) |
 | `mill` | `who` = `you` \| `target_player`, `n` | mill `n` |
 | `counter_target` | `if_color` | counter the targeted spell (only if it has colour `if_color`, e.g. `"U"`) |
 | `counter_target_unless_paid` | `cost` | its controller may pay `cost`; otherwise counter it (Force Spike) |
@@ -289,3 +289,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 - **Features need no registration.** State features and option keys are hashed strings (`encode.state_features`, `rl.features.option_tokens`), so a new card name or a new key shape gets buckets automatically, in both engines (`native/src/features.rs` hashes the same strings). Existing checkpoints still load, but they have never seen the new card: expect to fine-tune, and compare against the bots before and after.
 - **New decision kinds** must be added to `PUBLIC_KINDS` if the opponent may see the choice (and to `is_public` in Rust).
 - **Bots only play what they know.** `BlueBot.cast_score` and `JundBot.cast_score` return "never" for unknown names, and `card_value` / `CURVE` / `REMOVAL` / `THREATS` tables drive discards, search and mulligans. Add the card there, with a test in `tests/test_bots.py` if the decision matters.
+
+Flashback may additionally specify `flashback_life` (default 0). The life cost
+is checked when listing casts and paid with other casting costs, even if the
+spell is subsequently countered. New pilot cards do not alter fixed decklists.

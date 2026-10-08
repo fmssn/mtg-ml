@@ -1417,3 +1417,33 @@ rooms = [
     { name = "Catacombs", next = ["Throne of the Dead Three"], effect = [{ op = "create_token", token = "Skeleton", n = 1 }] },
     { name = "Throne of the Dead Three", effect = [{ op = "reveal_to_battlefield", n = 10, type = "Creature", counters = 3, hexproof = true }] },
 ]
+
+# Narrated Mono Blue pilot cards; source lists remain separate from fixed decks.
+[[card]]
+name = "Deep Analysis"
+cost = "{3}{U}"
+types = "Sorcery"
+text = "Target player draws two cards. Flashback—{1}{U}, Pay 3 life."
+targets = ["player"]
+effect = [{ op = "draw", n = 2, who = "target_player" }]
+flashback = "{1}{U}"
+flashback_life = 3
+
+[[card]]
+name = "Murmuring Mystic"
+cost = "{3}{U}"
+types = "Creature"
+subtypes = "Human Wizard"
+power = 1
+toughness = 5
+text = "Whenever you cast an instant or sorcery spell, create a 1/1 blue Bird Illusion creature token with flying."
+triggers = [{ name = "create a Bird Illusion", event = "you_cast", condition = { spell = "instant_or_sorcery" }, effect = [{ op = "create_token", token = "Bird Illusion", n = 1 }] }]
+
+[[token]]
+name = "Bird Illusion"
+types = "Creature"
+subtypes = "Bird Illusion"
+colors = "U"
+power = 1
+toughness = 1
+keywords = ["flying"]

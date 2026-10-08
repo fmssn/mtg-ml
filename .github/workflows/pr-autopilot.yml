@@ -91,6 +91,19 @@ jobs:
           [[ $(jq -r .isDraft <<< "$info") == false ]] || skip "draft"
           [[ $(jq -r .author.login <<< "$info") == "$OWNER" ]] || skip "not the owner's PR"
           [[ $(jq -r .headRepositoryOwner.login <<< "$info") == "$OWNER" ]] || skip "from a fork"
+          # --auto is not a CI gate on an unprotected stack parent. This inline
+          # check also permits bootstrapping policy.py onto the default branch.
+          # Keep it aligned with policy.py's final mutation checks.
+          gh pr merge "$pr" --disable-auto
+          default=$(gh api "repos/$GH_REPO" --jq .default_branch)
+          [[ $(jq -r .baseRefName <<< "$info") == "$default" ]] || skip "stacked PR: keep draft until its parent lands, then retarget"
+          encoded=$(jq -rn --arg ref "$default" '$ref | @uri')
+          [[ $(gh api "repos/$GH_REPO/branches/$encoded" --jq .protected) == true ]] || skip "default branch is unprotected"
+          rules=$(gh api "repos/$GH_REPO/rules/branches/$encoded")
+          jq -e 'any(.[]; .type == "pull_request") and
+            ([.[] | select(.type == "required_status_checks" and .parameters.strict_required_status_checks_policy == true)
+              | .parameters.required_status_checks[].context] | contains(["lint", "python", "native"]))' <<< "$rules" > /dev/null \
+            || skip "default branch must require up-to-date lint, python and native checks"
           labels=" $(jq -r '[.labels[].name] | join(" ")' <<< "$info") "
 
           for l in needs-opus needs-human autopilot:opus-used autopilot:round-1 autopilot:round-2; do
@@ -125,7 +138,6 @@ jobs:
           fi
 
           # Pause previous auto-merge before this head starts a new review.
-          gh pr merge "$pr" --disable-auto
           echo "PR #$pr: $mode (round $round)"
           {
             echo "pr=$pr"; echo "mode=$mode"; echo "round=$round"
