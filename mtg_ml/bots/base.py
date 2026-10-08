@@ -238,6 +238,8 @@ class Bot:
         return 2.0
 
     def score_sacrifice(self, g: Game, d: Decision, o: Option) -> float:
+        if isinstance(o.value, tuple):  # ("source", card, colour): tap it for mana first, the mana floats
+            return -self.sac_cost(g, o.value[1]) + 0.01
         return -self.sac_cost(g, o.value)
 
     def score_exile_from_graveyard(self, g: Game, d: Decision, o: Option) -> float:

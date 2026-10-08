@@ -108,9 +108,10 @@ def test_fireblast_alternative_cost_sacrifices_two_mountains():
     assert [l for l in labels(g) if "Fireblast" in l] == ["Cast Fireblast (alternative)"]
     choose(g, "Cast Fireblast (alternative)")
     choose(g, "Target player 1 (opponent)")
-    assert g.decision.kind == O.SACRIFICE and len(labels(g)) == 2  # the tapped or the untapped one
-    g.step(0)
-    settle(g)  # the second Mountain is the only one left
+    # The tapped or the untapped one, or tap the untapped one for {R} first (CR 601.2g-h).
+    assert g.decision.kind == O.SACRIFICE and [lab.split("#")[0] for lab in labels(g)] == ["Sacrifice Mountain", "Sacrifice Mountain", "Tap Mountain"]
+    g.step(0)  # the tapped one
+    choose(g, "Tap Mountain")  # the second Mountain: its {R} floats
     resolve_stack(g)
     assert g.players[1].life == 16 and bf(g, 0) == ["Swamp"]
     g = scenario(p0={"hand": ["Fireblast"], "battlefield": ["Mountain", "Swamp"]})
@@ -121,9 +122,26 @@ def test_lava_dart_flashback_sacrifices_a_mountain_and_exiles():
     g = scenario(p0={"graveyard": ["Lava Dart"], "battlefield": ["Mountain"]}, p1={"battlefield": ["Delver of Secrets"]})
     choose(g, "Cast Lava Dart (flashback)")
     choose(g, "Target Delver of Secrets")
+    choose(g, "Sacrifice Mountain")
     resolve_stack(g)
     assert "Delver of Secrets" not in bf(g) and bf(g, 0) == []
     assert names(g.players[0].exile) == ["Lava Dart"] and names(g.players[0].graveyard) == ["Mountain"]
+
+
+def test_lava_dart_flashback_taps_the_mountain_for_mana_first():
+    # CR 601.2g-h: the Mountain makes {R} before it is sacrificed to flashback,
+    # and the floating {R} casts Lightning Bolt.
+    g = scenario(p0={"hand": ["Lightning Bolt"], "graveyard": ["Lava Dart"], "battlefield": ["Mountain"]}, p1={"battlefield": ["Delver of Secrets"]})
+    choose(g, "Cast Lava Dart (flashback)")
+    choose(g, "Target Delver of Secrets")
+    assert g.decision.kind == O.SACRIFICE and [lab.split("#")[0] for lab in labels(g)] == ["Sacrifice Mountain", "Tap Mountain"]
+    choose(g, "Tap Mountain")
+    assert bf(g, 0) == [] and g.players[0].pool == {"R": 1}
+    choose(g, "Cast Lightning Bolt")
+    choose(g, "Target player 1 (opponent)")
+    pay(g)
+    resolve_stack(g)
+    assert "Delver of Secrets" not in bf(g) and g.players[1].life == 17 and g.players[0].pool == {}
 
 
 def test_highway_robbery_plot_then_cast_free_next_turn():
