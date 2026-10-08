@@ -59,6 +59,8 @@ class Position:
         self.source = self.top["source"]["name"] if self.top and self.top["source"] else None
         self.main = self.s["active"] == "self" and self.s["step"] in {"main1", "main2"} and not self.stack
         self.end = self.s["active"] == "opponent" and self.s["step"] == "end" and not self.stack
+        # Priority in combat_damage is after the turn-based damage action.
+        self.before_damage = self.s["step"] in {"declare_attackers", "declare_blockers"}
 
     def mana(self, gone=(), pool=None):
         units = pool_units(dict(self.me["pool"] if pool is None else pool))
@@ -138,16 +140,16 @@ class Position:
         return sorted(out, key=lambda c: (self.sacrifice_cost(c), c["oid"]))
 
     def munitions_budget(self):
-        """Maximum one-mana shots with cheap fodder, without double-use.
+        """Maximum one-mana lethal shots with all fodder, without double-use.
 
-        A Spawn used as fodder removes one potential mana unit. Other cheap
+        A Spawn used as fodder removes one potential mana unit. Other
         artifacts may tap for mana before being sacrificed. For k shots the
         necessary Spawn fodder is max(0, k - other), so k + that <= mana.
         """
-        cheap = [c for c in self.fodder(payment=cost("{1}")) if self.sacrifice_cost(c) <= T["cheap_fodder"]]
-        other = sum(c["name"] != "Eldrazi Spawn" for c in cheap)
+        fodder = self.fodder(payment=cost("{1}"))
+        other = sum(c["name"] != "Eldrazi Spawn" for c in fodder)
         mana = len(self.mana())
-        return min(len(cheap), mana, (mana + other) // 2)
+        return min(len(fodder), mana, (mana + other) // 2)
 
     def pending_damage(self, oid):
         return sum(1 for it in self.stack if it["source"] and it["source"]["name"] == "Makeshift Munitions"
@@ -163,7 +165,7 @@ class Position:
         if not self.payable((payment or ManaCost()).plus(ManaCost(ward))):
             return NEG
         v = combat.value(c)
-        if c["attacking"]:
+        if c["attacking"] and self.before_damage:
             v += T["ward_attack"]
             if sum(max(0, a["power"]) for a in self.threats if a["attacking"]) >= self.me["life"]:
                 v += C["survival"]
@@ -210,7 +212,7 @@ class Position:
                         survivors.append(c)
                 creatures = survivors
             total += gain * (T["gain_low"] if self.me["life"] < T["low_life"] else T["gain_normal"])
-            if any(c["attacking"] for c in self.threats):
+            if self.before_damage and any(c["attacking"] for c in self.threats):
                 before = sum(max(0, c["power"]) for c in self.threats if c["attacking"])
                 after = sum(max(0, c["power"]) for c in creatures if c["controller"] == "opponent" and c["attacking"])
                 if before >= self.me["life"] and after < self.me["life"] + gain:
@@ -383,11 +385,13 @@ class BenchmarkJundBot:
     def spawn_value(self, p, spawn):
         if spawn["name"] != "Eldrazi Spawn":
             return NEG
+        before_combat = p.s["active"] == "self" and p.s["step"] in {"main1", "begin_combat"}
+        if not before_combat and not p.before_damage:
+            return NEG
         grown = [dict(c, power=c["power"] + 1, toughness=c["toughness"] + 1) if c["name"] in {"Writhing Chrysalis", "Gixian Infiltrator"} else c
                  for c in p.creatures if c["oid"] != spawn["oid"]]
-        before_combat = p.s["active"] == "self" and p.s["step"] in {"main1", "begin_combat"}
         attacks = [c for c in grown if c["attacking"] or before_combat and not c["sick"] and not c["tapped"]]
-        declared = p.s["step"] in {"declare_blockers", "combat_damage", "end_combat"}
+        declared = p.s["step"] == "declare_blockers"
         blocks = {c["oid"]: [b for b in p.threats if b["blocking"] == c["oid"]] for c in attacks} if declared else combat.block_plan(attacks, p.threats, p.opp["life"])
         results = [combat.exchange(c, blocks[c["oid"]], declared and c["oid"] in p.view.context["blocked"]) for c in attacks]
         damage = sum(r[0] - r[3] for r in results)
@@ -425,7 +429,7 @@ class BenchmarkJundBot:
             fuel = sum(bool({"Instant", "Sorcery"}.intersection(p.rules[n]["types"])) for n in p.opp["graveyard"])
             return P["graveyard"] if fuel >= PARAMETERS["spellbomb_fuel"] or "Eviscerator's Insight" in p.opp["graveyard"] or "Sleep of the Dead" in p.opp["graveyard"] else NEG
         if name == "Lembas":
-            incoming = sum(t["power"] for t in p.threats if t["attacking"])
+            incoming = sum(t["power"] for t in p.threats if t["attacking"]) if p.before_damage else 0
             return C["survival"] if incoming >= p.me["life"] else P["life"] if p.me["life"] <= PARAMETERS["lembas_life"] and p.end else NEG
         if name == "Clue":
             return P["utility"] if p.end or p.main and len(p.hand) <= 1 else NEG

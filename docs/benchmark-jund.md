@@ -54,7 +54,8 @@ Payments assess remaining colored feasibility and a concrete useful Cast Down
 reserve. Sacrifice feasibility removes a self-sacrificing mana source from the
 payment supply before treating it as fodder. Munitions partitions available
 Spawns between payment and fodder, allowing two Spawns to fund one shot without
-counting either token twice. Wellspring draws, optional Spellbomb
+counting either token twice. Lethal calculations can spend valuable creatures
+and artifact lands; nonlethal exchanges retain the cheap-fodder limit. Wellspring draws, optional Spellbomb
 payment, Lembas recycling and Infiltrator/Chrysalis growth affect fodder values.
 Removal checks the target and ward before casting, and ignores a target already
 covered by pending Cast Down. Munitions distinguishes lethal face damage from a
@@ -77,6 +78,8 @@ not exhaustive optimal combat or an engine rollout. Every complete damage option
 is scored; PR63 sequential allocation uses suffix dynamic programming in O(nP),
 with lethal ranked above material. Spawn sacrifice evaluates growth and actual
 blocks after declaration rather than inventing a fresh blocking assignment.
+Priority in combat-damage/end-combat steps cannot cause another damage step;
+Spawn growth is not treated as immediate combat lethal after damage resolves.
 
 ## Decision coverage
 

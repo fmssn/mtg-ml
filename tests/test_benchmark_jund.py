@@ -246,6 +246,27 @@ def test_munitions_splits_spawns_between_mana_and_fodder():
     assert g.over and g.winner == 0 and "Eldrazi Spawn" not in bf(g)
 
 
+@pytest.mark.parametrize("fodder", ["Refurbished Familiar", "Drossforge Bridge"])
+def test_munitions_lethal_can_spend_valuable_fodder(fodder):
+    """Winning now outranks saving a valuable creature or needed artifact land."""
+    g = scenario(p0={"battlefield": ["Makeshift Munitions", fodder, "Swamp"]}, p1={"life": 1}, step="main2")
+    drive(g, until=end)
+    assert g.over and g.winner == 0
+
+
+def test_munitions_taps_artifact_fodder_to_fund_remaining_shot():
+    g = scenario(p0={"battlefield": ["Makeshift Munitions", "Drossforge Bridge", "Slagwoods Bridge"]}, p1={"life": 2}, step="main2")
+    drive(g, until=end)
+    assert g.over and g.winner == 0
+
+
+def test_spawn_does_not_claim_a_second_combat_damage_step():
+    """After dealing two damage, preserve the Spawn; growth cannot hit again."""
+    g = scenario(p0={"battlefield": [("Gixian Infiltrator", {"sick": False}), "Eldrazi Spawn"]}, p1={"life": 4})
+    drive(g, until=lambda g: g.step_name == "main2")
+    assert g.players[1].life == 2 and "Eldrazi Spawn" in bf(g)
+
+
 def test_spawn_growth_produces_combat_lethal():
     g = scenario(p0={"battlefield": [("Writhing Chrysalis", {"sick": False}), "Eldrazi Spawn"]}, p1={"life": 3})
     drive(g)
