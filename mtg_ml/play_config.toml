@@ -1,0 +1,17 @@
+# What the play page (apps/play) offers on a normal server: the decks a player
+# may take and the opponents (a checkpoint under `serve --models` and the deck it
+# plays). The page shows exactly this and the server refuses anything else.
+# `serve --dev` ignores this file and offers every checkpoint, every matchup,
+# the scripted bots and the dev scenarios. Use `serve --play-config PATH` for
+# another offer. A player deck that has no matchup (match.MATCHUPS) with any
+# offered opponent is listed but cannot be chosen.
+
+player_decks = ["jund_wildfire", "mono_blue_terror"]
+
+[[opponents]]
+id = "delver"
+label = "Delver"
+note = "The r4-control model (self-play RL) playing Mono Blue Terror"
+model = "r4-control/model"
+deck = "mono_blue_terror"
+greedy = false

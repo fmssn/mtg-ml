@@ -35,7 +35,7 @@ DECK_TITLES = {"jund_wildfire": "Jund Wildfire", "mono_blue_terror": "Mono Blue 
 
 
 def _card_info(face, token: bool) -> dict:
-    return {
+    info = {
         "types": sorted(face.types),
         "subtypes": sorted(face.subtypes),
         "cost": str(face.cost) if not ("Land" in face.types or token) else "",
@@ -44,6 +44,13 @@ def _card_info(face, token: bool) -> dict:
         "toughness": face.toughness,
         "token": token,
     }
+    # The colours its plain mana ability makes (the play client taps sources for mana)
+    ab = next((a for a in face.abilities if a.mana is not None and not a.is_filter and a.zone == "battlefield"), None)
+    if ab is not None:
+        info["mana"] = list(ab.mana)
+        if ab.sac_self:
+            info["mana_sac"] = True
+    return info
 
 
 def _card(c, info: dict) -> dict:
@@ -354,7 +361,10 @@ def main(argv=None) -> None:
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--models", default=None, help="directory of checkpoints to play against in the viewer (needs torch)")
     s.add_argument("--max-games", type=int, default=None, help="live games held at once (default 8); a full server refuses new games instead of dropping one being played")
-    s.add_argument("--scripted-bot", action="store_true", help="also offer the decks' scripted bots as opponents (dev; works without --models and torch)")
+    s.add_argument("--dev", action="store_true", help="development server: every checkpoint and matchup, the scripted bots and the dev scenarios (works without --models and torch)")
+    s.add_argument("--scripted-bot", action="store_true", help="same as --dev (kept for old commands)")
+    s.add_argument("--play-config", default=None, help="the play offer (default: mtg_ml/play_config.toml); ignored with --dev")
+    s.add_argument("--no-issues", action="store_true", help="never file flags as GitHub issues (default: file them when gh is authenticated or MTG_PLAY_GITHUB_TOKEN is set)")
     s.add_argument("--engine", default=None, help="engine for live games: python or native; default: $MTG_ENGINE, else python")
     args = ap.parse_args(argv)
 
@@ -374,11 +384,17 @@ def main(argv=None) -> None:
             print(f"{path}: {len(rep['frames'])} frames, {m['turns']} turns, winner {m['winner']} ({m['end_reason']})")
     else:
         live = None
-        if args.models or args.scripted_bot:
-            from .live import LiveManager, find_models
+        dev = args.dev or args.scripted_bot
+        if args.models or dev:
+            from .live import LiveManager, find_models, load_play_config
+            from .live_issues import GitHubFiler
 
             models = pathlib.Path(args.models) if args.models else None
-            live = LiveManager(models, pathlib.Path(args.dir), engine=args.engine, scripted=args.scripted_bot, **({} if args.max_games is None else {"max_games": args.max_games}))
+            config = None if dev else load_play_config(pathlib.Path(args.play_config) if args.play_config else None)
+            filer = None if args.no_issues else GitHubFiler()
+            live = LiveManager(models, pathlib.Path(args.dir), engine=args.engine, scripted=dev, config=config, filer=filer,
+                               **({} if args.max_games is None else {"max_games": args.max_games}))
+            print(f"flags: {'filed as GitHub issues on ' + filer.repo if filer and filer.available() else 'saved with the replays only (no GitHub access)'}")
             if models:
                 print(f"{len(find_models(models))} checkpoints in {args.models}")
             print(f"play against them at http://{args.host}:{args.port}/play/")

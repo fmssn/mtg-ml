@@ -3,6 +3,7 @@ and parsed events, and that neither leaks what the player may not see."""
 
 import json
 import random
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -318,34 +319,143 @@ def test_hand_cost_reductions(manager, monkeypatch):
     assert d["player"] == 1 and {int(k): v for k, v in d["reductions"].items()} == {terror: 3}
 
 
-def test_flags_and_survey_are_saved_with_the_replay(manager):
-    """Flags on the model's plays (reason + note, under a pseudonym) and the
-    post-game survey go into the saved replay's feedback block, which also
-    holds the game as seed + choices; feedback after the game rewrites it."""
-    view = manager.new({"model": SCRIPTED, "seed": 6, "seat": 0, "matchup": "jund_blue"})
-    gid, frames = view["live"]["id"], list(view["frames"])
+class FakeFiler:
+    """Stands in for GitHubFiler: records issues and comments, files nothing."""
+
+    def __init__(self):
+        self.issues, self.comments = [], []
+
+    def available(self):
+        return True
+
+    def create(self, category, title, body):
+        self.issues.append((category, title, body))
+        return f"https://github.com/example/repo/issues/{len(self.issues)}"
+
+    def comment(self, url, body):
+        self.comments.append((url, body))
+
+
+def play_until_bot_action(manager, gid, frames):
     rng = random.Random(0)
     while not any(f["decision"] and f["decision"]["player"] == 1 and f["decision"]["refs"][0]["type"] not in ("hidden", "pass") for f in frames):
         f = len(frames) - 1
         view = manager.choose(gid, {"frame": f, "index": rng.randrange(len(frames[-1]["decision"]["options"])), "since": f})
         frames[view["live"]["since"] :] = view["frames"]
-    theirs = next(i for i, f in enumerate(frames) if f["decision"] and f["decision"]["player"] == 1 and f["decision"]["refs"][0]["type"] not in ("hidden", "pass"))
+    return next(i for i, f in enumerate(frames) if f["decision"] and f["decision"]["player"] == 1 and f["decision"]["refs"][0]["type"] not in ("hidden", "pass"))
+
+
+def test_flags_file_issues_without_hidden_information(manager):
+    """A flag is one issue (labelled by category) holding only what the player
+    saw; seed + choices follow as a comment after the game; flags and the
+    survey are saved in the replay's feedback block."""
+    import time
+
+    manager.filer = FakeFiler()
+    view = manager.new({"model": SCRIPTED, "seed": 987654, "seat": 0, "matchup": "jund_blue"})
+    gid, frames = view["live"]["id"], list(view["frames"])
+    theirs = play_until_bot_action(manager, gid, frames)
     mine = next(i for i, f in enumerate(frames) if f["decision"] and f["decision"]["player"] == 0)
     with pytest.raises(LiveError):
-        manager.flag(gid, {"frame": mine, "reason": "misplay"})
+        manager.flag(gid, {"category": "bot", "frame": mine, "what": "x"})  # not a bot play
     with pytest.raises(LiveError):
-        manager.flag(gid, {"frame": theirs, "reason": "because"})
-    out = manager.flag(gid, {"frame": theirs, "reason": "misplay", "note": "should have attacked", "pseudonym": "Tester"})
-    assert out["flags"][0]["action"] == frames[theirs]["decision"]["options"][0]
+        manager.flag(gid, {"category": "praise", "frame": theirs, "what": "x"})
+    with pytest.raises(LiveError):
+        manager.flag(gid, {"category": "bot", "frame": theirs, "what": "  "})
+    out = manager.flag(gid, {"category": "bot", "frame": theirs, "what": "Attacked into a bigger blocker", "note": "should hold back", "pseudonym": "Tester"})
+    assert out["filed"] and out["issue"].endswith("/1")
+    bug = manager.flag(gid, {"category": "bug", "what": "The stack hid my creature"})
+    assert bug["filed"]
+    (cat, title, body), (cat2, title2, _) = manager.filer.issues
+    assert cat == "bot" and re.match(r"\[bot-play\] Jund Wildfire vs Mono Blue Terror, (turn \d+|mulligan): ", title) and "Attacked into a bigger blocker" in title
+    assert cat2 == "bug" and title2.startswith("[bug] ")
+    assert "Tester" in body and frames[theirs]["decision"]["options"][0] in body
+    # nothing the player could not see: no seed, no choice list, no card only in the bot's hidden hand or library
+    game = manager.games[gid]
+    hidden = manager._run(lambda: {c.name for c in game.g.players[1].hand if 0 not in c.known_to} | {c.name for c in list(game.g.players[1].library)})
+    visible = {c["name"] for f in frames for c in f["state"]["battlefield"]} | {c["name"] for f in frames for P in f["state"]["players"] for k in ("hand", "graveyard", "exile") for c in P[k] if c["name"]}
+    visible |= {line for f in frames for line in f["events"]}  # names in the visible log
+    assert str(game.seed) not in body and "--choices" not in body
+    for name in hidden - visible:
+        if not any(name in line for f in frames for line in f["events"]):
+            assert name not in body, name
+    assert not manager.filer.comments
     view = manager.concede(gid)
+    for _ in range(60):  # the reveal comments are posted on a thread of their own
+        if len(manager.filer.comments) == 2:
+            break
+        time.sleep(0.05)
+    urls = sorted(u for u, _ in manager.filer.comments)
+    assert urls == ["https://github.com/example/repo/issues/1", "https://github.com/example/repo/issues/2"]
+    reveal = manager.filer.comments[0][1]
+    assert f"seed `{game.seed}`" in reveal and "--choices" in reveal
     manager.survey(gid, {"strength": 4, "hardest": "turn 3", "pseudonym": "Tester"})
     rep = json.loads((manager.replay_dir / view["live"]["replay"]).read_text())
     fb = rep["feedback"]
     assert fb["format"] == 1 and fb["player"] == "Tester" and fb["seed"] == rep["meta"]["seed"]
+    assert [f["category"] for f in fb["flags"]] == ["bot", "bug"] and fb["flags"][0]["issue"].endswith("/1")
     assert fb["choices"] == [f["decision"]["chosen"] for f in rep["frames"][:-1]]
-    flag = fb["flags"][0]
-    assert flag["reason"] == "misplay" and flag["note"] == "should have attacked"
-    assert rep["frames"][flag["replay_frame"]]["decision"]["options"][rep["frames"][flag["replay_frame"]]["decision"]["chosen"]] == flag["action"]
     assert fb["survey"]["strength"] == 4
-    manager.flag(gid, {"frame": theirs, "remove": True})
-    assert json.loads((manager.replay_dir / view["live"]["replay"]).read_text())["feedback"]["flags"] == []
+
+
+def test_flags_without_github_are_saved_and_rate_limited(manager):
+    manager.filer = None
+    view = manager.new({"model": SCRIPTED, "seed": 6, "seat": 0, "matchup": "jund_blue"})
+    out = manager.flag(view["live"]["id"], {"category": "bug", "what": "something"})
+    assert not out["filed"] and "not filed" in out["message"] and out["flags"][0]["what"] == "something"
+    manager.filer = FakeFiler()
+    for k in range(12):
+        out = manager.flag(view["live"]["id"], {"category": "bug", "what": f"thing {k}"})
+    assert len(manager.filer.issues) == 10 and not out["filed"] and "at most" in out["message"]
+
+
+def test_rebuild_reproduces_the_game(manager):
+    """The reveal comment's rebuild command gives the same game."""
+    from mtg_ml.live_issues import rebuild
+
+    view = manager.new({"model": SCRIPTED, "seed": 8, "seat": 1, "matchup": "jund_blue"})
+    gid = view["live"]["id"]
+    play_out(manager, view, random.Random(3))
+    game = manager.games[gid]
+    fb, log = manager._run(lambda: (game.feedback(), list(game.g.log)))
+    same = manager._run(lambda: list(rebuild("jund_blue", fb["seed"], 1, 1, "standard", None, fb["choices"], manager.engine).log))
+    assert same == log
+
+
+@pytest.fixture
+def models(tmp_path):
+    torch = pytest.importorskip("torch")
+    from mtg_ml.rl.model import PolicyNet
+
+    config = {"hidden": 16, "memory": "gru", "trunk": "entity"}
+    (tmp_path / "models" / "tiny").mkdir(parents=True)
+    torch.save({"config": config, "model": PolicyNet(**config).state_dict()}, tmp_path / "models" / "tiny" / "model.pt")
+    return tmp_path / "models"
+
+
+def test_play_config_offer(tmp_path, models):
+    """A normal server offers exactly the configured decks and opponents and
+    refuses anything else; a deck without a matchup against them is listed
+    with no opponents."""
+    cfg = {"player_decks": ["jund_wildfire", "mono_blue_terror"],
+           "opponents": [{"id": "delver", "label": "Delver", "model": "tiny/model", "deck": "mono_blue_terror"},
+                         {"id": "ghost", "label": "Missing", "model": "nope/model", "deck": "red_madness"}]}
+    m = LiveManager(models, tmp_path, config=cfg)
+    try:
+        opt = m.options()
+        assert opt["mode"] == "play" and "models" not in opt and "scenarios" not in opt
+        assert [o["id"] for o in opt["opponents"]] == ["delver"]  # a checkpoint the server lacks is not offered
+        decks = {d["deck"]: d["opponents"] for d in opt["player_decks"]}
+        assert decks == {"jund_wildfire": ["delver"], "mono_blue_terror": []}  # no Delver mirror matchup
+        view = m.new({"deck": "jund_wildfire", "opponent": "delver", "seed": 1})
+        assert view["live"]["seat"] == 0 and view["meta"]["decks"] == ["Jund Wildfire", "Mono Blue Terror"]
+        for bad in ({"deck": "mono_blue_terror", "opponent": "delver"}, {"deck": "elves", "opponent": "delver"},
+                    {"deck": "jund_wildfire", "opponent": "ghost"}, {"model": "tiny/model", "matchup": "jund_blue"},
+                    {"model": SCRIPTED, "scenario": "crowded"}):
+            with pytest.raises(LiveError):
+                m.new(bad)
+        gid = view["live"]["id"]
+        m.concede(gid)
+        assert m.next_game(gid, {"plan": "maindeck"})["meta"]["match"]["game_no"] == 2  # the match goes on in play mode
+    finally:
+        m.close()

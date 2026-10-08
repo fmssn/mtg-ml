@@ -50,6 +50,14 @@ SCENARIOS: dict[str, dict] = {
         "me": {"hand": ["Tolarian Terror", "Counterspell"], "graveyard": ["Brainstorm", "Ponder", "Counterspell"], "battlefield": ["Island"] * 3},
         "opp": {"battlefield": ["Swamp", "Mountain"]},
     },
+    "wildfire": {
+        "title": "Cleansing Wildfire with a Bridge (tap for mana, target your own land)",
+        "matchup": "jund_blue",
+        "seat": 0,
+        "me": {"battlefield": ["Drossforge Bridge", "Mountain", "Swamp", "Mountain", "Forest"], "hand": ["Cleansing Wildfire", "Cleansing Wildfire"],
+               "library": ["Swamp", "Forest", "Mountain"] * 7},
+        "opp": {"battlefield": ["Island", "Island", "Island"]},
+    },
     "trade": {
         "title": "Combat death (attack a 1/1 into their 2/2)",
         "matchup": "madness_elves",

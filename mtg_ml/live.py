@@ -24,6 +24,7 @@ by path: loading a checkpoint unpickles it, which can run code.
 from __future__ import annotations
 
 import gc
+import threading
 import pathlib
 import secrets
 import time
@@ -33,13 +34,14 @@ from .agents import take
 from .backend import engine_name, game_class
 from .engine import DECKS, SIDEBOARDS, expand, plan_for, postboard
 from .match import MATCHUPS, game_args, matchup_decks
+from .live_issues import MAX_ISSUES_PER_GAME, FilingError
 from .live_proto import add_tap_previews, auto_pay_index, combat_and_life_lines, decision_cards, option_ref, option_refs, parse_events, status, visible_ids
 from .engine.cards import CARDS
 from .replay import DECK_TITLES, FORMAT, _card_info, snapshot, visible_events
 from .rl.features import PUBLIC_KINDS
 
 FEEDBACK_FORMAT = 1  # version of the "feedback" block in saved replays
-FLAG_REASONS = ("misplay", "missed lethal", "rules bug", "weird timing", "other")
+FLAG_CATEGORIES = {"bot": "Bot played wrong", "bug": "Bug: engine / UI"}
 SCRIPTED = "scripted-bot"  # the deck's hand-written bot, offered with --scripted-bot (dev, no checkpoint needed)
 MAX_GAMES = 8  # games held at once; only an idle or finished game makes room
 IDLE_SECONDS = 3600  # a game nobody touched for this long is dropped
@@ -50,6 +52,38 @@ def live_dev_options() -> dict[str, str]:
     from .live_dev import options
 
     return options()
+
+
+def live_game_args(matchup: str, game_no: int, seat: int, plan: str = "standard") -> dict:
+    """Game keyword arguments of a live game: game 1 with the maindecks; games 2
+    and 3 sideboarded, the model with the plan table's plan, the player with the
+    plan they chose ("standard": the table's plan for their deck, "maindeck")."""
+    args = game_args(game_no, matchup)
+    if game_no > 1:
+        decks = list(matchup_decks(matchup))
+        mine = postboard(decks[seat], decks[1 - seat]) if plan == "standard" else DECKS[decks[seat]]
+        lists = [None, None]
+        lists[seat], lists[1 - seat] = expand(mine), expand(postboard(decks[1 - seat], decks[seat]))
+        args["decks"] = tuple(lists)
+    return args
+
+
+def load_play_config(path: pathlib.Path | None = None) -> dict:
+    """The play offer (play_config.toml next to this module by default)."""
+    import tomllib
+
+    with open(path or pathlib.Path(__file__).with_name("play_config.toml"), "rb") as f:
+        return tomllib.load(f)
+
+
+def matchup_for(player_deck: str, opponent_deck: str) -> tuple[str, int] | None:
+    """(matchup, player's seat) for two decks, or None when no matchup pairs them."""
+    for k, (a, b) in MATCHUPS.items():
+        if (a, b) == (player_deck, opponent_deck):
+            return k, 0
+        if (b, a) == (player_deck, opponent_deck):
+            return k, 1
+    return None
 
 
 class LiveError(ValueError):
@@ -79,6 +113,7 @@ class LiveGame:
         for their deck, "maindeck": no changes). `start`: the starting player."""
         game = None
         self.match, self.game_no, self.plan = match, game_no, plan
+        self.start_arg = start  # None: the engine picked the starting player from the seed
         self.conceded = False
         # feedback: flags on the model's plays and a post-game survey, saved with the replay
         self.flags: list[dict] = []
@@ -105,14 +140,7 @@ class LiveGame:
         self.names = ["", ""]
         self.names[seat], self.names[1 - seat] = "you", f"model:{model_name}" + (" (greedy)" if greedy else "")
         if game is None:
-            args = game_args(game_no, matchup)
-            if game_no > 1:  # sideboarded: the model takes the table's plan, the player the plan they chose
-                decks = list(matchup_decks(matchup))
-                mine = postboard(decks[seat], decks[1 - seat]) if plan == "standard" else DECKS[decks[seat]]
-                lists = [None, None]
-                lists[seat], lists[1 - seat] = expand(mine), expand(postboard(decks[1 - seat], decks[seat]))
-                args["decks"] = tuple(lists)
-            game = game_class(engine)(**args, seed=seed, log=True, **({} if start is None else {"starting_player": start}))
+            game = game_class(engine)(**live_game_args(matchup, game_no, seat, plan), seed=seed, log=True, **({} if start is None else {"starting_player": start}))
         self.g = game
         self.seed = seed
         self.full_info: dict = {}  # card data for the saved replay
@@ -287,26 +315,72 @@ class LiveGame:
 
     # -- feedback (the hosted-play plan: flag + describe, a short survey)
     def flag(self, req: dict) -> dict:
-        """Flag (or unflag) the model's play at the player's frame `frame`:
-        a reason from FLAG_REASONS and a free-text note. Stored with the replay."""
-        frame = req.get("frame")
+        """A flag: "bot" (the model's play at the player's frame `frame` was
+        wrong) or "bug" (rules, an illegal play, the UI; any frame, default the
+        latest), with a short `what` and an optional `note`. Stored with the
+        replay; returns the entry and the issue to file (visible information
+        only: see live_issues)."""
+        from . import live_issues
+
+        category = req.get("category")
+        if category not in FLAG_CATEGORIES:
+            raise LiveError("category must be 'bot' or 'bug'")
+        frame = req.get("frame", len(self.frames) - 1)
         if not (isinstance(frame, int) and 0 <= frame < len(self.frames)):
             raise LiveError("no such frame")
         d = self.frames[frame]["decision"]
-        if d is None or d["player"] == self.seat:
-            raise LiveError("only the opponent's plays can be flagged")
-        self._pseudonym(req)
-        self.flags = [f for f in self.flags if f["frame"] != frame]
-        if req.get("remove"):
-            return {"flags": self.flags}
-        reason = req.get("reason", "other")
-        if reason not in FLAG_REASONS:
-            raise LiveError(f"reason must be one of {', '.join(FLAG_REASONS)}")
-        if len(self.flags) >= 200:
+        if category == "bot" and (d is None or d["player"] == self.seat):
+            raise LiveError("pick one of the bot's plays to flag")
+        what = str(req.get("what", "")).strip()[:200]
+        if not what:
+            raise LiveError("say in a few words what happened")
+        if len(self.flags) >= 50:
             raise LiveError("too many flags in one game")
-        self.flags.append({"frame": frame, "replay_frame": self.view_to_full[frame], "action": d["options"][d["chosen"] or 0], "kind": d["kind"],
-                           "turn": self.frames[frame]["state"]["turn"], "reason": reason, "note": str(req.get("note", ""))[:1000], "at": time.strftime("%Y-%m-%d %H:%M:%S")})
-        return {"flags": self.flags}
+        self._pseudonym(req)
+        state = self.frames[frame]["state"]
+        action = d["options"][d["chosen"] or 0] if d is not None and d.get("chosen") is not None and d["player"] != self.seat else None
+        entry = {"id": len(self.flags) + 1, "category": category, "frame": frame, "replay_frame": self.view_to_full[frame] if frame < len(self.view_to_full) else None,
+                 "action": action, "kind": d["kind"] if d else None, "turn": state["turn"], "step": state["step"], "what": what,
+                 "note": str(req.get("note", ""))[:2000], "at": time.strftime("%Y-%m-%d %H:%M:%S"), "issue": None}
+        self.flags.append(entry)
+        decks = [DECK_TITLES[x] for x in matchup_decks(self.matchup)]
+        when = f"turn {state['turn']}" if state["turn"] else "mulligan"
+        title = f"[{'bot-play' if category == 'bot' else 'bug'}] {decks[self.seat]} vs {decks[1 - self.seat]}, {when}: {what.splitlines()[0][:90]}"
+        recent = [line for line in self.frames[frame]["events"] if not line.startswith("--")][-12:]  # already the player's view
+        body = "\n".join([
+            f"**{FLAG_CATEGORIES[category]}**, flagged by **{self.pseudonym or 'anonymous'}** from the play UI.",
+            "",
+            f"> {what}",
+            *([">", *[f"> {line}" for line in entry["note"].splitlines()]] if entry["note"] else []),
+            "",
+            f"- game `{self.id}`, game {self.game_no} of the match, turn {state['turn']}, step `{state['step']}`",
+            f"- {decks[self.seat]} (player, seat {self.seat}) vs {decks[1 - self.seat]} played by `{self.model_name}`",
+            f"- engine `{engine_name(self.engine)}`, code `{live_issues.code_commit()}`",
+            *([f"- flagged action (as the player saw it): `{action}` ({d['kind']})"] if action else []),
+            "",
+            "### Board as the player saw it",
+            live_issues.board_text(state, self.seat),
+            "",
+            "### Recent log (player's view)",
+            "```", *recent, "```",
+            "",
+            "_The seed and the full list of choices (which reveal the bot's hidden cards) are added as a comment when the game ends._",
+        ])
+        return {"entry": entry, "issue": {"category": category, "title": title, "body": body}, "over": self.over, "flags": self.flags}
+
+    def reveal_comment(self) -> str:
+        """For issues filed during this game, once it is over: what rebuilds it."""
+        fb = self.feedback()
+        return "\n".join([
+            f"Game `{self.id}` is over ({'draw' if self.winner is None else ('the player' if self.winner == self.seat else 'the bot') + ' won'}, {self.end_reason}).",
+            "",
+            f"- seed `{self.seed}`, matchup `{self.matchup}`, player seat {self.seat}, game {self.game_no} (player's sideboard plan `{self.plan}`), starting player {self.g.starting_player}, engine `{engine_name(self.engine)}`" + (f", dev scenario `{self.scenario}`" if self.scenario else ""),
+            f"- omniscient replay on the server: `{self.replay_file}` (open it with `python -m mtg_ml.replay serve --dir <replay dir>`, then `#r={self.replay_file}`)",
+            "- rebuild the game from seed + choices:",
+            "```",
+            f"python -m mtg_ml.live_issues rebuild --matchup {self.matchup} --seed {self.seed} --seat {self.seat} --game {self.game_no} --plan {self.plan}" + ("" if self.start_arg is None else f" --start {self.start_arg}") + f" --engine {engine_name(self.engine)}" + (f" --scenario {self.scenario}" if self.scenario else "") + f" --choices {','.join(str(c) for c in fb['choices'])}",
+            "```",
+        ])
 
     def set_survey(self, req: dict) -> dict:
         strength = req.get("strength")
@@ -353,8 +427,14 @@ class LiveManager:
     thread that made them, and the HTTP server answers each request on a
     thread of its own. A move takes milliseconds, so one thread is plenty."""
 
-    def __init__(self, models_dir: pathlib.Path | None, replay_dir: pathlib.Path, engine: str | None = None, max_games: int = MAX_GAMES, scripted: bool = False):
-        """`models_dir` None: no checkpoints (only the scripted bot, with `scripted`)."""
+    def __init__(self, models_dir: pathlib.Path | None, replay_dir: pathlib.Path, engine: str | None = None, max_games: int = MAX_GAMES, scripted: bool = False,
+                 config: dict | None = None, filer=None):
+        """`models_dir` None: no checkpoints (only the scripted bot, with `scripted`).
+        `scripted`: a development server (serve --dev): every checkpoint and
+        matchup, the scripted bots and the dev scenarios. `config`: the play
+        offer (play_config.toml: player decks, opponents); None offers every
+        checkpoint and matchup. `filer`: files flags as GitHub issues (None: never)."""
+        self.config, self.filer = config, filer
         if models_dir is not None:
             import torch
 
@@ -364,11 +444,34 @@ class LiveManager:
         self.worker = ThreadPoolExecutor(1, thread_name_prefix="live")
 
     def options(self) -> dict:
-        return {
+        out = {"mode": "dev" if self.scripted else "play" if self.config is not None else "open"}
+        if self.config is not None and not self.scripted:
+            offer = self._offer()
+            out["player_decks"] = [{"deck": d, "title": DECK_TITLES[d], "opponents": [o["id"] for o in offer if matchup_for(d, o["deck"])]} for d in self.config.get("player_decks", [])]
+            out["opponents"] = [{"id": o["id"], "label": o["label"], "deck": o["deck"], "deck_title": DECK_TITLES[o["deck"]], "note": o.get("note", "")} for o in offer]
+            return out
+        out.update({
             "models": sorted(self._models()) + ([SCRIPTED] if self.scripted else []),
             "scenarios": live_dev_options() if self.scripted else {},
             "matchups": {k: [DECK_TITLES[d] for d in v] for k, v in MATCHUPS.items()},
-        }
+        })
+        return out
+
+    def _offer(self) -> list[dict]:
+        """The configured opponents whose checkpoint this server has."""
+        models = self._models()
+        return [o for o in self.config.get("opponents", []) if o.get("model") in models and o.get("deck") in DECK_TITLES]
+
+    def _resolve(self, req: dict) -> dict:
+        """A play-mode request {deck, opponent} as the internal one, or a refusal."""
+        deck, oid = req.get("deck"), req.get("opponent")
+        opp = next((o for o in self._offer() if o["id"] == oid), None)
+        if deck not in self.config.get("player_decks", []) or opp is None:
+            raise LiveError("that deck or opponent is not offered on this server")
+        m = matchup_for(deck, opp["deck"])
+        if m is None:
+            raise LiveError(f"{DECK_TITLES[deck]} against {DECK_TITLES[opp['deck']]} is not a supported matchup")
+        return {"model": opp["model"], "matchup": m[0], "seat": m[1], "greedy": bool(opp.get("greedy", False)), "seed": req.get("seed")}
 
     def close(self) -> None:
         """Drop every game (on the worker, where native games must be freed)."""
@@ -395,9 +498,6 @@ class LiveManager:
     def concede(self, gid: str) -> dict:
         return self._run(self._concede, gid)
 
-    def flag(self, gid: str, req: dict) -> dict:
-        return self._run(self._feedback, gid, "flag", req)
-
     def survey(self, gid: str, req: dict) -> dict:
         return self._run(self._feedback, gid, "survey", req)
 
@@ -407,6 +507,50 @@ class LiveManager:
         if game.replay_file:  # the game is over: the saved replay gets the new feedback
             self._write(game)
         return out
+
+    def flag(self, gid: str, req: dict) -> dict:
+        """Store a flag, then file it as a GitHub issue (on this thread, not the
+        game's worker). Returns the flags and what happened to this one."""
+        out = self._run(self._feedback, gid, "flag", req)
+        entry, issue, flags = out["entry"], out["issue"], out["flags"]  # read on the worker: native games belong to it
+        game = self.games.get(gid)
+        filed = [f for f in flags if f["issue"]]
+        if self.filer is None or not self.filer.available():
+            msg = "Saved with the game, not filed (no GitHub access on this server)."
+        elif len(filed) >= MAX_ISSUES_PER_GAME:
+            msg = f"Saved with the game, not filed (at most {MAX_ISSUES_PER_GAME} issues per game)."
+        else:
+            try:
+                url = self.filer.create(issue["category"], issue["title"], issue["body"])
+                self._run(self._filed, gid, entry["id"], url)
+                if out["over"] and game:  # the game is already over: reveal right away
+                    self._reveal(self._run(game.reveal_comment), [url])
+                return {"flags": flags, "filed": True, "issue": url, "message": "Filed as a GitHub issue."}
+            except FilingError as e:
+                msg = f"Saved with the game, not filed ({e})."
+        return {"flags": flags, "filed": False, "issue": None, "message": msg}
+
+    def _filed(self, gid: str, fid: int, url: str) -> None:
+        game = self._get(gid)
+        for f in game.flags:
+            if f["id"] == fid:
+                f["issue"] = url
+        if game.replay_file:
+            self._write(game)
+
+    def _reveal(self, body: str, urls: list[str]) -> None:
+        """After the game: post seed + choices to its issues (on a thread of its own)."""
+        if not urls or self.filer is None:
+            return
+
+        def post():
+            for u in urls:
+                try:
+                    self.filer.comment(u, body)
+                except FilingError:
+                    pass
+
+        threading.Thread(target=post, daemon=True).start()
 
     def next_game(self, gid: str, req: dict) -> dict:
         return self._run(self._next, gid, req)
@@ -446,10 +590,10 @@ class LiveManager:
         if not prev.over:
             raise LiveError("finish or concede this game first")
         if prev.scenario is not None:
-            return self._new({"model": prev.model_name, "scenario": prev.scenario, "greedy": prev.greedy})
+            return self._new({"model": prev.model_name, "scenario": prev.scenario, "greedy": prev.greedy}, internal=True)
         mm = prev._match_meta()
         if mm is None or mm["over"]:
-            return self._new({"model": prev.model_name, "seat": prev.seat, "matchup": prev.matchup, "greedy": prev.greedy})
+            return self._new({"model": prev.model_name, "seat": prev.seat, "matchup": prev.matchup, "greedy": prev.greedy}, internal=True)
         plan = req.get("plan", "standard")
         if plan not in ("standard", "maindeck"):
             raise LiveError("plan must be 'standard' or 'maindeck'")
@@ -461,12 +605,15 @@ class LiveManager:
         else:  # you lost: you choose
             start = prev.seat if req.get("play", True) else 1 - prev.seat
         return self._new({"model": prev.model_name, "seat": prev.seat, "matchup": prev.matchup, "greedy": prev.greedy},
-                         match=prev.match, game_no=prev.game_no + 1, start=start, plan=plan)
+                         match=prev.match, game_no=prev.game_no + 1, start=start, plan=plan, internal=True)
 
     def _models(self) -> dict[str, pathlib.Path]:
         return {} if self.models_dir is None else find_models(self.models_dir)
 
-    def _new(self, req: dict, match: dict | None = None, game_no: int = 1, start: int | None = None, plan: str = "standard") -> dict:
+    def _new(self, req: dict, match: dict | None = None, game_no: int = 1, start: int | None = None, plan: str = "standard", internal: bool = False) -> dict:
+        """`internal`: a request built by the server (the next game of a match, a rematch)."""
+        if self.config is not None and not self.scripted and not internal:
+            req = self._resolve(req)
         models: dict = self._models()
         if self.scripted:
             models[SCRIPTED] = None
@@ -533,6 +680,9 @@ class LiveManager:
         model = game.names[1 - game.seat].split(":", 1)[1].split(" ")[0].replace("/", "_")
         game.replay_file = f"human-vs-{model}-{game.id}.json" if game.seat == 0 else f"{model}-vs-human-{game.id}.json"
         self._write(game)
+        urls = [f["issue"] for f in game.flags if f["issue"]]
+        if urls:
+            self._reveal(game.reveal_comment(), urls)  # on the worker: the game is read here
 
     def _write(self, game: LiveGame) -> None:
         import json

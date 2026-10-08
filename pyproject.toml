@@ -19,6 +19,7 @@ include = ["mtg_ml*"]
 
 [tool.setuptools.package-data]
 "mtg_ml.engine" = ["cards.toml", "sideboard_plans.toml"]
+"mtg_ml" = ["play_config.toml"]
 
 [tool.ruff]
 line-length = 120
