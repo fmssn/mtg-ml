@@ -12,3 +12,9 @@ it points to. Historical handoffs are evidence, not a current task list.
 Run Python commands with `.venv/bin/python` after `make setup`; Make targets
 select this workspace's tools automatically. Rebuild with `make native` after
 Rust changes. Do not use another worktree's installed native extension.
+
+Use the project subagents for independent, substantial subtasks when the
+delegation policy in `CLAUDE.md` applies. This explicitly authorizes bounded
+delegation; keep straightforward work single-agent. Read only the assigned
+role under `.agents/roles/`, not the whole role library. When the spawn tool
+supports it, pass `fork_turns: "none"` explicitly for a fresh task context.

@@ -124,10 +124,19 @@ def test_bad_requests_are_refused(manager):
         manager.choose("nope", {"frame": 0, "index": 0})
 
 
-def test_oldest_game_makes_room(manager):
+def test_only_idle_games_make_room(manager):
+    """A full server never drops a game being played: it refuses the new one;
+    an idle (or finished) game makes room."""
+    from mtg_ml.live import ACTIVE_SECONDS, LiveError
+
     manager.max_games = 2
-    ids = [manager.new({"model": "tiny/model", "seed": s})["live"]["id"] for s in range(3)]
-    assert sorted(manager.games) == sorted(ids[1:])
+    ids = [manager.new({"model": "tiny/model", "seed": s})["live"]["id"] for s in range(2)]
+    with pytest.raises(LiveError, match="full"):
+        manager.new({"model": "tiny/model", "seed": 2})
+    assert sorted(manager.games) == sorted(ids)
+    manager.games[ids[0]].touched -= ACTIVE_SECONDS + 1  # left alone for a while
+    third = manager.new({"model": "tiny/model", "seed": 2})["live"]["id"]
+    assert sorted(manager.games) == sorted([ids[1], third])
 
 
 @pytest.mark.parametrize("engine", ["python", "native"])
