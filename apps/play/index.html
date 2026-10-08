@@ -12,12 +12,22 @@
     <h1>MTG <span>Play</span></h1>
     <div id="meta"></div>
     <div class="sp"></div>
-    <button class="btn" id="bConcede" title="Concede this game">Concede</button>
-    <button class="btn" id="bNew" title="Start a new game">New game</button>
-    <button class="btn" id="bSettings" title="Settings">Settings</button>
+    <button class="btn" id="bLog" title="The game log (L)">Log</button>
     <button class="btn" id="bMute" title="Sound">🔊</button>
     <button class="btn" id="bHelp" title="How to play (controls)">?</button>
-    <a class="btn" id="bViewer" href="../" title="Replays of finished games">Replay viewer</a>
+    <button class="btn" id="bMenu" title="Game menu" aria-haspopup="menu">☰ Menu</button>
+    <div id="menu" role="menu">
+      <button data-menu="new">New game</button>
+      <button data-menu="concede" id="bConcede">Concede</button>
+      <hr>
+      <button data-menu="flag-bot">⚑ Bot played wrong…</button>
+      <button data-menu="flag-bug">⚠ Bug: engine / UI…</button>
+      <hr>
+      <button data-menu="decks">Decklists</button>
+      <button data-menu="settings" id="bSettings">Settings</button>
+      <a href="../" target="_blank" data-menu="viewer">Replay viewer</a>
+    </div>
+    <button class="btn" id="bNew" hidden>New game</button>
   </header>
 
   <main id="board">
@@ -67,13 +77,9 @@
     <div id="toast"></div>
   </main>
 
-  <aside id="panel">
-    <div id="preview"><div class="hint">Hover a card to read it</div></div>
-    <div id="feedbox"><h3>Recent: opponent's actions and what hit you</h3><div id="feed"><div class="none">Nothing yet</div></div></div>
-    <div id="logh"><h3>Game log</h3><button class="btn ghost small" id="bLog" title="Collapse or expand the log">Hide</button></div>
-    <div id="log"></div>
-  </aside>
 </div>
+<div id="hoverprev" aria-hidden="true"></div>
+<aside id="logdrawer" aria-label="Game log"><div class="lh"><b>Game log</b><span class="sp"></span><button class="btn small" id="bLogClose" title="Close (L)">Close</button></div><div id="log"></div></aside>
 
 <div id="pop"></div>
 <div id="overlay"></div>

@@ -145,7 +145,7 @@ function applyView(view) {
 function resetGame(id) {
   // Every auto-pass mode and plan resets at a game boundary (Forge bug: End Turn carried over).
   Object.assign(S, {gid: id, flags: [], stopLog: [], lastAutoPassed: 0, yields: new Set(), holdOnce: false, autoPassed: 0, stats: {dealt: 0, taken: 0, played: 0}, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
-    fullControl: false, feed: [], logDone: 0, error: null, skip: false});
+    fullControl: false, feed: [], logDone: 0, error: null, skip: false, reserved: [], payPlan: null, manualOnce: false, autoRest: false, justTapped: null});
   $('#log').innerHTML = '';
   renderFeed();
 }
@@ -174,6 +174,8 @@ async function act(index, plan, frame) {
   if (S.busy || S.pumping || !myDecision()) return;
   if (frame != null && frame !== last()) return;  // made for a decision that is gone
   if (plan !== undefined) S.plan = stamp(plan);
+  const pv = tapsFor([index]);
+  S.payPlan = pv ? pv.taps.slice() : null;
   await send(index);
   pump();
 }
@@ -190,6 +192,7 @@ async function pump() {
       if (S.error) { enterDecision(); break; }
       const d = myDecision();
       if (S.over || !d) { finishGame(); break; }
+      expireReserved();
       let a = null;
       try { a = autoAnswer(d); } catch (e) { console.error(e); a = null; }
       if (a == null || autos > 400) { S.plan = null; S.skip = false; S.passMode = null; enterDecision(true); break; }
@@ -234,12 +237,14 @@ function autoAnswer(d) {
     const a = planAnswer(d);
     if (a != null) return a;
   }
-  if (d.kind === 'pay_mana' && !PREF.manualPay) return autoPay(d);
+  if (d.kind === 'pay_mana') return (PREF.manualPay || S.manualOnce) && !S.autoRest ? null : planPay(d);
   if (d.kind === 'order_triggers' && new Set(d.options).size === 1) return 0;  // identical triggers: the order cannot matter
   if (d.kind === 'priority') {
+    S.payPlan = null; S.manualOnce = false; S.autoRest = false;  // a cast is over
     const pass = refs.findIndex(r => r.type === 'pass');
     if (pass < 0) return null;
     if (S.fullControl) return null;
+    if (manaWaiting(stateAt(last()))) return null;  // mana you tapped is waiting: never pass it away silently
     if (!refs.some(isReal)) return pass;  // mana abilities alone never stop
     const s = stateAt(last());
     const top = s.stack[s.stack.length - 1];
@@ -331,6 +336,96 @@ function autoPay(d) {
     if (!bestKey || lexLess(key, bestKey)) { best = i; bestKey = key; }
   });
   return best;
+}
+
+// ---- tapping for mana (Arena/MTGO style)
+// Clicking an untapped land (or other plain mana source) at priority taps it
+// for mana. The engine cannot tap plain lands outside a payment, so the
+// client holds that mana as a reservation: the source shows tapped with its
+// colour in your mana pool, and the next payment spends it first (the same
+// source, that colour if the cost can use it). Like real floating mana it is
+// gone when the step ends (the land simply stays untapped). Sources that
+// sacrifice themselves (Eldrazi Spawn) use the engine's own mana ability and
+// float for real.
+const manaInfo = name => { const i = S.cards[name]; return i && i.mana && !i.mana_sac ? i.mana : null; };
+const isReserved = oid => S.reserved.some(r => r.oid === oid);
+function canTapForMana(c) {
+  return c && c.controller === S.seat && !c.tapped && manaInfo(c.name) && !(c.power != null && c.sick) && !isReserved(c.oid);
+}
+function reserveMana(oid, color) {
+  const s = stateAt(last()), c = s.battlefield.find(x => x.oid === oid);
+  if (!canTapForMana(c)) return;
+  S.reserved.push({oid, name: c.name, color, turn: s.turn, step: s.step});
+  S.justTapped = oid;
+  sound('tap');
+  closePop();
+  render(S.shown, {noAnim: true}); renderDock();
+}
+function unreserve(oid) {
+  S.reserved = S.reserved.filter(r => r.oid !== oid);
+  render(S.shown, {noAnim: true}); renderDock();
+}
+function tapForMana(el) {  // a click on one of your mana sources at priority
+  const s = stateAt(last());
+  const oids = el.dataset.oids.split(' ').map(Number);
+  const back = [...oids].reverse().find(isReserved);
+  if (back != null) { unreserve(back); return true; }
+  const c = oids.map(o => s.battlefield.find(x => x.oid === o)).find(canTapForMana);
+  if (!c) return false;
+  const colors = manaInfo(c.name);
+  if (colors.length === 1) reserveMana(c.oid, colors[0]);
+  else colorPicker(el, c, colors);
+  return true;
+}
+const MANA_NAME = {W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green', C: 'colourless'};
+function colorPicker(anchor, c, colors) {
+  const pop = $('#pop');
+  pop.innerHTML = `<div class="ph">Tap ${esc(c.name)} for</div><div class="pips">${colors.map(k => `<button class="pip ${k}" data-mana="${k}" title="${MANA_NAME[k] || k} (${k})">${k}</button>`).join('')}</div>`;
+  pop.classList.add('on');
+  const r = anchor.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let x = r.left + r.width / 2 - pw / 2, y = r.top - ph - 8;
+  if (y < 50) y = r.bottom + 8;
+  pop.style.left = `${Math.max(8, Math.min(innerWidth - pw - 8, x))}px`; pop.style.top = `${Math.max(8, Math.min(innerHeight - ph - 8, y))}px`;
+  pop._source = anchor; pop._plan = undefined; pop._mana = {oid: c.oid, colors};
+}
+// Reservations last for the step they were made in, like a mana pool.
+function expireReserved() {
+  if (!S.reserved.length || last() < 0) return;
+  const s = stateAt(last());
+  const keep = S.reserved.filter(r => r.turn === s.turn && r.step === s.step && s.battlefield.some(c => c.oid === r.oid && c.controller === S.seat && !c.tapped));
+  const gone = S.reserved.filter(r => !keep.includes(r));
+  S.reserved = keep;
+  const lost = gone.filter(r => r.turn !== s.turn || r.step !== s.step);
+  if (lost.length) toast(`Unused mana emptied at the end of the step: ${lost.map(r => `${r.color} from ${r.name}`).join(', ')}. The land was not tapped.`);
+}
+const poolCount = s => Object.values(s.players[S.seat].pool || {}).reduce((a, b) => a + b, 0);
+const manaWaiting = s => poolCount(s) + S.reserved.length;
+function sameSource(s, a, b) {  // the engine offers one of several interchangeable permanents
+  if (a === b) return true;
+  const x = s.battlefield.find(c => c.oid === a), y = s.battlefield.find(c => c.oid === b);
+  return !!(x && y && x.name === y.name && x.controller === y.controller && !!x.tapped === !!y.tapped && !!x.sick === !!y.sick);
+}
+// Pay one pip: floating engine mana, then your reserved mana (that source, the
+// tapped colour if the cost can use it, else its other colour), then the
+// sources the tap preview showed for this cast, then auto-pay.
+function planPay(d) {
+  const s = stateAt(last()), refs = d.refs;
+  const pool = refs.findIndex(r => r.pool != null);
+  if (pool >= 0) return pool;
+  for (let k = 0; k < S.reserved.length; k++) {
+    const res = S.reserved[k];
+    const ok = r => r.oid != null && r.via !== 'filter' && sameSource(s, r.oid, res.oid);
+    let j = refs.findIndex(r => ok(r) && r.color === res.color);
+    if (j < 0) j = refs.findIndex(ok);
+    if (j >= 0) { S.reserved.splice(k, 1); return j; }
+  }
+  if (S.payPlan) {
+    for (let k = 0; k < S.payPlan.length; k++) {
+      const j = refs.findIndex(r => r.oid != null && r.via !== 'filter' && sameSource(s, r.oid, S.payPlan[k]));
+      if (j >= 0) { S.payPlan.splice(k, 1); return j; }
+    }
+  }
+  return autoPay(d);
 }
 
 function lexLess(a, b) {
@@ -478,49 +573,67 @@ function humanize(label) {
 function pushFeed(text, fi, quiet, kind) {
   const e = {text, fi, quiet, kind, turn: S.shown >= 0 ? stateAt(S.shown).turn : 0};
   S.feed.push(e);
-  if (!quiet && kind !== 'impact') S.lastOpp = text;
+  if (!quiet && kind !== 'impact') { S.lastOpp = text; S.lastOppFi = fi; }
   if (S.feed.length > 14) S.feed.shift();
   // the cast line an opponent's target is later added to updates its feed entry too
   const lc = S.lastCast[opp()];
   if (lc && !kind && lc.text.replace(/^Opponent /, '') === text) lc.feed = e;
   renderFeed();
 }
-// ---- flag a play: reason + note, sent to the server and saved with the replay
-const FLAG_REASONS = [['misplay', 'Misplay'], ['missed lethal', 'Missed lethal'], ['rules bug', 'Rules bug'], ['weird timing', 'Weird timing'], ['other', 'Other']];
+// ---- reports: "Bot played wrong" (a bot play) and "Bug: engine / UI"; the server files them as GitHub issues
 const pseudonym = () => loadJSON('mtgml-play-name', '') || '';
-function isFlagged(fi) { return (S.flags || []).some(f => f.frame === fi); }
-function toggleFlag(fi, text, anchor) {
-  const pop = $('#pop'), existing = (S.flags || []).find(f => f.frame === fi);
-  pop.innerHTML = `<form id="fFlag" class="flagform"><div class="ph">Flag this play</div><div class="flagwhat">${esc(text)}</div>
-    <div class="seg reasons">${FLAG_REASONS.map(([k, t], j) => `<label><input type="radio" name="reason" value="${k}" ${(existing ? existing.reason === k : j === 0) ? 'checked' : ''}>${t}</label>`).join('')}</div>
-    <textarea name="note" rows="3" maxlength="1000" placeholder="What was wrong? What would you have done?">${esc(existing?.note || '')}</textarea>
-    <input name="who" maxlength="40" placeholder="Your name or nickname (optional, shown with your flags)" value="${esc(pseudonym())}">
-    <div class="flagbtns">${existing ? '<button type="button" class="btn small" id="bUnflag">Remove flag</button>' : ''}<span class="sp"></span><button type="button" class="btn small" id="bFlagCancel">Cancel</button><button class="primary small" type="submit">Send</button></div></form>`;
-  pop.classList.add('on');
-  const r = (anchor || document.body).getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
-  pop.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left - w + r.width))}px`;
-  pop.style.top = `${Math.max(8, Math.min(innerHeight - h - 8, r.bottom + 6))}px`;
+function isFlagged(fi) { return (S.flags || []).some(f => f.frame === fi && f.category === 'bot'); }
+function botPlays() {  // the bot's recent public plays, newest first
+  const out = [];
+  for (let i = S.raw.length - 1; i >= 0 && out.length < 12; i--) {
+    const d = S.raw[i].decision;
+    if (d && d.player === opp() && d.chosen != null && !['pass', 'pay', 'hidden'].includes(d.refs?.[0]?.type) && !d.refs?.[0]?.done) out.push([i, `Turn ${S.raw[i].state.turn}: ${humanize(d.options[d.chosen])}`]);
+  }
+  return out;
+}
+function toggleFlag(fi) { openFlagForm('bot', fi); }
+function openFlagForm(category, fi) {
+  if (!S.gid) return;
+  const bot = category === 'bot', plays = bot ? botPlays() : [];
+  if (bot && !plays.length) { toast('The bot has not made a play yet.'); return; }
+  const sel = fi != null && plays.some(([i]) => i === fi) ? fi : plays[0]?.[0];
+  const m = $('#modal');
+  m.innerHTML = `<div class="mbox flagbox"><h2>${bot ? '⚑ Bot played wrong' : '⚠ Bug: engine / UI'}</h2>
+    <div class="note">${bot ? 'A bad decision by the bot. It becomes a public GitHub issue with what you could see (never the bot&#39;s hidden cards).' : 'Wrong rules, an illegal play, or the page misbehaving. It becomes a public GitHub issue with the board as you see it.'}</div>
+    <form id="fFlag">${bot ? `<label>Which play</label><select name="frame">${plays.map(([i, t]) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
+      <label>What happened? (one line)</label><input name="what" maxlength="200" required placeholder="${bot ? 'e.g. attacked into my 4/4 with a 2/2' : 'e.g. my creature did not untap'}">
+      <label>Anything else (optional)</label><textarea name="note" rows="3" maxlength="2000" placeholder="${bot ? 'What would you have done?' : 'Steps, what you expected'}"></textarea>
+      <label>Your name or nickname (optional, shown publicly; never your real name)</label><input name="who" maxlength="40" value="${esc(pseudonym())}">
+      <div style="display:flex;gap:8px;margin-top:6px"><button class="primary" type="submit">Send report</button><button class="btn" type="button" id="bFlagCancel">Cancel</button></div>
+      <div class="result" id="flagResult"></div></form></div>`;
+  m.classList.add('on');
   const f = $('#fFlag');
-  f.note.focus();
-  const send = async body => {
-    try { const out = await api(`${encodeURIComponent(S.gid)}/flag`, {frame: fi, pseudonym: f.who.value.trim(), ...body}); S.flags = out.flags; }
-    catch (e) { toast(e.message); return; }
+  f.what.focus();
+  $('#bFlagCancel').onclick = () => m.classList.remove('on');
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const btn = f.querySelector('button[type=submit]');
+    if (btn.disabled) return;
+    btn.disabled = true; btn.textContent = 'Sending…';
     saveJSON('mtgml-play-name', f.who.value.trim());
-    closePop(); renderFeed();
-    $$(`#log .flag[data-fi="${fi}"]`).forEach(b => b.classList.toggle('on', isFlagged(fi)));
-    toast(body.remove ? 'Flag removed.' : 'Thanks: the flag is saved with this game.');
+    const body = {category, what: f.what.value.trim(), note: f.note.value, pseudonym: f.who.value.trim()};
+    if (bot) body.frame = +f.frame.value;
+    try {
+      const out = await api(`${encodeURIComponent(S.gid)}/flag`, body);
+      S.flags = out.flags;
+      renderFeed();
+      $$('#log .flag').forEach(b => b.classList.toggle('on', isFlagged(+b.dataset.flag)));
+      $('#flagResult').innerHTML = out.filed ? `Thanks. Filed as <a href="${esc(out.issue)}" target="_blank" rel="noopener">${esc(out.issue.replace('https://github.com/', ''))}</a>.` : esc(out.message);
+      btn.textContent = out.filed ? 'Filed' : 'Saved';
+      $('#bFlagCancel').textContent = 'Close';
+    } catch (err) { $('#flagResult').textContent = err.message; btn.disabled = false; btn.textContent = 'Send report'; }
   };
-  f.onsubmit = e => { e.preventDefault(); send({reason: f.reason.value, note: f.note.value}); };
-  $('#bFlagCancel').onclick = () => closePop();
-  if (existing) $('#bUnflag').onclick = () => send({remove: true});
 }
 function renderFeed() {
-  const nowTurn = S.shown >= 0 ? stateAt(S.shown).turn : 0;
-  $('#feed').innerHTML = S.feed.length ? S.feed.map(c => `<div class="fchip ${c.quiet ? 'quiet' : ''} ${c.kind === 'impact' ? 'impact' : ''} ${nowTurn - c.turn > 1 ? 'old' : ''}"><span class="txt">${esc(c.text)}</span>${c.kind === 'impact' ? '' : `<button class="flag ${isFlagged(c.fi) ? 'on' : ''}" data-flag="${c.fi}" title="Flag this play as odd">⚑</button>`}</div>`).join('')
-    : '<div class="none">Nothing yet</div>';
   const la = $('#plate1 .lastact');
-  if (la) la.innerHTML = S.lastOpp ? `<span>Last:</span> ${esc(S.lastOpp)}` : '';
+  if (la) la.innerHTML = lastActHtml();
 }
+const lastActHtml = () => S.lastOpp ? `<span>Last:</span> ${esc(S.lastOpp)}${S.lastOppFi != null ? `<button class="flagbot" data-flag="${S.lastOppFi}" title="Bot played wrong: report this play">⚑</button>` : ''}` : '';
 
 // ---------------------------------------------------------------- log
 // ---- the game log in Magic's words: one line per action, built from the
@@ -816,7 +929,7 @@ function renderMeta() {
   const mm = m.match;
   const score = mm ? ` · Game ${mm.game_no} of 3 · ${mm.wins[me]}–${mm.wins[op]}` : '';
   $('#meta').innerHTML = `<b>${esc(m.decks[me])}</b> (you) vs <b>${esc(m.decks[op])}</b> (${esc(agentName(m.agents[op]))})${score}`;
-  $('#bConcede').style.display = S.over ? 'none' : '';
+  $('#bConcede').disabled = !!S.over;
 }
 
 function renderPlate(p, s, prev) {
@@ -825,7 +938,8 @@ function renderPlate(p, s, prev) {
   const pv = prev?.players[p];
   const lf = fx('life', p), delta = lf ? lf.n : 0;
   void pv;
-  const pool = Object.entries(P.pool || {}).flatMap(([c, n]) => Array(n).fill(`<i class="${esc(c)}">${esc(c)}</i>`)).join('');
+  const pool = Object.entries(P.pool || {}).flatMap(([c, n]) => Array(n).fill(`<i class="${esc(c)}">${esc(c)}</i>`)).join('')
+    + (isMe ? S.reserved.map(r => `<i class="${esc(r.color)} res" data-res="${r.oid}" title="${esc(r.color)} from ${esc(r.name)} (click the land to untap it)">${esc(r.color)}</i>`).join('') : '');
   const d = S.ui?.d;
   const tgt = H.target.has('p' + p);
   const preview = isMe ? blockPreviewLife(s) : attackPreviewLife(s);
@@ -845,8 +959,8 @@ function renderPlate(p, s, prev) {
       <div class="zone clickable ${exCast}" data-zone="exile" data-p="${p}" title="Click to see exiled cards">Exile <b>${P.exile.length}</b></div>
     </div>
     <div class="openmana" title="Untapped mana sources: lands, and creatures and artifacts that tap for mana">${openMana(s, p)} open mana</div>
-    ${pool ? `<div class="mana" title="Floating mana">${pool}</div>` : ''}
-    ${isMe ? '' : `<div class="lastact" title="The opponent's latest action">${S.lastOpp ? `<span>Last:</span> ${esc(S.lastOpp)}` : ''}</div>`}`;
+    ${pool ? `<div class="mana" title="Your mana pool: spent first by your next payment">${pool}<span class="empties">empties end of ${esc((STEP_LABEL[s.step] || s.step).toLowerCase())}</span></div>` : ''}
+    ${isMe ? '' : `<div class="lastact" title="The opponent's latest action">${lastActHtml()}</div>`}`;
   void d;
 }
 
@@ -854,7 +968,7 @@ function renderPlate(p, s, prev) {
 // sick) and artifacts whose text has "{T}: Add".
 function openMana(s, p) {
   return s.battlefield.filter(c => {
-    if (c.controller !== p || c.tapped) return false;
+    if (c.controller !== p || c.tapped || isReserved(c.oid)) return false;
     if (c.types.includes('Land')) return true;
     const text = S.cards[c.name]?.text || '';
     if (!/\{T\}(, [^:]*)?: Add/.test(text)) return false;
@@ -870,7 +984,7 @@ function groupPerms(perms, s) {
   for (const c of perms) {
     const creature = c.power != null;
     if ((creature && combat) || c.attacking || c.blocking != null || c.damage || c.counters || hosts.has(c.oid)) { out.push([c]); continue; }
-    const k = [c.name, !!c.tapped, !!c.sick, c.power, c.toughness].join('|');
+    const k = [c.name, !!c.tapped, !!c.sick, c.power, c.toughness, isReserved(c.oid)].join('|');
     if (by.has(k)) by.get(k).push(c); else { const g = [c]; by.set(k, g); out.push(g); }
   }
   return out;
@@ -900,7 +1014,11 @@ function permHtml(g, s, prevBy, attachedTo) {
   const c = g[0], n = g.length, oids = g.map(x => x.oid);
   const ui = S.ui, cls = ['perm'];
   const pc = prevBy.get(c.oid);
-  if (c.tapped) cls.push('tapped');
+  const res = S.reserved.filter(r => oids.includes(r.oid));
+  if (c.tapped || res.length) cls.push('tapped');
+  if (res.length) cls.push('reserved');
+  if (res.length && oids.includes(S.justTapped)) { cls.push('justtapped'); S.justTapped = null; }
+  if (!res.length && ui?.kind === 'priority' && oids.some(o => canTapForMana(s.battlefield.find(x => x.oid === o)))) cls.push('manasrc');
   if (c.attacking) cls.push('attacking');
   if (c.blocking != null) cls.push('blocking');
   if (n > 1) cls.push('grouped');
@@ -921,6 +1039,7 @@ function permHtml(g, s, prevBy, attachedTo) {
   }
   const preview = ui?.kind === 'declare_attacker' || ui?.kind === 'declare_blocker' ? combatPreview(s) : {dies: new Set()};
   if (n > 1) b += `<span class="b cnt">×${n}</span>`;
+  if (res.length) b += `<span class="b pool">${res.map(r => `<i class="${esc(r.color)}">${esc(r.color)}</i>`).join('')}</span>`;
   if (c.power != null) {
     const base = S.cards[c.name];
     const buff = base && base.power != null && (c.power > base.power || c.toughness > base.toughness);
@@ -1256,10 +1375,10 @@ function renderDock() {
   switch (d.kind) {
     case 'priority': {
       const playable = d.refs.filter(isReal).length;
-      const floating = Object.values(s.players[S.seat].pool || {}).reduce((a, b) => a + b, 0);
-      pr.innerHTML = `<span class="k">Your priority · ${esc(STEP_LABEL[s.step] || s.step)}</span>${playable ? 'Drag a glowing card to the battlefield, or double-click it.' : 'Nothing to play.'}`;
+      const floating = manaWaiting(s);
+      pr.innerHTML = `<span class="k">Your priority · ${esc(STEP_LABEL[s.step] || s.step)}</span>${floating ? `<b class="floatwarn">${floating} mana in your pool: it empties when this step ends.</b> ` : ''}${playable ? 'Drag a glowing card to the battlefield, or double-click it. Click a land to tap it for mana.' : 'Nothing to play.'}`;
       if (H.loose.length) ch.innerHTML = choiceBtns(H.loose);
-      P.textContent = ui.armed === 'float' ? `Pass with ${floating} mana floating?` : passLabel(s);
+      P.textContent = ui.armed === 'float' ? `Pass? ${floating} mana empties` : passLabel(s);
       P.classList.add(ui.armed ? 'armed' : 'ask');
       P.disabled = false;
       break;
@@ -1292,9 +1411,9 @@ function renderDock() {
       break;
     }
     case 'pay_mana': {
-      pr.innerHTML = `<span class="k">Pay mana</span>${esc(clean(d.prompt))}. Click a glowing source.`;
+      pr.innerHTML = `<span class="k">Pay mana</span>${esc(clean(d.prompt))}. Click a glowing source to pay with it.`;
       if (H.loose.length) ch.innerHTML = choiceBtns(H.loose);
-      P.textContent = 'Auto-pay'; P.disabled = false; P.dataset.act = 'autopay'; P.classList.add('ask');
+      P.textContent = 'Auto-pay the rest'; P.disabled = false; P.dataset.act = 'autopay'; P.classList.add('ask');
       break;
     }
     case 'mulligan': {
@@ -1475,6 +1594,12 @@ function showMenu(anchor, idxs, title) {
   pop.style.left = x + 'px'; pop.style.top = y + 'px';
   pop._source = anchor;
   pop._plan = undefined;  // a caller that drops onto a target sets it after
+  pop._mana = null; pop._extra = [];
+}
+function addMenuItem(label, fn) {
+  const pop = $('#pop');
+  pop._extra.push(fn);
+  pop.insertAdjacentHTML('beforeend', `<button data-extra="${pop._extra.length - 1}">${esc(label)}</button>`);
 }
 function closePop() { $('#pop').classList.remove('on'); }
 
@@ -1512,6 +1637,18 @@ function targetAt(x, y) {
   if (perm) return {oid: +perm.dataset.oid, el: perm};
   if (plate) return {player: +plate.dataset.player, el: plate};
   return null;
+}
+// What a targeted spell may target, read from its text (the engine decides after the drop).
+function markMayTarget(name) {
+  const t = (S.cards[name]?.text || '').toLowerCase();
+  const kinds = [];
+  for (const k of ['land', 'creature', 'artifact', 'enchantment', 'planeswalker']) if (new RegExp(`target (\\w+ )?${k}|target (\\w+ )?(\\w+ or )?${k}`).test(t)) kinds.push(k[0].toUpperCase() + k.slice(1));
+  const any = /target permanent|any target/.test(t);
+  const s = stateAt(last());
+  for (const el of $$('#board .perm')) {
+    const c = s.battlefield.find(x => x.oid === +el.dataset.oid);
+    if (c && (any || kinds.some(k => c.types.includes(k)))) el.classList.add('may-target');
+  }
 }
 const mentionsTarget = name => /\btarget\b/i.test(S.cards[name]?.text || '');
 
@@ -1568,6 +1705,7 @@ function startHandDrag(e) {
   drag.vx = 0; drag.lx = e.clientX;
   $('#field0').classList.add('drop');
   drag.targets = mentionsTarget(drag.el.dataset.name) && plainPlay(handOpts(drag.el.dataset.name)) != null;
+  if (drag.targets) markMayTarget(drag.el.dataset.name);
 }
 function moveHandDrag(e) {
   const g = $('#ghost');
@@ -1578,7 +1716,7 @@ function moveHandDrag(e) {
   const inPlay = e.clientY < r.bottom - r.height * 0.22 && e.clientX < r.right;
   field.classList.toggle('hot', inPlay);
   clearHot();
-  if (drag.targets) { const t = targetAt(e.clientX, e.clientY); if (t && t.el.closest('#side1, .plate')) t.el.classList.add('drop-hot'); }
+  if (drag.targets) { const t = targetAt(e.clientX, e.clientY); if (t && (t.el.closest('.plate') || t.el.classList.contains('may-target'))) t.el.classList.add('drop-hot'); }
 }
 function endHandDrag(dg, e) {
   const g = $('#ghost'), field = $('#field0');
@@ -1586,6 +1724,7 @@ function endHandDrag(dg, e) {
   const inPlay = e.clientY < r.bottom - r.height * 0.22 && e.clientX < r.right && e.clientX > r.left;
   field.classList.remove('drop', 'hot');
   clearHot();
+  $$('.may-target').forEach(x => x.classList.remove('may-target'));
   showTaps(null);
   const idxs = handOpts(dg.el.dataset.name);
   if (inPlay && idxs.length) {
@@ -1593,6 +1732,7 @@ function endHandDrag(dg, e) {
     dg.el.classList.remove('dragging');
     let plan;
     if (dg.targets) { const t = targetAt(e.clientX, e.clientY); if (t && (t.player != null || t.el.closest('#side1, #side0'))) plan = {kind: 'target', t: t.player != null ? {player: t.player} : {oid: t.oid}}; }
+    S.manualOnce = e.shiftKey || e.altKey;  // Shift or Alt/Option on the drop: pay this one by hand
     playGesture(dg.el, idxs, plan);
     return;
   }
@@ -1626,8 +1766,12 @@ document.addEventListener('click', e => {
   const t = e.target;
   // skip the bot's replay
   if (S.queue.length && S.pumping && t.closest('#board')) { S.skip = true; return; }
+  const mb = t.closest('[data-mana]');
+  if (mb && $('#pop')._mana) { reserveMana($('#pop')._mana.oid, mb.dataset.mana); return; }
+  const mi = t.closest('[data-extra]');
+  if (mi && $('#pop')._extra) { $('#pop')._extra[+mi.dataset.extra](); return; }
   const flag = t.closest('[data-flag]');
-  if (flag) { toggleFlag(+flag.dataset.flag, flag.parentElement.textContent.replace('⚑', '').trim(), flag); return; }
+  if (flag) { openFlagForm('bot', +flag.dataset.flag); return; }
   const stop = t.closest('[data-stop]');
   if (stop) { const [who, st] = stop.dataset.stop.split(':'); PREF.stops[who][st] = !PREF.stops[who][st]; savePref(); renderMid(stateAt(S.shown)); return; }
   if (t.closest('[data-resync]')) { resync(); return; }
@@ -1666,7 +1810,14 @@ document.addEventListener('click', e => {
   const hc = t.closest('#hand .card'), pm = t.closest('#board .perm'), plate = t.closest('.plate'), si = t.closest('.sitem');
   if (ui.kind === 'priority') {
     if (hc && handOpts(hc.dataset.name).length) return showMenu(hc, handOpts(hc.dataset.name), hc.dataset.name);
-    if (pm && permOpts(pm).length) { S.srcOid = +pm.dataset.oid; return showMenu(pm, permOpts(pm), pm.dataset.name); }
+    const tapRes = pm && pm.classList.contains('reserved');
+    if (pm && permOpts(pm).length && !tapRes) {
+      S.srcOid = +pm.dataset.oid;
+      showMenu(pm, permOpts(pm), pm.dataset.name);
+      if (pm.classList.contains('manasrc')) addMenuItem('Tap for mana', () => { closePop(); tapForMana(pm); });
+      return;
+    }
+    if (pm && (pm.classList.contains('manasrc') || tapRes)) { tapForMana(pm); return; }
   }
   if (ui.kind === 'target') {
     if (pm) { const o = pm.dataset.oids.split(' ').find(x => H.target.has('o' + x)); if (o) return act(H.target.get('o' + o)); }
@@ -1687,8 +1838,12 @@ document.addEventListener('click', e => {
 document.addEventListener('dblclick', e => {
   if (!canAct() || S.ui.kind !== 'priority') return;
   const hc = e.target.closest('#hand .card'), pm = e.target.closest('#board .perm');
+  if (pm && (pm.classList.contains('manasrc') || pm.classList.contains('reserved')) && !permOpts(pm).length) {
+    if (!pm.classList.contains('reserved')) tapForMana(pm);
+    return;
+  }
   closePop();
-  if (hc && handOpts(hc.dataset.name).length) return playGesture(hc, handOpts(hc.dataset.name));
+  if (hc && handOpts(hc.dataset.name).length) { S.manualOnce = e.shiftKey || e.altKey; return playGesture(hc, handOpts(hc.dataset.name)); }
   if (pm && permOpts(pm).length) {
     const d = myDecision(), idxs = permOpts(pm);
     const risky = idxs.some(i => /sacrific|discard|exile/i.test(d.refs[i].ability || d.options[i]));
@@ -1727,12 +1882,26 @@ document.addEventListener('contextmenu', e => {
 function tapsFor(idxs) {
   const d = myDecision();
   if (!d || !S.ui || S.ui.kind !== 'priority') return null;
-  for (const i of idxs || []) if (d.refs[i]?.taps) return {taps: d.refs[i].taps, sacs: d.refs[i].sacs || []};
+  for (const i of idxs || []) {
+    const r = d.refs[i];
+    if (!r?.taps) continue;
+    if (!S.reserved.length) return {taps: r.taps, sacs: r.sacs || [], used: []};
+    const s = stateAt(last());
+    const need = r.taps.length;
+    const used = S.reserved.slice(0, need).map(x => x.oid);
+    const free = r.taps.filter(o => !used.some(u => sameSource(s, o, u)));
+    return {taps: free.slice(0, Math.max(0, need - used.length)), sacs: r.sacs || [], used};
+  }
   return null;
 }
 function showTaps(p) {
   $$('#board .will-tap').forEach(el => { el.classList.remove('will-tap', 'will-sac'); el.querySelectorAll('.b.tap').forEach(b => b.remove()); });
+  $$('.mana i.used, #board .perm.uses').forEach(el => el.classList.remove('used', 'uses'));
   if (!p) return;
+  for (const o of p.used || []) {
+    $(`.mana i[data-res="${o}"]`)?.classList.add('used');
+    $$('#board .perm.reserved').forEach(el => { if (el.dataset.oids.split(' ').includes(String(o))) el.classList.add('uses'); });
+  }
   const taps = new Set(p.taps), sacs = new Set(p.sacs);
   for (const el of $$('#board .perm')) {
     const oids = el.dataset.oids.split(' ').map(Number);
@@ -1766,7 +1935,8 @@ document.addEventListener('pointerover', e => {
     cards.forEach((x, j) => x.style.setProperty('--sx', j === k ? '0px' : `${j < k ? -14 : 14}px`));
   } else if (!e.target.closest('#hand')) $$('#hand .card').forEach(x => x.style.setProperty('--sx', '0px'));
   clearTimeout(hoverTimer);
-  if (c && !pinned) hoverTimer = setTimeout(() => showPreview(c.dataset.name), hc ? 120 : 250);
+  if (c && !pinned) hoverTimer = setTimeout(() => showPreview(c.dataset.name), hc ? 160 : 300);
+  else if (!c) hidePreview();
 });
 document.addEventListener('pointerleave', () => $$('#hand .card').forEach(x => x.classList.remove('hover')));
 document.addEventListener('pointerout', e => {  // leaving a hand card for anything outside the hand drops its lift
@@ -1775,10 +1945,17 @@ document.addEventListener('pointerout', e => {  // leaving a hand card for anyth
 });
 function showPreview(name, pin) {
   if (pin) pinned = !pinned;
-  const i = S.cards[name]; if (!i) return;
+  const i = S.cards[name], el = $('#hoverprev');
+  if (!i || drag) return;
   const tl = i.types.join(' ') + (i.subtypes.length ? ' — ' + i.subtypes.join(' ') : '');
-  $('#preview').innerHTML = cardHtml(name) + `<div class="ptxt"><b>${esc(name)}</b> ${esc(i.cost)}<div>${esc((i.token ? 'Token ' : '') + tl)}${i.power != null ? ` · ${i.power}/${i.toughness}` : ''}</div><div class="ot">${esc(i.text)}</div>${pinned ? '<div class="st">Pinned (right-click again to unpin)</div>' : ''}</div>`;
+  el.innerHTML = cardHtml(name) + `<div class="ptxt"><b>${esc(name)}</b> ${esc(i.cost)}<div>${esc((i.token ? 'Token ' : '') + tl)}${i.power != null ? ` · ${i.power}/${i.toughness}` : ''}</div><div class="ot">${esc(i.text)}</div>${pinned ? '<div class="st">Pinned (right-click again or Esc to unpin)</div>' : ''}</div>`;
+  el.classList.add('on');
+  const w = el.offsetWidth, h = el.offsetHeight;
+  const left = pointer[0] > innerWidth * 0.6 ? 16 : innerWidth - w - 16;  // the right edge (your lands sit left), unless the pointer is there
+  el.style.left = `${left}px`;
+  el.style.top = `${Math.max(50, Math.min(innerHeight - h - 150, pointer[1] - h / 2))}px`;  // clear of the dock
 }
+function hidePreview() { if (!pinned) $('#hoverprev').classList.remove('on'); }
 
 // ---------------------------------------------------------------- commands and keys
 async function command(c) {
@@ -1800,12 +1977,11 @@ function primary() {
   if (a === 'new') return openNewGame();
   if (a === 'resync') return resync();
   if (a.startsWith('opt:')) { const i = +a.slice(4); if (i >= 0) return act(i); return; }
-  if (a === 'autopay') { const d = myDecision(); return act(autoPay(d)); }
+  if (a === 'autopay') { const d = myDecision(); S.autoRest = true; return act(planPay(d)); }
   if (!canAct()) return;
   const ui = S.ui, d = ui.d, s = stateAt(ui.fi);
   if (ui.kind === 'priority') {
-    const floating = Object.values(s.players[S.seat].pool || {}).reduce((x, y) => x + y, 0);
-    if (floating && ui.armed !== 'float') { ui.armed = 'float'; renderDock(); return; }
+    if (manaWaiting(s) && ui.armed !== 'float') { ui.armed = 'float'; renderDock(); return; }
     return act(d.refs.findIndex(r => r.type === 'pass'));
   }
   if (ui.kind === 'declare_attacker') {
@@ -1827,6 +2003,11 @@ function primary() {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && $('#modal').classList.contains('on') && S.gid && !$('#fNew')) { $('#modal').classList.remove('on'); return; }
   if (e.key === 'Escape' && $('#pop').classList.contains('on')) { closePop(); return; }
+  const pm = $('#pop').classList.contains('on') && $('#pop')._mana;
+  if (pm && pm.colors.includes(e.key.toUpperCase()) && !e.ctrlKey && !e.metaKey) { e.preventDefault(); reserveMana(pm.oid, e.key.toUpperCase()); return; }
+  if (e.key === 'Escape' && $('#menu').classList.contains('on')) { $('#menu').classList.remove('on'); return; }
+  if (e.key === 'Escape' && pinned) { pinned = false; hidePreview(); return; }
+  if (e.key === 'Escape' && $('#logdrawer').classList.contains('on')) { toggleLog(false); return; }
   if (e.target.closest('input, select, textarea') || $('#modal').classList.contains('on')) return;
   const k = e.key;
   if (e.repeat && (k === ' ' || k === 'Enter' || k === 'r' || k === 'R' || k === 'a' || k === 'n')) { e.preventDefault(); return; }  // a held key is not a decision
@@ -1858,6 +2039,7 @@ document.addEventListener('keydown', e => {
     const b = document.querySelector(`#overlay.on [data-opt] kbd, #choices [data-opt] kbd`) ? [...document.querySelectorAll('#overlay.on [data-opt], #choices [data-opt]')].find(x => x.querySelector('kbd')?.textContent === k) : null;
     if (b) { b.click(); return; }
   }
+  if (k === 'l' || k === 'L') { toggleLog(); return; }
   if (k === 'h' || k === 'H') { S.holdOnce = !S.holdOnce; toast(S.holdOnce ? 'You keep priority after your next spell (to respond to it yourself).' : 'Hold priority off.'); renderDock(); return; }
   if (k === 'f' || k === 'F') { S.fullControl = !S.fullControl; toast(S.fullControl ? 'Full control: every priority stop is yours.' : 'Auto-pass back on.'); renderDock(); return; }
   if ((k === 'a' || k === 'A') && S.ui?.kind === 'declare_attacker') return command('all');
@@ -1875,12 +2057,11 @@ $('#bNew').addEventListener('click', () => {
   if (S.gid && !S.over && S.raw.length && !confirm('Leave this game? It counts as a loss and cannot be resumed.')) return;
   openNewGame();
 });
-$('#bConcede').addEventListener('click', async () => {
+async function concede() {
   if (!S.gid || S.over || S.busy || S.pumping) return;
   if (!confirm('Concede this game?')) return;
   try { applyView(await api(`${encodeURIComponent(S.gid)}/concede`, {})); pump(); } catch (e) { toast(e.message); }
-});
-$('#bSettings').addEventListener('click', () => openSettings());
+}
 $('#bHelp').addEventListener('click', () => openHelp());
 const muteLabel = () => { $('#bMute').textContent = PREF.sound ? '🔊' : '🔇'; $('#bMute').title = PREF.sound ? 'Sound on (click to mute)' : 'Muted (click for sound)'; };
 $('#bMute').addEventListener('click', () => { PREF.sound = !PREF.sound; savePref(); muteLabel(); if (PREF.sound) sound('decide'); });
@@ -1888,15 +2069,17 @@ muteLabel();
 
 const HELP = [
   ['Play a land or cast a spell', 'Drag the glowing card up onto the battlefield, or double-click it. One click opens its options (flashback, cycling, modes).'],
-  ['See what it will tap', 'Hover a castable card: the lands auto-pay will use light up.'],
+  ['Tap a land for mana', 'Click an untapped land at priority. A land with several colours (Drossforge Bridge) asks which: click a pip or press W/U/B/R/G/C. The mana shows in your pool on your plate; click the land again to untap it. Unused mana empties when the step ends.'],
+  ['Paying', 'Your pool pays first, then auto-pay taps the rest. Hover a card: the extra lands it will tap light up, your pool mana says "used". Hold Shift or Alt/Option when you drop or double-click to pick every land yourself (Space: auto-pay the rest).'],
   ['Target', 'Click a glowing (cyan) creature, player plate or stack item. Or drop a targeted spell right onto its target.'],
   ['Attack', 'Click your creatures (or drag them forward), A for all, then Space. Right-click undoes one.'],
   ['Block', 'Drag your creature onto an attacker, or click yours then theirs. Space confirms.'],
   ['Pass', 'Space. The button always says what happens next. R passes until the opponent does something; F turns auto-pass off; H keeps priority after your next spell.'],
   ['Auto-pass stops', 'The small bars under each step in the middle strip: gold for your turn, blue for theirs.'],
   ['Everything else', 'O lists every option the engine offers. Number keys pick listed choices. Esc cancels a menu or selection.'],
-  ['Read a card', 'Hover it; right-click pins it in the panel. Click a deck name for both decklists.'],
-  ['The opponent', 'Their moves replay one by one; click or Space skips. The panel lists what they did and what hit you; ⚑ flags a play that looks wrong.'],
+  ['Read a card', 'Hover it for a big preview; right-click pins it (Esc unpins). Click a deck name for both decklists.'],
+  ['The opponent', 'Their moves replay one by one; click or Space skips. Their last move shows on their plate; L opens the full log.'],
+  ['Report a problem', '⚑ next to their last move, or the Menu: "Bot played wrong" or "Bug: engine / UI". It becomes a public GitHub issue with only what you could see.'],
 ];
 function openHelp() {
   const m = $('#modal');
@@ -1908,12 +2091,13 @@ function openHelp() {
   $('#bCoachAgain').onclick = () => { saveJSON('mtgml-play-coached', false); m.classList.remove('on'); coach(true); };
 }
 
-// First-game callouts: four short tips anchored to the parts of the screen, once.
-const COACH = [
+// First-game callouts: short tips anchored to the parts of the screen, once.
+const COACH = [  // first-game tips
   ['#hand', 'Your hand. Drag a glowing card up to play it, or double-click it.'],
   ['#primary', 'The main button says what happens next. Space presses it.'],
+  ['#lands0', 'Click a land to tap it for mana; casting spends that mana first.'],
   ['#rail', 'Where auto-pass stops: click the small bars under a step.'],
-  ['#feedbox', "What the opponent did and what hit you. ⚑ flags a play that looks wrong."],
+  ['#bLog', 'The game log (L). The ⚑ next to the opponent\'s last move reports a bad bot play.'],
 ];
 function coach(force) {
   if (!force && loadJSON('mtgml-play-coached', false)) return;
@@ -1937,7 +2121,28 @@ function coach(force) {
   };
   show();
 }
-$('#bLog').addEventListener('click', () => { const l = $('#log'); l.classList.toggle('hide'); $('#bLog').textContent = l.classList.contains('hide') ? 'Show' : 'Hide'; });
+function toggleLog(on) {
+  const d = $('#logdrawer'), open = on ?? !d.classList.contains('on');
+  d.classList.toggle('on', open); $('#bLog').classList.toggle('on', open);
+  if (open) $('#log').scrollTop = $('#log').scrollHeight;
+}
+$('#bLog').addEventListener('click', e => { e.stopPropagation(); toggleLog(); });
+$('#bLogClose').addEventListener('click', e => { e.stopPropagation(); toggleLog(false); });
+$('#bMenu').addEventListener('click', e => { e.stopPropagation(); $('#menu').classList.toggle('on'); });
+$('#menu').addEventListener('click', e => {
+  const b = e.target.closest('[data-menu]'); if (!b) return;
+  $('#menu').classList.remove('on');
+  const k = b.dataset.menu;
+  if (k === 'viewer') return;
+  e.preventDefault();
+  if (k === 'new') $('#bNew').click();
+  else if (k === 'concede') concede();
+  else if (k === 'flag-bot') openFlagForm('bot', S.lastOppFi);
+  else if (k === 'flag-bug') openFlagForm('bug');
+  else if (k === 'decks') openDecks();
+  else if (k === 'settings') openSettings();
+});
+document.addEventListener('click', e => { if (!e.target.closest('#menu, #bMenu')) $('#menu').classList.remove('on'); }, true);
 $('#overlay').addEventListener('click', e => {
   const ob = e.target.closest('[data-ord]');
   if (ob && S.ui?.order) { const [row, i, how] = ob.dataset.ord.split(':'); moveOrder(S.ui, row, +i, how === 'x' ? 'x' : +how); renderOrder(S.ui.d, S.ui, $('#overlay')); }
@@ -1980,7 +2185,7 @@ const SOUNDS = {
   hit: [[180, 90, 0.10, 'square']], death: [[260, 70, 0.35, 'triangle']], turn: [[660, 660, 0.10, 'sine'], [990, 990, 0.14, 'sine', 0.09]],
   win: [[523, 523, 0.14, 'triangle'], [659, 659, 0.14, 'triangle', 0.12], [784, 784, 0.3, 'triangle', 0.24]],
   lose: [[392, 392, 0.2, 'triangle'], [330, 330, 0.2, 'triangle', 0.18], [262, 262, 0.4, 'triangle', 0.36]], draw: [[440, 440, 0.3, 'triangle']],
-  decide: [[880, 1320, 0.18, 'sine']],
+  decide: [[880, 1320, 0.18, 'sine']], tap: [[340, 520, 0.07, 'triangle']],
 };
 const lastSound = {};
 function sound(name, amount) {
@@ -2089,9 +2294,10 @@ async function openNewGame() {
   m.classList.add('on');
   let opt;
   try { opt = await api('options'); } catch (e) {
-    m.innerHTML = `<div class="mbox"><h2>Live play is off</h2><div class="err">${esc(e.message)}</div><p class="note">Start the server with <code>python -m mtg_ml.replay serve --models DIR</code> (or <code>--scripted-bot</code>).</p></div>`;
+    m.innerHTML = `<div class="mbox"><h2>Live play is off</h2><div class="err">${esc(e.message)}</div><p class="note">Start the server with <code>python -m mtg_ml.replay serve --models DIR</code> (add <code>--dev</code> for scenarios and the scripted bot).</p></div>`;
     return;
   }
+  if (opt.mode === 'play') return newGamePlay(m, opt);
   const last = loadJSON('mtgml-play-last', {});
   const mus = Object.entries(opt.matchups);
   m.innerHTML = `<div class="mbox"><h2>Play against a model</h2><form id="fNew">
@@ -2122,6 +2328,34 @@ async function openNewGame() {
       pump();
     } catch (err) { $('#newErr').textContent = err.message; b.disabled = false; b.textContent = 'Start game'; }
   };
+}
+
+// The normal new-game screen: the decks and opponents this server offers (mtg_ml/play_config.toml).
+function newGamePlay(m, opt) {
+  const last = loadJSON('mtgml-play-pick', {});
+  let deck = opt.player_decks.some(d => d.deck === last.deck && d.opponents.length) ? last.deck : opt.player_decks.find(d => d.opponents.length)?.deck;
+  let foe = last.opponent;
+  const draw = () => {
+    const mine = opt.player_decks.find(d => d.deck === deck);
+    if (!mine || !mine.opponents.includes(foe)) foe = mine?.opponents[0];
+    m.innerHTML = `<div class="mbox newgame"><h2>New game</h2>
+      <div class="ngsec"><h3>Your deck</h3><div class="ngopts">${opt.player_decks.map(d => `<button type="button" class="ngopt ${d.deck === deck ? 'sel' : ''}" data-deck="${esc(d.deck)}" ${d.opponents.length ? '' : 'disabled'}><b>${esc(d.title)}</b><span>${d.opponents.length ? 'Best of three, sideboarded games 2 and 3' : 'No opponent for this deck yet (no mirror match)'}</span></button>`).join('')}</div></div>
+      <div class="ngsec"><h3>Opponent</h3><div class="ngopts">${opt.opponents.map(o => `<button type="button" class="ngopt ${o.id === foe ? 'sel' : ''}" data-opp="${esc(o.id)}" ${mine?.opponents.includes(o.id) ? '' : 'disabled'}><b>${esc(o.label)}</b><span>${esc(o.note || `The model playing ${o.deck_title}`)}</span></button>`).join('') || '<div class="note">No opponent is available on this server.</div>'}</div></div>
+      <div style="display:flex;gap:10px;align-items:center"><button class="primary" id="bStart" ${deck && foe ? '' : 'disabled'}>Start game</button>${S.gid && !S.over ? '<button class="btn" type="button" id="bCancel">Back to the game</button>' : ''}<span class="err" id="newErr"></span></div>
+      <p class="note" style="margin-top:14px">Space passes or confirms · drag cards to play them (or double-click) · click a land to tap it for mana · ? shows every control</p></div>`;
+    m.querySelectorAll('[data-deck]').forEach(b => b.onclick = () => { deck = b.dataset.deck; draw(); });
+    m.querySelectorAll('[data-opp]').forEach(b => b.onclick = () => { foe = b.dataset.opp; draw(); });
+    if ($('#bCancel')) $('#bCancel').onclick = () => m.classList.remove('on');
+    const b = $('#bStart');
+    b.focus();
+    b.onclick = async () => {
+      b.disabled = true; b.textContent = 'Starting…';
+      saveJSON('mtgml-play-pick', {deck, opponent: foe});
+      try { const v = await api('new', {deck, opponent: foe}); m.classList.remove('on'); S.gid = null; applyView(v); pump(); }
+      catch (err) { $('#newErr').textContent = err.message; b.disabled = false; b.textContent = 'Start game'; }
+    };
+  };
+  draw();
 }
 
 function openSettings() {
