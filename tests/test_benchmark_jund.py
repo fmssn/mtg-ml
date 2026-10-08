@@ -121,6 +121,8 @@ def test_payment_preserves_black_for_removal():
     while g.decision.kind == "pay_mana":
         g.step(a.act(g))
     assert not find(g, "Swamp").tapped
+    drive(g, a, until=end)
+    assert "Cryptic Serpent" not in bf(g)
 
 
 def test_draw_sacrifices_wellspring_and_keeps_lands():
@@ -188,6 +190,27 @@ def test_shaman_rejects_unfavorable_collateral():
     g = scenario(p0={"hand": ["Toxin Analysis"], "battlefield": ["Krark-Clan Shaman", "Writhing Chrysalis", "Writhing Chrysalis", "Ichor Wellspring", "Swamp"]},
                  p1={"battlefield": ["Delver of Secrets"]})
     assert key(g) == ("pass",)
+
+
+def test_removal_response_cancels_unresolved_toxin_sweep():
+    """Removal above Toxin kills the source; preserve fodder instead of using
+    deathtouch that never resolved. The opponent's Terror remains alive."""
+    g = scenario(p0={"hand": ["Toxin Analysis"], "battlefield": ["Krark-Clan Shaman", "Ichor Wellspring", "Swamp"]},
+                 p1={"hand": ["Cast Down"], "battlefield": ["Tolarian Terror", "Swamp", "Swamp"]})
+    a = adapter()
+    while not (g.decision.player == 1 and g.decision.kind == "priority"):
+        g.step(a.act(g))
+    choose(g, "Cast Cast Down")
+    while g.decision.kind != "priority":
+        if g.decision.kind == "target":
+            _, actions = inputs(g, 1, JUND_WILDFIRE)
+            g.step(next(x.index for x in actions if x.data["target"]["name"] == "Krark-Clan Shaman"))
+        else:
+            g.step(0)
+    actions = drive(g, a, until=end)
+    assert "Krark-Clan Shaman" not in bf(g)
+    assert "Tolarian Terror" in bf(g) and "Ichor Wellspring" in bf(g)
+    assert not any(k[:2] == ("activate", "Krark-Clan Shaman") for _, _, k in actions)
 
 
 def test_hydra_bestow_uses_ready_evasive_creature():
@@ -307,6 +330,8 @@ def test_midline_reset_labels_and_hidden_worlds_do_not_change_choice():
     altered = replace(v, state=freeze(state))
     assert a.agent.choose(altered, tuple(replace(x, label="redacted") for x in actions)) == expected
     assert adapter().act(g) == expected
+    g.deck_names = ("unrelated-own-label", "unrelated-opponent-label")
+    assert adapter().act(g) == expected
     for seed in range(4):
         h = determinize(g, 0, random.Random(seed))
         assert adapter().act(h) == expected
@@ -323,6 +348,21 @@ def test_duplicate_card_refs_choose_actual_threat():
     drive(g, until=end)
     survivors = [c for c in g.battlefield if c.controller == 1]
     assert len(survivors) == 1 and survivors[0].counters == 0
+
+
+def test_counter_evidence_requires_revelation_and_available_blue():
+    """Known castable Counterspell favors cheap bait; hidden cards do not."""
+    g = scenario(p0={"hand": ["Writhing Chrysalis", "Refurbished Familiar"],
+                     "battlefield": ["Slagwoods Bridge", "Drossforge Bridge", "Forest", "Swamp", "Ichor Wellspring"]},
+                 p1={"hand": ["Counterspell"], "battlefield": ["Island", "Island"]})
+    assert key(g)[1] == "Writhing Chrysalis"
+    v, actions = inputs(g, 0, JUND_WILDFIRE)
+    state = thaw(v.state)
+    state["opponent"]["hand_known"] = ["Counterspell"]
+    a = adapter().agent
+    assert actions[a.choose(replace(v, state=freeze(state)), actions)].key[1] == "Refurbished Familiar"
+    next(c for c in state["battlefield"] if c["controller"] == "opponent")["tapped"] = True
+    assert actions[a.choose(replace(v, state=freeze(state)), actions)].key[1] == "Writhing Chrysalis"
 
 
 @pytest.mark.slow
