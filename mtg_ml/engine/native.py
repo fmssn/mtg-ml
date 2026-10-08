@@ -463,6 +463,10 @@ class NativeGame:
     def turn(self) -> int:
         return self._g.turn
 
+    @turn.setter
+    def turn(self, value: int) -> None:
+        self._g.turn = value
+
     @property
     def step_name(self) -> str:
         return self._g.step_name
@@ -490,6 +494,18 @@ class NativeGame:
     @property
     def lands_played(self) -> int:
         return self._g.lands_played
+
+    @lands_played.setter
+    def lands_played(self, value: int) -> None:
+        self._g.lands_played = value
+
+    @property
+    def spells_cast_this_turn(self) -> int:
+        return self._g.spells_cast_this_turn
+
+    @spells_cast_this_turn.setter
+    def spells_cast_this_turn(self, value: int) -> None:
+        self._g.spells_cast_this_turn = value
 
     @property
     def mulligans_taken(self) -> list[int]:

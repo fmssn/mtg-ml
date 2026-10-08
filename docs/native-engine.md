@@ -2,6 +2,10 @@
 
 The pure-Python engine (`mtg_ml/engine/`) is the reference. `native/` is a Rust port of it that plays **exactly the same games**: same seeds, same decisions, same options in the same order (labels and keys), same observations and the same RNG stream. It is an optional backend:
 
+Reviewed [expert scenarios](expert-data.md) use the same setup interface on both
+engines. Native setup exposes `turn`, `lands_played` and
+`spells_cast_this_turn`; setters invalidate cached copy snapshots.
+
 ```bash
 MTG_ENGINE=native python -m mtg_ml.play bench          # or --engine native on any play/train/evaluate command
 python -m mtg_ml.rl.train --engine native ...           # rollout workers use the Rust engine

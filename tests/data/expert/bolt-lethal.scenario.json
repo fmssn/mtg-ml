@@ -1,0 +1,295 @@
+{
+  "format": "ExecutableScenario",
+  "version": 1,
+  "id": "bolt-lethal",
+  "group_id": "fixture",
+  "perspective": 0,
+  "decision_time": 1,
+  "episode_mode": "reset",
+  "initial": {
+    "active": 0,
+    "step": "main1",
+    "turn": 8,
+    "lands_played": 1,
+    "spells_cast_this_turn": 0,
+    "players": [
+      {
+        "life": 20,
+        "drawn": 0,
+        "hand": [
+          "Lightning Bolt"
+        ],
+        "hand_count": 1,
+        "battlefield": [
+          "Mountain"
+        ],
+        "graveyard": [],
+        "exile": [],
+        "library": [
+          "Mountain",
+          "Mountain",
+          "Mountain",
+          "Mountain",
+          "Mountain",
+          "Mountain",
+          "Mountain",
+          "Mountain",
+          "Mountain",
+          "Mountain"
+        ],
+        "library_count": 10
+      },
+      {
+        "life": 3,
+        "drawn": 0,
+        "hand": [
+          "Island"
+        ],
+        "hand_count": 1,
+        "battlefield": [],
+        "graveyard": [],
+        "exile": [],
+        "library": [
+          "Island",
+          "Island",
+          "Island",
+          "Island",
+          "Island",
+          "Island",
+          "Island",
+          "Island",
+          "Island",
+          "Island"
+        ],
+        "library_count": 10
+      }
+    ],
+    "seed": 5,
+    "match_game": 1
+  },
+  "review": {
+    "status": "accepted",
+    "reviewer": "test",
+    "note": "Synthetic tactical test."
+  },
+  "state_facts": {
+    "active": [
+      "state-0"
+    ],
+    "step": [
+      "state-1"
+    ],
+    "turn": [
+      "state-2"
+    ],
+    "lands_played": [
+      "state-3"
+    ],
+    "spells_cast_this_turn": [
+      "state-4"
+    ],
+    "players.0.life": [
+      "state-5"
+    ],
+    "players.0.drawn": [
+      "state-6"
+    ],
+    "players.0.hand": [
+      "state-7"
+    ],
+    "players.0.hand_count": [
+      "state-8"
+    ],
+    "players.0.battlefield": [
+      "state-9"
+    ],
+    "players.0.graveyard": [
+      "state-10"
+    ],
+    "players.0.exile": [
+      "state-11"
+    ],
+    "players.0.library_count": [
+      "state-13"
+    ],
+    "players.1.life": [
+      "state-14"
+    ],
+    "players.1.drawn": [
+      "state-15"
+    ],
+    "players.1.hand_count": [
+      "state-17"
+    ],
+    "players.1.battlefield": [
+      "state-18"
+    ],
+    "players.1.graveyard": [
+      "state-19"
+    ],
+    "players.1.exile": [
+      "state-20"
+    ],
+    "players.1.library_count": [
+      "state-22"
+    ]
+  },
+  "synthetic_fields": {
+    "players.0.library": "Explicit hidden-information test completion; not a real MTGO shuffle.",
+    "players.1.hand": "Explicit hidden-information test completion; not a real MTGO shuffle.",
+    "players.1.library": "Explicit hidden-information test completion; not a real MTGO shuffle."
+  },
+  "assumptions": [
+    "Synthetic unit-test fixture, not expert footage."
+  ],
+  "setup_actions": [],
+  "demonstration": [
+    {
+      "selector": {
+        "player": 0,
+        "kind": "priority",
+        "key": [
+          "cast",
+          "Lightning Bolt",
+          "hand",
+          "normal"
+        ],
+        "label": "Cast Lightning Bolt"
+      },
+      "refs": [
+        "action-0"
+      ],
+      "label": true
+    },
+    {
+      "selector": {
+        "player": 0,
+        "kind": "target",
+        "key": [
+          "target",
+          "any",
+          "player",
+          "opponent"
+        ],
+        "label": "Target player 1 (opponent)"
+      },
+      "refs": [
+        "action-1"
+      ],
+      "label": true
+    },
+    {
+      "selector": {
+        "player": 0,
+        "kind": "pay_mana",
+        "key": [
+          "pay",
+          "source",
+          "Mountain",
+          "R"
+        ],
+        "label": "Tap Mountain#12 for R"
+      },
+      "refs": [
+        "action-2"
+      ],
+      "label": true
+    },
+    {
+      "selector": {
+        "player": 0,
+        "kind": "priority",
+        "key": [
+          "pass"
+        ],
+        "label": "Pass priority"
+      },
+      "refs": [
+        "action-3"
+      ],
+      "label": true
+    },
+    {
+      "selector": {
+        "player": 1,
+        "kind": "priority",
+        "key": [
+          "pass"
+        ],
+        "label": "Pass priority"
+      },
+      "refs": [
+        "action-4"
+      ],
+      "label": false
+    }
+  ],
+  "preferred": [
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "cast",
+        "Lightning Bolt",
+        "hand",
+        "normal"
+      ]
+    }
+  ],
+  "continuation": [
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "cast",
+        "Lightning Bolt",
+        "hand",
+        "normal"
+      ],
+      "label": "Cast Lightning Bolt"
+    },
+    {
+      "player": 0,
+      "kind": "target",
+      "key": [
+        "target",
+        "any",
+        "player",
+        "opponent"
+      ],
+      "label": "Target player 1 (opponent)"
+    },
+    {
+      "player": 0,
+      "kind": "pay_mana",
+      "key": [
+        "pay",
+        "source",
+        "Mountain",
+        "R"
+      ],
+      "label": "Tap Mountain#12 for R"
+    },
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "pass"
+      ],
+      "label": "Pass priority"
+    },
+    {
+      "player": 1,
+      "kind": "priority",
+      "key": [
+        "pass"
+      ],
+      "label": "Pass priority"
+    }
+  ],
+  "expected_after": {
+    "over": true,
+    "winner": "self",
+    "opponent.life": 0
+  }
+}
