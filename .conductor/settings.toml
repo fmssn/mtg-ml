@@ -1,0 +1,20 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "make setup"
+run_mode = "concurrent"
+
+[scripts.run.replay]
+available_in = ["local"]
+command = "make replay"
+default = true
+icon = "play"
+
+[scripts.run.live]
+available_in = ["local"]
+command = "make live"
+icon = "swords"
+
+[scripts.run.test]
+command = "make test-fast"
+icon = "test-tube"

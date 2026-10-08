@@ -38,7 +38,7 @@ python -m mtg_ml.review record --agents $M,$M --games 50 --seed 1000 --greedy --
 python -m mtg_ml.review review <dir>/*.json --backend prompt --focus setup
 ```
 
-`--focus setup` adds the "what the policy observes" sheet (`OBSERVES` in `mtg_ml/review/prompt.py`) and the setup-first instruction. **If the checkpoint uses a feature set or trunk the sheet does not describe (for example set 4, or entity attention), update `OBSERVES` first.** A wrong sheet makes the reviewers report gaps that are already fixed, or miss new ones.
+`--focus setup` adds the "what the policy observes" sheet and the setup-first instruction. New recordings carry structured checkpoint configuration; the sheet selects the actual feature set (1–6), trunk, memory and attention layers for each model seat. Check it against the checkpoint before reviewing. Legacy recordings without configuration get a versioned reference marked unknown: resolve the actual configuration before confirming a gap. Keep `observation_sheet` in `mtg_ml/review/prompt.py` aligned with new feature versions. A wrong sheet makes reviewers report gaps already fixed, or miss new ones.
 
 ## 4. Run the workflow
 
@@ -56,7 +56,7 @@ List the stems with `ls <dir>/*.json | grep -v findings | xargs -n1 basename | s
 - Save the workflow result as `<review dir>/flaws.json`. Copy the policy file and the workflow script next to it.
 - Report to the user, grouped by verdict (confirmed, partly, refuted), each with the number of games, one or two example decisions, the root cause and the fix. Lead with engine bugs and confirmed feature or architecture gaps. Put training-side patterns last, and say they are not feature flaws.
 - If the user wants the fixes done, write a handoff note in the shape of `docs/handoff-2026-10-07-feature-set-4.md`: evidence paths, base branch, ground rules (version gate, both engines, difftest, docs/features.md), gaps by priority with fixture decisions, out-of-scope items, and done-when.
-- Run `tools/feature_collisions.py` (once it exists, see the feature-set-4 handoff) on the checkpoint's feature set; report its per-decision-kind table next to the flaws.
+- Run `python -m mtg_ml.audit --features N` on the checkpoint's feature set (see `docs/audit.md`); report its per-decision-kind table next to the flaws.
 - Every flaw comes with fixture decisions. Rebuild any of them with `mtg_ml.review.verify.prefixes(rep, [d])`, then call `encode.entity_features` / `rl.features.featurize` to show exactly what the policy saw.
 
 ## Gotchas
