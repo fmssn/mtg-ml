@@ -715,7 +715,10 @@ class BenchmarkBlue:
             dies = attacker["power"] >= lethal(attacker, blocker)
             prevent = max(0, attacker["power"]) if attacker["oid"] not in blocked else 0
             if keyword(attacker, "trample"):
-                prevent = min(prevent, lethal(attacker, blocker))
+                # Every additional blocker absorbs damage, even when the
+                # attacker was already blocked and the team cannot kill it.
+                remaining = max(0, attacker["power"] - sum(lethal(attacker, b) for b in others))
+                prevent = min(remaining, lethal(attacker, blocker))
             score = (creature_value(attacker) if kill else 0) - (creature_value(blocker) if dies else 0)
             if not dies:
                 score += prevent * .5

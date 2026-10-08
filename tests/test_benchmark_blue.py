@@ -112,6 +112,16 @@ def test_ponder_finds_land_and_preserves_order():
     assert names(g.players[0].library[:2]) == ["Counterspell", "Tolarian Terror"]
 
 
+def test_brainstorm_second_putback_is_the_better_top_card():
+    # Distinct put-backs witness engine order: the second selected card is
+    # drawn first, so recover Spike before the redundant sixth Island.
+    g = scenario(p0={"hand": ["Brainstorm", "Counterspell", "Force Spike"], "battlefield": ISLANDS(5),
+                     "library": ["Counterspell", "Tolarian Terror", "Island"] + ISLANDS(10)})
+    line(g)
+    assert names(g.players[0].library[:2]) == ["Force Spike", "Island"]
+    assert sorted(names(g.players[0].hand)) == ["Counterspell", "Counterspell", "Tolarian Terror"]
+
+
 def test_ponder_shuffles_bad_known_cards():
     g = scenario(p0={"hand": ["Ponder"], "battlefield": ISLANDS(5), "library": ISLANDS(3)+["Counterspell"]*10})
     choose(g, "Cast Ponder"); pay(g); resolve_stack(g)
@@ -409,6 +419,26 @@ def test_trample_floor_and_cumulative_defensive_blocks():
     defenders = [c for c in v.state["battlefield"] if c["controller"] == "self"]
     assert damage_floor(hydra, defenders[:1]) == 5
     assert damage_floor(hydra, defenders) == 0
+
+
+def test_second_trample_block_preserves_life_without_killing_attacker():
+    # A 12/12 Hydra survives both 5/5 blockers. One block still deals lethal
+    # seven damage; sacrificing the second Terror leaves us alive at four.
+    g = scenario(p0={"battlefield": ["Tolarian Terror"]*2, "life": 6},
+                 p1={"battlefield": [("Nyxborn Hydra", {"counters":12, "sick":False})]},
+                 active=1, step="declare_attackers")
+    choose(g, "Attack with Nyxborn")
+    while g.decision.kind != "declare_blocker": g.step(0)
+    for _ in range(2):
+        assert key(g)[-1] == "Nyxborn Hydra"
+        g.step(choice(g))
+    while not g.over and g.step_name != "main2":
+        # Use the common allocation objective for the attacker too: assigning
+        # excess damage to a blocker would conceal the required defense.
+        g.step(choice(g) if g.decision.player == 0 or g.decision.kind.startswith("assign_damage") else 0)
+    assert not g.over and g.players[0].life == 4
+    assert names(g.players[0].graveyard).count("Tolarian Terror") == 2
+    assert find(g, "Nyxborn Hydra").damage == 10
 
 
 def test_cantrip_avoids_self_decking_and_scour_uses_safe_target():
