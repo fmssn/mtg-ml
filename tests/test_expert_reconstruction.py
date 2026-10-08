@@ -5,6 +5,7 @@ import pytest
 
 from mtg_ml.expert.artifacts import fact, ref, review
 from mtg_ml.expert.log_events import normalize_events, parse_event
+from mtg_ml.expert import reconstruction as R
 from mtg_ml.expert.reconstruction import checkpoint_template, completions, reconstruct
 
 ROOT = Path(__file__).parent / "data" / "expert"
@@ -509,3 +510,202 @@ def test_countered_chrysalis_keeps_its_cast_trigger(engine, native_parity):
 def test_pilot_grammar(text, kind, cards):
     event = parse_event(text, {"Alice": 0, "Bob": 1})
     assert event["type"] == kind and event["cards"] == cards
+
+
+def test_fetch_sacrifice_and_shuffle_replay_in_order(engine, native_parity):
+    evidence, spec = fixture()
+    window = spec["windows"][0]
+    root = window["start_scenario"]
+    root["initial"]["players"][0].update(
+        hand=["Crop Rotation"],
+        hand_count=1,
+        battlefield=["Forest", "Forest"],
+        library=["Swamp", "Island", "Swamp", "Island", "Swamp", "Island"],
+        library_count=6,
+    )
+    root["expected_after"] = {}
+    rebind(evidence, root)
+    window["event_ids"] = []
+    for rid, text in [
+        ("sac", "Alice sacrifices Forest."),
+        ("rotation", "Alice casts Crop Rotation."),
+        ("shuffle", "Alice shuffles her library."),
+    ]:
+        add_event(evidence, spec, rid, text)
+    window["end_assertions"] = {
+        "self.graveyard": ["Forest", "Crop Rotation"],
+        "self.library_count": 5,
+        "battlefield.1.name": "Swamp",
+        "stack": [],
+    }
+    spec["budget"].update(actions=24, expansions=4000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "matched" and result["paths"][0]["verification"]["identical"]
+    # The additional cost is logged before the cast, and fetching a land is a
+    # shuffle even though the library no longer holds the same cards.
+    assert result["paths"][0]["matched_event_ids"] == ["sac", "rotation", "shuffle"]
+
+
+def ponder_window(evidence, spec):
+    """A Ponder cast that keeps its optional shuffle, as MTGO logs it."""
+    window = spec["windows"][0]
+    root = window["start_scenario"]
+    root["initial"]["players"][0].update(
+        hand=["Ponder"],
+        hand_count=1,
+        battlefield=["Island"],
+        library=["Swamp", "Island", "Swamp", "Island", "Swamp", "Island"],
+        library_count=6,
+    )
+    root["expected_after"] = {}
+    rebind(evidence, root)
+    window["event_ids"] = []
+    for rid, text in [
+        ("ponder", "Alice casts Ponder."),
+        ("use", "Alice chooses to use the shuffle option of Ponder."),
+        ("shuffle", "Alice shuffles her library."),
+        ("draw", "Alice draws a card."),
+    ]:
+        add_event(evidence, spec, rid, text)
+    window["end_assertions"] = {"self.graveyard": ["Ponder"], "self.library_count": 5, "stack": []}
+    return window
+
+
+def test_optional_shuffle_choice_matches_the_engine_obligation(engine, native_parity):
+    evidence, spec = fixture()
+    ponder_window(evidence, spec)
+    spec["budget"].update(candidates=4, actions=24, expansions=6000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "matched" and result["paths"][0]["verification"]["identical"]
+    assert result["paths"][0]["matched_event_ids"] == ["ponder", "use", "shuffle", "draw"]
+    # The verification receipt counts the decisions whose features were
+    # compared, so it cannot claim a check the lockstep replay never ran.
+    verification = result["paths"][0]["verification"]
+    assert verification["features_checked"] >= verification["actions_checked"] > 0
+
+
+def test_one_completion_can_retain_several_action_paths(engine, native_parity):
+    evidence, spec = fixture()
+    ponder_window(evidence, spec)
+    spec["budget"].update(candidates=6, actions=24, expansions=20000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    # Ponder's reordering is never logged, so several legal traces satisfy the
+    # same evidence from one completion. They are retained, not collapsed.
+    assert result["status"] == "matched" and result["completion_attempts"] == 1
+    traces = {json.dumps([step["selector"] for step in p["trace"]], sort_keys=True) for p in result["paths"]}
+    assert len(traces) == len(result["paths"]) > 1
+
+
+def test_combat_declarations_replay_through_damage(engine, native_parity):
+    evidence, spec = fixture()
+    window = spec["windows"][0]
+    root = window["start_scenario"]
+    root["initial"]["players"][0].update(hand=[], hand_count=0, battlefield=["Cryptic Serpent"])
+    root["initial"]["players"][1].update(life=20, battlefield=["Refurbished Familiar"])
+    root["expected_after"] = {}
+    rebind(evidence, root)
+    window["event_ids"] = []
+    for rid, text in [
+        ("attack", "Bob is being attacked by Cryptic Serpent."),
+        ("block", "Refurbished Familiar blocks Cryptic Serpent."),
+    ]:
+        add_event(evidence, spec, rid, text)
+    window["end_assertions"] = {
+        "opponent.graveyard": ["Refurbished Familiar"],
+        "opponent.life": 20,
+        "battlefield.0.name": "Cryptic Serpent",
+        "battlefield.0.damage": 2,
+    }
+    spec["budget"].update(actions=24, expansions=4000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "matched" and result["paths"][0]["verification"]["identical"]
+    assert result["paths"][0]["matched_event_ids"] == ["attack", "block"]
+
+
+def test_counterspell_chain_resolves_in_stack_order(engine, native_parity):
+    evidence, spec = fixture()
+    window = spec["windows"][0]
+    root = window["start_scenario"]
+    root["initial"]["players"][0].update(
+        hand=["Deep Analysis", "Counterspell"], hand_count=2, battlefield=["Island"] * 6
+    )
+    root["initial"]["players"][1].update(hand=["Counterspell"], hand_count=1, battlefield=["Island"] * 2)
+    root["expected_after"] = {}
+    rebind(evidence, root)
+    window["event_ids"] = []
+    for rid, text in [
+        ("analysis", "Alice casts Deep Analysis targeting Alice."),
+        ("counter", "Bob casts Counterspell targeting Deep Analysis."),
+        ("recounter", "Alice casts Counterspell targeting Counterspell."),
+        ("draw", "Alice draws two cards."),
+    ]:
+        add_event(evidence, spec, rid, text)
+    # Countering the counter lets the original spell resolve.
+    window["end_assertions"] = {
+        "self.graveyard": {"multiset": ["Counterspell", "Deep Analysis"]},
+        "opponent.graveyard": ["Counterspell"],
+        "self.cards_drawn_this_turn": 2,
+        "stack": [],
+    }
+    spec["budget"].update(actions=40, expansions=20000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "matched" and result["paths"][0]["verification"]["identical"]
+    assert result["paths"][0]["matched_event_ids"] == ["analysis", "counter", "recounter", "draw"]
+
+
+def test_brainstorm_window_replays_one_three_card_draw(engine, native_parity):
+    evidence, spec = fixture()
+    window = spec["windows"][0]
+    root = window["start_scenario"]
+    root["initial"]["players"][0].update(
+        hand=["Brainstorm"],
+        hand_count=1,
+        battlefield=["Island"],
+        library=["Swamp", "Island", "Swamp", "Island"],
+        library_count=4,
+    )
+    root["expected_after"] = {}
+    rebind(evidence, root)
+    window["event_ids"] = []
+    for rid, text in [
+        ("brainstorm", "Alice casts Brainstorm."),
+        ("draw", "Alice draws three cards with Brainstorm."),
+    ]:
+        add_event(evidence, spec, rid, text)
+    # Three drawn, two put back: the hand grows by one and the library by -1.
+    window["end_assertions"] = {"self.graveyard": ["Brainstorm"], "self.library_count": 3, "stack": []}
+    spec["budget"].update(candidates=4, actions=24, expansions=6000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "matched" and result["paths"][0]["verification"]["identical"]
+    assert result["paths"][0]["matched_event_ids"] == ["brainstorm", "draw"]
+
+
+def test_each_budget_reports_the_limit_it_exhausted(engine, monkeypatch):
+    """An unresolved window says whether to raise a limit or bring evidence."""
+    evidence, spec = fixture()
+    spec["windows"][0]["end_assertions"]["opponent.life"] = 19
+    spec["budget"].update(actions=1, expansions=10000)
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "unresolved" and result["truncated"]
+    assert result["limits_hit"] == ["actions"] and "actions" in result["reason"]
+
+    evidence, spec = fixture()
+    spec["windows"][0]["end_assertions"]["opponent.life"] = 19
+    spec["budget"].update(seconds=1, expansions=10**6, actions=200)
+    clock = iter(0.4 * n for n in range(10**6))
+    monkeypatch.setattr(R.time, "monotonic", lambda: next(clock))
+    result = reconstruct(evidence, spec, engine)["windows"][0]
+    assert result["status"] == "unresolved" and result["limits_hit"] == ["seconds"]
+    assert "seconds" in result["reason"]
+
+
+def test_aliases_must_be_text_substitutions(engine):
+    evidence, spec = fixture()
+    spec["aliases"] = {"saidin raken": "Alice"}
+    assert reconstruct(evidence, spec, engine)["windows"][0]["status"] == "matched"
+    spec["aliases"] = {"": "Alice"}
+    with pytest.raises(ValueError, match="nonempty"):
+        reconstruct(evidence, spec, engine)
+    spec["aliases"] = ["saidin raken"]
+    with pytest.raises(ValueError, match="aliases must be a mapping"):
+        reconstruct(evidence, spec, engine)

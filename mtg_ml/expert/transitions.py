@@ -40,6 +40,20 @@ CHECKABLE = {
 }
 
 
+PRIORITY_LINE = re.compile(r"\s*p[01] priority: ")
+
+
+def newest(stack, predicate):
+    """The topmost stack item satisfying `predicate` (most recently put there)."""
+    return next((it for it in reversed(stack) if predicate(it)), None)
+
+
+def subsequence(small, big):
+    """Does `small` appear inside `big` in order (not necessarily adjacent)?"""
+    rest = iter(big)
+    return all(any(x == y for y in rest) for x in small)
+
+
 def frozen_option(option):
     """Materialize native decision proxies before advancing the engine."""
     return SimpleNamespace(key=canonical(option.key), label=option.label)
@@ -136,13 +150,19 @@ def transition(g, before, decision, option):
                 if cast_index is not None
                 else True
             )
-            if cast_line and not resolving and cast_line not in lines:
+            # A spell already on the stack when this step began was reported
+            # when its own costs finished. Priority in between is the marker:
+            # without it, this step is what completed the cast.
+            reported = cast_index is not None and any(
+                PRIORITY_LINE.match(line) for line in g.log[cast_index + 1 : before["log_size"]]
+            )
+            if cast_line and not resolving and not reported and cast_line not in lines:
                 lines.append(cast_line)
     for line in lines:
         activation = re.match(r"p([01]) activates (.+): (.+)$", line)
         if activation and g.decision is not None and g.decision.kind == "priority":
             name = activation[2]
-            it = next((it for it in after["stack"] if it["name"] == name + ": " + activation[3]), None)
+            it = newest(after["stack"], lambda it: it["name"] == name + ": " + activation[3])
             targets = []
             target_player = None
             for target_kind, oid in (it or {}).get("targets", []):
@@ -160,7 +180,9 @@ def transition(g, before, decision, option):
         m = re.match(r"p([01]) casts (.+) \(([^)]+)\) from (\w+)", line)
         if m and g.decision is not None and g.decision.kind == "priority":
             actor, name, method, zone = int(m[1]), m[2], m[3], m[4]
-            it = next((it for it in after["stack"] if it["name"] == name and it["kind"] == "spell"), None)
+            # Two spells of one name can share the stack (a countered
+            # Counterspell); the cast that just completed is the topmost.
+            it = newest(after["stack"], lambda it: it["name"] == name and it["kind"] == "spell")
             targets, target_player = [], None
             for target_kind, oid in (it or {}).get("targets", []):
                 if target_kind == "player":
@@ -246,10 +268,11 @@ def transition(g, before, decision, option):
         add("counter", actor, card=name, count=count)
     if before["rng"] != after["rng"]:
         for actor in (0, 1):
-            if (
-                set(before["libraries"][actor]) == set(after["libraries"][actor])
-                and before["libraries"][actor] != after["libraries"][actor]
-            ):
+            # Drawing or fetching removes cards but leaves the rest in order,
+            # so only a shuffle makes the new library stop being a subsequence
+            # of the old one. A short library can shuffle back into order, so
+            # an unreported shuffle stays an evidence-only occurrence.
+            if after["libraries"][actor] and not subsequence(after["libraries"][actor], before["libraries"][actor]):
                 if not any(f["type"] == "shuffle" and f["player"] == actor for f in facts):
                     add("shuffle", actor)
     if after["over"] and not before["over"]:

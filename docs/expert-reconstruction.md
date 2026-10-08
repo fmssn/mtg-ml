@@ -60,8 +60,9 @@ verified paths, even with `--engine python`.
 Defaults are 64 candidates, 50,000 expansions, 200 actions and 30 seconds per
 window, with two escalations up to 256 candidates, 200,000 expansions and 120
 seconds. All five values have CLI overrides. Domain exploration, beam pruning
-and search exhaustion are reported; results never claim exhaustive hidden-state
-search. `<timeline-stem>.progress.json` records the latest completed attempt so
+and search exhaustion are reported; an unresolved window lists the limits it
+exhausted in `limits_hit`, so raising a bound and bringing more evidence are
+distinguishable. Results never claim exhaustive hidden-state search. `<timeline-stem>.progress.json` records the latest completed attempt so
 an interrupted investigation has a bounded progress receipt.
 
 Timeline events distinguish `verified`, `evidence_only`, `boundary` and

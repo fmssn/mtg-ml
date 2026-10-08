@@ -111,6 +111,15 @@ def validate_spec(spec, evidence):
         isinstance(spec.get("players"), dict) and set(spec["players"].values()) == {0, 1},
         "explicit two-player mapping required",
     )
+    aliases = spec.get("aliases", {})
+    # Aliases are literal text substitutions applied before parsing. An empty
+    # key would rewrite every position, so reject the shape here rather than
+    # letting it corrupt occurrences deep inside the grammar.
+    require(isinstance(aliases, dict), "aliases must be a mapping")
+    require(
+        all(isinstance(k, str) and k and isinstance(v, str) and v for k, v in aliases.items()),
+        "aliases must map nonempty text to nonempty text",
+    )
     previous = -1
     game_ids = set()
     for g in spec.get("games", []):
@@ -459,8 +468,12 @@ def verify_path(scenario, evidence, trace, assertions, events=None):
 
     cursor = 0
     pending = []
+    features = 0
     for step in [*trace, None]:
         require(snapshot(games[0]) == snapshot(games[1]), "reconstruction engine divergence")
+        # snapshot() compares featurize/event hashes only where a decision is
+        # pending, so count the comparisons that actually covered features.
+        features += int(games[0].decision is not None)
         if step is not None:
             facts = []
             for g in games:
@@ -481,7 +494,12 @@ def verify_path(scenario, evidence, trace, assertions, events=None):
     if events is not None:
         require(cursor == len(events), "reconstruction left unchecked events")
     require(matches(observe(games[0], scenario["perspective"]), assertions), "reconstruction endpoint contradicted")
-    return {"identical": True, "actions_checked": len(trace), "features_checked": True, "engines": ["python", "native"]}
+    return {
+        "identical": True,
+        "actions_checked": len(trace),
+        "features_checked": features,
+        "engines": ["python", "native"],
+    }
 
 
 def _search(window, evidence, events, budget, engine):
@@ -491,6 +509,15 @@ def _search(window, evidence, events, budget, engine):
     paths = []
     attempts = 0
     best = 0
+    hit = set()
+
+    def over(*names):
+        """Record which of the named budgets is exhausted right now, so an
+        unresolved window says whether to raise a limit or bring evidence."""
+        spent = {"expansions": expansions, "seconds": time.monotonic() - started}
+        now = {n for n in names if spent[n] >= budget[n]}
+        hit.update(now)
+        return bool(now)
     unchecked = [e["id"] for e in events if e["event"]["type"] not in CHECKABLE]
     if unchecked:
         return {
@@ -503,6 +530,7 @@ def _search(window, evidence, events, budget, engine):
             "wall_seconds": 0,
             "truncated": False,
             "exhaustive": False,
+            "limits_hit": [],
             "unchecked_event_ids": unchecked,
             "reason": "Unsupported transition constraints: " + ", ".join(unchecked),
         }
@@ -520,10 +548,11 @@ def _search(window, evidence, events, budget, engine):
             "wall_seconds": 0,
             "truncated": False,
             "exhaustive": False,
+            "limits_hit": [],
             "reason": "Predecessor window has no compatible paths.",
         }
     for root, completion in completions(window, events, budget["candidates"], completion_stats):
-        if expansions >= budget["expansions"] or time.monotonic() - started >= budget["seconds"]:
+        if over("expansions", "seconds"):
             truncated = True
             break
         attempts += 1
@@ -533,7 +562,7 @@ def _search(window, evidence, events, budget, engine):
             continue
         frontier = []
         for prefix in prefixes:
-            if time.monotonic() - started >= budget["seconds"]:
+            if over("seconds"):
                 truncated = True
                 break
             candidate = g.copy()
@@ -542,7 +571,7 @@ def _search(window, evidence, events, budget, engine):
             trace = []
             valid = True
             for recorded in prefix["trace"]:
-                if expansions >= budget["expansions"] or time.monotonic() - started >= budget["seconds"]:
+                if over("expansions", "seconds"):
                     truncated = True
                     valid = False
                     break
@@ -594,10 +623,12 @@ def _search(window, evidence, events, budget, engine):
                     )
                     if len(paths) >= budget["candidates"]:
                         truncated = True
+                        hit.add("candidates")
                         break
                     continue
                 if len(trace) >= budget["actions"]:
                     truncated = True
+                    hit.add("actions")
                     continue
                 # MTGO can log a discard/exile cost before the corresponding
                 # activation/cast. Guide with the next action, while retaining
@@ -634,32 +665,24 @@ def _search(window, evidence, events, budget, engine):
                         "assumption": None if observed else "Unrecorded legal engine choice.",
                     }
                     next_frontier.append((child, new_cursor, trace + [step], new_obligation, new_pending))
-                if expansions >= budget["expansions"] or time.monotonic() - started >= budget["seconds"]:
+                if over("expansions", "seconds"):
                     break
-            if (
-                len(paths) > base_paths
-                or expansions >= budget["expansions"]
-                or time.monotonic() - started >= budget["seconds"]
-            ):
+            if len(paths) > base_paths or over("expansions", "seconds"):
                 break
             # Beam pruning is reported. Never use an observable digest to merge hidden states/coroutines.
             next_frontier.sort(key=lambda item: -item[1])
             if len(next_frontier) > budget["candidates"]:
                 truncated = True
+                hit.add("candidates")
             frontier = next_frontier[: budget["candidates"]]
             if not frontier:
                 break
-        if (
-            len(paths) >= budget["candidates"]
-            or expansions >= budget["expansions"]
-            or time.monotonic() - started >= budget["seconds"]
-        ):
+        if len(paths) >= budget["candidates"] or over("expansions", "seconds"):
             break
-    truncated = (
-        truncated
-        or completion_stats.get("candidate_limit_hit", False)
-        or completion_stats.get("domain_limit_hit", False)
-    )
+    if completion_stats.get("candidate_limit_hit") or completion_stats.get("domain_limit_hit"):
+        hit.add("completions")
+    truncated = truncated or bool(hit)
+    exhausted = ", ".join(sorted(hit))
     return {
         "status": "matched" if paths else "unresolved",
         "paths": paths,
@@ -671,7 +694,11 @@ def _search(window, evidence, events, budget, engine):
         "wall_seconds": time.monotonic() - started,
         "truncated": truncated,
         "exhaustive": False,
-        "reason": None if paths else "No compatible path within the explored completion/search budget.",
+        "limits_hit": sorted(hit),
+        "reason": None
+        if paths
+        else "No compatible path within the explored completion/search budget"
+        + (f" (exhausted: {exhausted})." if exhausted else "."),
     }
 
 
