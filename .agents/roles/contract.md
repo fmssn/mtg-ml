@@ -14,12 +14,18 @@ Supply these fields in the delegation message:
 - Dependencies, other writers and interfaces already agreed with them.
 - Required checks and resource limits; output artifact location if needed.
 
-Use a fresh context rather than a conversation fork. Do not paste whole logs,
+Use a fresh context rather than a conversation fork. In Codex, set
+`fork_turns: "none"` explicitly when that parameter exists; omission can mean
+the full history. Otherwise use the host's equivalent fresh-context option and
+report when unavailable. Route by descriptions; let the child read its own
+role rather than loading every role into the parent. Do not paste whole logs,
 PR bodies or historical handoffs when paths and a short explanation suffice.
 Keep one active writer per file. A rules/cards change owns both engines; do not
 assign Python and Rust halves to separate writers. Resolve overlapping scope
 before edits. Children do not change branches, commit, push, manipulate PRs or
 update the shared tracker. The parent owns those actions and final verification.
+While a child works, do independent work or use completion events/longer waits;
+avoid repeated short polls and duplicate reads of the child's source files.
 
 ## Child's execution
 

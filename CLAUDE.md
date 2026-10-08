@@ -56,7 +56,9 @@ Use focused `mtg-*` agents for independent, substantial subtasks or noisy
 investigations; do straightforward work directly. Default to one or two
 children, at most three active per coordinator (or the runtime's lower limit).
 Children do not delegate. Use fresh task briefs and the shared
-[handoff contract](.agents/roles/contract.md); load only the assigned role.
+[handoff contract](.agents/roles/contract.md). Route by descriptions; each child
+loads only its assigned role. For Codex, explicitly set `fork_turns: "none"`
+when supported; omitting it can inherit the entire conversation.
 Inherit the selected model and reasoning settings; avoid generic quality
 pipelines and duplicate reviews. The parent integrates, verifies, commits and
 handles PRs. Give each file one writer, including paired Python/Rust changes;

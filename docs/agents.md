@@ -37,7 +37,9 @@ that action. See [Conductor's parallel-work guidance](https://www.conductor.buil
 
 Pass objective, completion criteria, workspace/branch/revision, relevant paths,
 allowed writes, dependencies, checks, resource limits and artifact destination.
-Prefer fresh context to a full conversation fork. Return at most 300 words with
+Prefer fresh context to a full conversation fork. With Codex's `fork_turns`
+parameter, explicitly pass `"none"`; omitting it can copy the whole conversation.
+Return at most 300 words with
 outcome, changes, evidence, actual check results, gaps and artifact paths. Put
 long logs in `.context/`; preserve essential evidence in the PR or committed
 report before the workspace is archived. No persistent per-agent memory.
