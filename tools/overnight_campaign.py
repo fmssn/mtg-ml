@@ -372,9 +372,30 @@ def status_or_stop(args):
             except FileNotFoundError:
                 pass
 
+
+def validate_scenario(spec):
+    from mtg_ml.difftest import run_lockstep
+    failure = run_lockstep(spec, full_every=17, fork_every=97)
+    return None if failure is None else failure.to_json()
+
+
+def validate_engines(args):
+    from concurrent.futures import ProcessPoolExecutor
+    import multiprocessing as mp
+    from mtg_ml.trace import Scenario
+    specs = [Scenario(seed=71000+i, agents=('bot', 'bot'), matchup=name,
+                      match_game=game, starting_player=start)
+             for i, (name, game, start) in enumerate((n,g,s) for n in MATCHUPS for g in (1,2) for s in (0,1))]
+    with ProcessPoolExecutor(max_workers=8, mp_context=mp.get_context('spawn')) as pool:
+        failures = [f for f in pool.map(validate_scenario, specs) if f is not None]
+    print(json.dumps({'games':len(specs), 'failures':failures}), flush=True)
+    if failures:
+        raise SystemExit(1)
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest='action', required=True)
+    sub.add_parser('validate')
     p = sub.add_parser('prepare')
     for name in ('root', 'code', 'ladder'):
         p.add_argument('--'+name, required=True)
@@ -392,7 +413,7 @@ def main():
         p = sub.add_parser(name)
         p.add_argument('--root', required=True)
     args = ap.parse_args()
-    {'prepare': prepare, 'run': run_arm, 'panel': panel, 'watch': watch, 'report': lambda a: report(a.root), 'status': status_or_stop, 'stop': status_or_stop}[args.action](args)
+    {'validate': validate_engines, 'prepare': prepare, 'run': run_arm, 'panel': panel, 'watch': watch, 'report': lambda a: report(a.root), 'status': status_or_stop, 'stop': status_or_stop}[args.action](args)
 
 
 if __name__ == '__main__':
