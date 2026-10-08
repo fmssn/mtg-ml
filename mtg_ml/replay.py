@@ -262,6 +262,10 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                         return self._json(live.choose(parts[0], req))
                     if len(parts) == 2 and parts[1] == "concede":
                         return self._json(live.concede(parts[0]))
+                    if len(parts) == 2 and parts[1] == "flag":
+                        return self._json(live.flag(parts[0], req))
+                    if len(parts) == 2 and parts[1] == "survey":
+                        return self._json(live.survey(parts[0], req))
                     if len(parts) == 2 and parts[1] == "next":
                         return self._json(live.next_game(parts[0], req))
             except (LiveError, ValueError) as e:  # JSON and int() errors are ValueErrors too

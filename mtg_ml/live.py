@@ -38,6 +38,8 @@ from .engine.cards import CARDS
 from .replay import DECK_TITLES, FORMAT, _card_info, snapshot, visible_events
 from .rl.features import PUBLIC_KINDS
 
+FEEDBACK_FORMAT = 1  # version of the "feedback" block in saved replays
+FLAG_REASONS = ("misplay", "missed lethal", "rules bug", "weird timing", "other")
 SCRIPTED = "scripted-bot"  # the deck's hand-written bot, offered with --scripted-bot (dev, no checkpoint needed)
 MAX_GAMES = 8  # games held at once; only an idle or finished game makes room
 IDLE_SECONDS = 3600  # a game nobody touched for this long is dropped
@@ -78,6 +80,11 @@ class LiveGame:
         game = None
         self.match, self.game_no, self.plan = match, game_no, plan
         self.conceded = False
+        # feedback: flags on the model's plays and a post-game survey, saved with the replay
+        self.flags: list[dict] = []
+        self.survey: dict | None = None
+        self.pseudonym = ""
+        self.view_to_full: list[int] = []  # player frame -> omniscient frame (the same decision)
         self.model_name, self.greedy, self.scenario = model_name, greedy, scenario
         if scenario is not None:
             from . import live_dev
@@ -168,6 +175,7 @@ class LiveGame:
                 shown, refs = [options[choice]], [option_ref(d.kind, o.label, o.key, o.value, visible_ids(state))]
             else:
                 shown, refs = [f"(hidden {d.kind.replace('_', ' ')})"], [{"type": "hidden"}]
+            self.view_to_full.append(len(self.full_frames) - 1)
             self._view_frame(state, {"player": d.player, "kind": d.kind, "prompt": "", "options": shown, "refs": refs, "chosen": 0})
             self._take(choice)
         decision = None
@@ -199,6 +207,7 @@ class LiveGame:
                     for n in names:  # the player's own cards: their text may be shown
                         if n in CARDS:
                             self.view_info.setdefault(n, _card_info(CARDS[n], False))
+        self.view_to_full.append(len(self.full_frames))  # the player's decision: recorded once it is taken
         self._view_frame(state, decision)
 
     def _view_state(self) -> dict:
@@ -231,6 +240,7 @@ class LiveGame:
             raise LiveError("the game is over")
         self.conceded = True
         self.log.append(f"p{self.seat} concedes")
+        self.view_to_full.append(len(self.full_frames))
         self._view_frame(self._view_state(), None)
 
     def choose(self, frame: int, index: int) -> None:
@@ -275,11 +285,54 @@ class LiveGame:
         last_loser = None if not results or results[-1][1] is None else 1 - results[-1][1]
         return {"game_no": self.game_no, "results": results, "wins": wins, "over": over, "you_choose_play": last_loser == self.seat, "plan": self.plan}
 
+    # -- feedback (the hosted-play plan: flag + describe, a short survey)
+    def flag(self, req: dict) -> dict:
+        """Flag (or unflag) the model's play at the player's frame `frame`:
+        a reason from FLAG_REASONS and a free-text note. Stored with the replay."""
+        frame = req.get("frame")
+        if not (isinstance(frame, int) and 0 <= frame < len(self.frames)):
+            raise LiveError("no such frame")
+        d = self.frames[frame]["decision"]
+        if d is None or d["player"] == self.seat:
+            raise LiveError("only the opponent's plays can be flagged")
+        self._pseudonym(req)
+        self.flags = [f for f in self.flags if f["frame"] != frame]
+        if req.get("remove"):
+            return {"flags": self.flags}
+        reason = req.get("reason", "other")
+        if reason not in FLAG_REASONS:
+            raise LiveError(f"reason must be one of {', '.join(FLAG_REASONS)}")
+        if len(self.flags) >= 200:
+            raise LiveError("too many flags in one game")
+        self.flags.append({"frame": frame, "replay_frame": self.view_to_full[frame], "action": d["options"][d["chosen"] or 0], "kind": d["kind"],
+                           "turn": self.frames[frame]["state"]["turn"], "reason": reason, "note": str(req.get("note", ""))[:1000], "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+        return {"flags": self.flags}
+
+    def set_survey(self, req: dict) -> dict:
+        strength = req.get("strength")
+        if strength is not None and strength not in (1, 2, 3, 4, 5):
+            raise LiveError("strength is 1 to 5")
+        self._pseudonym(req)
+        self.survey = {"strength": strength, "hardest": str(req.get("hardest", ""))[:1000], "note": str(req.get("note", ""))[:1000], "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+        return {"survey": self.survey}
+
+    def _pseudonym(self, req: dict) -> None:
+        name = str(req.get("pseudonym", "") or "").strip()[:40]
+        if name:
+            self.pseudonym = "".join(ch for ch in name if ch.isprintable())
+
+    def feedback(self) -> dict:
+        """The feedback block of the saved replay: who (a pseudonym, never a
+        real name), the game as seed + choices (enough to rebuild it with the
+        same decks and engine), the flags and the survey."""
+        return {"format": FEEDBACK_FORMAT, "player": self.pseudonym or "anonymous", "seat": self.seat, "seed": self.seed, "matchup": self.matchup,
+                "match_game": self.game_no, "choices": [f["decision"]["chosen"] for f in self.full_frames], "flags": self.flags, "survey": self.survey}
+
     def replay(self) -> dict:
-        """The finished game as an ordinary omniscient replay."""
+        """The finished game as an ordinary omniscient replay (plus the player's feedback)."""
         self._sync_log()
         frames = self.full_frames + [{"state": snapshot(self.g, self.full_info), "events": self.log[self.full_seen :], "decision": None}]
-        return {"format": FORMAT, "meta": self._meta(), "cards": self.full_info, "frames": frames}
+        return {"format": FORMAT, "meta": self._meta(), "cards": self.full_info, "frames": frames, "feedback": self.feedback()}
 
     def view(self, since: int = 0) -> dict:
         """The player's view: frames from `since` on (the client keeps the
@@ -341,6 +394,19 @@ class LiveManager:
 
     def concede(self, gid: str) -> dict:
         return self._run(self._concede, gid)
+
+    def flag(self, gid: str, req: dict) -> dict:
+        return self._run(self._feedback, gid, "flag", req)
+
+    def survey(self, gid: str, req: dict) -> dict:
+        return self._run(self._feedback, gid, "survey", req)
+
+    def _feedback(self, gid: str, what: str, req: dict) -> dict:
+        game = self._get(gid)
+        out = game.flag(req) if what == "flag" else game.set_survey(req)
+        if game.replay_file:  # the game is over: the saved replay gets the new feedback
+            self._write(game)
+        return out
 
     def next_game(self, gid: str, req: dict) -> dict:
         return self._run(self._next, gid, req)
@@ -459,14 +525,17 @@ class LiveManager:
 
     def _finish(self, game: LiveGame) -> None:
         """Write the replay of a game that just ended."""
-        import json
 
         if not game.over or game.replay_file:
             return
         if game.match is not None:
             game.match["results"].append((game.g.starting_player, game.winner))
         model = game.names[1 - game.seat].split(":", 1)[1].split(" ")[0].replace("/", "_")
-        name = f"human-vs-{model}-{game.id}.json" if game.seat == 0 else f"{model}-vs-human-{game.id}.json"
+        game.replay_file = f"human-vs-{model}-{game.id}.json" if game.seat == 0 else f"{model}-vs-human-{game.id}.json"
+        self._write(game)
+
+    def _write(self, game: LiveGame) -> None:
+        import json
+
         self.replay_dir.mkdir(parents=True, exist_ok=True)
-        (self.replay_dir / name).write_text(json.dumps(game.replay(), separators=(",", ":")))
-        game.replay_file = name
+        (self.replay_dir / game.replay_file).write_text(json.dumps(game.replay(), separators=(",", ":")))

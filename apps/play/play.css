@@ -326,6 +326,21 @@ button:disabled{cursor:default}
 .seg input{display:none}
 .seg label:has(input:checked){background:#f0c86922;color:var(--me)}
 
+/* feedback */
+.flagform{display:flex;flex-direction:column;gap:6px;width:320px;padding:4px}
+.flagform .flagwhat{font-size:12.5px;color:var(--text);padding:0 8px}
+.flagform textarea,.flagform input,.survey input{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:6px 8px;color:var(--text);resize:vertical}
+.flagform .reasons{flex-wrap:wrap}
+.flagform .reasons label{font-size:11.5px;padding:3px 8px}
+.flagbtns{display:flex;gap:6px;align-items:center}
+#pop .flagform button{display:inline-block;width:auto;padding:4px 12px;border-radius:8px}
+#pop .flagform .btn{background:var(--panel2);border:1px solid var(--line)}
+#pop .flagform .primary{background:linear-gradient(#f7d57e,#e2b54c);color:#251a00}
+#pop .flagform .primary:hover{color:#251a00;filter:brightness(1.07)}
+.survey{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.survey .ph{grid-column:1/3;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.survey .seg label{font-size:11.5px;padding:3px 7px}
+.survey button{justify-self:start}
 /* mana and costs */
 .openmana{font-size:11px;color:var(--muted)}
 .b.reduced{left:50%;top:6px;transform:translateX(-50%);background:var(--good);color:#04210f;font-size:11px}

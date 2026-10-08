@@ -316,3 +316,36 @@ def test_hand_cost_reductions(manager, monkeypatch):
     d = view["frames"][-1]["decision"]
     terror = next(c["uid"] for c in view["frames"][-1]["state"]["players"][1]["hand"] if c["name"] == "Tolarian Terror")
     assert d["player"] == 1 and {int(k): v for k, v in d["reductions"].items()} == {terror: 3}
+
+
+def test_flags_and_survey_are_saved_with_the_replay(manager):
+    """Flags on the model's plays (reason + note, under a pseudonym) and the
+    post-game survey go into the saved replay's feedback block, which also
+    holds the game as seed + choices; feedback after the game rewrites it."""
+    view = manager.new({"model": SCRIPTED, "seed": 6, "seat": 0, "matchup": "jund_blue"})
+    gid, frames = view["live"]["id"], list(view["frames"])
+    rng = random.Random(0)
+    while not any(f["decision"] and f["decision"]["player"] == 1 and f["decision"]["refs"][0]["type"] not in ("hidden", "pass") for f in frames):
+        f = len(frames) - 1
+        view = manager.choose(gid, {"frame": f, "index": rng.randrange(len(frames[-1]["decision"]["options"])), "since": f})
+        frames[view["live"]["since"] :] = view["frames"]
+    theirs = next(i for i, f in enumerate(frames) if f["decision"] and f["decision"]["player"] == 1 and f["decision"]["refs"][0]["type"] not in ("hidden", "pass"))
+    mine = next(i for i, f in enumerate(frames) if f["decision"] and f["decision"]["player"] == 0)
+    with pytest.raises(LiveError):
+        manager.flag(gid, {"frame": mine, "reason": "misplay"})
+    with pytest.raises(LiveError):
+        manager.flag(gid, {"frame": theirs, "reason": "because"})
+    out = manager.flag(gid, {"frame": theirs, "reason": "misplay", "note": "should have attacked", "pseudonym": "Tester"})
+    assert out["flags"][0]["action"] == frames[theirs]["decision"]["options"][0]
+    view = manager.concede(gid)
+    manager.survey(gid, {"strength": 4, "hardest": "turn 3", "pseudonym": "Tester"})
+    rep = json.loads((manager.replay_dir / view["live"]["replay"]).read_text())
+    fb = rep["feedback"]
+    assert fb["format"] == 1 and fb["player"] == "Tester" and fb["seed"] == rep["meta"]["seed"]
+    assert fb["choices"] == [f["decision"]["chosen"] for f in rep["frames"][:-1]]
+    flag = fb["flags"][0]
+    assert flag["reason"] == "misplay" and flag["note"] == "should have attacked"
+    assert rep["frames"][flag["replay_frame"]]["decision"]["options"][rep["frames"][flag["replay_frame"]]["decision"]["chosen"]] == flag["action"]
+    assert fb["survey"]["strength"] == 4
+    manager.flag(gid, {"frame": theirs, "remove": True})
+    assert json.loads((manager.replay_dir / view["live"]["replay"]).read_text())["feedback"]["flags"] == []

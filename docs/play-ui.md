@@ -33,7 +33,7 @@ The replay viewer (`/`) and its own live mode are unchanged. A finished game is 
 | everything else | **O** or "All options": the plain list of the engine's options, always there |
 | inspect a card | hover (preview on the right); right-click pins it |
 | skip the opponent's replay | click the board or **Space** |
-| flag an opponent move | the ⚑ on its chip or log line (stored locally for now; flag + describe comes with hosted play) |
+| flag an opponent move | the ⚑ on its chip or log line: a reason and a note, saved with the replay |
 
 ## Protocol (`mtg_ml/live_proto.py`)
 
@@ -128,6 +128,12 @@ Games are best of three (`mtg_ml.match`): game 1 with the maindecks, games 2 and
 The opening hand opens a mulligan screen: the seven cards large, the land count (amber at 0-1 or 6-7), play or draw, and Keep / Mulligan as two buttons. Click a deck name on a plate for both decklists (maindeck and sideboard).
 
 Endpoints: `POST /api/live/<id>/concede`, `POST /api/live/<id>/next {plan, play}`, `GET /api/live/sideboard?matchup=&seat=`, `GET /api/live/decks?matchup=&seat=`. A full server never drops a game that is being played (touched in the last 10 minutes and not over): it refuses a new game with a message instead.
+
+### Feedback: flags and survey
+
+The ⚑ on any opponent action (feed or log) opens a small form: a reason (misplay, missed lethal, rules bug, weird timing, other), a note ("what was wrong, what would you have done?") and an optional name or nickname, remembered locally. It is sent to the server (`POST /api/live/<id>/flag {frame, reason, note, pseudonym}`; `remove: true` takes it back) and kept with the game. The result card has a short survey: how strong the bot played (1-5) and the hardest moment (`POST /api/live/<id>/survey`).
+
+Both are saved in the replay file under `feedback` (format 1): `player` (the pseudonym, never a real name; "anonymous" if none), `seat`, `seed`, `matchup`, `match_game`, `choices` (every decision's chosen index: the game is reproducible from seed + choices with the same decks and engine), `flags` (each with the player's `frame`, the replay's `replay_frame`, the flagged `action`, `kind`, `turn`, `reason`, `note`, `at`) and `survey`. Feedback given after the game ends rewrites the saved file.
 
 ### Help and information
 

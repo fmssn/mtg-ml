@@ -144,7 +144,7 @@ function applyView(view) {
 
 function resetGame(id) {
   // Every auto-pass mode and plan resets at a game boundary (Forge bug: End Turn carried over).
-  Object.assign(S, {gid: id, stopLog: [], lastAutoPassed: 0, yields: new Set(), holdOnce: false, autoPassed: 0, stats: {dealt: 0, taken: 0, played: 0}, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
+  Object.assign(S, {gid: id, flags: [], stopLog: [], lastAutoPassed: 0, yields: new Set(), holdOnce: false, autoPassed: 0, stats: {dealt: 0, taken: 0, played: 0}, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
     fullControl: false, feed: [], logDone: 0, error: null, skip: false});
   $('#log').innerHTML = '';
   renderFeed();
@@ -469,16 +469,34 @@ function pushFeed(text, fi, quiet, kind) {
   if (lc && !kind && lc.text.replace(/^Opponent /, '') === text) lc.feed = e;
   renderFeed();
 }
-const FLAGS = () => loadJSON('mtgml-play-flags', []);
-function isFlagged(fi) { return FLAGS().some(f => f.game === S.gid && f.frame === fi); }
-function toggleFlag(fi, text) {
-  // Stub for the hosted-play plan (flag + describe): stored locally only.
-  let flags = FLAGS();
-  if (flags.some(f => f.game === S.gid && f.frame === fi)) flags = flags.filter(f => !(f.game === S.gid && f.frame === fi));
-  else { flags.push({game: S.gid, frame: fi, action: text, at: Date.now()}); toast('Flagged. Describing what went wrong comes later.'); }
-  saveJSON('mtgml-play-flags', flags);
-  renderFeed();
-  $$(`#log .flag[data-fi="${fi}"]`).forEach(b => b.classList.toggle('on', isFlagged(fi)));
+// ---- flag a play: reason + note, sent to the server and saved with the replay
+const FLAG_REASONS = [['misplay', 'Misplay'], ['missed lethal', 'Missed lethal'], ['rules bug', 'Rules bug'], ['weird timing', 'Weird timing'], ['other', 'Other']];
+const pseudonym = () => loadJSON('mtgml-play-name', '') || '';
+function isFlagged(fi) { return (S.flags || []).some(f => f.frame === fi); }
+function toggleFlag(fi, text, anchor) {
+  const pop = $('#pop'), existing = (S.flags || []).find(f => f.frame === fi);
+  pop.innerHTML = `<form id="fFlag" class="flagform"><div class="ph">Flag this play</div><div class="flagwhat">${esc(text)}</div>
+    <div class="seg reasons">${FLAG_REASONS.map(([k, t], j) => `<label><input type="radio" name="reason" value="${k}" ${(existing ? existing.reason === k : j === 0) ? 'checked' : ''}>${t}</label>`).join('')}</div>
+    <textarea name="note" rows="3" maxlength="1000" placeholder="What was wrong? What would you have done?">${esc(existing?.note || '')}</textarea>
+    <input name="who" maxlength="40" placeholder="Your name or nickname (optional, shown with your flags)" value="${esc(pseudonym())}">
+    <div class="flagbtns">${existing ? '<button type="button" class="btn small" id="bUnflag">Remove flag</button>' : ''}<span class="sp"></span><button type="button" class="btn small" id="bFlagCancel">Cancel</button><button class="primary small" type="submit">Send</button></div></form>`;
+  pop.classList.add('on');
+  const r = (anchor || document.body).getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+  pop.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left - w + r.width))}px`;
+  pop.style.top = `${Math.max(8, Math.min(innerHeight - h - 8, r.bottom + 6))}px`;
+  const f = $('#fFlag');
+  f.note.focus();
+  const send = async body => {
+    try { const out = await api(`${encodeURIComponent(S.gid)}/flag`, {frame: fi, pseudonym: f.who.value.trim(), ...body}); S.flags = out.flags; }
+    catch (e) { toast(e.message); return; }
+    saveJSON('mtgml-play-name', f.who.value.trim());
+    closePop(); renderFeed();
+    $$(`#log .flag[data-fi="${fi}"]`).forEach(b => b.classList.toggle('on', isFlagged(fi)));
+    toast(body.remove ? 'Flag removed.' : 'Thanks: the flag is saved with this game.');
+  };
+  f.onsubmit = e => { e.preventDefault(); send({reason: f.reason.value, note: f.note.value}); };
+  $('#bFlagCancel').onclick = () => closePop();
+  if (existing) $('#bUnflag').onclick = () => send({remove: true});
 }
 function renderFeed() {
   const nowTurn = S.shown >= 0 ? stateAt(S.shown).turn : 0;
@@ -1585,7 +1603,7 @@ document.addEventListener('click', e => {
   // skip the bot's replay
   if (S.queue.length && S.pumping && t.closest('#board')) { S.skip = true; return; }
   const flag = t.closest('[data-flag]');
-  if (flag) { toggleFlag(+flag.dataset.flag, flag.parentElement.textContent.replace('⚑', '').trim()); return; }
+  if (flag) { toggleFlag(+flag.dataset.flag, flag.parentElement.textContent.replace('⚑', '').trim(), flag); return; }
   const stop = t.closest('[data-stop]');
   if (stop) { const [who, st] = stop.dataset.stop.split(':'); PREF.stops[who][st] = !PREF.stops[who][st]; savePref(); renderMid(stateAt(S.shown)); return; }
   if (t.closest('[data-resync]')) { resync(); return; }
@@ -1618,6 +1636,7 @@ document.addEventListener('click', e => {
   const zone = t.closest('.zone[data-zone]');
   if (zone) { openZone(+zone.dataset.p, zone.dataset.zone); return; }
   if (!t.closest('#pop')) closePop();
+  if (t.closest('#fFlag')) return;
   if (!canAct()) return;
   const ui = S.ui;
   const hc = t.closest('#hand .card'), pm = t.closest('#board .perm'), plate = t.closest('.plate'), si = t.closest('.sitem');
@@ -1958,7 +1977,7 @@ async function showResult() {
   let sb = null;
   if (mm && !mm.over) { try { sb = await api(`sideboard?matchup=${encodeURIComponent(S.matchup || '')}&seat=${me}`); } catch (e) { sb = null; } }
   const swaps = sb && Object.keys(sb.in).length ? `<div class="sbplan"><div><b>In</b> ${Object.entries(sb.in).map(([n, k]) => `${k}× ${esc(n)}`).join(', ')}</div><div><b>Out</b> ${Object.entries(sb.out).map(([n, k]) => `${k}× ${esc(n)}`).join(', ')}</div></div>` : '';
-  const flags = FLAGS().filter(f => f.game === S.gid).length;
+  const flags = (S.flags || []).length;
   m.innerHTML = `<div class="mbox result"><div class="note">${mm ? `Game ${mm.game_no} of 3 · ` : ''}turn ${meta?.turns}</div>
     <div class="big ${w == null ? '' : win ? 'win' : 'loss'}">${w == null ? 'Draw' : win ? 'You win' : 'You lose'}</div>
     <div class="note">${esc(reasonText())}</div>
@@ -1969,6 +1988,10 @@ async function showResult() {
         ${swaps ? `<div class="full">${swaps}</div>` : ''}
         ${mm.you_choose_play ? `<label>You lost, so you choose</label><span class="seg"><label><input type="radio" name="play" value="1" checked>play first</label><label><input type="radio" name="play" value="0">draw first</label></span>` : `<div class="full note">They lost the last game, so they play first.</div>`}
       </form>` : ''}
+    <form id="fSurvey" class="survey"><div class="ph">How was it? (optional, saved with the game)</div>
+      <label>The bot played</label><span class="seg">${[1, 2, 3, 4, 5].map(n => `<label><input type="radio" name="strength" value="${n}">${['very weak', 'weak', 'okay', 'strong', 'very strong'][n - 1]}</label>`).join('')}</span>
+      <label>Hardest moment</label><input name="hardest" maxlength="1000" placeholder="e.g. their turn-6 Counterspell">
+      <span></span><button class="btn small" type="submit">Send feedback</button></form>
     <div class="rbtns">${S.replay ? `<a class="btn" href="../#r=${encodeURIComponent(S.replay)}" target="_blank">Full replay (both hands)</a>` : ''}
       <button class="btn" id="bLook">Look at the board</button><button class="btn" id="bChange">Change opponent or decks</button>
       <button class="primary" id="bAgain">${matchOver ? 'Rematch' : `Next game (${mm.game_no + 1} of 3)`}</button></div></div>`;
@@ -1982,6 +2005,12 @@ async function showResult() {
     catch (e) { toast(e.message); $('#bAgain').disabled = false; }
   };
   $('#bChange').onclick = () => openNewGame();
+  $('#fSurvey').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target, st = f.strength.value;
+    try { await api(`${encodeURIComponent(S.gid)}/survey`, {strength: st ? +st : null, hardest: f.hardest.value, pseudonym: pseudonym()}); toast('Thanks for the feedback.'); f.querySelector('button').disabled = true; }
+    catch (err) { toast(err.message); }
+  };
   $('#bLook').onclick = () => m.classList.remove('on');
 }
 
