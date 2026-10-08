@@ -60,3 +60,8 @@ Project `mtg-*` subagents share short role instructions across Codex and Claude.
 See [agents.md](agents.md) for routing, scoped briefs, limits, validation and
 fallbacks. Small tasks stay single-agent; independent deliverables retain their
 own workspace and PR.
+
+For planning in one chat and implementing in another, use the saved plan plus
+`.context/handoff.json`. The [coordination guide](workspace-coordination.md)
+documents activation, baseline checks, shared write claims and resource slots.
+The installed shared tracker helper is maintained in `tools/progress.py`.

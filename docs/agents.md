@@ -75,6 +75,13 @@ of creating a competing shared tracker. Resolve unclear overlapping ownership
 before writing. A child reports blockers to its parent rather than taking over
 another task. GPU/CPU jobs need current load checks and explicit assignments.
 
+Use the structured owner, workspace, write paths and dependencies supported by
+the shared updater, plus `.context/handoff.json` for the current approved plan.
+Reconcile GitHub observations at start/resume and keep task completion distinct
+from PR merge state. Shared interface changes have one foundation integration
+owner. The [coordination guide](workspace-coordination.md) gives the commands,
+including the cross-session `local:heavy` slot and explicit remote reservations.
+
 ## Host configuration and boundaries
 
 Codex uses standalone project TOML agents and
