@@ -55,7 +55,7 @@ def process_inventory():
 
 def gpu_inventory():
     query = 'pci.bus_id,uuid,name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw'
-    raw = subprocess.check_output(['nvidia-smi', '--query-gpu=' + query, '--format=csv,noheader,nounits'], text=True, timeout=5)
+    raw = subprocess.check_output(['nvidia-smi', '--query-gpu=' + query, '--format=csv,noheader,nounits'], text=True, timeout=12)
     out = []
     for fields in csv.reader(raw.splitlines()):
         bus, uuid, name, used, total, util, temp, power = [f.strip() for f in fields]

@@ -11,13 +11,13 @@ root=$(cd "$root" && pwd)
 start_session() {
     local name=$1 command
     shift
-    if tmux has-session -t "=$prefix-$name" 2>/dev/null; then
+    if tmux has-session -t "$prefix-$name" 2>/dev/null; then
         echo "$prefix-$name already exists" >&2
         return 1
     fi
     printf -v command '%q ' "$@"
     tmux new-session -d -s "$prefix-$name" -c "$code" "$command"
-    tmux set-option -t "=$prefix-$name" history-limit 2000
+    tmux set-option -t "$prefix-$name" history-limit 2000
 }
 
 case "$action" in
@@ -41,8 +41,8 @@ case "$action" in
         ;;
     stop-monitoring)
         for name in dashboard watch; do
-            if tmux has-session -t "=$prefix-$name" 2>/dev/null; then
-                tmux kill-session -t "=$prefix-$name"
+            if tmux has-session -t "$prefix-$name" 2>/dev/null; then
+                tmux kill-session -t "$prefix-$name"
             fi
         done
         ;;
