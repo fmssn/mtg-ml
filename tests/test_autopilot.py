@@ -324,3 +324,12 @@ def test_replay_uses_checked_out_pr_not_dispatch_workflow_sha(monkeypatch):
     assert replay.checkout_snapshot(log) == (head, base)
     with pytest.raises(ValueError, match="checkout SHAs"):
         replay.checkout_snapshot("No checkout receipt available")
+
+
+def test_replay_controls_distinguish_separate_hidden_information_defects(monkeypatch):
+    monkeypatch.syspath_prepend(str(AP.parents[1] / "tools"))
+    replay = importlib.import_module("autopilot_replay")
+    assert replay.matches_bug({"file": "mtg_ml/live.py", "issue": "Opponent Delver prompt leaks the top card"}, "hidden-card")
+    assert not replay.matches_bug({"file": "mtg_ml/live.py", "issue": "The public seed reveals the hidden shuffled library"}, "hidden-card")
+    assert replay.matches_bug({"file": "mtg_ml/live.py", "issue": "Shutdown drops the unsendable game on another thread"}, "native-shutdown")
+    assert not replay.matches_bug({"file": "mtg_ml/live.py", "issue": "Browser close loses the last response"}, "native-shutdown")

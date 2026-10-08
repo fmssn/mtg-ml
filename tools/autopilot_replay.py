@@ -101,8 +101,10 @@ def provider_env(output):
 def matches_bug(finding, bug):
     issue = finding.get("issue", "").lower()
     if bug == "hidden-card":
-        return finding.get("file") == "mtg_ml/live.py" and any(w in issue for w in ("prompt", "delver", "top card", "hidden", "library"))
-    return finding.get("file") in ("mtg_ml/replay.py", "mtg_ml/live.py") and any(w in issue for w in ("shutdown", "close", "thread", "unsendable", "ctrl-c"))
+        return finding.get("file") == "mtg_ml/live.py" and "prompt" in issue and any(w in issue for w in ("delver", "top card", "library"))
+    return (finding.get("file") in ("mtg_ml/replay.py", "mtg_ml/live.py")
+            and any(w in issue for w in ("thread", "unsendable", "coroutine"))
+            and any(w in issue for w in ("shutdown", "close", "drop", "destroy", "delete")))
 
 
 def assess_checkout(record, checkout, tmp, env):
@@ -227,6 +229,7 @@ def summary(records):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--output", type=Path, default=ROOT / ".context/autopilot-replay")
+    p.add_argument("--manifest", type=Path, help="Exact recorded cases (avoids rediscovery from expiring GitHub logs)")
     p.add_argument("--jobs", type=int, default=1)
     p.add_argument("--case", action="append", default=[])
     p.add_argument("--discover-only", action="store_true")
@@ -234,7 +237,9 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     manifest_path = output / "cases.json"
-    if not manifest_path.exists():
+    if args.manifest:
+        manifest_path.write_text(args.manifest.read_text())
+    elif not manifest_path.exists():
         manifest_path.write_text(json.dumps(discover(), indent=2) + "\n")
     cases = json.loads(manifest_path.read_text())
     if args.case:

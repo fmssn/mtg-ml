@@ -70,6 +70,11 @@ npm exec --yes --package @anthropic-ai/claude-code@2.1.293 -- claude --version
 .venv/bin/python tools/autopilot_replay.py --jobs 3
 ```
 
+The audited snapshots are retained in
+[`autopilot-replay-cases-2026-10-08.json`](autopilot-replay-cases-2026-10-08.json).
+Use `--manifest docs/autopilot-replay-cases-2026-10-08.json` to reproduce those
+cases after the original GitHub logs expire.
+
 Artifacts default to `.context/autopilot-replay/`: exact cases, setup/review logs,
 changed-code diffs, model/runner receipts and a resumable aggregate summary.
 Completion target: at least 11/13 historical reviews within the model budget,
