@@ -508,3 +508,19 @@ def test_factory_modes_and_actor_seeds_do_not_change_choices():
     greedy = blue_factory(0, "greedy"); greedy.reset(MONO_BLUE_TERROR, actor_seed=1)
     sampled = blue_factory(0, "sampled"); sampled.reset(MONO_BLUE_TERROR, actor_seed=999)
     assert greedy.act(g) == sampled.act(g)
+
+
+def test_ponder_does_not_count_known_bottom_land_as_a_top_three_hit():
+    g = scenario(p0={"hand": ["Ponder"], "battlefield": ISLANDS(1),
+                     "library": ["Counterspell", "Tolarian Terror", "Cryptic Serpent"]+ISLANDS(10)})
+    choose(g, "Cast Ponder"); pay(g); resolve_stack(g)
+    g.step(choice(g))  # order the three known nonlands
+    v, actions = inputs(g, 0, MONO_BLUE_TERROR)
+    # A self-contained permitted view can retain an Island bottomed at an
+    # earlier London mulligan. It cannot satisfy this turn's top-three dig.
+    state = dict(v.state); own = dict(state["self"])
+    own["mulligans"] = 1
+    own["library_known"] = list(own["library_known"]) + [(12, "Island")]
+    state["self"] = own
+    v = replace(v, state=freeze(state))
+    assert actions[bot().choose(v, actions)].key == ("shuffle", "yes")

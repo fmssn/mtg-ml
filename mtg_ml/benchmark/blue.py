@@ -558,7 +558,7 @@ class BenchmarkBlue:
                 # A mana-starved Ponder should search again if its three cards
                 # contain no Island, even when a good threat is present.
                 if self._lands(view) < 2 and "Island" not in view.state["self"]["hand"]:
-                    want = "Island" not in known.values()
+                    want = not any(name == "Island" for pos, name in known.items() if pos < 3)
                 out.append(float((answer == "yes") == want))
             elif tag == "pay_optional":
                 stack = view.context["stack"]
