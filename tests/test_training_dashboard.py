@@ -72,3 +72,24 @@ def test_corrupted_complete_record_is_reported_and_nan_is_strict_json(tmp_path):
     with pytest.raises(ValueError, match='Invalid complete JSON record'):
         module.jsonl(path)
     assert json.dumps(module.clean({'x': float('nan')}), allow_nan=False) == '{"x": null}'
+
+
+def test_ssh_failure_preserves_last_snapshot_with_visible_error(tmp_path, monkeypatch):
+    import subprocess
+
+    spec = importlib.util.spec_from_file_location('dashboard_server', APP / 'server.py')
+    server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server)
+    monitor = server.Monitor('host', '/script.py', '/campaign', tmp_path / 'cache.json', 15)
+    observed = {'schema_version': 1, 'observed_at': 123, 'arms': []}
+    monitor.value['snapshot'] = observed
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired('ssh', 20)
+
+    monkeypatch.setattr(server.subprocess, 'run', timeout)
+    monitor.poll()
+    value = json.loads(monitor.state())
+    assert value['snapshot'] == observed
+    assert 'timed out' in value['error']
+    assert value['last_attempt'] > observed['observed_at']
