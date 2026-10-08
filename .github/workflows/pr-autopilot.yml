@@ -93,7 +93,7 @@ jobs:
           labels=" $(jq -r '[.labels[].name] | join(" ")' <<< "$info") "
 
           for l in needs-opus needs-human autopilot:opus-used autopilot:round-1 autopilot:round-2; do
-            gh label create "$l" --color ededed > /dev/null 2>&1 || true
+            gh label create "$l" --color ededed --force > /dev/null
           done
 
           # New work from the developer starts the loop over.
@@ -109,8 +109,13 @@ jobs:
           [[ $mode == escalate || $labels != *" needs-opus "* ]] || skip "already escalated"
 
           round=$(( $(tr ' ' '\n' <<< "$labels" | grep -c '^autopilot:round-' || true) + 1 ))
-          if [[ $mode != escalate && $round -gt 2 ]]; then
-            mode=escalate   # round cap: two cheap review/fix rounds per PR
+          if [[ $mode == ci-fix && $round -gt 2 ]]; then
+            mode=escalate   # CI still fails after two DeepSeek rounds: an evidenced blocker
+          elif [[ $mode == conflict && $round -gt 2 ]]; then
+            gh pr merge "$pr" --disable-auto
+            gh pr edit "$pr" --add-label needs-human > /dev/null
+            gh pr comment "$pr" --body "**Autopilot:** repeated conflict work remains unfinished. Auto-merge is off; please inspect it."
+            skip "repeated conflicts; capacity alone does not invoke Opus"
           fi
           if [[ $mode == escalate && $labels == *" autopilot:opus-used "* ]]; then
             gh pr edit "$pr" --add-label needs-human > /dev/null
@@ -118,6 +123,8 @@ jobs:
             skip "Opus already used on this PR"
           fi
 
+          # Pause previous auto-merge before this head starts a new review.
+          gh pr merge "$pr" --disable-auto
           echo "PR #$pr: $mode (round $round)"
           {
             echo "pr=$pr"; echo "mode=$mode"; echo "round=$round"
@@ -182,9 +189,14 @@ jobs:
       - name: Install
         working-directory: pr
         run: |
-          uv pip install -e '.[dev]' numpy ruff && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -e '.[dev]' numpy ruff 'maturin>=1.5,<2' && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
           # Pinned: CLI flags and permission behaviour change between releases.
           npm install -g @anthropic-ai/claude-code@2.1.293
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pr/native
 
       - name: "Fix: prepare"
         if: env.MODE != 'escalate'
@@ -210,7 +222,7 @@ jobs:
             export ANTHROPIC_DEFAULT_SONNET_MODEL=$DEEPSEEK_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL=$DEEPSEEK_MODEL \
               ANTHROPIC_SMALL_FAST_MODEL=$DEEPSEEK_MODEL CLAUDE_CODE_SUBAGENT_MODEL=$DEEPSEEK_MODEL
           fi
-          bash "$AP/run-claude.sh" "$AP/fix.md" sonnet 3 15m 30
+          bash "$AP/run-claude.sh" "$AP/fix.md" sonnet 3 15m 60
       - name: "Fix: guard, push, decide"
         id: fix
         if: env.MODE != 'escalate'
@@ -231,12 +243,12 @@ jobs:
         working-directory: pr
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          ESCALATION: ${{ steps.fix.outputs.reason || (env.MODE == 'escalate' && 'Round cap reached, or escalated by hand with the needs-opus label. Read the latest autopilot comments on the PR for findings.') }}
+          ESCALATION: ${{ steps.fix.outputs.reason || (env.MODE == 'escalate' && 'CI still fails after two DeepSeek rounds, or escalated explicitly with the needs-opus label. Read the latest autopilot comments on the PR for findings.') }}
         run: |
           git merge --abort 2> /dev/null || true
           git reset -q --hard "origin/$HEAD_REF" && git clean -fdq
           gh pr edit "$PR" --add-label autopilot:opus-used > /dev/null
-          gh pr view "$PR" --comments --json comments --jq '[.comments[] | select(.body | startswith("**Autopilot"))] | .[-3:][] | .body' > "$RUNNER_TEMP/notes.md" || true
+          gh pr view "$PR" --comments --json comments --jq '[.comments[] | select(.body | startswith("**Autopilot"))] | .[-3:][] | .body' > "$RUNNER_TEMP/notes.md"
           ESCALATION="$ESCALATION"$'\n\nRecent autopilot comments:\n'"$(cat "$RUNNER_TEMP/notes.md")" \
             bash "$AP/prepare.sh" escalate "$PR" "$BASE_REF"
       - name: "Escalate: Opus"
