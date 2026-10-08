@@ -59,6 +59,9 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
   Logs and outcomes stay in that campaign directory. ComfyUI and bus BE are
   excluded. These timing screens disable evaluation; strength comparisons and
   three paired two-hour finalists have not started.
+  Four-rank parity passed all three cases (eager FP32, graph FP32, compiled
+  BF16), including unequal and empty shards, in 87.77 seconds. The baseline
+  remains active; throughput results are pending.
 - **Training strength:** not measured; sampled/greedy benchmark and L1 Elo are
   unavailable pending the paired continuation experiments.
 - **Verdict: inconclusive.** The 3–5× end-to-end target remains unmeasured. Adopt
