@@ -371,14 +371,16 @@ def test_h256_set7_residency_crosses_64_policy_boundary(tmp_path):
         keys = [learner, (paths[64], 0)]
         cl.generation = int(srv.c[3])
         cl.ids = {k: srv.register_key(k) for k in keys}
-        rows = [(k, i, 1 | GREEDY_FLAG, *_decision(73)) for i, k in enumerate(keys)]
+        crowded = _decision(73)
+        crowded = (crowded[0], array('i', [1]*512), array('i', range(1, 513)), crowded[3])
+        rows = [(k, i, 1 | GREEDY_FLAG, *crowded) for i, k in enumerate(keys)]
         rows.sort(key=lambda r:r[0])
         request = cl.submit(0, rows)
         srv.process(srv.pending())
         srv.drain()
         actions, logps, values = cl.collect(request)
         with torch.no_grad():
-            logits, expected, _ = net(_batch(torch, [_decision(73)])[0])
+            logits, expected, _ = net(_batch(torch, [crowded])[0])
         for action, lp, value in zip(actions, logps, values):
             assert action == logits.argmax(-1).item()
             assert lp == pytest.approx(torch.log_softmax(logits,-1)[0,action].item(), abs=3e-5)

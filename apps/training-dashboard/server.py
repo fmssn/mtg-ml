@@ -43,8 +43,9 @@ class Monitor:
 
     def run(self):
         while not self.stop.is_set():
+            started = time.monotonic()
             self.poll()
-            self.stop.wait(self.interval)
+            self.stop.wait(max(0, self.interval - (time.monotonic() - started)))
 
     def state(self):
         with self.lock:
