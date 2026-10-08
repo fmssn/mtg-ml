@@ -66,23 +66,31 @@ jobs:
       - run: python -m pytest -q -n auto --durations=15 -m "not slow and not gpu"
 
   native-tests:
-    # Rust engine: cargo tests, then the tests marked `native` (tests/conftest.py).
+    # Rust engine: cargo tests, then the tests marked `native` (tests/conftest.py), in two shards.
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    env:
+      PYTEST_SHARD: ${{ matrix.shard }}/2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          save-if: ${{ matrix.shard == 0 }}
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
           activate-environment: true
           enable-cache: true
       - run: uv pip install -e '.[dev]' "maturin>=1.5,<2"
-      - run: cargo test --no-default-features
+      - if: matrix.shard == 0
+        run: cargo test --no-default-features
         working-directory: native
       - run: maturin develop --release
         working-directory: native
@@ -104,7 +112,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
-          save-if: false  # native-tests saves the cache
+          save-if: false  # native-tests (0) saves the cache
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
