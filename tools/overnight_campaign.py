@@ -235,7 +235,7 @@ def panel(args):
     import torch
     from mtg_ml.backend import ENV_VAR
     from mtg_ml.rl.collect import PoolProcess
-    from mtg_ml.rl.evaluate import DECK_KEYS, benchmark, evaluation_lock, head_to_head
+    from mtg_ml.rl.evaluate import DECK_KEYS, benchmark, evaluation_lock
     os.environ[ENV_VAR] = 'native'
     torch.set_num_threads(1)
     arms = entries(args.root)
@@ -292,13 +292,11 @@ def panel(args):
             if any(r['matchup'] == matchup and r['checkpoint'] == checkpoint for r in state['h2h']):
                 continue
             with evaluation_lock(str(Path(arms[0]['run']) / 'evaluation.lock')):
-                result = pool.call(head_to_head, str(frozen / (arms[0]['name'] + '.pt')),
-                                   str(frozen / (arms[1]['name'] + '.pt')), args.h2h_games, len(cpus),
-                                   0, 100, 'local', False, False).wait() if matchup == 'jund_blue' else pool.call(
-                                       h2h_cell, str(frozen / (arms[0]['name'] + '.pt')),
-                                       str(frozen / (arms[1]['name'] + '.pt')), args.h2h_games, len(cpus), matchup).wait()
+                result = pool.call(h2h_cell, str(frozen / (arms[0]['name'] + '.pt')),
+                                   str(frozen / (arms[1]['name'] + '.pt')), args.h2h_games, len(cpus), matchup).wait()
             state['h2h'].append(dict(matchup=matchup, score=result['all'][0], ci=result['all'][1], n=result['all'][2],
-                                     weight=1 if a == b else 2, checkpoint=checkpoint))
+                                     weight=1 if a == b else 2, checkpoint=checkpoint, seed_scores=result['seed_scores']))
+            state['h2h_summary'] = paired_summary([r for r in state['h2h'] if r['checkpoint'] == checkpoint])
             state['updated_at'] = time.time()
             atomic(path, state)
     finally:
@@ -308,8 +306,35 @@ def panel(args):
 
 
 def h2h_cell(pool, a, b, games, jobs, matchup):
-    from mtg_ml.rl.evaluate import head_to_head
-    return head_to_head(pool, a, b, games, jobs, matchup=matchup)
+    from collections import defaultdict
+    from mtg_ml.rl.evaluate import paired_specs, score
+    from mtg_ml.rl.rollout import Job, LEARNER, play
+    specs = paired_specs(b, games, matchup=matchup, balance_seats=True)
+    played = play(pool, specs, Job([], a, 0, record=False, max_turns=100, inference='local'), jobs).games
+    result = score(played, matchup)
+    blocks = defaultdict(list)
+    for seats, winner, _, _, _, seed in played:
+        seat = 0 if seats[0] == LEARNER else 1
+        blocks[str(seed)].append(.5 if winner is None else float(winner == seat))
+    result['seed_scores'] = {seed: sum(xs)/len(xs) for seed, xs in blocks.items()}
+    return result
+
+
+def paired_summary(rows):
+    """Resample complete seed blocks jointly across matchups, preserving pairing."""
+    import random
+    if not rows or any(not r.get('seed_scores') for r in rows):
+        return None
+    seeds = sorted(set.intersection(*(set(r['seed_scores']) for r in rows)))
+    if not seeds:
+        return None
+    weight = sum(r['weight'] for r in rows)
+    xs = [sum(r['weight']*r['seed_scores'][seed] for r in rows)/weight for seed in seeds]
+    rng = random.Random(8)
+    samples = sorted(sum(rng.choices(xs, k=len(xs)))/len(xs) for _ in range(2000))
+    return dict(score=sum(xs)/len(xs), ci=[samples[49], samples[1949]], seed_blocks=len(xs),
+                pairings=len(rows), complete=len(rows)==21,
+                method='paired-seed block bootstrap; conditional on these two trained policies')
 
 
 def report(root):
@@ -349,6 +374,9 @@ def report(root):
             weight = sum(c['weight'] for c in h2h)
             lines += [f"Descriptive weighted A score: {sum(c['weight']*c['score'] for c in h2h)/weight:.3f}. Coverage {'complete' if len(h2h) == 21 else 'incomplete'}; per-pair Wilson intervals below are diagnostic, not a paired-seed aggregate confidence interval."]
             lines += [f"- {c['matchup']}: {c['score']:.3f}, 95% CI {c['ci']}, n={c['n']}" for c in h2h]
+            summary = panel_state.get('h2h_summary')
+            if summary:
+                lines += [f"Weighted paired-seed bootstrap 95% CI: {summary['ci']} across {summary['seed_blocks']} seed blocks; conditional on these two trained policies, not training-seed uncertainty."]
     lines += ['', 'One seed per arm. Incomplete evaluations are pending, not losses. Healthy training continues to 20M games.',
               '', 'Live dashboard: https://gpu-server1.tailc02128.ts.net:8443']
     atomic(root / 'morning-report.json', result)

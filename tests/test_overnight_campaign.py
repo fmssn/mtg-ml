@@ -6,7 +6,7 @@ import pytest
 from mtg_ml.match import EXPLICIT_ONLY, MATCHUPS, parse_matchups
 from mtg_ml.rl.evaluate import DECK_KEYS, score
 from mtg_ml.rl.rollout import BOT, LEARNER
-from tools.overnight_campaign import matrix_mix
+from tools.overnight_campaign import matrix_mix, paired_summary
 
 
 def test_uniform_ordered_matrix_includes_each_mirror_once():
@@ -39,6 +39,23 @@ def test_cross_deck_counts_stay_distinct():
     result = score([((LEARNER, BOT), 0), ((BOT, LEARNER), 0)])
     assert result['jund'][2] == result['blue'][2] == 1
     assert result['all'][2] == 2
+
+
+def test_matrix_evaluation_balances_physical_seats_and_starting_players():
+    from collections import Counter
+    from mtg_ml.rl.evaluate import paired_specs
+    for matchup in MATCHUPS:
+        specs = paired_specs(BOT, 200, seat=0, matchup=matchup, balance_seats=True)
+        assert Counter((s.starting_player, s.swap_seats) for s in specs) == {(0, False): 50, (0, True): 50, (1, False): 50, (1, True): 50}
+        assert len({s.seed for s in specs}) == 50
+
+
+def test_joint_bootstrap_preserves_cross_matchup_seed_correlation():
+    # Opposite results on each same seed cancel exactly after weighting.
+    rows = [dict(weight=2, seed_scores={'1':0., '2':1.}), dict(weight=2, seed_scores={'1':1., '2':0.})]
+    result = paired_summary(rows)
+    assert result['score'] == .5 and result['ci'] == [.5, .5]
+    assert not result['complete'] and result['seed_blocks'] == 2
 
 
 def test_frequent_evaluation_can_omit_extra_matchups():
