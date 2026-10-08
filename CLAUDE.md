@@ -44,6 +44,15 @@ New user-facing apps (replay viewer, dashboards) go under `apps/<name>/` and sho
 - For durable preferences and external evidence, see `docs/context.md`. When
   resuming shared work, read current orchestration status and verify PR state on
   GitHub before acting; old handoffs and agent IDs can be stale.
+- Follow [workspace coordination](docs/workspace-coordination.md): reconcile the
+  existing tracker on start/resume, claim explicit write paths under a stable
+  workspace owner, and read/check `.context/handoff.json` when present. After an
+  approved plan, record its starting revision and active plan before implementation.
+  Resolve changed handoff evidence before editing; never refresh it blindly.
+- Shared interface changes land through one prerequisite/foundation owner.
+  Reserve `local:heavy` through the shared progress updater for native builds,
+  full suites and fuzzing; reserve current GPU/CPU assignments for authorized
+  remote jobs. Subagent limits are per session, not a shared compute budget.
 - Many sessions run in parallel worktrees. Keep PRs to one component, branch from the default branch (`git remote set-head origin -a`, then `origin/HEAD`), and avoid editing shared hotspots (README.md, `.gitignore`, `play.py`, golden digests) unless the change needs it.
 - CI (`.github/workflows/ci.yml`) runs lint, the Python suite with CPU torch, and the native build + differential fuzz. It must be green before merge.
 - Mark tests that take more than a few seconds `@pytest.mark.slow`; GPU-only tests `@pytest.mark.gpu` (CI runs on CPU and deselects both).
@@ -78,6 +87,8 @@ Every training run meant to answer a question is recorded in `docs/experiments/`
 
 1. **Open a draft PR early**, as soon as the first meaningful commit is pushed: `gh pr create --draft`. CI runs on drafts; the autopilot ignores them.
 2. Keep pushing to the draft and fix CI failures yourself.
+   Stacked PRs remain draft until their prerequisite merges. Then retarget to
+   the default branch, reconcile the diff and rerun validation/CI before readiness.
 3. **When the user confirms the work is ready:** `gh pr ready <n>`. From there the autopilot ([docs/pr-autopilot.md](docs/pr-autopilot.md)) reviews, pushes fixes, keeps the branch current and auto-merges once CI is green. Don't request Copilot reviews.
 4. Act on a PR again only when it gets `needs-human` (read the latest **Autopilot:** comment) or the user asks. Pushing to the PR restarts the autopilot.
 5. A PR whose test changes alter expected behaviour (assertions, golden digests) should say so in its description: green CI is the only merge gate.
