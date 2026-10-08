@@ -375,3 +375,36 @@ def test_mana_budget_and_damage_assignment_arithmetic():
     assert _suffix_scores([20,30], [2,2], 2, 0, False)[2] == 30
     cs = [c for c in v.state["battlefield"] if "Creature" in c["types"]]
     assert damage_floor(cs, []) == 0
+
+
+def test_force_spike_combines_pending_ward_obligation():
+    # Opponent can pay either {1} or {2}, but not both; Spike is live here.
+    g = scenario(p0={"hand": ["Force Spike"], "battlefield": ["Tolarian Terror"]+ISLANDS(1)},
+                 p1={"hand": ["Cast Down"], "battlefield": ["Swamp"]*4}, active=1)
+    choose(g, "Cast Cast Down"); pay(g); pass_priority(g)
+    assert key(g)[:2] == ("cast", "Force Spike")
+    line(g)
+    assert "Tolarian Terror" in names(g.battlefield)
+
+
+def test_stack_only_card_rules_and_public_ward_whitelist():
+    g = scenario(p0={"battlefield": ["Tolarian Terror"]},
+                 p1={"hand": ["Cast Down"], "battlefield": ["Swamp"]*2}, active=1)
+    choose(g, "Cast Cast Down"); pay(g); pass_priority(g)
+    v, _ = inputs(g, 0, MONO_BLUE_TERROR)
+    assert "Cast Down" in v.cards  # not in any other visible zone or own list
+    ward = next(s for s in v.context["stack"] if "ward" in s)
+    assert set(ward["ward"]) == {"sid", "amount"}
+    assert ward["ward"]["amount"] == 2
+    assert ward["source"]["name"] == "Tolarian Terror"
+    assert not any("data" in s for s in v.context["stack"])
+
+
+def test_trample_floor_and_cumulative_defensive_blocks():
+    g = scenario(p0={"battlefield": ["Tolarian Terror"]*2},
+                 p1={"battlefield": [("Nyxborn Hydra", {"counters":10})]})
+    v, _ = inputs(g, 0, MONO_BLUE_TERROR)
+    hydra = [c for c in v.state["battlefield"] if c["name"] == "Nyxborn Hydra"]
+    defenders = [c for c in v.state["battlefield"] if c["controller"] == "self"]
+    assert damage_floor(hydra, defenders[:1]) == 5
+    assert damage_floor(hydra, defenders) == 0

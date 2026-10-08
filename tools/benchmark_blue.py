@@ -12,6 +12,7 @@ from pathlib import Path
 import platform
 import random
 import subprocess
+import sys
 import time
 
 from mtg_ml.benchmark import LegacyAdapter, episodes, run_episodes
@@ -29,6 +30,8 @@ BASELINE_REVISION = "66345da4c5bff4a1a31ab0047ff8b1abf3869c49"
 LEGACY_FILES = ("mtg_ml/bots/base.py", "mtg_ml/bots/blue.py", "mtg_ml/bots/jund.py")
 SETTINGS = dict(max_turns=100, max_decisions=10000, auto_single=False, auto_mana=False, auto_pass=False)
 ROOT = Path(__file__).resolve().parents[1]
+DECK_HASHES = {"jund_wildfire": "998d97f37438776c175fe75ca50926eaa2490df3b869e627ea88b2391bc4b6bd",
+               "mono_blue_terror": "7d7681cf282f5cf7d79ca2cc8629e3562d43af70078d13b23835afcc02fd17c8"}
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,8 @@ def freeze_sources(baseline):
 def development_manifest(blocks):
     decks = {name: {"cards": dict(cards), "sha256": digest(cards)} for name, cards in
              (("jund_wildfire", JUND_WILDFIRE), ("mono_blue_terror", MONO_BLUE_TERROR))}
+    if any(deck["sha256"] != DECK_HASHES[name] for name, deck in decks.items()):
+        raise ValueError("deck differs from PR62 freeze")
     # Deliberately a private schedule configuration, not a release manifest:
     # fixed diagnostic opponents are mixed with a fair-input candidate.
     data = {"id": "blue-specialist-development", "stream": "benchmark-v1/dev", "modes": ["greedy"],
@@ -181,24 +186,28 @@ def main(argv=None):
     blocks = args.blocks if args.blocks is not None else {"smoke": 40, "compare": 400, "verify": 1}[args.phase]
     if blocks < 1 or args.workers < 1:
         ap.error("blocks and workers must be positive")
+    dirty = subprocess.check_output(["git", "diff", "HEAD", "--", "mtg_ml", "tools/benchmark_blue.py"], cwd=ROOT)
+    untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "mtg_ml", "tools/benchmark_blue.py"], cwd=ROOT)
+    if dirty or untracked:
+        ap.error("commit source before freezing a development campaign")
     args.out.mkdir(parents=True, exist_ok=False)
     legacy_hashes = freeze_sources(args.baseline_revision)
     code = revision()
     native_revision = native_build() if args.engine == "native" or args.phase == "verify" else None
     schedule = development_manifest(blocks)
     specs = episodes(schedule)
-    dirty = subprocess.check_output(["git", "diff", "HEAD", "--", "mtg_ml", "tools/benchmark_blue.py"], cwd=ROOT)
-    untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "mtg_ml", "tools/benchmark_blue.py"], cwd=ROOT)
-    # Final reports identify committed code; exploratory checks explicitly carry
-    # the dirty tracked patch and untracked source identities instead of lying.
-    source_files = {p: file_digest(ROOT / p) for p in untracked.decode().splitlines()}
+    source_files = {p: file_digest(ROOT / p) for p in subprocess.check_output(
+        ["git", "ls-files", "mtg_ml", "tools/benchmark_blue.py"], cwd=ROOT, text=True).splitlines()}
+    hardware = platform.processor() or platform.machine()
+    if sys.platform == "darwin":
+        hardware = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True).strip()
     provenance = {"code_revision": code, "native_build": native_revision, "legacy_revision": args.baseline_revision,
                   "legacy_sources": legacy_hashes, "card_spec_sha256": file_digest(SPEC_PATH), "decks": schedule.data["decks"],
                   "candidate": {"id": BOT_ID, "rules_revision": RULES_REVISION, "parameters_sha256": digest(thaw(PARAMETERS)),
                                 "information_contract": FAIR}, "baseline_contract": DIAGNOSTIC,
-                  "opponent_contract": DIAGNOSTIC, "dirty_patch_sha256": sha256(dirty).hexdigest() if dirty else None,
-                  "untracked_sources": source_files, "runtime": {"python": platform.python_version(), "platform": platform.platform(),
-                                                                  "machine": platform.machine(), "workers": args.workers}}
+                  "opponent_contract": DIAGNOSTIC, "source_files": source_files,
+                  "runtime": {"python": platform.python_version(), "platform": platform.platform(),
+                              "machine": hardware, "workers": args.workers}}
     write_json(args.out / "freeze.json", provenance)
     write_json(args.out / "planned.json", [asdict(s) for s in specs])
     started = time.monotonic()
@@ -220,6 +229,10 @@ def main(argv=None):
                         "engine_parity": strip_timing(native) == strip_timing(python)}
         complete = all(verification.values())
     latency = [t for r in candidate for t in r["latency_seconds"]]
+    if any(file_digest(ROOT / p) != h for p, h in source_files.items()):
+        complete = False
+        comparison = None
+        verification = {"source_unchanged": False}
     report = {"format": "BlueSpecialistDevelopment", "version": 1, "phase": args.phase,
               "status": "complete" if complete else "incomplete", "engine": args.engine, "freeze": provenance,
               "settings": SETTINGS, "stream": schedule.data["stream"], "mode": "greedy", "planned_games_per_arm": len(specs),

@@ -135,10 +135,38 @@ def _prevented(powers, legal):
 
 
 def damage_floor(attackers, defenders):
-    """Guaranteed unblocked damage against optimal legal single blocking."""
+    """Guaranteed damage; optimize blocking, including cumulative trample.
+
+    Ordinary Blue attacks have at most twelve bodies. Unusually wide boards or
+    multiple tramplers use a conservative prevention upper bound, never a false
+    guaranteed-lethal claim. No legal actions or entities are truncated.
+    """
     if not attackers:
         return 0
     powers = tuple(max(0, c["power"]) for c in attackers)
+    tramplers = [i for i, a in enumerate(attackers) if keyword(a, "trample")]
+    if len(attackers) > 12 or len(tramplers) > 1:
+        maximum = sum(max((min(powers[i], lethal(a, b)) if keyword(a, "trample") else powers[i]
+                           for i, a in enumerate(attackers) if blocks(b, a)), default=0) for b in defenders)
+        return max(0, sum(powers) - maximum)
+    if tramplers:
+        t = tramplers[0]
+        ordinary = [a for i, a in enumerate(attackers) if i != t]
+        ps = [max(0, a["power"]) for a in ordinary]
+        # State is (which ordinary attacks were blocked, trample damage stopped).
+        dp = {(0, 0): 0}
+        for b in defenders:
+            out = dict(dp)
+            for (mask, stopped), value in dp.items():
+                if blocks(b, attackers[t]):
+                    new = min(powers[t], stopped + lethal(attackers[t], b))
+                    out[mask, new] = max(out.get((mask, new), -1), value + new - stopped)
+                for i, a in enumerate(ordinary):
+                    if not mask & (1 << i) and blocks(b, a):
+                        key = mask | (1 << i), stopped
+                        out[key] = max(out.get(key, -1), value + ps[i])
+            dp = out
+        return sum(powers) - max(dp.values())
     legal = tuple(sum(1 << i for i, a in enumerate(attackers) if blocks(b, a)) for b in defenders)
     return sum(powers) - _prevented(powers, legal)
 
@@ -270,7 +298,8 @@ class BenchmarkBlue:
     def _counter_target(self, view, spike=False):
         candidates = [s for s in view.context["stack"] if s["kind"] == "spell" and s["controller"] == "opponent"]
         if spike:
-            candidates = [s for s in candidates if available(view, "opponent") < 1]
+            candidates = [s for s in candidates if available(view, "opponent") < 1 + sum(
+                w["ward"]["amount"] for w in view.context["stack"] if w.get("ward", {}).get("sid") == s["sid"])]
         return max(candidates, key=lambda s: self._spell_value(view, s), default=None)
 
     def _reserve(self, view, cost):
@@ -620,7 +649,9 @@ class BenchmarkBlue:
         blocker = permanent(view, view.context["subject"]["oid"])
         attackers = [c for c in creatures(view, "opponent") if c["attacking"]]
         blocked = {c["blocking"] for c in creatures(view, "self") if c["blocking"] is not None}
-        incoming = sum(max(0, c["power"]) for c in attackers if c["oid"] not in blocked)
+        incoming = sum(max(0, c["power"]) if c["oid"] not in blocked else
+                       max(0, c["power"] - sum(lethal(c, b) for b in creatures(view, "self") if b["blocking"] == c["oid"]))
+                       if keyword(c, "trample") else 0 for c in attackers)
         scores = []
         for a in actions:
             if a.key[0] != "block":
