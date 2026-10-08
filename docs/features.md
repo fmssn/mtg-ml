@@ -572,3 +572,28 @@ interval shifted by the telescoping potential. Raw predictions and terminal
 rewards remain unchanged. `value_clamp = 0` still disables clamping. Active
 shaping with a `tanh` value head is rejected because its fixed range cannot
 represent these shifted returns; use an unbounded head or disable shaping.
+
+### Encoding cost check
+
+Warm `featurize_flat` medians on **Apple M3, Mac15,3, macOS 26.6.2**, code
+`d1b20b6`, interleaving versions 6 and 7. Other CPU verification was active;
+these are encoding microbenchmarks, not training-throughput or strength results.
+
+| engine / fixture | set 6, ms | set 7, ms |
+|---|---:|---:|
+| Python, ordinary decisions | 1.323 | 1.292 |
+| Native, ordinary decisions | 0.037 | 0.046 |
+| Python, 73 entities | 12.288 | 12.192 |
+| Native, 73 entities | 0.215 | 0.216 |
+| Python, 40 candidates | 0.732 | 15.865 |
+| Native, 40 candidates | 0.074 | 0.721 |
+
+Ordinary: 151 decisions from Jund–Blue, Jund–Elves and Affinity–Tron games,
+seed 570, maximum 10 turns and 120 decisions per game, option choices from
+`random.Random(57)`. Crowded: 40 repetitions with 70 own Spawn, Mountain,
+Lightning Bolt in hand, and an opposing Island. High-candidate: 20 repetitions
+of the first allocation of a 50-power Hydra against eleven Spawn at 100 life
+(40 defender-share options). Set 6 skips both simulations in that last case;
+set 7 computes every candidate, so its additional cost is expected. The crowded
+case retains 64 entities in set 6 versus all 73 in set 7. No speed improvement
+is inferred from the small noisy differences in the Python medians.
