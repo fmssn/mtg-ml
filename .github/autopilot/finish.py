@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from review_result import InvalidResult, completion_problems, parse_result as validate_result, read_json
+
 # The cheap model may not touch these (except to resolve a conflict in that file).
 # For the escalation model, edits here are allowed but stop auto-merge.
 SENSITIVE = ("tests/", "mtg_ml/engine/cards.toml")
@@ -31,7 +33,8 @@ def sh(*args, check=True):
 
 
 def gh(*args):
-    subprocess.run(("gh", *args), check=False)
+    # Label, comment and merge failures must not produce a successful receipt.
+    subprocess.run(("gh", *args), check=True)
 
 
 def output(**kv):
@@ -42,18 +45,17 @@ def output(**kv):
 
 def parse_result(tmp):
     try:
-        text = json.loads((tmp / "claude.json").read_text()).get("result", "")
-        blocks = re.findall(r"```json\s*(\{.*?\})\s*```", text, re.S)
-        return json.loads(blocks[-1])
-    except (OSError, ValueError, IndexError):
+        return validate_result(read_json(tmp / "claude.json"))
+    except InvalidResult:
         return None
 
 
-def ran_out_of_turns(tmp):
-    try:
-        return json.loads((tmp / "claude.json").read_text()).get("subtype") == "error_max_turns"
-    except (OSError, ValueError):
-        return False
+def handoff(pr, stage, result, reason, kind="incomplete"):
+    gh("pr", "merge", pr, "--disable-auto")
+    gh("pr", "edit", pr, "--add-label", "needs-human")
+    gh("pr", "edit", pr, "--remove-label", "needs-opus")
+    comment(pr, f"{kind}; nothing pushed", result, reason)
+    output(outcome="human", reason=f"{stage}: {kind}: {reason}")
 
 
 def comment(pr, title, result, extra=""):
@@ -101,30 +103,17 @@ def main():
     stage, pr, head, rnd = sys.argv[1:5]
     base = sys.argv[5] if len(sys.argv) > 5 else os.environ["BASE_REF"]
     tmp = Path(os.environ["RUNNER_TEMP"])
-    conflicts = set((tmp / "conflicts.txt").read_text().split())
+    conflicts = set((tmp / "conflicts.txt").read_text().splitlines())
     if stage == "fix":
         gh("pr", "edit", pr, "--add-label", f"autopilot:round-{rnd}")
 
     result = parse_result(tmp)
-    if result is None and stage == "fix" and ran_out_of_turns(tmp):
-        result = {"verdict": "escalate", "summary": "The cheap model hit its turn cap without a verdict.",
-                  "findings": [], "escalation_reason": "cheap model hit its turn cap"}
-    if result is None:
-        output(outcome="error", reason="model run produced no parsable result")
-        print("no parsable result; nothing pushed", file=sys.stderr)
-        if stage == "escalate":
-            # e.g. an expired CLAUDE_CODE_OAUTH_TOKEN (401): don't leave the PR in limbo.
-            gh("pr", "merge", pr, "--disable-auto")
-            gh("pr", "edit", pr, "--add-label", "needs-human")
-            gh("pr", "edit", pr, "--remove-label", "needs-opus")
-            run = f"{os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
-            gh("pr", "comment", pr, "--body", f"**Autopilot:** the Opus run failed without a result (auth or API error?), nothing pushed. Over to you. Log: {run}")
-        return 1
+    receipt = read_json(tmp / "runner.json", {})
 
     # Files the model touched: unstaged edits and new files. The merge's own
     # changes from the base branch are already staged, so they don't show here.
-    touched = set(sh("git", "diff", "--name-only").split())
-    touched |= set(sh("git", "ls-files", "--others", "--exclude-standard").split())
+    touched = set(filter(None, sh("git", "diff", "--name-only", "-z").split("\0")))
+    touched |= set(filter(None, sh("git", "ls-files", "--others", "--exclude-standard", "-z").split("\0")))
     own = touched - conflicts
     forbidden = sorted(p for p in own if p.startswith(FORBIDDEN))
     sensitive = sorted(p for p in own if p.startswith(SENSITIVE))
@@ -138,12 +127,29 @@ def main():
         problems.append(f"edited tests or card data: {', '.join(sensitive)}")
     if markers:
         problems.append(f"conflict markers left in: {', '.join(markers)}")
-    if lint.returncode:
-        problems.append("ruff check fails after the fix")
-    if result.get("verdict") not in ("clean", "fixed"):
-        problems.append(result.get("escalation_reason") or "model asked to escalate")
+    fallback = {"summary": "Reviewer did not produce a complete valid verdict.", "findings": []}
+    if not problems:
+        if result is None or receipt.get("status") == "incomplete":
+            envelope = read_json(tmp / "claude.json", {})
+            kind = receipt.get("failure_kind") or ("capacity" if envelope.get("subtype") == "error_max_turns" else "result")
+            reason = receipt.get("reason") or "Model produced no usable verdict; capacity or API failure is not an Opus escalation."
+            handoff(pr, stage, result or fallback, reason, kind)
+            return 0
+        pending = completion_problems(result, read_json(tmp / "manifest.json"))
+        if result["verdict"] in ("clean", "fixed", "incomplete") and pending:
+            handoff(pr, stage, result, "; ".join(pending))
+            return 0
+        if lint.returncode:
+            problems.append("ruff check fails after the fix")
+        native = read_json(tmp / "native.json", {})
+        if native.get("status") in ("failed", "unavailable") and result["verdict"] in ("clean", "fixed"):
+            handoff(pr, stage, result, "Native verification is unavailable; review cannot claim completion.", "verification")
+            return 0
+        if result["verdict"] == "escalate":
+            problems.append(result.get("escalation_reason") or "unresolved evidenced defect")
 
     if problems:
+        result = result or fallback
         reason = "; ".join(problems)
         gh("pr", "merge", pr, "--disable-auto")
         if stage == "fix":
@@ -185,7 +191,7 @@ def main():
         output(outcome="human", reason="escalation model changed tests or card data")
         return 0
     gh("pr", "edit", pr, "--remove-label", "needs-opus")
-    gh("pr", "merge", pr, "--auto", "--squash")
+    gh("pr", "merge", pr, "--auto", "--squash", "--match-head-commit", sh("git", "rev-parse", "HEAD").strip())
     output(outcome="automerge", reason=result.get("summary", ""))
     return 0
 

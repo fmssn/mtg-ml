@@ -108,7 +108,12 @@ def test_crop_rotation_sacrifices_a_land_and_puts_a_land_onto_the_battlefield():
     g = scenario(p0={"hand": ["Crop Rotation"], "battlefield": ["Forest", "Urza's Mine", "Urza's Power Plant"], "library": ["Bramble Wurm", "Urza's Tower"]})
     choose(g, "Cast Crop Rotation")  # the Forest, the only green source, pays and may then be sacrificed
     assert find(g, "Forest").tapped and g.decision.kind == O.SACRIFICE
-    assert labels(g) == ["Sacrifice Forest#%d" % find(g, "Forest").oid] + [f"Sacrifice {n}#{find(g, n).oid}" for n in ("Urza's Mine", "Urza's Power Plant")]
+    tron = ("Urza's Mine", "Urza's Power Plant")
+    assert labels(g) == (
+        ["Sacrifice Forest#%d" % find(g, "Forest").oid]
+        + [f"Sacrifice {n}#{find(g, n).oid}" for n in tron]
+        + [f"Tap {n}#{find(g, n).oid} for C, then sacrifice it" for n in tron]  # untapped: their mana can float first
+    )
     choose(g, "Sacrifice Forest")
     resolve_stack(g)
     choose(g, "Find Urza's Tower")

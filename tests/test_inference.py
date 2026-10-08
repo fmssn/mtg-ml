@@ -295,6 +295,40 @@ def _client(srv):
     return InferenceClient(0, req_q, resp_qs[0], names, layout)
 
 
+def test_oversized_request_is_split_into_chunks(tmp_path):
+    """A request larger than the slot (ServerConfig.request_ints) goes out
+    in chunks that fit and comes back whole: the same greedy actions and
+    values as through a slot that holds it at once. A single decision
+    larger than the slot is a clear error."""
+    from mtg_ml.rl.inference import GREEDY_FLAG, REC
+
+    _, path = _ckpt(tmp_path, "none", trunk="entity")
+    xs = _decisions(40)
+    rows = [((path, 0), k, 1 | GREEDY_FLAG, *x) for k, x in enumerate(xs)]
+    sizes = [REC + len(x[0]) + len(x[1]) + len(x[2]) + len(x[3]) for x in xs]
+    small = 2 * max(sizes)
+    assert sum(sizes) > 4 * small  # at least five chunks
+    out = {}
+    for ints in (1 << 18, small):
+        srv = InferenceServer(1, ServerConfig(device="cpu", threads=1, request_ints=ints, compile=False, graphs=False))
+        try:
+            cl = _client(srv)
+            h = cl.submit(0, rows)
+            assert bool(h[-1]) == (ints == small)  # the small slot leaves chunks for collect to send
+            out[ints] = cl.collect(h)
+            if ints == small:
+                big = ((path, 0), 0, 1, xs[0][0], array("i", [1] * small), array("i", [1] * small), xs[0][3])
+                with pytest.raises(ValueError, match="one decision of .* does not fit"):
+                    cl.submit(0, [big])
+                assert cl.collect(cl.submit(0, rows[:3]))[0] == out[1 << 18][0][:3]  # the slot still works
+            cl.close()
+        finally:
+            srv.close()
+    (a0, _, v0), (a1, _, v1) = out[1 << 18], out[small]
+    assert len(a1) == len(rows) and a0 == a1
+    assert torch.allclose(torch.tensor(v0), torch.tensor(v1), atol=1e-5)
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("reaped", [True, False])
 def test_worker_notices_a_killed_server(tmp_path, monkeypatch, reaped):

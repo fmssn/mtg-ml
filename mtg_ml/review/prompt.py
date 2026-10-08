@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import re
 
+from ..encode import check_features
+
 CAUSES = {
     "engine_bug": "the engine did something the rules (or the card text) do not allow, or failed to do something they require: wrong damage, a missing or extra trigger, a wrong life total, a spell resolving that should have been countered, an illegal option that WAS offered. Cite the log lines.",
     "masking_gap": "a play the rules allow was NOT among the offered options (the option list is the complete legal set the engine produced). Name the missing play and the rule or card text that allows it.",
@@ -51,18 +53,49 @@ Reply with only a JSON object, no prose around it:
 }}"""
 
 
-# What the policy observes (feature sets 2-3, entity trunk). Shown with
-# --focus setup so the reviewer can name a missing feature, not guess one.
-OBSERVES = """# WHAT THE POLICY OBSERVES (feature set 2-3, entity trunk)
-The network never sees card text. It knows card names only from experience. It sees:
-- Global state: step, active player, turn, each side's life, library size (bucketed), mulligans, graveyard and exile (card names with counts), mana pool, known library cards with their position, its own hand (names with counts), the opponent's hand size and any of the opponent's cards it has seen, per-side counts of permanent types (tapped and untapped), total board power per side, stack size. Per side, combat readiness: the power that could attack right now (untapped creatures that can attack), the part of it no untapped enemy creature can block (by flying/reach only), the number of untapped potential blockers, `lethal_on_board` / `evasive_lethal_on_board` (that power >= the other side's life), untapped mana sources. Deck markers.
-  Note: the readiness features count only creatures that could still attack, so during the opponent's combat (attackers tapped) they no longer show the incoming damage.
-- One entity per permanent and per stack item, encoded independently: name, controller, types, keywords, tapped, summoning-sick, attacking, token, `blocking` (a flag only: NOT which attacker), `attached` (a flag only: NOT to what), power / toughness / damage / counters, skip-untap, who targets it with what; stack items also have position, kind, X and what kind of object they target.
-  Nothing marks an attacker as blocked or unblocked, or says how much combat damage will get through.
-- Each option: the decision kind and the option's key, written with card NAMES (e.g. `declare_blocker|block|Eldrazi Spawn|Cryptic Serpent`), a pointer to the entities its label names (so two same-name objects are told apart only by their entity features), and engine previews: creatures a sweeper would kill per side, whether damage is lethal to a target, ward on a target and whether it can be paid, mana and colours left after paying a cost.
-- Memory: a GRU carries state from one of the player's decisions to the next. The actions since its previous decision (its own, and the opponent's public ones, as option keys) are fed in as events (at most 256 tokens).
-- Network: the entity vectors are summed into the state. In this checkpoint there is no attention between entities, so any relation between two objects has to come from features, option pointers or memory.
-"""
+# Additions are cumulative. Keep this reference aligned with docs/features.md;
+# select the version from the recorded checkpoint, never the current default.
+FEATURE_NOTES = {
+    1: """Global state includes step, active player, turn, life, library/hand/zone sizes, mulligans, own hand names, known opponent cards, graveyard/exile names, floating mana, board type counts and power, stack size and known library cards. Hidden opponent cards and library order are not inputs. Permanent entities have name, controller, types, keywords, tapped/sick/attacking/token/blocking/attached flags, P/T, damage and counters; stack entities identify the item. Options carry decision kind and structured action-key tokens, with entity pointers for objects they refer to. The network does not read raw oracle text.""",
+    2: """Adds readiness/evasive-power, potential blockers, lethal-on-board and untapped-mana state features; known library positions; entity skip-untap, stack targets, targeting relations and X. Static option previews describe sweeper kills, target ward/payability and lethal damage, mana and colours left after a cost. Adds the self deck marker. Ready power is not itself an incoming-combat-damage measurement.""",
+    3: """Adds the opponent deck marker (`opp:deck:`), allowing deck-conditioned matchup mixes.""",
+    4: """Adds combat relations: attacker slots, blocked/unblocked flags, blocker counts/power/lethality, and which attacker a blocker blocks (slot/name/characteristics). Global inputs include attacking and unblocked power, incoming lethal and life after unblocked damage. Block previews describe attacker/blocker death and lethal damage still unblocked. X has numeric/max/entering-power previews and an option-to-spell pointer. Mana colour supply/hand needs and colour previews cover land plays, basic searches and payments.""",
+    5: """Adds card-shape tokens derived from the structured card specification: costs, ability/trigger/effect ops and target kinds. These describe what cards do without giving the model raw card text. The decider's own hand cards are entities, and cast/play-land/plot options point at them; stack items include their resolving ops.""",
+    6: """Adds simulated option previews (`pv:sim:*`) from applying an option to an exact game copy, plus assume-opponent-passes previews (`pv:simp:*`). Observable deltas include life, creatures/permanents gained/lost, zones, mana/colours and lethal flags. Simulations stop at hidden information, relevant decisions, game end or a bounded horizon and can be skipped; they are not unrestricted search or knowledge of hidden draws. Existing static previews remain.""",
+}
+
+
+def observation_sheet(config: dict | None = None) -> str:
+    """Describe an actual policy, or give a versioned reference for legacy files."""
+    if config is None:
+        lines = [
+            "# WHAT THE POLICY OBSERVES (configuration unknown)",
+            "This replay has no structured policy configuration. The following is a cumulative versioned reference, not a claim that this checkpoint uses the latest features. Resolve its features, trunk, memory and entity_attn from the original checkpoint before confirming an observation or architecture gap.",
+        ]
+        versions = FEATURE_NOTES
+    else:
+        features = check_features(config.get("features", 1))
+        trunk = config.get("trunk", "mlp")
+        memory = config.get("memory", "gru")
+        attention = config.get("entity_attn", 0)
+        lines = [f"# WHAT THE POLICY OBSERVES (feature set {features})",
+                 f"Recorded architecture: trunk={trunk}, memory={memory}, entity_attn={attention}."]
+        versions = range(1, features + 1)
+        if trunk == "entity":
+            lines.append(f"Entity vectors use {attention} self-attention layers before being summed into the state; option pointers use the corresponding entity vectors.")
+        else:
+            lines.append("This is not the entity trunk. Check mtg_ml/rl/model.py for how this trunk consumes state/entity tokens and option pointers; do not assume entity self-attention.")
+        if memory == "gru":
+            lines.append("A GRU carries recurrent state between the player's decisions; event tokens describe own and public opponent actions since the previous decision (at most 256 tokens).")
+        else:
+            lines.append("There is no recurrent memory between decisions; current event tokens still describe own and public opponent actions.")
+    lines += [f"- Feature set {v}: {FEATURE_NOTES[v]}" for v in versions]
+    lines.append("Numbers use hashed/bucketed/thermometer representations, not raw arithmetic. Entity lists are capped at 64. Feature presence does not prove the policy learned to use it. For a claimed gap, inspect the checkpoint-version inputs at the cited decision against docs/features.md, mtg_ml/encode.py and mtg_ml/rl/features.py.")
+    return "\n".join(lines) + "\n"
+
+
+# Retain a general reference for callers that imported the old constant.
+OBSERVES = observation_sheet()
 
 FOCUS_SETUP = """# FOCUS
 This review is for finding flaws in the SETUP before looking at play quality: engine bugs, masking gaps, observation gaps (information the policy does not get, judged against the sheet above) and architecture limits. Report misplays mainly when they point to one of these. A misplay explained by sampling or plain undertraining is only worth a finding when it is severe or recurs. For every observation_gap or architecture finding, name the exact missing feature or relation and the decision kind it affects."""
@@ -72,8 +105,11 @@ def system_prompt() -> str:
     return SYSTEM.format(causes="\n".join(f"- {k}: {v}" for k, v in CAUSES.items()))
 
 
-def user_prompt(transcript: str, part: tuple[int, int] | None = None, of: int = 1, focus: str = "all") -> str:
-    scope = OBSERVES + "\n" + FOCUS_SETUP + "\n\n" if focus == "setup" else ""
+def user_prompt(transcript: str, part: tuple[int, int] | None = None, of: int = 1, focus: str = "all", policy_configs: list[dict | None] | None = None) -> str:
+    scope = ""
+    if focus == "setup":
+        sheets = [f"# POLICY P{i}\n{observation_sheet(c)}" for i, c in enumerate(policy_configs or ()) if c is not None]
+        scope = "\n".join(sheets or [OBSERVES]) + "\n" + FOCUS_SETUP + "\n\n"
     if part is not None and of > 1:
         scope += f"This is the part of the game from turn {part[0]} to turn {part[1]} ({of} parts in all); review only decisions in it.\n\n"
     return scope + transcript

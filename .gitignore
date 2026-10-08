@@ -9,3 +9,7 @@ target-wheels/
 difftest-failure.json
 replays/
 .cargo-target/
+.context/
+.env
+.env.*
+.conductor/settings.local.toml

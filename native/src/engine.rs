@@ -621,24 +621,48 @@ impl Eng {
     fn choose_sacrifice(&mut self, p: u8, flt: SacFilter, what: &str) -> R<i32> {
         let st = self.s();
         let cands = st.dedupe_by_equiv(st.sac_candidates(p, flt, &[]));
-        let options = cands
+        let mut options: Vec<Opt> = cands
             .iter()
             .map(|&c| {
                 let card = st.c(c);
                 opt(format!("Sacrifice {}#{}", card.name(), card.oid), vec![s("sacrifice"), s(card.name())], Val::Card(c))
             })
             .collect();
+        // CR 601.2g-h: mana abilities are activated before costs are paid, so
+        // an untapped mana source can be tapped for mana and then sacrificed
+        // to the same cost; the mana floats (`Game._choose_sacrifice`).
+        let tappable: Vec<(CIdx, usize)> = st.mana_sources(p, &[]).into_iter().filter(|&(c, ai)| !st.c(c).face().abilities[ai].sac_self).collect();
+        for &c in &cands {
+            let Some(&(_, ai)) = tappable.iter().find(|&&(t, _)| t == c) else { continue };
+            let card = st.c(c);
+            for &color in card.face().abilities[ai].mana.as_ref().unwrap() {
+                let cs = color_str(color);
+                options.push(opt(
+                    format!("Tap {}#{} for {cs}, then sacrifice it", card.name(), card.oid),
+                    vec![s("sacrifice"), s(card.name()), s("tap"), s(cs)],
+                    Val::Source(c, color),
+                ));
+            }
+        }
         let fname = flt.name().replace('_', " ");
         let article = if fname.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
-        match self.ask(p, Kind::Sacrifice, || format!("Sacrifice {article} {fname} for {what}"), options)? {
-            Val::Card(c) => {
+        let c = match self.ask(p, Kind::Sacrifice, || format!("Sacrifice {article} {fname} for {what}"), options)? {
+            Val::Card(c) => c,
+            Val::Source(c, color) => {
                 let st = self.s();
-                let mv = st.c(c).defn().mana_value();
-                st.sacrifice(c);
-                Ok(mv)
+                let ai = st.mana_ability(c);
+                let n = st.mana_amount(c, &st.c(c).face().abilities[ai]);
+                st.activate_mana_ability(c, ai);
+                st.players[p as usize].pool_add(color, n);
+                st.push_log_lazy(|s| format!("p{p} taps {}#{} for {}", s.c(c).name(), s.c(c).oid, color_str(color)));
+                c
             }
             _ => unreachable!(),
-        }
+        };
+        let st = self.s();
+        let mv = st.c(c).defn().mana_value();
+        st.sacrifice(c);
+        Ok(mv)
     }
 
     // ------------------------------------------------------------------
@@ -1522,13 +1546,9 @@ impl Eng {
                 assignments.push((a, Ref::Perm(st.c(blockers[0]).oid), pw));
                 continue;
             }
-            let slots = blockers.len() + usize::from(trample);
             let lethal: Vec<i32> = blockers.iter().map(|&b| st.lethal(st.c(a), st.c(b))).collect();
             let mut options = vec![];
-            for split in compositions(pw, slots) {
-                if trample && *split.last().unwrap() > 0 && split.iter().zip(&lethal).any(|(s, l)| s < l) {
-                    continue;
-                }
+            for split in damage_splits(pw, &lethal, trample) {
                 let mut parts: Vec<String> = split.iter().zip(&blockers).map(|(s, &b)| format!("{s} to {}", st.c(b).repr())).collect();
                 if trample {
                     parts.push(format!("{} to player", split.last().unwrap()));

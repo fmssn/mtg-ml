@@ -48,6 +48,7 @@ def review_file(path: pathlib.Path, backend: str, model: str | None = None, effo
     from . import llm
 
     rep = json.loads(path.read_text())
+    configs = rep.get("meta", {}).get("review", {}).get("policy_configs")
     system = system_prompt()
     if backend == "file":
         # --model names whose reply it is: <game>.reply-<model>.txt
@@ -57,13 +58,13 @@ def review_file(path: pathlib.Path, backend: str, model: str | None = None, effo
     else:
         chunks = turn_chunks(rep, MAX_CHARS[backend])
         if backend == "prompt":
-            text = user_prompt(transcript(rep), focus=focus)
+            text = user_prompt(transcript(rep), focus=focus, policy_configs=configs)
             p = llm.write_prompt(path.with_name(path.stem + ".x"), system, text)
             print(f"{p}: {len(text) // 4:,} tokens (approx.); put the reply in {path.stem}.reply.txt, then --backend file")
             return None
         result = {"summary": [], "findings": [], "usage": [], "backend": backend, "model": model or llm.DEFAULTS[backend]}
         for part in chunks:
-            text = user_prompt(transcript(rep, part if len(chunks) > 1 else None), part, len(chunks), focus=focus)
+            text = user_prompt(transcript(rep, part if len(chunks) > 1 else None), part, len(chunks), focus=focus, policy_configs=configs)
             reply, usage = llm.complete(backend, system, text, model=model, effort=effort)
             try:
                 got = parse_findings(reply)

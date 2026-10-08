@@ -5,12 +5,17 @@ Rules engine + RL for Pauper Magic (Jund Wildfire vs Mono Blue Terror). Python r
 ## Commands
 
 ```bash
-make setup        # uv pip install -e '.[dev,rl]' + build native engine
+make setup        # create .venv, install dev + rl tools, build native engine
 make test-fast    # what to run while iterating
 make test         # full suite, both engines if native is built
 make lint         # ruff check (CI blocks on it)
 make difftest     # Python vs Rust in lockstep
 ```
+
+Make targets use this checkout's `.venv` when present. For direct Python commands,
+use `.venv/bin/python` or activate `.venv`. `make native` rebuilds into that same
+environment; never install one worktree's native engine into a shared global Python.
+Conductor setup and run commands are described in `docs/development.md`.
 
 `MTG_ENGINE=native` switches play, training, evaluation and trace commands to the Rust engine; `mtg_ml.play`, `mtg_ml.rl.evaluate` and `mtg_ml.trace` also take `--engine native`. The test suite picks engines itself (see `tests/conftest.py`), and `mtg_ml.difftest` always runs both.
 
@@ -36,6 +41,9 @@ New user-facing apps (replay viewer, dashboards) go under `apps/<name>/` and sho
 
 ## Working in this repo
 
+- For durable preferences and external evidence, see `docs/context.md`. When
+  resuming shared work, read current orchestration status and verify PR state on
+  GitHub before acting; old handoffs and agent IDs can be stale.
 - Many sessions run in parallel worktrees. Keep PRs to one component, branch from the default branch (`git remote set-head origin -a`, then `origin/HEAD`), and avoid editing shared hotspots (README.md, `.gitignore`, `play.py`, golden digests) unless the change needs it.
 - CI (`.github/workflows/ci.yml`) runs lint, the Python suite with CPU torch, and the native build + differential fuzz. It must be green before merge.
 - Mark tests that take more than a few seconds `@pytest.mark.slow`; GPU-only tests `@pytest.mark.gpu` (CI runs on CPU and deselects both).

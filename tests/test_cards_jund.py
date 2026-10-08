@@ -393,5 +393,6 @@ def test_krark_clan_shaman_damage_comes_from_shaman():
     g = scenario(p0={"battlefield": ["Krark-Clan Shaman", "Vault of Whispers"]}, p1={"battlefield": ["Cryptic Serpent"]})
     find(g, "Krark-Clan Shaman").temp.append(O.TempEffect(keywords=frozenset({"deathtouch"})))
     choose(g, "Krark-Clan Shaman: 1 damage")
+    choose(g, "Sacrifice Vault of Whispers")  # or tap it for {B} first
     resolve_stack(g)
     assert "Cryptic Serpent" not in bf(g)

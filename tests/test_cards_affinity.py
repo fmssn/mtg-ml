@@ -121,6 +121,46 @@ def test_reckoners_bargain_token_gains_nothing():
     assert g.players[0].life == 20 and len(g.players[0].hand) == 2 and "Blood" not in bf(g)
 
 
+# -- sacrifice costs after mana abilities (CR 601.2g-h) --------------------------
+
+
+def test_artifact_land_tapped_for_mana_then_sacrificed_to_krark_clan_shaman():
+    # Great Furnace makes {R}, is sacrificed to the Shaman, and the {R} floats
+    # for Galvanic Blast with the Shaman's ability still on the stack.
+    g = scenario(p0={"hand": ["Galvanic Blast"], "battlefield": ["Krark-Clan Shaman", "Great Furnace"]})
+    furnace = find(g, "Great Furnace")
+    choose(g, "Krark-Clan Shaman: 1 damage")
+    assert labels(g) == [f"Sacrifice Great Furnace#{furnace.oid}", f"Tap Great Furnace#{furnace.oid} for R, then sacrifice it"]
+    choose(g, "Tap Great Furnace")
+    assert bf(g, 0) == ["Krark-Clan Shaman"] and g.players[0].pool == {"R": 1}
+    assert names(g.players[0].graveyard) == ["Great Furnace"]
+    choose(g, "Cast Galvanic Blast")
+    choose(g, "Target player 1 (opponent)")
+    pay(g)
+    assert g.players[0].pool == {}
+    resolve_stack(g)
+    assert g.players[1].life == 18
+
+
+def test_tapped_or_mana_less_candidates_offer_only_the_plain_sacrifice():
+    # A tapped land and a creature without a mana ability: nothing to tap first.
+    g = scenario(p0={"battlefield": ["Krark-Clan Shaman", ("Seat of the Synod", {"tapped": True}), "Myr Enforcer"]})
+    choose(g, "Krark-Clan Shaman: 1 damage")
+    assert [lab.split("#")[0] for lab in labels(g)] == ["Sacrifice Seat of the Synod", "Sacrifice Myr Enforcer"]
+
+
+def test_fanatical_offering_pays_with_the_land_it_then_sacrifices():
+    # The artifact land pays part of the cost and is still a legal sacrifice:
+    # the spell is castable with exactly two lands.
+    g = scenario(p0={"hand": ["Fanatical Offering"], "battlefield": ["Vault of Whispers", "Swamp"]})
+    choose(g, "Cast Fanatical Offering")
+    choose(g, "Tap Vault of Whispers")
+    pay(g)
+    resolve_stack(g)
+    assert "Vault of Whispers" not in bf(g) and names(g.players[0].graveyard) == ["Vault of Whispers", "Fanatical Offering"]
+    assert len(g.players[0].hand) == 2 and g.players[0].pool == {}
+
+
 # -- Blood Fountain ---------------------------------------------------------------
 
 
