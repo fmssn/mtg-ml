@@ -56,11 +56,12 @@ Every turn re-sends the system prompt, the diff and all tool output so far, so t
 
 ## Shadow replay validation
 
-`tools/autopilot_replay.py` reconstructs the 13 audited initial reviews at their
-recorded head commits and the default-branch state at run creation, plus PR #30
+`tools/autopilot_replay.py` reconstructs the 13 audited initial reviews at the PR
+and trusted-base SHAs recorded in the original checkout logs, plus PR #30
 before/after its hidden-card and shutdown fixes. It creates isolated clones with
 no remote, one virtual environment and freshly installed native extension each.
-It never invokes the finish/push/merge controller. Keys come from the environment
+It merges each recorded base before building/reviewing, validates local guards
+and lint, and never invokes the finish/push/merge controller. Keys come from the environment
 or the gitignored `.env` and are not saved to artifacts.
 
 ```bash

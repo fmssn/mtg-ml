@@ -137,7 +137,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.mode != 'skip'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Two bounded native preparations plus 15m DeepSeek / 25m Opus, if needed.
+    timeout-minutes: 55
     concurrency:
       group: autopilot-pr-${{ needs.plan.outputs.pr }}
       # A developer push (mode review) makes any running round stale: cancel it
@@ -242,6 +243,7 @@ jobs:
         working-directory: pr
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
+          CI_RUN_ID: ${{ needs.plan.outputs.ci_run }}
           ESCALATION: ${{ steps.fix.outputs.reason || (env.MODE == 'escalate' && 'CI still fails after two DeepSeek rounds, or escalated explicitly with the needs-opus label. Read the latest autopilot comments on the PR for findings.') }}
         run: |
           git merge --abort 2> /dev/null || true

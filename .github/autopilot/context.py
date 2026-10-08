@@ -90,7 +90,7 @@ def main():
     args = p.parse_args()
     info = json.loads(subprocess.check_output(("gh", "pr", "view", args.pr, "--json", "title,body")))
     log, native_ci = "", False
-    if args.mode == "ci-fix" and os.environ.get("CI_RUN_ID"):
+    if args.mode in ("ci-fix", "escalate") and os.environ.get("CI_RUN_ID"):
         run = os.environ["CI_RUN_ID"]
         log = subprocess.check_output(("gh", "run", "view", run, "--log-failed"), text=True)
         native_ci = "native\t" in log

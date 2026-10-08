@@ -179,6 +179,23 @@ def test_manifest_records_full_patch_exclusions_and_native_need(modules, tmp_pat
     assert "generated.json" in (tmp / "pr-full.diff").read_text()
 
 
+@pytest.mark.parametrize("mode", ["ci-fix", "escalate"])
+def test_failed_ci_context_survives_escalation(modules, tmp_path, monkeypatch, mode):
+    context = modules[2]
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("CI_RUN_ID", "77")
+    monkeypatch.setattr(sys, "argv", ["context.py", mode, "1", "base"])
+    calls, written = [], []
+    def read(args, **kw):
+        calls.append(args)
+        return json.dumps({"title": "PR", "body": ""}) if args[1] == "pr" else "native\tcompile failed"
+    monkeypatch.setattr(context.subprocess, "check_output", read)
+    monkeypatch.setattr(context, "write_context", lambda *args: written.append(args))
+    context.main()
+    assert ("gh", "run", "view", "77", "--log-failed") in calls
+    assert written[0][-2:] == ("native\tcompile failed", True)
+
+
 def setup_guard(tmp_path, monkeypatch, finish, result=None, receipt=None, changed=()):
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
