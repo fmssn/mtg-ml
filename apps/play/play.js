@@ -1232,7 +1232,11 @@ document.addEventListener('keydown', e => {
   }
   if (k === 'f' || k === 'F') { S.fullControl = !S.fullControl; toast(S.fullControl ? 'Full control: every priority stop is yours.' : 'Auto-pass back on.'); renderDock(); return; }
   if ((k === 'a' || k === 'A') && S.ui?.kind === 'declare_attacker') return command('all');
-  if ((k === 'n' || k === 'N') && canAct() && ['declare_attacker', 'declare_blocker'].includes(S.ui.kind)) { const d = S.ui.d; return act(d.refs.findIndex(r => r.done || (r.none && S.ui.kind === 'declare_blocker'))); }
+  if ((k === 'n' || k === 'N') && canAct()) {
+    const d = S.ui.d;
+    if (S.ui.kind === 'declare_attacker') return act(d.refs.findIndex(r => r.done));
+    if (S.ui.kind === 'declare_blocker') { S.plan = {kind: 'block', map: new Map()}; return act(planAnswer(d)); }  // no blocks at all
+  }
   if (k === 'o' || k === 'O') { $('#drawer').classList.contains('on') ? closeDrawer() : openDrawer(); }
 });
 $('#primary').addEventListener('click', e => { e.stopPropagation(); primary(); });
