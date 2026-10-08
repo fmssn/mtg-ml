@@ -2,6 +2,35 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+
+## 20261008-r7-fs7-h256 · fresh full-matrix LR comparison
+
+- **Status:** prepared for unattended launch on `h100-private2`; target 20M games
+  per arm; 08:00 Berlin October 9 report, then healthy training continues.
+- **Parent:** none. Both arms initialize with seed 8 and parameter hash
+  `c9b2d973e06e1c1050566c274ecd608dc8ddaafd41b6a44fd774de907baa4847`.
+- **Code:** `4a32795fd4ad25e328fda69c210c08be0d40982d`, descendant of pinned
+  PR #53 `b80b6306b18354f87bb60ae742c70ad0369ba5b7` (includes merged #63).
+  No other PR is a launch dependency. Exact commands, UUIDs, environment and
+  smoke measurements: [launch record](r7-overnight-launch.json).
+- **Arms:** `20261008-r7-fs7-h256-lr150` uses 1.5e-4 → 1.5e-5;
+  `20261008-r7-fs7-h256-lr075` uses 7.5e-5 → 7.5e-6. Every learning setting
+  otherwise matches. Feature 7; 21 pairings weighted into a uniform 36-cell
+  matrix with mirrors; 80/20 main/postboard using fixed tactical assumptions.
+- **Smoke:** both completed five warm-up plus twenty measured updates (51,200
+  games), finite PPO statistics, final sampled/greedy/L1 evaluation, identical
+  initial hashes, then resumed iteration 25 to 26 with the correct LR. Measured
+  1.248M / 1.040M games/hour on this host. These early-run rates do not establish
+  strength or predict performance after a large historical pool develops.
+- **Benchmark/L1:** production pending. Tiny smoke evaluations are engineering
+  checks, not strength estimates. Scripted bots and legacy L1 are diagnostic.
+- **Verdict:** inconclusive, one training seed. Compare immutable matched-game
+  checkpoints; joint seed-block bootstrap for head-to-head uncertainty.
+- **Operations:** [protocol and commands](r7-overnight.md). Dashboard runs on the
+  server, loopback only behind Tailscale Serve8443; ComfyUI443 retained. Local
+  append-only archives are automatic at completion; primary-host transfer remains
+  a follow-up after completion.
+
 ## 20261008-h256-attention-scaling · implementation and completed throughput screens
 
 - **Parent:** r6-h256 `pool/iter_02440.pt`, 4,997,120 games, source code
