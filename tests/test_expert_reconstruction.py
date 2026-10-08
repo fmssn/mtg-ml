@@ -699,7 +699,7 @@ def test_each_budget_reports_the_limit_it_exhausted(engine, monkeypatch):
     assert "seconds" in result["reason"]
 
 
-def test_aliases_must_be_text_substitutions(engine):
+def test_aliases_must_be_text_substitutions(engine, native_parity):
     evidence, spec = fixture()
     spec["aliases"] = {"saidin raken": "Alice"}
     assert reconstruct(evidence, spec, engine)["windows"][0]["status"] == "matched"
