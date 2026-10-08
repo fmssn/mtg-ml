@@ -50,12 +50,25 @@ function addSf(c, alias) {
   for (const f of c.card_faces || []) if (f.image_uris) IMG[f.name] = url(f.image_uris);
   if (alias && !IMG[alias] && c.card_faces?.[0]?.image_uris) IMG[alias] = url(c.card_faces[0].image_uris);
 }
-let imgBusy = false;
-async function resolveImages() {
-  if (imgBusy) return;
+let imgBusy = null;
+// Wait (at most `ms`) until a card's image is known and loaded, so the spotlight shows art, not a text face.
+async function ensureImg(name, ms) {
+  const end = performance.now() + ms;
+  if (!(name in IMG)) resolveImages();
+  while (!(name in IMG) && performance.now() < end) await sleep(40);
+  if (!IMG[name]) return;
+  const im = new Image();
+  im.src = IMG[name];
+  await Promise.race([im.decode().catch(() => {}), sleep(Math.max(0, end - performance.now()))]);
+}
+function resolveImages() {
+  if (imgBusy) return imgBusy;
+  imgBusy = fetchImages().finally(() => { imgBusy = null; });
+  return imgBusy;
+}
+async function fetchImages() {
   const want = Object.keys(S.cards).filter(n => !(n in IMG));
   if (!want.length) return;
-  imgBusy = true;
   try {
     const normal = want.filter(n => !S.cards[n].token), tokens = want.filter(n => S.cards[n].token);
     for (let i = 0; i < normal.length; i += 75) {
@@ -74,7 +87,7 @@ async function resolveImages() {
       await sleep(110);
     }
     saveJSON(IMG_KEY, IMG);
-  } catch (e) { console.warn('scryfall', e); } finally { imgBusy = false; }
+  } catch (e) { console.warn('scryfall', e); }
   refreshImages();
 }
 // Swap text faces for images in place: a re-render now would break a drag or a double-click.
@@ -137,6 +150,7 @@ function resetGame(id) {
 async function send(index) {
   const frame = last();
   S.busy = true; S.error = null; S.ui = null; closePop(); closeOverlay(); renderDock();
+  if (S.shown >= 0) render(S.shown, {noAnim: true});  // drop the highlights of the decision just made
   try {
     const v = await api(`${encodeURIComponent(S.gid)}/choose`, {frame, index, since: frame});
     S.lastMine = frame;
@@ -181,13 +195,18 @@ async function pump() {
 const isReal = r => r.type !== 'pass' && r.type !== 'mana';
 const ACTS = new Set(['cast', 'activate', 'plot', 'attack', 'block']);
 
+// Did the opponent act in the current step since my last decision? (cast,
+// activate, attack, block). A step or turn change clears it: what they did
+// in an earlier step has been seen and answered already.
 function oppActedSince(fi) {
+  let acted = false;
   for (let i = fi + 1; i <= last(); i++) {
-    for (const a of S.raw[i].actions || []) if (a.p === opp() && ACTS.has(a.t)) return true;
-    const d = S.raw[i].decision;
-    if (d && d.player === opp() && d.chosen != null && ['cast', 'activate', 'plot'].includes(d.refs?.[0]?.type)) return true;
+    for (const a of S.raw[i].actions || []) {
+      if (a.t === 'step' || a.t === 'turn') acted = false;
+      else if (a.p === opp() && ACTS.has(a.t)) acted = true;
+    }
   }
-  return false;
+  return acted;
 }
 
 function autoAnswer(d) {
@@ -307,6 +326,7 @@ async function playFrame(i) {
   const cast = theirs.find(a => a.t === 'cast' || a.t === 'activate' || a.t === 'plot');
   if (cast && !S.skip && beatScale() > 0) {
     const name = cast.t === 'activate' ? cast.name.split(':')[0].trim() : cast.name;
+    await ensureImg(name, 900);
     showSpot(name, cast.t === 'cast' ? `${oppLabel()} casts ${cast.name}` : cast.t === 'plot' ? `${oppLabel()} plots ${cast.name}` : `${oppLabel()} activates ${cast.name}`);
     await wait(950);
     hideSpot();
@@ -365,7 +385,9 @@ function toggleFlag(fi, text) {
   $$(`#log .flag[data-fi="${fi}"]`).forEach(b => b.classList.toggle('on', isFlagged(fi)));
 }
 function renderFeed() {
-  $('#feed').innerHTML = S.feed.slice(-4).map(c => `<span class="fchip ${c.quiet ? 'quiet' : ''}" title="${esc(c.text)}"><span class="txt">Opp: ${esc(c.text)}</span><button class="flag ${isFlagged(c.fi) ? 'on' : ''}" data-flag="${c.fi}" title="Flag this play as odd">⚑</button></span>`).join('');
+  $('#feed').innerHTML = S.feed.slice(-4).reverse().map(c => `<span class="fchip ${c.quiet ? 'quiet' : ''}" title="${esc(c.text)}"><span class="txt">Opp: ${esc(c.text)}</span><button class="flag ${isFlagged(c.fi) ? 'on' : ''}" data-flag="${c.fi}" title="Flag this play as odd">⚑</button></span>`).join('');
+  const box = $('#feed').getBoundingClientRect();
+  for (const chip of $$('#feed .fchip').slice(1)) if (chip.getBoundingClientRect().left < box.left) chip.remove();  // no half chips
 }
 
 // ---------------------------------------------------------------- log
@@ -378,6 +400,13 @@ function appendLog(i) {
     if (/^ {2}p\d (priority|pay_mana|declare_attacker|mulligan|order_triggers):/.test(line)) continue;  // the action has a line of its own
     const m = /^=== Turn (\d+): player (\d) ===$/.exec(line);
     if (m) { out.push(`<div class="th">Turn ${m[1]} · ${+m[2] === S.seat ? 'your turn' : "opponent's turn"}</div>`); continue; }
+    const bm = /^p(\d) blocks: \{(.*)\}$/.exec(line);
+    if (bm) {
+      const name = o => f.state.battlefield.find(c => c.oid === o)?.name || S.prev?.battlefield.find(c => c.oid === o)?.name || '?';
+      const pairs = [...bm[2].matchAll(/(\d+): (\d+)/g)].map(m => `${name(+m[1])} blocks ${name(+m[2])}`);
+      out.push(`<div class="${+bm[1] === S.seat ? 'me' : 'opp'}">${esc((+bm[1] === S.seat ? 'You: ' : 'Opp: ') + pairs.join(', '))}</div>`);
+      continue;
+    }
     const pm = /^\s*p(\d) /.exec(line);
     const who = pm ? (+pm[1] === S.seat ? 'me' : 'opp') : '';
     const text = clean(line.trim()).replace(/^p(\d) /, (_, p) => +p === S.seat ? 'You: ' : 'Opp: ')
@@ -385,7 +414,7 @@ function appendLog(i) {
     out.push(`<div class="${who} ${/^\s/.test(line) ? 'sub' : ''}">${esc(text)}</div>`);
   }
   const d = f.decision;
-  if (d && d.player === opp() && d.chosen != null && !['pass', 'pay', 'hidden'].includes(d.refs?.[0]?.type)) {
+  if (d && d.player === opp() && d.chosen != null && !['pass', 'pay', 'hidden'].includes(d.refs?.[0]?.type) && !d.refs?.[0]?.done) {
     out.push(`<div class="opp sub">${esc('Opp: ' + humanize(d.options[d.chosen]))}<button class="flag ${isFlagged(i) ? 'on' : ''}" data-flag="${i}" data-fi="${i}" title="Flag this play">⚑</button></div>`);
   }
   if (out.length) { el.insertAdjacentHTML('beforeend', out.join('')); el.scrollTop = el.scrollHeight; }
@@ -883,10 +912,10 @@ function renderOverlay() {
     el.innerHTML = `<div class="obox"><h2>${esc(clean(d.prompt))}</h2><div class="sub">Starts from a legal split; adjust with − and +. Space confirms.</div>${rows}
       <div class="orow"><button class="primary" ${ok ? '' : 'disabled'} data-opt="${splitIndex(d, ui.dmg)}">${ok ? 'Assign damage' : 'Not a legal split'}</button></div></div>`;
   } else {
-    const tiles = d.refs.map((r, i) => r.name && S.cards[r.name]
-      ? `<button class="tile" data-opt="${i}">${cardHtml(r.name)}<span>${esc(clean(d.options[i]))}</span></button>`
-      : `<button class="choice" data-opt="${i}">${esc(clean(d.options[i]))}</button>`).join('');
-    el.innerHTML = `<div class="obox"><h2>${esc(clean(d.prompt))}</h2><div class="sub">${esc(d.kind.replace(/_/g, ' '))} · click one</div><div class="grid">${tiles}</div></div>
+    const isCard = r => r.name && S.cards[r.name];
+    const tiles = d.refs.map((r, i) => isCard(r) ? `<button class="tile" data-opt="${i}">${cardHtml(r.name)}<span>${esc(clean(d.options[i]))}</span></button>` : '').join('');
+    const texts = d.refs.map((r, i) => isCard(r) ? '' : `<button class="choice" data-opt="${i}">${esc(clean(d.options[i]))}</button>`).join('');
+    el.innerHTML = `<div class="obox"><h2>${esc(clean(d.prompt))}</h2><div class="sub">${esc(d.kind.replace(/_/g, ' '))} · click one</div><div class="grid">${tiles}</div>${texts ? `<div class="textopts">${texts}</div>` : ''}</div>
       <button class="btn peekbtn" data-cmd="peek">Peek at the board</button>`;
   }
   el.classList.add('on'); el.classList.remove('peek');

@@ -16,7 +16,8 @@
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:13px/1.4 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",system-ui,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
 button,select,input{font:inherit;color:inherit}
-button,[data-click],.clickable{cursor:pointer}
+button,[data-click],.clickable,.playable,.activatable,.targetable,.can-attack,.attack-sel,.can-block,.blocked-by,.attacker-target,.payable,.zone.clickable,#hand .card.playable{cursor:pointer}
+#hand .card.playable:active{cursor:grabbing}
 button:disabled{cursor:default}
 .sp{flex:1}
 
@@ -68,8 +69,8 @@ button:disabled{cursor:default}
 .step .stop.me.on{background:var(--me);border-color:var(--me)}
 .step .stop.opp.on{background:var(--opp);border-color:var(--opp)}
 .step .stop:hover{border-color:#fff}
-#feed{flex:1;display:flex;gap:6px;justify-content:flex-end;align-items:center;min-width:0;overflow:hidden}
-#feed .fchip{flex:0 1 auto;min-width:0}
+#feed{flex:1;display:flex;flex-direction:row-reverse;gap:6px;justify-content:flex-start;align-items:center;min-width:0;overflow:hidden}
+#feed .fchip{flex:none;max-width:280px}
 #feed .fchip .txt{overflow:hidden;text-overflow:ellipsis}
 .fchip{display:inline-flex;align-items:center;gap:6px;background:#6fa8ff1c;border:1px solid #6fa8ff44;color:#cfe0ff;border-radius:999px;padding:2px 4px 2px 10px;font-size:11.5px;white-space:nowrap;animation:chipin .25s var(--ease)}
 .fchip.quiet{background:#ffffff0c;border-color:#ffffff1c;color:var(--muted)}
@@ -129,13 +130,13 @@ button:disabled{cursor:default}
 .perm.grouped>.card{box-shadow:3px -3px 0 -1px #2b2f37,3px -3px 0 0 #000,6px -6px 0 -1px #2b2f37,6px -6px 0 0 #000}
 .perm:hover{z-index:8}
 .badges{position:absolute;inset:0;pointer-events:none;z-index:3}
-.perm.tapped .badges{inset:calc(var(--w)*(var(--ar) - 1)/-2) 0 auto 0;height:calc(var(--w)*var(--ar))}
+.perm.tapped .badges{inset:auto 0;top:calc(var(--w)*(var(--ar) - 1)/2);height:var(--w)}
 .b{position:absolute;font-size:11px;font-weight:800;padding:0 5px;border-radius:5px;line-height:17px;white-space:nowrap}
 .b.pt{right:-4px;bottom:-4px;background:#0b0d11;color:#fff;border:1px solid #ffffff40;font-size:12.5px;padding:1px 6px}
 .b.pt.hurt{color:#ff9b9b;border-color:var(--bad)}
 .b.pt.buff{color:var(--good)}
 .b.ctr{left:-4px;bottom:-4px;background:var(--good);color:#04210f}
-.b.cnt{right:-6px;top:-8px;background:var(--me);color:#211800;border-radius:9px;font-size:12px}
+.b.cnt{right:-6px;bottom:-6px;background:var(--me);color:#211800;border-radius:9px;font-size:12px}
 .b.sick{left:3px;top:3px;background:#000c;color:#c9d2ff;font-size:10px}
 .b.sword{left:50%;top:-11px;transform:translateX(-50%);background:var(--bad);color:#fff;font-size:12px}
 .b.shield{left:50%;top:-11px;transform:translateX(-50%);background:var(--block);color:#0b1a33;font-size:12px}
@@ -174,7 +175,7 @@ button:disabled{cursor:default}
 
 /* ------------------------------------------------------------------ hand */
 #handzone{position:relative;min-width:0}
-#hand{position:absolute;left:calc(var(--platew) + 14px);right:300px;bottom:0;top:0}
+#hand{position:absolute;left:calc(var(--platew) + 14px);right:312px;bottom:0;top:0}
 #hand .card{--w:var(--hw);position:absolute;bottom:calc(var(--hw)*var(--ar)*-.24);transform-origin:50% 100%;
   transform:translateX(var(--sx,0px)) translateY(var(--ty,0px)) rotate(var(--rot,0deg));transition:transform .14s var(--ease),box-shadow .14s,left .25s var(--ease)}
 #hand .card.hover{transform:translateX(var(--sx,0px)) translateY(calc(var(--hw)*var(--ar)*-.3)) scale(1.14);z-index:50 !important}
@@ -186,7 +187,7 @@ button:disabled{cursor:default}
 #ghost.back{transition:transform .22s cubic-bezier(.3,1.4,.5,1)}
 
 /* ------------------------------------------------------------------ stack */
-#stack{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:200px;display:flex;flex-direction:column;gap:6px;z-index:20;pointer-events:none}
+#stack{position:absolute;right:10px;top:calc(50% - var(--handh)/2 + 30px);width:200px;display:flex;flex-direction:column;gap:6px;z-index:20;pointer-events:none}
 #stack .sh{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#ffffff66;text-align:right}
 .sitem{pointer-events:auto;display:flex;gap:8px;align-items:center;padding:5px 8px 5px 5px;border-radius:10px;background:#000c;border:1px solid #ffffff1c;animation:chipin .25s var(--ease)}
 .sitem.c-me{border-left:3px solid var(--me)}.sitem.c-opp{border-left:3px solid var(--opp)}
@@ -221,11 +222,13 @@ button:disabled{cursor:default}
 .secondary{padding:9px 12px;border-radius:10px;font-weight:700}
 
 /* spotlight for the opponent's spells */
-#spot{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:150;pointer-events:none;display:none;flex-direction:column;align-items:center;gap:8px}
+#spot{position:absolute;inset:0;z-index:150;pointer-events:none;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:radial-gradient(ellipse 45% 55% at 50% 50%,#000a 0%,#0006 60%,transparent 100%)}
 #spot.on{display:flex;animation:spotin .3s var(--ease)}
-#spot .card{--w:calc(var(--u)*24)}
+#spot .card{--w:calc(var(--u)*30);box-shadow:0 0 0 2px #6fa8ff88,0 20px 60px #000,0 0 60px #6fa8ff44}
 #spot .cap{background:#000d;border:1px solid #6fa8ff66;border-radius:999px;padding:4px 14px;font-weight:700;font-size:14px;color:#cfe0ff}
-@keyframes spotin{from{opacity:0;transform:translate(-50%,-40%) scale(.7)}}
+@keyframes spotin{from{opacity:0}}
+#spot.on .card{animation:spotcard .3s var(--ease)}
+@keyframes spotcard{from{transform:translateY(-40px) scale(.6)}}
 
 /* arrows */
 #arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:120;overflow:visible}
@@ -257,6 +260,7 @@ button:disabled{cursor:default}
 #overlay .tile .card{--w:150px;transition:transform .12s var(--ease)}
 #overlay .tile:hover .card{transform:translateY(-6px);box-shadow:0 0 0 2px var(--me),0 10px 24px #000c}
 #overlay .tile span{font-size:12px;color:var(--text);text-align:center}
+#overlay .textopts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px}
 #overlay .orow{display:flex;gap:8px;justify-content:center;margin-top:16px;flex-wrap:wrap}
 #overlay .opts{display:flex;flex-direction:column;gap:6px;min-width:320px}
 #overlay .peekbtn{position:fixed;right:316px;top:54px;pointer-events:auto}
