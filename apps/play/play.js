@@ -23,7 +23,7 @@ const SPEEDS = {'0.5': 2, '1': 1, '2': 0.5, instant: 0};
 
 // ---------------------------------------------------------------- preferences
 const PREF = Object.assign({
-  speed: '1', manualPay: false, confirmEmptyAttack: true, sound: true, autoTarget: false,
+  speed: '1', autoPayNoAsk: false, spotMs: 2800, confirmEmptyAttack: true, sound: true, autoTarget: false,
   stops: {me: {main1: true, main2: true}, opp: {declare_blockers: true, end: true}}, stopsVersion: 2,
 }, loadJSON('mtgml-play-pref', {}));
 function loadJSON(k, d) { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch (e) { return d; } }
@@ -145,7 +145,7 @@ function applyView(view) {
 function resetGame(id) {
   // Every auto-pass mode and plan resets at a game boundary (Forge bug: End Turn carried over).
   Object.assign(S, {gid: id, flags: [], stopLog: [], lastAutoPassed: 0, yields: new Set(), holdOnce: false, autoPassed: 0, stats: {dealt: 0, taken: 0, played: 0}, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
-    fullControl: false, feed: [], logDone: 0, error: null, skip: false, reserved: [], payPlan: null, manualOnce: false, autoRest: false, justTapped: null});
+    fullControl: false, feed: [], logDone: 0, error: null, skip: false, reserved: [], payPlan: null, payAssign: null, paying: null, autoRest: false, justTapped: null, spotDone: new Set()});
   $('#log').innerHTML = '';
   renderFeed();
 }
@@ -170,12 +170,12 @@ function stamp(plan) {  // scope a plan to the current turn and step
   const s = stateAt(last());
   return plan && {...plan, turn: s.turn, step: s.step};
 }
-async function act(index, plan, frame) {
+async function act(index, plan, frame, pay) {
   if (S.busy || S.pumping || !myDecision()) return;
   if (frame != null && frame !== last()) return;  // made for a decision that is gone
   if (plan !== undefined) S.plan = stamp(plan);
-  const pv = tapsFor([index]);
-  S.payPlan = pv ? pv.taps.slice() : null;
+  if (pay) { S.payAssign = pay.assign; S.payPlan = pay.rest; }
+  else if (myDecision().kind === 'priority') { S.payAssign = null; S.payPlan = null; }
   await send(index);
   pump();
 }
@@ -237,10 +237,10 @@ function autoAnswer(d) {
     const a = planAnswer(d);
     if (a != null) return a;
   }
-  if (d.kind === 'pay_mana') return (PREF.manualPay || S.manualOnce) && !S.autoRest ? null : planPay(d);
+  if (d.kind === 'pay_mana') return S.payAssign || S.autoRest || PREF.autoPayNoAsk ? planPay(d) : null;  // nothing is paid unless the player committed a payment
   if (d.kind === 'order_triggers' && new Set(d.options).size === 1) return 0;  // identical triggers: the order cannot matter
   if (d.kind === 'priority') {
-    S.payPlan = null; S.manualOnce = false; S.autoRest = false;  // a cast is over
+    S.payPlan = null; S.payAssign = null; S.autoRest = false;  // a cast is over
     const pass = refs.findIndex(r => r.type === 'pass');
     if (pass < 0) return null;
     if (S.fullControl) return null;
@@ -304,7 +304,7 @@ function planAnswer(d) {
   if (P.kind === 'target' && d.kind === 'target') {
     S.plan = null;
     const t = P.t;
-    const i = refs.findIndex(r => (t.oid != null && r.oid === t.oid) || (t.player != null && r.player === t.player));
+    const i = refs.findIndex(r => (t.oid != null && r.oid === t.oid) || (t.player != null && r.player === t.player) || (t.sid != null && r.sid === t.sid));
     return i >= 0 ? i : null;
   }
   if (d.kind === 'priority' && P.kind !== 'target') S.plan = null;
@@ -412,6 +412,14 @@ function planPay(d) {
   const s = stateAt(last()), refs = d.refs;
   const pool = refs.findIndex(r => r.pool != null);
   if (pool >= 0) return pool;
+  for (let k = 0; S.payAssign && k < S.payAssign.length; k++) {  // the sources the player picked in the paying step
+    const a = S.payAssign[k];
+    if (a.pool) continue;
+    const ok = r => r.oid != null && r.via !== 'filter' && sameSource(s, r.oid, a.oid);
+    let j = refs.findIndex(r => ok(r) && r.color === a.color);
+    if (j < 0) j = refs.findIndex(ok);
+    if (j >= 0) { S.payAssign.splice(k, 1); S.reserved = S.reserved.filter(x => x.oid !== a.oid); return j; }
+  }
   for (let k = 0; k < S.reserved.length; k++) {
     const res = S.reserved[k];
     const ok = r => r.oid != null && r.via !== 'filter' && sameSource(s, r.oid, res.oid);
@@ -426,6 +434,140 @@ function planPay(d) {
     }
   }
   return autoPay(d);
+}
+
+// ---- the paying step (MTG Arena style): a spell you play waits, lifted next
+// to the stack with its cost as pips, until you pay it: click sources (each
+// fills a pip) or Auto pay (Space/Enter). Nothing has been sent yet, so Cancel
+// (Esc, right-click) simply puts the card back. On commit the client sends the
+// cast, the target and then answers the engine's pay steps with the sources
+// you picked (`planPay`); auto pay covers the rest the way the preview showed.
+function parseCost(cost) {
+  const pips = [];
+  for (const m of String(cost).matchAll(/\{([^}]+)\}/g)) {
+    const t = m[1];
+    if (/^\d+$/.test(t)) for (let k = 0; k < +t; k++) pips.push({sym: '1', generic: true});
+    else pips.push({sym: t, generic: false});
+  }
+  return pips.filter(p => p.generic).concat(pips.filter(p => !p.generic));  // generic first, as printed
+}
+function beginCast(el, i, plan) {
+  const d = myDecision(), r = d?.refs[i];
+  if (!r) return;
+  closePop();
+  const needsPay = r.cost && !(r.before_pay || []).includes('choose_x');
+  if (PREF.autoPayNoAsk || !needsPay) {  // a land, a free spell, or the opt-in instant cast
+    if (!PREF.autoPayNoAsk && r.cost) return act(i, plan);  // X spells: the engine asks X first, then the pay steps wait for you
+    return act(i, plan, undefined, PREF.autoPayNoAsk ? {assign: [], rest: tapsFor([i])?.taps.slice() || null} : undefined);
+  }
+  const s = stateAt(last());
+  const P = {i, name: r.name || el?.dataset.name, uid: el?.dataset.uid != null ? +el.dataset.uid : null, srcOid: el?.dataset.oid != null ? +el.dataset.oid : null,
+    verb: r.type === 'activate' ? 'Activating' : 'Casting', cost: r.cost, pips: parseCost(r.cost), plan, targets: null, step: 'pay', taps: r.taps || []};
+  const real = (r.targets || []).filter(t => !t.none);
+  if (real.length && !(plan && plan.kind === 'target')) {
+    P.targets = r.targets;
+    P.step = 'target';
+    if (PREF.autoTarget && real.length === 1 && r.targets.length === 1) { P.plan = {kind: 'target', t: real[0].player != null ? {player: real[0].player} : real[0].sid != null ? {sid: real[0].sid} : {oid: real[0].oid}}; P.step = 'pay'; }
+  }
+  P.fi = last();
+  S.paying = P;
+  // floating mana and lands you tapped before casting fill pips first
+  for (const [c, n] of Object.entries(s.players[S.seat].pool || {})) for (let k = 0; k < n; k++) fillPip({pool: c, color: c}, c);
+  for (const res of S.reserved) fillPip({oid: res.oid, color: res.color, res: true, name: res.name}, res.color);
+  sound('cast');
+  refreshPaying();
+}
+function openPip(color) {  // the pip `color` mana would fill: its own colour first, else generic
+  const P = S.paying;
+  return P.pips.findIndex(p => !p.by && !p.generic && p.sym === color) >= 0 ? P.pips.findIndex(p => !p.by && !p.generic && p.sym === color)
+    : P.pips.findIndex(p => !p.by && p.generic);
+}
+function fillPip(by, color) {
+  const k = openPip(color);
+  if (k < 0) return false;
+  S.paying.pips[k].by = by;
+  return true;
+}
+const payingHeld = oid => S.paying?.pips.some(p => p.by && p.by.oid === oid);
+function payWith(el) {  // a click on a permanent while paying
+  const P = S.paying, s = stateAt(last());
+  const oids = el.dataset.oids.split(' ').map(Number);
+  const held = [...oids].reverse().find(o => payingHeld(o));
+  if (held != null) {  // click it again: take it back
+    const k = P.pips.findIndex(p => p.by && p.by.oid === held);
+    const by = P.pips[k].by;
+    P.pips[k].by = null;
+    if (by.res) S.reserved = S.reserved.filter(x => x.oid !== held);  // a pre-tapped land untaps too
+    return refreshPaying();
+  }
+  const c = oids.map(o => s.battlefield.find(x => x.oid === o)).find(x => canTapForMana(x) && !payingHeld(x.oid));
+  if (!c) { if (oids.some(o => s.battlefield.find(x => x.oid === o)?.controller === S.seat)) toast(`${el.dataset.name} can't make mana right now.`); return; }
+  const colors = manaInfo(c.name).filter(k => openPip(k) >= 0);
+  if (!colors.length) { toast(`${c.name} can't pay any of the open pips.`); return; }
+  // several colours: ask only when the choice matters (they would fill different pips)
+  const where = new Set(colors.map(k => S.paying.pips[openPip(k)].generic ? '1' : k));
+  const pay = color => { closePop(); fillPip({oid: c.oid, color, name: c.name}, color); S.justTapped = c.oid; sound('tap'); refreshPaying(); };
+  if (where.size > 1) { colorPicker(el, c, colors); $('#pop')._mana.cb = (oid, color) => pay(color); return; }
+  pay(colors[0]);
+}
+function chooseCastTarget(t) {  // t: {oid} | {player} | {sid}
+  const P = S.paying, s = stateAt(last());
+  const r = P.targets.find(x => (t.player != null && x.player === t.player) || (t.sid != null && x.sid === t.sid) || (t.oid != null && x.oid != null && sameSource(s, x.oid, t.oid)));
+  if (!r) return false;
+  P.plan = {kind: 'target', t: r.player != null ? {player: r.player} : r.sid != null ? {sid: r.sid} : {oid: r.oid}};
+  P.step = 'pay';
+  refreshPaying();
+  return true;
+}
+const payTargetKeys = () => {
+  const P = S.paying, out = new Set();
+  if (!P || P.step !== 'target') return out;
+  const s = stateAt(last());
+  for (const r of P.targets) {
+    if (r.player != null) out.add('p' + r.player);
+    if (r.sid != null) out.add('s' + r.sid);
+    if (r.oid != null) for (const c of s.battlefield) if (sameSource(s, c.oid, r.oid)) out.add('o' + c.oid);
+  }
+  return out;
+};
+function payingSuggestion() {  // the extra lands auto pay would tap for the open pips
+  const P = S.paying; if (!P) return null;
+  const s = stateAt(last()), open = P.pips.filter(p => !p.by).length;
+  const held = P.pips.filter(p => p.by && p.by.oid != null).map(p => p.by.oid);
+  return {taps: P.taps.filter(o => !held.some(h => sameSource(s, o, h))).slice(0, open), sacs: [], used: []};
+}
+function refreshPaying() {
+  const P = S.paying;
+  render(S.shown, {noAnim: true});
+  renderDock();
+  if (P && P.step === 'pay' && P.pips.every(p => p.by)) { setTimeout(() => { if (S.paying === P) payCommit(); }, 260); }  // paid: it is cast
+}
+function payCommit() {
+  const P = S.paying; if (!P) return;
+  if (P.step === 'target') { toast('Choose a target first (or Cancel).'); return; }
+  const assign = P.pips.filter(p => p.by).map(p => p.by);
+  const sug = payingSuggestion();
+  S.paying = null;
+  S.autoRest = false;
+  return act(P.i, P.plan, undefined, {assign: assign.filter(a => !a.pool).map(a => ({oid: a.oid, color: a.color})), rest: sug ? sug.taps : null});
+}
+function payCancel(quiet) {
+  if (!S.paying) return;
+  S.paying = null;
+  if (!quiet) toast('Cancelled: the card is back in your hand.');
+  render(S.shown, {noAnim: true}); renderDock();
+}
+function renderPaying() {
+  let el = $('#paying');
+  const P = S.paying;
+  if (!P) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'paying'; document.body.appendChild(el); }
+  const filled = P.pips.filter(p => p.by).length;
+  el.innerHTML = `<div class="ph">${esc(P.verb)}</div>${cardHtml(P.name)}
+    <div class="pips cost">${P.pips.map(p => `<span class="pip ${p.by ? 'paid ' + esc(p.by.color) : p.generic ? 'gen' : esc(p.sym)}" title="${p.by ? esc(`${p.by.color} from ${p.by.pool ? 'your mana pool' : p.by.name || 'a land'}`) : 'unpaid'}">${esc(p.by ? p.by.color : p.sym)}</span>`).join('')}</div>
+    <div class="pstep">${P.step === 'target' ? 'Choose a target (glowing).' : `${filled}/${P.pips.length} paid. Click lands to tap them, or Auto pay.`}</div>
+    <div class="pbtns"><button class="primary" data-pay="auto">Auto pay <kbd>Space</kbd></button><button class="btn" data-pay="cancel">Cancel <kbd>Esc</kbd></button></div>`;
+  el.querySelector('[data-pay=auto]').disabled = P.step === 'target';
 }
 
 function lexLess(a, b) {
@@ -447,18 +589,21 @@ async function playFrame(i) {
   const theirs = acts.filter(a => a.p === opp());
   const notable = acts.some(a => ['cast', 'play', 'activate', 'attack', 'block', 'resolve', 'trigger', 'enter', 'leave', 'dies', 'turn', 'discard', 'hit', 'life'].includes(a.t));
   const isLast = i === last();
-  if (!notable && !isLast && i !== 0) { appendLog(i); return; }
   const cast = theirs.find(a => a.t === 'cast' || a.t === 'activate' || a.t === 'plot');
+  const td = f.decision && f.decision.player === opp() && f.decision.kind === 'target' ? f.decision : null;
+  if (cast && td) S.spotDone.add(i);  // the target joins the cast's spotlight
+  const choice = S.spotDone.has(i) ? null : oppChoiceSpot(i);
+  if (!notable && !isLast && i !== 0 && !choice && !cast) { appendLog(i); return; }
   if (cast && !S.skip && beatScale() > 0) {
     const name = cast.t === 'activate' ? cast.name.split(':')[0].trim() : cast.name;
     await ensureImg(name, 900);
-    const td = f.decision && f.decision.player === opp() && f.decision.kind === 'target' ? f.decision : null;
-    const aim = td ? plainTarget(td.options[0], opp()) : '';
+    const aim = td ? oppAim(td.options[0]) : '';
     const atMe = /^(you|your )/.test(aim);
-    showSpot(name, (cast.t === 'cast' ? `${oppLabel()} casts ${cast.name}` : cast.t === 'plot' ? `${oppLabel()} plots ${cast.name}` : `${oppLabel()} activates ${cast.name}`) + (aim ? ` → ${aim}` : ''), atMe);
-    await wait(atMe ? 1400 : 950);
-    hideSpot();
+    const title = cast.t === 'cast' ? `${oppLabel()} casts ${cast.name}` : cast.t === 'plot' ? `${oppLabel()} plots ${cast.name}` : `${oppLabel()} activates ${cast.name}`;
+    if (aim) await bigSpot({name, title, lines: [`→ ${aim}`], atMe});  // a target is a choice that matters: the long spotlight
+    else { showSpot(name, title, atMe); await wait(950); hideSpot(); }
   }
+  if (choice) await bigSpot(choice);
   // Combat and deaths play out on the board as it was, before the new state lands.
   const fought = await playCombat(acts);
   await playDeaths(acts);
@@ -554,10 +699,116 @@ function nudgeAttackers() {
 
 function showSpot(name, cap, atMe) {
   const el = $('#spot');
+  el.className = '';
   el.innerHTML = cardHtml(name) + `<div class="cap ${atMe ? 'atme' : ''}">${esc(cap)}</div>`;
   el.classList.add('on');
 }
-function hideSpot() { $('#spot').classList.remove('on'); }
+function hideSpot() { $('#spot').classList.remove('on', 'big'); }
+
+// ---- the opponent's choices that matter, in a centred spotlight that stays
+// PREF.spotMs (Settings) or until a click or Space: Brainstorm and Ponder put
+// backs, scry, Delver's reveal, mulligans, modes, X, targets, blocks,
+// sacrifices, and their sideboarding before games 2 and 3. Hidden parts stay
+// hidden: the server sends only counts and where cards went (live_proto.hidden_summary).
+async function bigSpot(sp) {
+  if (S.skip || beatScale() === 0 || !(+PREF.spotMs > 0)) return;
+  if (sp.name && S.cards[sp.name]) await ensureImg(sp.name, 900);
+  const el = $('#spot'), ms = +PREF.spotMs;
+  el.className = '';
+  el.innerHTML = `${sp.name && S.cards[sp.name] ? cardHtml(sp.name) : backHtml()}<div class="spotbox ${sp.atMe ? 'atme' : ''}"><div class="st">${esc(sp.title)}</div>${(sp.lines || []).map(l => `<div class="sl">${esc(l)}</div>`).join('')}
+    <div class="bar"><i style="animation-duration:${ms}ms"></i></div><div class="hint">click or Space to continue</div></div>`;
+  el.classList.add('on', 'big');
+  if (!pinned) $('#hoverprev').classList.remove('on');
+  sound('decide');
+  S.spotSkip = false;
+  const end = performance.now() + ms;
+  while (!S.skip && !S.spotSkip && performance.now() < end) await sleep(40);
+  S.spotSkip = false;
+  hideSpot();
+}
+const CHOICE_KINDS = new Set(['yes_no', 'choose_mode', 'choose_x', 'sacrifice', 'exile_from_graveyard', 'mulligan', 'declare_blocker', 'order', 'choose_card', 'hidden', 'target']);
+function oppChoiceSpot(i) {
+  const f = S.raw[i], d = f.decision;
+  if (i === 0 && S.meta?.match?.game_no > 1 && S.meta.match.opp_swaps != null && !S.spotDone.has('sb' + S.gid + S.meta.match.game_no)) {
+    S.spotDone.add('sb' + S.gid + S.meta.match.game_no);
+    const n = S.meta.match.opp_swaps;
+    return {title: `Game ${S.meta.match.game_no}: ${oppLabel()} sideboards`, lines: [n ? `${n} cards in, ${n} out (which ones stays hidden)` : 'no changes: the maindeck again']};
+  }
+  if (!d || d.player !== opp() || d.chosen == null) return null;
+  const r = d.refs?.[0] || {}, kind = r.type === 'hidden' ? 'hidden' : d.kind;
+  if (!CHOICE_KINDS.has(kind) && !CHOICE_KINDS.has(d.kind)) return null;
+  if (d.kind === 'declare_blocker' || d.kind === 'mulligan' || r.group === 'bottom') return groupSpot(i, d.kind === 'declare_blocker' ? 'declare_blocker' : 'mulligan');
+  return groupSpot(i, 'source');
+}
+function choiceLine(d) {
+  const r = d.refs?.[0] || {};
+  if (r.type === 'hidden') return r.text;
+  let line = clean(d.options[0]);
+  if (d.kind === 'choose_x') return `chooses ${line.replace(/^X\s*=?\s*/i, 'X = ')}`;
+  if (d.kind === 'yes_no') {
+    if (/^Reveal /.test(line)) return `reveals ${line.slice(7)} from the top of the library`;
+    if (/^Don't reveal/.test(line)) return 'does not reveal the top card';
+    if (line === 'Shuffle') return 'shuffles the library';
+    if (line === "Don't shuffle") return 'does not shuffle';
+  }
+  if (d.kind === 'target') return `→ ${oppAim(d.options[0])}`;
+  return line;
+}
+// Consecutive opponent choices become one spotlight: everything one spell
+// or ability decided while it resolved (Brainstorm's put backs, Ponder's
+// order and shuffle, a scry), a mulligan and its bottoms, a combat's blocks.
+function groupSpot(i, key) {
+  const srcOf = j => S.raw[j].state.stack.at(-1)?.card || S.raw[j].state.stack.at(-1)?.name || null;
+  const same = j => {
+    const d = S.raw[j]?.decision;
+    if (!d || d.player !== opp() || d.chosen == null) return false;
+    const r = d.refs?.[0] || {};
+    if (key === 'mulligan') return d.kind === 'mulligan' || r.group === 'bottom';
+    if (key === 'declare_blocker') return d.kind === 'declare_blocker';
+    if (d.kind === 'declare_blocker' || d.kind === 'mulligan' || !(r.type === 'hidden' || CHOICE_KINDS.has(d.kind) || d.kind === 'target')) return false;
+    return srcOf(j) === srcOf(i) && (srcOf(i) != null || (r.source && r.source === (S.raw[i].decision.refs?.[0] || {}).source));
+  };
+  const js = [i];
+  for (const j of S.queue) { if (j <= js.at(-1)) continue; if (j === js.at(-1) + 1 && same(j)) { js.push(j); S.spotDone.add(j); } else break; }
+  const ds = js.map(j => S.raw[j].decision), refs = ds.map(d => d.refs?.[0] || {});
+  const top = S.raw[i].state.stack.at(-1), src = top?.card || null;
+  if (key === 'declare_blocker') {
+    const real = ds.filter(d => !d.refs?.[0]?.none);
+    const lines = real.map(d => plainBlock(clean(d.options[0])));
+    return {name: real.length ? S.raw[i].state.battlefield.find(c => c.oid === real[0].refs[0].blocker)?.name : null,
+      title: `${oppLabel()} ${lines.length ? 'blocks' : 'does not block'}`, lines};
+  }
+  if (key === 'mulligan') {
+    const mull = ds.filter(d => d.kind === 'mulligan').map(d => clean(d.options[0]));
+    const bottoms = refs.filter(r => r.group === 'bottom').length;
+    const lines = mull.map(t => t.replace(/^Keep \((\d+) cards\)$/, 'keeps $1').replace(/^Mulligan \(to (\d+)\)$/, 'mulligans to $1'));
+    if (bottoms) lines.push(`puts ${bottoms} card${bottoms > 1 ? 's' : ''} on the bottom`);
+    if (lines.length === 1 && /^keeps 7$/.test(lines[0])) return null;  // a plain keep is not worth a pause
+    return {title: `${oppLabel()}'s opening hand`, lines};
+  }
+  // one line per choice, counting repeated put backs and scry cards
+  const lines = [];
+  const putBack = refs.filter(r => r.group === 'put_back').length;
+  const scry = refs.filter(r => r.group === 'scry'), scryTop = scry.filter(r => /top/.test(r.text)).length;
+  let saidPut = false, saidScry = false;
+  ds.forEach((d, k) => {
+    const r = refs[k];
+    if (r.group === 'put_back') { if (!saidPut) lines.push(`puts ${putBack} card${putBack > 1 ? 's' : ''} from hand back on top`); saidPut = true; return; }
+    if (r.group === 'scry') {
+      if (!saidScry) lines.push(`${r.source || 'Scry'}: ` + [scryTop ? `keeps ${scryTop} on top` : '', scry.length - scryTop ? `puts ${scry.length - scryTop} on the bottom` : ''].filter(Boolean).join(', '));
+      saidScry = true; return;
+    }
+    lines.push(choiceLine(d));
+  });
+  const r0 = refs[0];
+  const name = src || (r0.source && S.cards[r0.source] ? r0.source : null);
+  const label = src || (r0.source && !/^Scry|^Mulligan/.test(r0.source) ? r0.source : '');
+  return {name, title: `${oppLabel()}${label ? ` · ${label.split(':')[0]}` : ''}`, lines, atMe: lines.some(l => /→ (you|your )/.test(l))};
+}
+const oppAim = label => plainTarget(label, opp()).replace(/^the opponent$/, 'themselves').replace(/^the opponent's /, 'their own ');  // their choice, in my words
+function plainBlock(label) {  // "Insectile Aberration blocks Sagu Wildling" from their side
+  return label.replace(/ \((self|opponent)\)/g, '').replace(/^(.+?) blocks (.+)$/, '$1 blocks your $2');
+}
 const oppLabel = () => S.meta ? 'Opponent' : 'Opponent';
 
 // The opponent's actions as chips (each can be flagged), held until you act.
@@ -863,6 +1114,8 @@ function render(i, o = {}) {
   fitRows();
   fitHand();
   if (before) flip(before, prev);
+  renderPaying();
+  if (S.paying) showTaps(payingSuggestion());
   requestAnimationFrame(drawArrows);
   scheduleFxCleanup();
   markFocusable();
@@ -941,7 +1194,7 @@ function renderPlate(p, s, prev) {
   const pool = Object.entries(P.pool || {}).flatMap(([c, n]) => Array(n).fill(`<i class="${esc(c)}">${esc(c)}</i>`)).join('')
     + (isMe ? S.reserved.map(r => `<i class="${esc(r.color)} res" data-res="${r.oid}" title="${esc(r.color)} from ${esc(r.name)} (click the land to untap it)">${esc(r.color)}</i>`).join('') : '');
   const d = S.ui?.d;
-  const tgt = H.target.has('p' + p);
+  const tgt = H.target.has('p' + p) || payTargetKeys().has('p' + p);
   const preview = isMe ? blockPreviewLife(s) : attackPreviewLife(s);
   const gyCast = !isMe ? '' : (H.gy.size ? 'castable' : ''), exCast = !isMe ? '' : (H.ex.size ? 'castable' : '');
   el.className = `plate ${s.active === p ? 'active' : ''} ${tgt ? 'targetable' : ''}`;
@@ -984,7 +1237,7 @@ function groupPerms(perms, s) {
   for (const c of perms) {
     const creature = c.power != null;
     if ((creature && combat) || c.attacking || c.blocking != null || c.damage || c.counters || hosts.has(c.oid)) { out.push([c]); continue; }
-    const k = [c.name, !!c.tapped, !!c.sick, c.power, c.toughness, isReserved(c.oid)].join('|');
+    const k = [c.name, !!c.tapped, !!c.sick, c.power, c.toughness, isReserved(c.oid), payingHeld(c.oid)].join('|');
     if (by.has(k)) by.get(k).push(c); else { const g = [c]; by.set(k, g); out.push(g); }
   }
   return out;
@@ -1014,11 +1267,11 @@ function permHtml(g, s, prevBy, attachedTo) {
   const c = g[0], n = g.length, oids = g.map(x => x.oid);
   const ui = S.ui, cls = ['perm'];
   const pc = prevBy.get(c.oid);
-  const res = S.reserved.filter(r => oids.includes(r.oid));
+  const res = S.reserved.filter(r => oids.includes(r.oid)).concat((S.paying?.pips || []).filter(p => p.by && p.by.oid != null && !p.by.res && oids.includes(p.by.oid)).map(p => p.by));
   if (c.tapped || res.length) cls.push('tapped');
   if (res.length) cls.push('reserved');
   if (res.length && oids.includes(S.justTapped)) { cls.push('justtapped'); S.justTapped = null; }
-  if (!res.length && ui?.kind === 'priority' && oids.some(o => canTapForMana(s.battlefield.find(x => x.oid === o)))) cls.push('manasrc');
+  if (!res.length && !S.paying && ui?.kind === 'priority' && oids.some(o => canTapForMana(s.battlefield.find(x => x.oid === o)))) cls.push('manasrc');
   if (c.attacking) cls.push('attacking');
   if (c.blocking != null) cls.push('blocking');
   if (n > 1) cls.push('grouped');
@@ -1027,7 +1280,8 @@ function permHtml(g, s, prevBy, attachedTo) {
   if (fFlash) cls.push('flash');
   void pc;
   if (oids.some(o => H.perm.has(o))) cls.push('activatable');
-  if (oids.some(o => H.target.has('o' + o))) cls.push('targetable');
+  if (oids.some(o => H.target.has('o' + o)) || (S.paying?.step === 'target' && oids.some(o => payTargetKeys().has('o' + o)))) cls.push('targetable');
+  if (S.paying?.step === 'pay' && !res.length && c.controller === S.seat && oids.some(o => canTapForMana(s.battlefield.find(x => x.oid === o)) && !payingHeld(o))) cls.push('paysrc');
   if (oids.some(o => H.pay.has(o))) cls.push('payable');
   let b = '';
   if (ui?.kind === 'declare_attacker' && c.controller === S.seat) {
@@ -1064,7 +1318,7 @@ function renderHand(s) {
     const opts = H.hand.get(c.name);
     const n = red[c.uid];
     const badge = n ? `<div class="badges"><span class="b reduced" title="This costs ${n} less right now">−${n} cost</span></div>` : '';
-    return cardHtml(c.name, {uid: c.uid, cls: opts ? 'playable' : '', attrs: ' data-hand="1"', badges: badge});
+    return cardHtml(c.name, {uid: c.uid, cls: (opts ? 'playable' : '') + (S.paying && S.paying.uid === c.uid ? ' casting' : ''), attrs: ' data-hand="1"', badges: badge});
   }).join('');
 }
 
@@ -1310,6 +1564,7 @@ function enterDecision(fresh) {
   }
   if (d.kind === 'assign_damage') ui.dmg = defaultSplit(d, s);
   if (d.kind !== 'target') ui.source = null;
+  if (S.paying && (d.kind !== 'priority' || fi !== S.paying.fi)) S.paying = null;
   S.ui = ui;
   render(fi, {noAnim: S.shown === fi});
   renderDock();
@@ -1374,6 +1629,13 @@ function renderDock() {
   P.dataset.act = 'primary';
   switch (d.kind) {
     case 'priority': {
+      if (S.paying) {
+        const Pg = S.paying;
+        pr.innerHTML = `<span class="k">${esc(Pg.verb)} ${esc(Pg.name)}</span>${Pg.step === 'target' ? 'Choose a target, or Esc to cancel.' : `Pay ${esc(Pg.cost)}: click lands to tap them, or Auto pay. Esc or right-click cancels.`}`;
+        ch.innerHTML = '<button class="choice sec" data-pay="cancel">Cancel</button>';
+        P.textContent = 'Auto pay'; P.dataset.act = 'paycommit'; P.disabled = Pg.step === 'target'; P.classList.add('ask');
+        break;
+      }
       const playable = d.refs.filter(isReal).length;
       const floating = manaWaiting(s);
       pr.innerHTML = `<span class="k">Your priority · ${esc(STEP_LABEL[s.step] || s.step)}</span>${floating ? `<b class="floatwarn">${floating} mana in your pool: it empties when this step ends.</b> ` : ''}${playable ? 'Drag a glowing card to the battlefield, or double-click it. Click a land to tap it for mana.' : 'Nothing to play.'}`;
@@ -1621,12 +1883,12 @@ function playGesture(el, idxs, plan) {
   const i = plainPlay(idxs);
   if (i == null) { showMenu(el, idxs, el.dataset.name || 'Choose'); $('#pop')._plan = plan; return; }
   S.srcOid = null;
-  act(i, plan);
+  beginCast(el, i, plan);
 }
 function chooseFromCard(el, idxs, plan) {
   if (!idxs.length) return;
   S.srcOid = el.dataset.oid != null ? +el.dataset.oid : null;
-  if (idxs.length === 1) act(idxs[0], plan);
+  if (idxs.length === 1) beginCast(el, idxs[0], plan);
   else { showMenu(el, idxs, el.dataset.name || 'Choose'); $('#pop')._plan = plan; }
 }
 
@@ -1654,7 +1916,7 @@ const mentionsTarget = name => /\btarget\b/i.test(S.cards[name]?.text || '');
 
 let drag = null, suppressClick = false;
 document.addEventListener('pointerdown', e => {
-  if (e.button !== 0 || !canAct()) return;
+  if (e.button !== 0 || !canAct() || S.paying) return;
   const hc = e.target.closest('#hand .card'), pm = e.target.closest('#board .perm');
   const ui = S.ui;
   if (hc && ui.kind === 'priority' && handOpts(hc.dataset.name).length) drag = {kind: 'hand', el: hc, x0: e.clientX, y0: e.clientY};
@@ -1732,7 +1994,6 @@ function endHandDrag(dg, e) {
     dg.el.classList.remove('dragging');
     let plan;
     if (dg.targets) { const t = targetAt(e.clientX, e.clientY); if (t && (t.player != null || t.el.closest('#side1, #side0'))) plan = {kind: 'target', t: t.player != null ? {player: t.player} : {oid: t.oid}}; }
-    S.manualOnce = e.shiftKey || e.altKey;  // Shift or Alt/Option on the drop: pay this one by hand
     playGesture(dg.el, idxs, plan);
     return;
   }
@@ -1764,10 +2025,24 @@ function assignBlock(b, a) {
 document.addEventListener('click', e => {
   if (suppressClick) return;
   const t = e.target;
+  if ($('#spot').classList.contains('big') && (t.closest('#spot') || t.closest('#board'))) { S.spotSkip = true; return; }
   // skip the bot's replay
   if (S.queue.length && S.pumping && t.closest('#board')) { S.skip = true; return; }
   const mb = t.closest('[data-mana]');
-  if (mb && $('#pop')._mana) { reserveMana($('#pop')._mana.oid, mb.dataset.mana); return; }
+  if (mb && $('#pop')._mana) { const pm = $('#pop')._mana; (pm.cb || reserveMana)(pm.oid, mb.dataset.mana); return; }
+  const pb = t.closest('[data-pay]');
+  if (pb) { if (pb.dataset.pay === 'auto') payCommit(); else payCancel(); return; }
+  if (S.paying && canAct()) {
+    const P = S.paying, pm = t.closest('#board .perm'), plate = t.closest('.plate'), si = t.closest('.sitem');
+    if (P.step === 'target') {
+      const keys = payTargetKeys();
+      if (pm) { const o = pm.dataset.oids.split(' ').find(x => keys.has('o' + x)); if (o) { chooseCastTarget({oid: +o}); return; } }
+      if (plate && keys.has('p' + plate.dataset.player)) { chooseCastTarget({player: +plate.dataset.player}); return; }
+      if (si && keys.has('s' + si.dataset.sid)) { chooseCastTarget({sid: +si.dataset.sid}); return; }
+    } else if (pm) { payWith(pm); return; }
+    if (t.closest('#hand .card')) { toast('Finish paying (Auto pay) or Cancel first.'); return; }
+    return;
+  }
   const mi = t.closest('[data-extra]');
   if (mi && $('#pop')._extra) { $('#pop')._extra[+mi.dataset.extra](); return; }
   const flag = t.closest('[data-flag]');
@@ -1780,8 +2055,9 @@ document.addEventListener('click', e => {
   const opt = t.closest('[data-opt]');
   if (opt && canAct()) {
     const i = +opt.dataset.opt; if (i < 0 || inputLocked()) return;
-    const plan = t.closest('#pop')?._plan;
+    const pop = t.closest('#pop'), plan = pop?._plan, src = pop?._source;
     closePop(); closeDrawer();
+    if (S.ui?.kind === 'priority' && ['cast', 'activate', 'plot'].includes(S.ui.d.refs[i]?.type)) return beginCast(src, i, plan);
     return act(i, plan);
   }
   const zc = t.closest('[data-zcard]');
@@ -1838,12 +2114,13 @@ document.addEventListener('click', e => {
 document.addEventListener('dblclick', e => {
   if (!canAct() || S.ui.kind !== 'priority') return;
   const hc = e.target.closest('#hand .card'), pm = e.target.closest('#board .perm');
+  if (S.paying) return;
   if (pm && (pm.classList.contains('manasrc') || pm.classList.contains('reserved')) && !permOpts(pm).length) {
     if (!pm.classList.contains('reserved')) tapForMana(pm);
     return;
   }
   closePop();
-  if (hc && handOpts(hc.dataset.name).length) { S.manualOnce = e.shiftKey || e.altKey; return playGesture(hc, handOpts(hc.dataset.name)); }
+  if (hc && handOpts(hc.dataset.name).length) return playGesture(hc, handOpts(hc.dataset.name));
   if (pm && permOpts(pm).length) {
     const d = myDecision(), idxs = permOpts(pm);
     const risky = idxs.some(i => /sacrific|discard|exile/i.test(d.refs[i].ability || d.options[i]));
@@ -1862,6 +2139,7 @@ function markFocusable() {
 document.addEventListener('focusin', e => { const c = e.target.closest?.('[data-name]'); if (c && S.cards[c.dataset.name]) showPreview(c.dataset.name); });
 
 document.addEventListener('contextmenu', e => {
+  if (S.paying) { e.preventDefault(); payCancel(); return; }
   const ui = S.ui, pm = e.target.closest('#board .perm');
   if (ui && pm && canAct()) {  // undo a selection that has not been sent yet
     const oid = +pm.dataset.oid;
@@ -1925,7 +2203,7 @@ document.addEventListener('pointerover', e => {
   }
   if (!drag) {
     const hcard = e.target.closest('#hand .card'), pcard = e.target.closest('#board .perm.activatable'), mitem = e.target.closest('#pop [data-opt]');
-    showTaps(hcard ? tapsFor(handOpts(hcard.dataset.name)) : pcard ? tapsFor(permOpts(pcard)) : mitem ? tapsFor([+mitem.dataset.opt]) : null);
+    showTaps(S.paying ? payingSuggestion() : hcard ? tapsFor(handOpts(hcard.dataset.name)) : pcard ? tapsFor(permOpts(pcard)) : mitem ? tapsFor([+mitem.dataset.opt]) : null);
   }
   const c = e.target.closest('.card[data-name], .sitem[data-name], .dline[data-name]');
   const hc = e.target.closest('#hand .card');
@@ -1935,8 +2213,8 @@ document.addEventListener('pointerover', e => {
     cards.forEach((x, j) => x.style.setProperty('--sx', j === k ? '0px' : `${j < k ? -14 : 14}px`));
   } else if (!e.target.closest('#hand')) $$('#hand .card').forEach(x => x.style.setProperty('--sx', '0px'));
   clearTimeout(hoverTimer);
-  if (c && !pinned) hoverTimer = setTimeout(() => showPreview(c.dataset.name), hc ? 160 : 300);
-  else if (!c) hidePreview();
+  if (c && !pinned && !S.paying) hoverTimer = setTimeout(() => showPreview(c.dataset.name), hc ? 160 : 300);
+  else if (!c || S.paying) hidePreview();
 });
 document.addEventListener('pointerleave', () => $$('#hand .card').forEach(x => x.classList.remove('hover')));
 document.addEventListener('pointerout', e => {  // leaving a hand card for anything outside the hand drops its lift
@@ -1946,7 +2224,7 @@ document.addEventListener('pointerout', e => {  // leaving a hand card for anyth
 function showPreview(name, pin) {
   if (pin) pinned = !pinned;
   const i = S.cards[name], el = $('#hoverprev');
-  if (!i || drag) return;
+  if (!i || drag || $('#spot').classList.contains('big')) return;
   const tl = i.types.join(' ') + (i.subtypes.length ? ' — ' + i.subtypes.join(' ') : '');
   el.innerHTML = cardHtml(name) + `<div class="ptxt"><b>${esc(name)}</b> ${esc(i.cost)}<div>${esc((i.token ? 'Token ' : '') + tl)}${i.power != null ? ` · ${i.power}/${i.toughness}` : ''}</div><div class="ot">${esc(i.text)}</div>${pinned ? '<div class="st">Pinned (right-click again or Esc to unpin)</div>' : ''}</div>`;
   el.classList.add('on');
@@ -1969,6 +2247,7 @@ async function command(c) {
 }
 
 function primary() {
+  if ($('#spot').classList.contains('big')) { S.spotSkip = true; return; }
   if (S.queue.length && S.pumping) { S.skip = true; return; }
   if (inputLocked()) return;
   const P = $('#primary');
@@ -1978,6 +2257,7 @@ function primary() {
   if (a === 'resync') return resync();
   if (a.startsWith('opt:')) { const i = +a.slice(4); if (i >= 0) return act(i); return; }
   if (a === 'autopay') { const d = myDecision(); S.autoRest = true; return act(planPay(d)); }
+  if (a === 'paycommit') return payCommit();
   if (!canAct()) return;
   const ui = S.ui, d = ui.d, s = stateAt(ui.fi);
   if (ui.kind === 'priority') {
@@ -2004,7 +2284,11 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && $('#modal').classList.contains('on') && S.gid && !$('#fNew')) { $('#modal').classList.remove('on'); return; }
   if (e.key === 'Escape' && $('#pop').classList.contains('on')) { closePop(); return; }
   const pm = $('#pop').classList.contains('on') && $('#pop')._mana;
-  if (pm && pm.colors.includes(e.key.toUpperCase()) && !e.ctrlKey && !e.metaKey) { e.preventDefault(); reserveMana(pm.oid, e.key.toUpperCase()); return; }
+  if (pm && pm.colors.includes(e.key.toUpperCase()) && !e.ctrlKey && !e.metaKey) { e.preventDefault(); (pm.cb || reserveMana)(pm.oid, e.key.toUpperCase()); return; }
+  if (S.paying && !$('#modal').classList.contains('on')) {
+    if (e.key === 'Escape') { e.preventDefault(); payCancel(); return; }
+    if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); payCommit(); return; }
+  }
   if (e.key === 'Escape' && $('#menu').classList.contains('on')) { $('#menu').classList.remove('on'); return; }
   if (e.key === 'Escape' && pinned) { pinned = false; hidePreview(); return; }
   if (e.key === 'Escape' && $('#logdrawer').classList.contains('on')) { toggleLog(false); return; }
@@ -2070,7 +2354,7 @@ muteLabel();
 const HELP = [
   ['Play a land or cast a spell', 'Drag the glowing card up onto the battlefield, or double-click it. One click opens its options (flashback, cycling, modes).'],
   ['Tap a land for mana', 'Click an untapped land at priority. A land with several colours (Drossforge Bridge) asks which: click a pip or press W/U/B/R/G/C. The mana shows in your pool on your plate; click the land again to untap it. Unused mana empties when the step ends.'],
-  ['Paying', 'Your pool pays first, then auto-pay taps the rest. Hover a card: the extra lands it will tap light up, your pool mana says "used". Hold Shift or Alt/Option when you drop or double-click to pick every land yourself (Space: auto-pay the rest).'],
+  ['Paying', 'A spell you play waits beside the stack with its cost as pips; nothing is paid yet. Click lands to tap them (each fills a pip) or press Auto pay (Space/Enter). Esc, right-click or Cancel puts the card back. Floating mana and lands you tapped beforehand fill pips first; the lands auto pay would use glow. Settings: "Auto-pay without asking" casts at once.'],
   ['Target', 'Click a glowing (cyan) creature, player plate or stack item. Or drop a targeted spell right onto its target.'],
   ['Attack', 'Click your creatures (or drag them forward), A for all, then Space. Right-click undoes one.'],
   ['Block', 'Drag your creature onto an attacker, or click yours then theirs. Space confirms.'],
@@ -2078,7 +2362,7 @@ const HELP = [
   ['Auto-pass stops', 'The small bars under each step in the middle strip: gold for your turn, blue for theirs.'],
   ['Everything else', 'O lists every option the engine offers. Number keys pick listed choices. Esc cancels a menu or selection.'],
   ['Read a card', 'Hover it for a big preview; right-click pins it (Esc unpins). Click a deck name for both decklists.'],
-  ['The opponent', 'Their moves replay one by one; click or Space skips. Their last move shows on their plate; L opens the full log.'],
+  ['The opponent', 'Their moves replay one by one; click or Space skips. Choices that matter (Brainstorm, Ponder, scry, Delver, mulligans, targets, modes, blocks, sideboarding) stay in a centred spotlight for a few seconds (Settings: short, normal, long); click or Space continues. Hidden cards stay hidden: you see how many and where they went. Their last move shows on their plate; L opens the full log.'],
   ['Report a problem', '⚑ next to their last move, or the Menu: "Bot played wrong" or "Bug: engine / UI". It becomes a public GitHub issue with only what you could see.'],
 ];
 function openHelp() {
@@ -2095,7 +2379,7 @@ function openHelp() {
 const COACH = [  // first-game tips
   ['#hand', 'Your hand. Drag a glowing card up to play it, or double-click it.'],
   ['#primary', 'The main button says what happens next. Space presses it.'],
-  ['#lands0', 'Click a land to tap it for mana; casting spends that mana first.'],
+  ['#lands0', 'Your lands. Play a spell and it waits for payment: click lands to tap them, or press Auto pay (Space). Esc cancels.'],
   ['#rail', 'Where auto-pass stops: click the small bars under a step.'],
   ['#bLog', 'The game log (L). The ⚑ next to the opponent\'s last move reports a bad bot play.'],
 ];
@@ -2363,7 +2647,8 @@ function openSettings() {
   setTimeout(() => m.querySelector('input, button')?.focus(), 0);
   m.innerHTML = `<div class="mbox"><h2>Settings</h2><form id="fSet">
     <label>Opponent replay speed</label><span class="seg">${Object.keys(SPEEDS).map(k => `<label><input type="radio" name="speed" value="${k}" ${PREF.speed === k ? 'checked' : ''}>${k === 'instant' ? 'instant' : k + '×'}</label>`).join('')}</span>
-    <label>Mana</label><label class="note"><input type="checkbox" name="manualPay" ${PREF.manualPay ? 'checked' : ''}> pay mana by hand (default: auto-pay)</label>
+    <label>Paying</label><label class="note"><input type="checkbox" name="autoPayNoAsk" ${PREF.autoPayNoAsk ? 'checked' : ''}> Auto-pay without asking (cast at once; default: a paying step)</label>
+    <label>Opponent's choices</label><span class="seg">${[[1500, 'short'], [2800, 'normal'], [4500, 'long']].map(([v, l]) => `<label><input type="radio" name="spotMs" value="${v}" ${+PREF.spotMs === v ? 'checked' : ''}>${l}</label>`).join('')}</span>
     <label>Attacks</label><label class="note"><input type="checkbox" name="confirmEmptyAttack" ${PREF.confirmEmptyAttack ? 'checked' : ''}> confirm "No attacks" when creatures could attack</label>
     <label>Targets</label><label class="note"><input type="checkbox" name="autoTarget" ${PREF.autoTarget ? 'checked' : ''}> pick the only legal target automatically</label>
     <label>Sound</label><span><label class="note"><input type="checkbox" name="sound" ${PREF.sound ? 'checked' : ''}> sounds on</label> <input type="range" name="volume" min="0" max="1" step="0.1" value="${PREF.volume ?? 0.6}" title="Volume"></span>
@@ -2374,7 +2659,7 @@ function openSettings() {
   const f = $('#fSet');
   f.onsubmit = e => {
     e.preventDefault();
-    PREF.speed = f.speed.value; PREF.manualPay = f.manualPay.checked; PREF.confirmEmptyAttack = f.confirmEmptyAttack.checked;
+    PREF.speed = f.speed.value; PREF.autoPayNoAsk = f.autoPayNoAsk.checked; PREF.spotMs = +f.spotMs.value; PREF.confirmEmptyAttack = f.confirmEmptyAttack.checked;
     PREF.autoTarget = f.autoTarget.checked; PREF.sound = f.sound.checked; PREF.volume = +f.volume.value; S.fullControl = f.full.checked;
     savePref(); m.classList.remove('on'); renderDock();
   };

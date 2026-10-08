@@ -496,3 +496,33 @@ button:disabled{cursor:default}
 #pop .pips .pip:hover{outline:2px solid var(--me)}
 .floatwarn{color:var(--me)}
 #board .perm.may-target>.card{box-shadow:0 0 0 2px var(--cyan),0 0 16px #5fd4e588}
+
+/* the opponent's choices: a centred spotlight that stays */
+#spot.big{pointer-events:auto;cursor:pointer;background:radial-gradient(ellipse 60% 70% at 50% 50%,#000c 0%,#0008 65%,#0003 100%);flex-direction:row;gap:26px}
+#spot.big .card{--w:clamp(180px,calc(var(--u)*40),300px)}
+#spot .spotbox{max-width:min(460px,46vw);background:#0b0e14f0;border:1px solid #6fa8ff77;border-radius:14px;padding:16px 18px;box-shadow:0 20px 60px #000c}
+#spot .spotbox.atme{border-color:var(--bad)}
+#spot .spotbox .st{font-weight:800;font-size:18px;color:#dce8ff;margin-bottom:8px}
+#spot .spotbox .sl{font-size:16px;color:var(--text);margin:4px 0}
+#spot .spotbox .bar{height:3px;background:#ffffff1a;border-radius:2px;margin-top:12px;overflow:hidden}
+#spot .spotbox .bar i{display:block;height:100%;background:#6fa8ff;transform-origin:left;animation:spotbar linear forwards}
+@keyframes spotbar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+#spot .spotbox .hint{font-size:11px;color:var(--muted);margin-top:6px}
+/* the paying step */
+#paying{position:fixed;right:18px;top:50%;translate:0 -55%;z-index:330;width:clamp(200px,17vw,250px);background:#10141bf2;border:1px solid var(--me);border-radius:14px;padding:12px;box-shadow:0 18px 50px #000d,0 0 30px #f0c86933;display:flex;flex-direction:column;gap:8px;animation:chipin .2s var(--ease)}
+#paying .ph{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--me)}
+#paying .card{--w:100%;width:100%;translate:0 -4px;box-shadow:0 14px 30px #000b}
+#paying .pips{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+#paying .pip{width:28px;height:28px;border-radius:50%;display:inline-grid;place-items:center;font-weight:800;font-size:13px;color:#111;border:2px dashed #fff8;background:#2a2f3a;color:#ddd}
+#paying .pip.gen{background:#3a3f4a}
+#paying .pip.W{border-color:#f6f0d0}#paying .pip.U{border-color:#9ccfee}#paying .pip.B{border-color:#a99e9a}#paying .pip.R{border-color:#f29b7c}#paying .pip.G{border-color:#94c9a0}#paying .pip.C{border-color:#cbc2bf}
+#paying .pip.paid{border:2px solid #000a;color:#111;animation:pipin .25s var(--ease)}
+#paying .pip.paid.W{background:#f6f0d0}#paying .pip.paid.U{background:#9ccfee}#paying .pip.paid.B{background:#a99e9a}#paying .pip.paid.R{background:#f29b7c}#paying .pip.paid.G{background:#94c9a0}#paying .pip.paid.C{background:#cbc2bf}
+@keyframes pipin{from{scale:1.5}to{scale:1}}
+#paying .pstep{font-size:12.5px;color:var(--muted);text-align:center}
+#paying .pbtns{display:flex;flex-direction:column;gap:6px}
+#paying .pbtns button{flex:1;font-size:12.5px;padding:7px 6px}
+#paying kbd{font-size:10px;opacity:.7}
+#hand .card.casting{opacity:.18;filter:grayscale(.6)}
+#board .perm.paysrc{cursor:pointer}
+#board .perm.paysrc>.card{box-shadow:0 0 0 2px #f0c869cc,0 0 16px #f0c86977}

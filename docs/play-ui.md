@@ -27,14 +27,16 @@ The replay viewer (`/`) and its own live mode are unchanged. A finished game is 
 
 | what | how |
 |---|---|
-| play a land, cast a spell | drag the glowing card above the hand, or double-click it. A single click opens a menu of its options (modes, flashback, cycling...). |
+| play a land, cast a spell | drag the glowing card above the hand, or double-click it. A single click opens a menu of its options (modes, flashback, cycling...). A spell then waits in the **paying step** (below) |
+| pay for it | the card waits next to the stack with its cost as pips, nothing sent yet. Click lands (or other sources) to tap them: each fills a pip, a Bridge asks for its colour when it matters. Or **Auto pay** (button, **Space** or **Enter**). Once every pip is filled the spell is cast. **Esc**, right-click or Cancel puts the card back |
 | cast and target in one go | drop a targeted spell onto the creature or player |
 | activate an ability | click the permanent (blue glow) → menu; double-click if it has one ability |
 | flashback, plotted cards | click the glowing Grave / Exile counter on your plate |
 | choose a target | click a glowing (cyan) permanent, player plate or stack item; the arrow follows the pointer |
 | tap a land for mana | click an untapped land (or other plain mana source) at priority. A source with several colours (Drossforge Bridge) asks which: click a pip or press **W/U/B/R/G/C**. It turns sideways and its mana shows as a pip in the pool on your plate; click it again to untap it |
 | see what a spell will tap | hover or drag a castable card: your pool's pips say "used" and only the extra lands auto-pay will tap light up ("tap", "tap ×2" on a stack); anything it would sacrifice is marked red |
-| pay by hand for one spell | hold **Shift** or **Alt/Option** when you drop or double-click it: each pay step waits for a click on a glowing source; **Space** "Auto-pay the rest" finishes it. Settings → "pay mana by hand" does this for every spell |
+| cast at once, auto-paid | Settings → "Auto-pay without asking" (off by default) skips the paying step |
+| the opponent's choices | Brainstorm, Ponder, scry, Delver's reveal, mulligans, targets, modes, X, blocks, sacrifices and their sideboarding show in a centred spotlight with the card for a few seconds (Settings: short 1.5 s, normal 2.8 s, long 4.5 s); a click or **Space** continues |
 | attack | click creatures (or drag them forward), **A** all attack, then **Space** "Attack with N" |
 | block | drag your creature onto an attacker (or click yours, then theirs); **Space** "Block (N)" |
 | undo before confirming | right-click a selected attacker or assigned blocker (right-click an attacker drops all its blockers); **Esc** clears every selection. Nothing is undone once sent: no server-side undo |
@@ -90,7 +92,7 @@ The research brief behind this (2026-10-08) looked at endstep.cc (the closest an
 3. **The bot is instant, its moves must not be.** Replay them as a queue: spells fly into a spotlight and hold ~1 s, lands and attacks get a beat, the whole turn stays within a few seconds, a click skips. Input for a decision only after the events before it played (Arena's "server ahead of the animations" is the anti-pattern). Hearthstone's lesson: animation must never cost the player time ([Blizzard forum](https://us.forums.blizzard.com/en/hearthstone/t/abuse-of-animations/108732)).
 4. **Direct manipulation.** Hover lift ~120-150 ms, preview with full Oracle text, playable glow (never grey out), drag threshold 6-8 px, valid drop zones glow, snap back on an invalid drop, double-click as the alternative (Arena/MTGO convention), popover menus anchored to the card for multi-option cards.
 5. **Targeting arrows** end at the nearest card edge (endstep), legal targets glow, players are targeted through their plate, stack items show arrows to their targets.
-6. **Mana: auto-pay by default**, manual on demand (settings).
+6. **Mana: a deliberate paying step** (MTG Arena): a spell waits until you tap lands or press Auto pay; casting at once is an opt-in setting.
 7. **Combat is batched in the client and streamed to the server**: toggle attackers, "All attack"; drag blockers onto attackers with lines; a rough outcome preview (skulls, "→ 11 after combat") in the spirit of Runeterra and Slay the Spire's enemy intents ([StS intents](https://sts2.untapped.gg/guides/how-to-read-enemy-intent)); damage assignment starts from a legal split, editable (endstep removed its confusing Auto-Assign).
 8. **Confirm guards that stay armed**: passing with floating mana, "No attacks" while creatures could attack (endstep: the guard now stays armed until used or cancelled).
 9. **Board readability**: lands grouped with a count, big P/T badges with damage shown, tapped = rotated, all zone counts visible, a stack column, life with animated change and red at ≤ 5.
@@ -126,7 +128,7 @@ Drop and double-click mean "play it": they take only a land play or a normal cas
 |---|---|
 | priority | drag / double-click / menu; primary button passes |
 | target | glowing targets, arrow from the spell or ability; "No target" as the button when allowed |
-| pay_mana | auto-pay; manual mode: click glowing sources, button "Auto-pay" |
+| pay_mana | answered from the paying step's plan; an engine pay step the client did not plan (X spells) waits: click glowing sources, or "Auto-pay the rest" |
 | declare_attacker / declare_blocker | batched, see above |
 | assign_damage | overlay with −/+ per recipient, starts from the split that kills most blockers in order |
 | choose_card, sacrifice, exile_from_graveyard, ... | card browser overlay (board peekable), text options ("Find nothing") below the cards; tapped permanents are tilted and say so, identical names get "permanent 2 of 3" |
@@ -162,7 +164,29 @@ The engine has no "tap a land for mana" action outside a payment: its priority o
 - Clicking an untapped land (any permanent whose card has a plain `{T}: Add` ability; the server sends its colours as `cards[name].mana`) puts `{oid, colour}` into the client's pool. The land shows sideways with its colour pip, and the pool on your plate shows the pip and when it empties ("empties end of main 1"). Clicking the land again takes it back. Sources that sacrifice themselves keep using the engine's own mana option (from their menu), and that mana floats in the engine's pool for real. A land that also has other abilities (Twisted Landscape) gets "Tap for mana" in its menu.
 - Paying (`planPay`): the engine's floating mana goes first. Then your reserved mana: the same source, in the reserved colour if the cost can use it, else its other colour. Then the sources the tap preview showed for this cast (`S.payPlan`), then the usual auto-pay. The preview subtracts the pool: pool pips say "used" and only the extra lands light up.
 - The pool empties at the end of the step, like real mana. The land was never tapped, so it simply stays untapped, and a toast says so. While the pool holds mana, auto-pass always stops. Pressing Space first asks "Pass? N mana empties", and the prompt warns that the pool empties when the step ends.
-- Manual payment: Shift or Alt/Option on a drop or double-click makes that one spell's pay steps interactive. Click a glowing source to pay with it; "Auto-pay the rest" (Space) finishes the payment with the pool and auto-pay.
+
+### The paying step (MTG Arena style)
+
+Nothing is paid automatically. Playing a spell or an ability with a mana cost (drop, double-click or its menu) does not send anything: the card goes into a paying panel next to the stack, its hand slot fades, and its cost shows as pips (generic first, as printed).
+
+- **What the client knows before sending.** For each cast or activation, the server simulates it on a copy (`live_proto.tap_preview`, the same run that makes the tap preview) and adds to the option's ref:
+  - `cost`: the mana still to pay at the first pay step, e.g. `{1}{R}`;
+  - `targets`: the refs of the first target decision before payment;
+  - `before_pay`: other decisions on the way. A `choose_x` there means the cost depends on X; such spells skip the panel, and their engine pay steps wait for clicks instead.
+- **Target first.** A targeted spell that was not dropped onto a target asks for it in the panel (the legal targets glow, your own permanents too); then the pips.
+- **Filling pips.** The engine's floating mana and lands you tapped before casting fill pips first. A click on an untapped source fills its colour's pip, else a generic one. A Drossforge Bridge asks B or R only when the two would fill different pips. A tapped-for-this-payment land shows sideways with its pip; clicking it again takes it back. The lands Auto pay would use for the open pips glow.
+- **Commit.** When the last pip is filled (or on Auto pay) the client sends the cast, answers the target decision with the chosen target, then answers each engine pay step from the plan (`planPay`): your picked sources (that source, that colour), then the preview's lands, then the auto-pay order. Decisions on the way that the plan does not cover (a sacrifice for Eviscerator's Insight) stop for you as usual.
+- **Cancel** (Esc, right-click, the Cancel button) only clears the client's panel, so no engine undo is ever needed.
+- **Opt-in:** Settings → "Auto-pay without asking" casts at once and auto-pays (the old behaviour).
+
+### The opponent's choices in the spotlight
+
+The bot's moves still replay in order, but the choices that matter get a centred spotlight with the card's art that stays for `PREF.spotMs` (Settings: short 1.5 s, normal 2.8 s, long 4.5 s) or until a click or Space (which ends only the spotlight, not the whole replay):
+
+- casts with a target ("Opponent casts Counterspell → your Lightning Bolt"), modes, X, Delver's reveal, Ponder's shuffle, blocks (all of a combat's blocks in one), sacrifices, a mulligan with its bottoms, and at the start of games 2 and 3 how many cards they sideboarded;
+- their hidden choices as the server describes them (`live_proto.hidden_summary`): counts and places only, never a card the player cannot see. Examples: "Brainstorm: puts 2 cards from hand back on top", "Ponder: puts 3 cards back on top in a chosen order, does not shuffle", "Scry 1: puts a card on the bottom", "searches the library and finds a card". Consecutive choices of one spell become one spotlight.
+
+A plain keep of seven, and casts without a target, keep the short spotlight.
 
 The difference from real floating mana: no mana burn (none exists), and an unused reservation leaves the land untapped instead of tapped. Mana abilities with a cost (filters) are not reservable.
 
@@ -235,4 +259,5 @@ Combat damage and life changes are not in the engine's log; the live layer adds 
 - Card art comes from Scryfall on first sight; until it arrives a card shows a text face. When Scryfall is unreachable the client backs off for two minutes (text faces, no waiting before the opponent's spells).
 - A game lives only in the server's memory: after a server restart the page says so and offers a new game.
 - Phone layout is not done; the target is desktop 1280×720 and up.
+- X spells skip the paying panel (their cost is known only after X): their engine pay steps wait for clicks, and they cannot be cancelled once X is chosen. Hybrid or phyrexian pips never appear in the panel (the engine resolves them into plain pips or a cast mode first).
 - Tapping a plain land at priority is a client-side reservation (see *Mana*): an unused one leaves the land untapped when the step ends.

@@ -35,7 +35,7 @@ from .backend import engine_name, game_class
 from .engine import DECKS, SIDEBOARDS, expand, plan_for, postboard
 from .match import MATCHUPS, game_args, matchup_decks
 from .live_issues import MAX_ISSUES_PER_GAME, FilingError
-from .live_proto import add_tap_previews, auto_pay_index, combat_and_life_lines, decision_cards, option_ref, option_refs, parse_events, status, visible_ids
+from .live_proto import add_tap_previews, auto_pay_index, hidden_summary, combat_and_life_lines, decision_cards, option_ref, option_refs, parse_events, status, visible_ids
 from .engine.cards import CARDS
 from .replay import DECK_TITLES, FORMAT, _card_info, snapshot, visible_events
 from .rl.features import PUBLIC_KINDS
@@ -202,7 +202,10 @@ class LiveGame:
                 o = d.options[choice]
                 shown, refs = [options[choice]], [option_ref(d.kind, o.label, o.key, o.value, visible_ids(state))]
             else:
-                shown, refs = [f"(hidden {d.kind.replace('_', ' ')})"], [{"type": "hidden"}]
+                # Only what the player may know: counts, top/bottom/order, never a hidden card.
+                o = d.options[choice]
+                summary = hidden_summary(d.kind, d.prompt, o.label, o.value, len(d.options))
+                shown, refs = [f"(hidden {d.kind.replace('_', ' ')})"], [{"type": "hidden", **summary}]
             self.view_to_full.append(len(self.full_frames) - 1)
             self._view_frame(state, {"player": d.player, "kind": d.kind, "prompt": "", "options": shown, "refs": refs, "chosen": 0})
             self._take(choice)
@@ -311,7 +314,11 @@ class LiveGame:
         wins = [sum(1 for _, w in results if w == p) for p in (0, 1)]
         over = max(wins) >= 2 or len(results) >= 3
         last_loser = None if not results or results[-1][1] is None else 1 - results[-1][1]
-        return {"game_no": self.game_no, "results": results, "wins": wins, "over": over, "you_choose_play": last_loser == self.seat, "plan": self.plan}
+        out = {"game_no": self.game_no, "results": results, "wins": wins, "over": over, "you_choose_play": last_loser == self.seat, "plan": self.plan}
+        if self.game_no > 1:  # the bot's sideboarding: how many cards it swapped (public in a match), not which
+            mine, theirs = matchup_decks(self.matchup)[self.seat], matchup_decks(self.matchup)[1 - self.seat]
+            out["opp_swaps"] = plan_for(theirs, mine).swaps
+        return out
 
     # -- feedback (the hosted-play plan: flag + describe, a short survey)
     def flag(self, req: dict) -> dict:
