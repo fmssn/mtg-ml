@@ -45,7 +45,8 @@ def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = O
         return game.featurize(player, state_dim, option_dim, features)
     d = game.decision
     feats = state_features(game, player, features)
-    feats.append(f"seat:{player}")
+    if features < 7:
+        feats.append(f"seat:{player}")
     feats.append(f"decision:{d.kind}")
     state = sorted({_h(f, state_dim) for f in feats})
     ents, index = entity_features(game, player, features)
@@ -87,6 +88,7 @@ PUBLIC_KINDS = frozenset(
         "declare_attacker",
         "declare_blocker",
         "assign_damage",
+        "assign_damage_amount",
         "mulligan",
     }
 )
