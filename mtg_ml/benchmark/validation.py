@@ -74,6 +74,7 @@ def _verify_case(puzzle, case, decks, engines):
     scenario_path = reference(puzzle.path, case["scenario"], "cases.scenario")
     evidence_path = reference(puzzle.path, case["evidence"], "cases.evidence")
     scenario, evidence = read_json(scenario_path), read_json(evidence_path)
+    require(scenario.get("group_id") == puzzle.data["source_group_id"], "puzzle.source_group_id", "scenario source-group mismatch")
     witnesses = case.get("witnesses")
     if witnesses is None:
         actions = [s["selector"] for s in scenario.get("demonstration", [])] or scenario.get("continuation", [])
@@ -116,7 +117,8 @@ def _verify_case(puzzle, case, decks, engines):
             traces.append({"initial": initial_view, "trace": trace, "finish": observe(g, viewer)})
         require(all(t == traces[0] for t in traces), "parity", "engine inputs/actions/events/outcomes diverged")
         checked.append({"actions": len(actions), "trace_sha256": digest(traces[0])})
-    return {"case": case["id"], "witnesses": checked}
+    return {"case": case["id"], "witnesses": checked, "initial_sha256": digest({"view": traces[0]["initial"],
+                                                                            "decision": traces[0]["trace"][0] | {"chosen": None, "events": []}})}
 
 
 def validate(manifest_path, engines=("python", "native"), registry=None):
@@ -165,6 +167,7 @@ def validate(manifest_path, engines=("python", "native"), registry=None):
                 response = case["response_policy"]
                 require(response["id"] in bots and bots[response["id"]]["parameters_sha256"] == response["parameters_sha256"], "response_policy", "freeze mismatch")
                 cases.append(_verify_case(puzzle, case, d["decks"], engines))
+            require(len({c["initial_sha256"] for c in cases}) == 1, "puzzle.cases", "cases do not share initial player information")
             report["puzzles"].append({"id": puzzle.data["id"], "cases": cases})
         report["status"] = "complete"
         report["scope"] = "foundation-validation; response-policy branch coverage and release corpus certification deferred"

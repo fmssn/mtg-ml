@@ -102,11 +102,10 @@ def validate_result(d):
         require(c["technical_case_errors"] == sum(r["mode"] == mode and r["status"] == "error" for r in d["puzzle_rows"]), "counts", "case error count mismatch")
     all_done = seen_games == expected_games and seen_puzzles == expected_puzzles and all(r["status"] == "completed" for r in d["game_rows"]) and all(r["status"] != "error" for r in d["puzzle_rows"])
     require(d["status"] != "complete" or all_done, "status", "technical errors or missing rows cannot be complete")
-    eligible = d["status"] == "complete" and d["panel"] == "full" and candidate["information_contract"] == FAIR
+    require(set(d["aggregate"]) == set(d["modes"]), "aggregate", "mode mismatch")
     for aggregate in d["aggregate"].values():
-        require(aggregate.get("ci95") is None, "aggregate.ci95", "intervals not implemented in foundation")
-        if not eligible:
-            require(all(v is None for v in aggregate.values()), "aggregate", "partial/privileged/invalid/incomplete primary scores must be null")
+        require(set(aggregate) == {"game_score", "puzzle_success", "ci95"} and all(v is None for v in aggregate.values()),
+                "aggregate", "primary scores and intervals are deferred; foundation fields must be null")
 
 
 def build_result(manifest, candidate, game_rows, puzzle_rows=(), *, engine="python", code_revision,
