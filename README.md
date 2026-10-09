@@ -103,7 +103,7 @@ Bot vs bot, 200 matches each (2026-10-07, 8-core dev Mac, native engine; re-run 
 
 ## Scripted bots
 
-`mtg_ml/bots/` holds one heuristic bot per deck (six, registered in `BOTS`) and a search bot, used as fixed baseline opponents. Each bot scores every legal option and takes the best one.
+`mtg_ml/bots/` holds one heuristic bot per deck (six, registered in `BOTS`) and a search bot, used as fixed baseline opponents. Each deck bot scores every legal option and takes the best one; the search bot (`bots/search.py`) plays each of its base bot's top options out to the end, with the scripted bots on both sides, and picks the best average result.
 
 - **Jund** (`jund.py`):
   - plays Bridges early, while entering tapped costs nothing;
@@ -199,7 +199,7 @@ Throughput on one CPU core of h100-private (measured 2026-10-05, see [docs/nativ
 ## Layout
 
 ```
-mtg_ml/    the package: engine/ (rules, cards.toml, decks), bots/, rl/ (masked PPO), review/, hosted/, expert/, plus match.py, play.py, replay.py, trace.py, difftest.py
+mtg_ml/    the package: engine/ (rules, cards.toml, decks), bots/, rl/ (masked PPO), benchmark/, review/, hosted/, expert/, plus match.py, play.py, replay.py, trace.py, difftest.py
 native/    Rust port of the engine (pyo3 / maturin crate mtg_ml_native)
 apps/      play, expert-review and training-dashboard web clients
 tools/     benchmarks, audits and campaign scripts (not imported by the package)
