@@ -14,7 +14,7 @@ import sys
 
 import pytest
 
-from benchmark_fixtures import fixture
+from benchmark_fixtures import fixture, revision
 from mtg_ml.benchmark import build_result, episodes
 from mtg_ml.benchmark import stats
 from mtg_ml.benchmark.__main__ import main
@@ -25,7 +25,7 @@ from mtg_ml.benchmark.tactics import SelectorFactory, attempt_case, ResponseFact
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINES = pytest.mark.parametrize("engine", ["python", "native"], indirect=True)
-REVISION = "a" * 40
+REVISION = revision()  # the archive tests need a revision `git archive` can resolve
 
 
 # -- statistics ---------------------------------------------------------------------------------
@@ -330,7 +330,7 @@ def test_resume_reuses_only_clean_chunks_and_never_retries_errors(dev, tmp_path)
     with pytest.raises(SystemExit):
         run(dev, tmp_path / "a.json", "--resume")
     stored = read_json(tmp_path / "a.json")
-    assert stored["status"] == "incomplete" and stored["runtime"]["resumed_chunks"] == [] or len(stored["runtime"]["resumed_chunks"]) <= 1
+    assert stored["status"] == "incomplete" and stored["runtime"]["resumed_chunks"] == []  # the first chunk is the errored one
     assert all(v is None for v in stored["aggregate"]["greedy"].values())
     assert stored["counts"]["greedy"]["technical_game_errors"] == 1 and stored["puzzle_rows"] == []
     assert [r["reason"] for r in stored["game_rows"] if r["status"] == "error"] == ["injected"]
@@ -393,7 +393,7 @@ def test_passing_through_is_a_defect_unless_passing_is_a_reviewed_line(tmp_path)
 def test_injected_faults_leave_incomplete_runs_with_null_scores(dev, tmp_path):
     from mtg_ml.benchmark.release import _check_faults
     from mtg_ml.benchmark.tactics import specialist_registry
-    out = _check_faults(dev, tmp_path / "work", specialist_registry(REVISION), "python", 2)
+    out = _check_faults(dev, tmp_path / "work", specialist_registry(REVISION), "python", 2, {"status": "complete", "errors": [], "native_build": None})
     assert out["passed"], out["problems"]
     assert set(out["faults"]) == {"exception", "illegal-index", "exception-when-losing"}
     for name, fault in out["faults"].items():
