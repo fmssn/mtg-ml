@@ -112,7 +112,7 @@ const fmt={
 };
 const state={live:null,hist:null,hidden:new Set(),metric:null,xaxis:'games',sort:{key:'date',dir:-1},filter:'',open:new Set(),view:'live'};
 const colors={};let colorN=0;
-function nameRuns(runs){const n={};for(const r of runs)n[r.label]=(n[r.label]||0)+1;for(const r of runs)r.dn=n[r.label]>1&&r.campaign?r.campaign.replace(/^overnight-/,'')+' · '+r.label:r.label}
+function nameRuns(runs){const n={};for(const r of runs)n[r.label]=(n[r.label]||0)+1;for(const r of runs)r.dn=r.handle||(n[r.label]>1&&r.campaign?r.campaign.replace(/^overnight-/,'')+' · '+r.label:r.label)}
 const colorOf=id=>colors[id]??(colors[id]=PAL[colorN++%PAL.length]);
 
 /* ---------- theme ---------- */
@@ -237,13 +237,13 @@ function renderHistory(){
   const el=$('#history'),H=state.hist;
   if(!H){el.innerHTML='<div class="empty">Loading ledger…</div>';return}
   let rows=H.runs.slice();
-  const q=state.filter.toLowerCase();if(q)rows=rows.filter(r=>[r.id,r.parent,r.change,r.flags,r.verdict].join(' ').toLowerCase().includes(q));
+  const q=state.filter.toLowerCase();if(q)rows=rows.filter(r=>[r.id,r.handle,r.parent,r.change,r.flags,r.verdict].join(' ').toLowerCase().includes(q));
   const {key,dir}=state.sort;rows.sort((a,b)=>{const x=a[key],y=b[key];if(x==null&&y==null)return 0;if(x==null)return 1;if(y==null)return -1;return (x>y?1:x<y?-1:0)*dir});
   let h=`<div class="toolbar"><h2 style="flex:1;border:0">Experiments</h2><input id="q" placeholder="filter" value="${esc(state.filter)}"><span class="note">${rows.length} of ${H.runs.length} · from ledger.jsonl</span></div>
   <div class="grid wide" id="hfigs"></div>
   <div class="tablewrap"><table><thead><tr>${COLS.map(([k,l,n])=>`<th class="${n?'num':''}" data-k="${k}" ${state.sort.key===k?`aria-sort="${state.sort.dir>0?'ascending':'descending'}"`:''}>${l}</th>`).join('')}</tr></thead><tbody>`;
   for(const r of rows){
-    h+=`<tr class="row" data-id="${esc(r.id)}"><td class="mono">${esc(r.date)}</td><td>${esc(r.id)}</td><td class="note">${esc(r.parent||'–')}</td><td class="num">${r.games?fmt.big(r.games):'–'}</td><td class="num">${fmt.pct(r.sampled)}</td><td class="num">${fmt.pct(r.greedy)}</td><td class="num">${fmt.n(r.elo,1)}</td><td><span class="pill ${r.verdict_class}">${esc((v=>v.length>24?v.slice(0,23)+'…':v)((r.verdict||'–').split(/[:(;]/)[0].trim()))}</span></td></tr>`;
+    h+=`<tr class="row" data-id="${esc(r.id)}"><td class="mono">${esc(r.date)}</td><td>${r.handle?`<b>${esc(r.handle)}</b> <span class="note">${esc(r.id)}</span>`:esc(r.id)}</td><td class="note">${esc(r.parent||'–')}</td><td class="num">${r.games?fmt.big(r.games):'–'}</td><td class="num">${fmt.pct(r.sampled)}</td><td class="num">${fmt.pct(r.greedy)}</td><td class="num">${fmt.n(r.elo,1)}</td><td><span class="pill ${r.verdict_class}">${esc((v=>v.length>24?v.slice(0,23)+'…':v)((r.verdict||'–').split(/[:(;]/)[0].trim()))}</span></td></tr>`;
     if(state.open.has('h:'+r.id))h+=`<tr class="detail"><td colspan="8"><div class="kv"><span>change</span><span>${esc(r.change||'–')}</span><span>verdict</span><span>${esc(r.verdict||'–')}</span><span>flags</span><span>${esc(r.flags||'–')}</span><span>code</span><span>${esc(r.code||'–')} ${r.engine?'· engine: '+esc(r.engine):''}</span><span>results</span><span>${esc(Object.entries(r.results||{}).map(([k,v])=>k+' = '+JSON.stringify(v)).join('\n'))}</span><span>archive</span><span>${esc(r.archive||'–')}</span></div></td></tr>`}
   h+='</tbody></table></div>';
   el.innerHTML=h;
