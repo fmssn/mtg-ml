@@ -712,10 +712,11 @@ impl Eng {
         let reduction = st.cost_reduction(p, card);
         let cname = st.c(card).name();
         let add_sac = st.mode_additional_sac(card, mode);
+        let pay_filter = st.pay_filter(p, card, mode);
         if base.x != 0 {
             let mut options = vec![];
             let mut x = 0;
-            while st.cost_feasible(p, &Remaining::of(&base.with_x(x).reduced(reduction)), add_sac, &[], None, &[]) {
+            while st.cost_feasible(p, &Remaining::of(&base.with_x(x).reduced(reduction)), pay_filter, &[], None, &[]) {
                 options.push(opt(format!("X={x}"), vec![s("x"), KI::I(x as i64)], Val::Int(x)));
                 x += 1;
             }
@@ -731,7 +732,7 @@ impl Eng {
         let st = self.s();
         let xv = st.stack[st.stack_pos(sid).unwrap()].x;
         let cost = base.with_x(xv).reduced(reduction);
-        self.pay_mana(p, Remaining::of(&cost), add_sac, &[], cname)?;
+        self.pay_mana(p, Remaining::of(&cost), pay_filter, &[], cname)?;
         let life = if mode == Method::Phyrexian { d.phyrexian_life } else if mode == Method::Flashback { d.flashback_life } else { 0 };
         if life != 0 {
             let st = self.s();

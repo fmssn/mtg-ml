@@ -1830,6 +1830,7 @@ impl State {
                     SacFilter::Mountain => self.is_land(c) && c.face().has_subtype("Mountain"),
                     SacFilter::ArtifactEnchantmentOrToken => c.is_token || self.types(c) & (T_ARTIFACT | T_ENCHANTMENT) != 0,
                     SacFilter::Land => self.is_land(c),
+                    SacFilter::KeepCreature => self.is_creature(c),
                 }
             })
             .collect()
@@ -1956,6 +1957,16 @@ impl State {
         if mode == Method::Bargain { Some(SacFilter::ArtifactEnchantmentOrToken) } else { self.c(ci).face().additional_sac }
     }
 
+    /// `Game._pay_filter`: what `cost_feasible` / `pay_mana` must leave a permanent for.
+    pub fn pay_filter(&self, p: u8, ci: CIdx, mode: Method) -> Option<SacFilter> {
+        let add = self.mode_additional_sac(ci, mode);
+        let d = self.c(ci).face();
+        if add.is_none() && (d.additional_power || d.additional_choose_creature) && !self.players[p as usize].hand.iter().any(|&h| h != ci && self.c(h).face().is_type(T_CREATURE)) {
+            return Some(SacFilter::KeepCreature);
+        }
+        add
+    }
+
     /// `Game._mode_sac`: lands sacrificed instead of (part of) the cost.
     pub fn mode_sac(&self, ci: CIdx, mode: Method) -> Option<(SacFilter, i32)> {
         let d = self.c(ci).face();
@@ -2056,7 +2067,7 @@ impl State {
             }
         }
         let cost = base.with_x(0).reduced(self.cost_reduction(p, ci));
-        self.cost_feasible(p, &Remaining::of(&cost), self.mode_additional_sac(ci, mode), &[], None, &[])
+        self.cost_feasible(p, &Remaining::of(&cost), self.pay_filter(p, ci, mode), &[], None, &[])
     }
 
     /// `Game._power_sources`: creatures `p` controls (deduplicated) and creature cards in hand (by name).
