@@ -43,8 +43,11 @@ DEFAULT_DIM = 1 << 16
 #      of the opponent, and the observable change is featurized (`pv:sim:`)
 #   7: hidden-list own-deck counts, no absolute seat token, uncapped
 #      entities, and simulated previews independent of candidate count.
-FEATURES = 7  # the latest; what new runs train on
-FEATURE_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
+#   8: set 7's hashed features plus exact witnessed opponent-card evidence
+#      for the belief head (`rl.belief`, docs/belief-head.md). Opt-in.
+FEATURES = 7  # the default for new runs; set 8 is opt-in
+FEATURE_VERSIONS = (1, 2, 3, 4, 5, 6, 7, 8)
+BELIEF_FEATURES = 8  # first version with belief evidence
 
 
 def information_contract(features: int) -> str:
