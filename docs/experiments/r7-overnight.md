@@ -133,6 +133,23 @@ launch metadata and hashes to append-only
 must subsequently be transferred to the primary `h100-private` archive without
 overwriting existing IDs, and final results reconciled into both ledgers.
 
+## Wrap-up · October 9
+
+Both arms were stopped by request at 09:32 Berlin with `overnight_host.sh stop`
+(lr075 8,353,792 games, lr150 9,035,776), so the automatic completion archive did
+not run. The watcher had already started the matched panel on `iter_04026`; it
+completed (144/144 cells, 21/21 pairings) and `overnight_campaign.py report`
+rewrote `morning-report.md` as the final report. The final policies were then
+benchmarked on 2,000 games each (`final-eval/` in the campaign directory) and
+against the specialists (`20261009-specialist-benchmark`, PR #72).
+
+The run directories were copied box to box with `rsync` (SSH agent forwarding;
+h100-private2 has no key of its own for h100-private) and archived with
+`archive_run.sh` as `h100-private:~/mtg-ml-checkpoints/20261008-r7-fs7-h256-{lr075,lr150}`,
+with `evals.txt`, the campaign launch record and `ladder.json`. The dashboard
+session is left running read-only. Results and verdict: ledger entry
+`20261008-r7-fs7-h256`.
+
 ## Incidents
 
 **October 8, 23:33 Berlin: lr075 out of memory.** The trainer exited at iteration
