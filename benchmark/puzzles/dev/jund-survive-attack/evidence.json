@@ -1,0 +1,13 @@
+{
+  "format": "EvidenceGame",
+  "version": 1,
+  "sources": [
+    {
+      "id": "synthetic-chump-versus-ward",
+      "group_id": "synthetic-chump-versus-ward",
+      "type": "synthetic_test"
+    }
+  ],
+  "records": [],
+  "metrics": {}
+}

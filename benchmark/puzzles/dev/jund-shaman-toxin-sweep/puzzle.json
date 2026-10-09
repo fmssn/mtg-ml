@@ -1,0 +1,201 @@
+{
+  "format": "TacticalPuzzle",
+  "version": 1,
+  "id": "jund-shaman-toxin-sweep",
+  "deck": "jund_wildfire",
+  "category": "deck-synergy",
+  "template_id": "shaman-deathtouch-sweep",
+  "source_group_id": "synthetic-shaman-deathtouch-sweep",
+  "split": "dev",
+  "episode_mode": "reset",
+  "rationale": "Toxin Analysis on Krark-Clan Shaman gives it deathtouch and makes a Clue; sacrificing the Clue to the Shaman then deals deathtouch damage to every non-flying creature, killing both Serpents and Delver. Toxin on an opposing creature only kills Delver (on Terror it is countered by ward). The Shaman dies to its own sweep. docs/representation-plan.md lists this sweep as a card-level interaction the model has missed.",
+  "max_decisions": 64,
+  "claim": "success-against-declared-responses",
+  "objective": {
+    "all": [
+      {
+        "object": "terror",
+        "zone": "battlefield",
+        "present": false
+      },
+      {
+        "object": "serpent",
+        "zone": "battlefield",
+        "present": false
+      },
+      {
+        "object": "delver",
+        "zone": "battlefield",
+        "present": false
+      }
+    ]
+  },
+  "stop": {
+    "kind": "decision_boundary",
+    "turn": 8,
+    "step": "end",
+    "active": "self",
+    "require_empty_stack": true
+  },
+  "cases": [
+    {
+      "id": "basic-lands-library",
+      "hidden_completion": "libraries-of-basic-lands",
+      "response_policy": {
+        "id": "benchmark-blue@1",
+        "parameters_sha256": "f80cb31cad22feaa42a5d1488356151fa4ce4f36f9b02a27922212a156b4c68c"
+      },
+      "witnesses": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Toxin Analysis",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "creature",
+                "perm",
+                "self",
+                "Krark-Clan Shaman"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Swamp",
+                "B"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "activate",
+                "Krark-Clan Shaman",
+                "1 damage to each creature without flying"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "sacrifice",
+              "key": [
+                "sacrifice",
+                "Clue"
+              ]
+            }
+          ],
+          "note": "Toxin on the Shaman, then sacrifice the Clue.",
+          "learner_only": true
+        }
+      ],
+      "mistakes": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Toxin Analysis",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "creature",
+                "perm",
+                "opponent",
+                "Cryptic Serpent"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Swamp",
+                "B"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "activate",
+                "Krark-Clan Shaman",
+                "1 damage to each creature without flying"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "sacrifice",
+              "key": [
+                "sacrifice",
+                "Clue"
+              ]
+            }
+          ],
+          "note": "Toxin on an opposing creature before the sweep.",
+          "expect": "objective_failed"
+        }
+      ],
+      "scenario": {
+        "path": "scenario.json",
+        "sha256": "b097bdcc20375e0a8a2b982a7fad2c7831f6b3986ace84f9e650c8a41264d96d"
+      },
+      "evidence": {
+        "path": "evidence.json",
+        "sha256": "5a099cab890e09eb249819efdc8b5612c6c9ef956ac6ea1bb54a2ae12243f18c"
+      }
+    }
+  ],
+  "acceptable_first_actions": [
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "cast",
+        "Toxin Analysis",
+        "hand",
+        "normal"
+      ]
+    }
+  ],
+  "review": {
+    "status": "accepted",
+    "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+    "note": "Toxin on Shaman then sacrificing the Clue sweeps all three ground creatures via deathtouch; Toxin on Serpent/Delver fails (traced) and Terror's ward counters it. Random learners 0/4, a strong discriminator."
+  }
+}

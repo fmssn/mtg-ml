@@ -1,0 +1,200 @@
+{
+  "format": "TacticalPuzzle",
+  "version": 1,
+  "id": "blue-sleep-redundant",
+  "deck": "mono_blue_terror",
+  "category": "resource-preservation",
+  "template_id": "sleep-redundant-lock",
+  "source_group_id": "playtest-2026-10-09-flag4",
+  "split": "dev",
+  "episode_mode": "reset",
+  "rationale": "The only opposing creature is already tapped and locked by this turn's Sleep of the Dead. Escaping Sleep again cannot extend the lock (the effect uses the larger skip count, it does not add), so it wastes three mana and three graveyard cards that fuel Tolarian Terror and later escapes. From the r7 playtest (2026-10-09, flag 4).",
+  "max_decisions": 64,
+  "claim": "success-against-declared-responses",
+  "objective": {
+    "all": [
+      {
+        "object": "yard-brainstorm",
+        "zone": "graveyard",
+        "present": true
+      },
+      {
+        "object": "yard-ponder",
+        "zone": "graveyard",
+        "present": true
+      },
+      {
+        "object": "yard-scour",
+        "zone": "graveyard",
+        "present": true
+      },
+      {
+        "object": "yard-note",
+        "zone": "graveyard",
+        "present": true
+      }
+    ]
+  },
+  "stop": {
+    "kind": "decision_boundary",
+    "turn": 9,
+    "step": "end",
+    "active": "self",
+    "require_empty_stack": true
+  },
+  "cases": [
+    {
+      "id": "basic-lands-library",
+      "hidden_completion": "libraries-of-basic-lands",
+      "response_policy": {
+        "id": "benchmark-jund@1",
+        "parameters_sha256": "ae78cd031937091182d8be444c6f4bdd84c18e1ead382e1bca668fe7f1fe7f95"
+      },
+      "witnesses": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            }
+          ],
+          "note": "Pass: the lock is already in place.",
+          "learner_only": true
+        },
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "play_land",
+                "Island"
+              ]
+            }
+          ],
+          "note": "Play the land and keep the graveyard.",
+          "learner_only": true
+        }
+      ],
+      "mistakes": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Sleep of the Dead",
+                "graveyard",
+                "escape"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "creature",
+                "perm",
+                "opponent",
+                "Krark-Clan Shaman"
+              ],
+              "objects": [
+                "shaman"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "exile_from_graveyard",
+              "key": [
+                "exile_gy",
+                "Brainstorm"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "exile_from_graveyard",
+              "key": [
+                "exile_gy",
+                "Ponder"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "exile_from_graveyard",
+              "key": [
+                "exile_gy",
+                "Thought Scour"
+              ]
+            }
+          ],
+          "note": "Redundant escape onto the locked Shaman.",
+          "expect": "objective_failed"
+        }
+      ],
+      "scenario": {
+        "path": "scenario.json",
+        "sha256": "6e619e3aea919aca00c8d459f858a1ad51ff1ea4bdc3cd65fc5b6deb282bd9bb"
+      },
+      "evidence": {
+        "path": "evidence.json",
+        "sha256": "eef0793ccdffb5f4ba1f7a3d6479f8e3bad368341d47c82bc5e04bcb8ea8bbde"
+      }
+    }
+  ],
+  "acceptable_first_actions": [
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "pass"
+      ]
+    },
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "play_land",
+        "Island"
+      ]
+    }
+  ],
+  "review": {
+    "status": "accepted",
+    "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+    "note": "The engine takes the larger skip-untap count (cards.py:142), as the rules do, so escaping onto the locked Shaman only spends mana and three graveyard cards and always fails the four-card graveyard objective. A pass learner succeeds, which is inherent to a don't-waste-it puzzle; shares a leakage group with blue-sleep-productive."
+  }
+}

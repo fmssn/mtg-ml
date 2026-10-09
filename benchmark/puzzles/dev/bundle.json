@@ -1,0 +1,34 @@
+{
+  "format": "BenchmarkPuzzleBundle",
+  "version": 1,
+  "puzzles": [
+    {
+      "path": "blue-sleep-redundant/puzzle.json",
+      "sha256": "339608045b19830957f5daffc3a824c0646337715c60756b2db3a8bbe2412837"
+    },
+    {
+      "path": "blue-sleep-productive/puzzle.json",
+      "sha256": "a491f69d70ad77c02bee50eda694d993abc9134304c580409e90deaf21526097"
+    },
+    {
+      "path": "blue-counter-untapped/puzzle.json",
+      "sha256": "512724b43fb57c0c34668589c0261b0a314896d89cd8d5c92a927868ace76c28"
+    },
+    {
+      "path": "blue-counter-tapped-out/puzzle.json",
+      "sha256": "febd1b3f844240084d2e5d402a8baba0d7188553ffbe0c3237c578bb0f4144d6"
+    },
+    {
+      "path": "jund-shaman-toxin-sweep/puzzle.json",
+      "sha256": "8e4165adfb04f2815e5dc9098e330ead5ec64ad8447005652b6fe471f7c2220d"
+    },
+    {
+      "path": "jund-survive-attack/puzzle.json",
+      "sha256": "7362d8f3a9e4981e1ef7c73a11477d3c0afc60e57cbf6c0fae6c531f7920681a"
+    },
+    {
+      "path": "jund-color-sequencing/puzzle.json",
+      "sha256": "889a6c01c6508fe2281224d4d32a4e5f4677d4e233aac91c81505d3470e4297e"
+    }
+  ]
+}
