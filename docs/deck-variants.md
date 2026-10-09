@@ -47,36 +47,43 @@ The dashboard reports main-deck builds and sideboard builds **independently** (e
 2. Each `out` card is taken up to what the variant's maindeck has. Any shortfall comes from the variant's slot replacements: nonland cards it plays more copies of than the stock maindeck, most extra copies first.
 3. Both sides are trimmed from the end to the same total.
 
-Every plan for every variant and opponent is validated at import: 60 / 15, at most 4 copies, and the 75 unchanged. Of the 54 x 6 variant/opponent pairs, 198 use an adjusted plan. Of those, 84 keep as many swaps as the stock row, 92 lose one and 22 lose two to four. Sideboard cards that only a variant has (Ancient Grudge, Go for the Throat, Steel Sabotage outside the Annul slot, ...) never come in under these plans. A learned or expert plan should replace them.
+Every plan for every variant and opponent is validated at import: 60 / 15, at most 4 copies, and the 75 unchanged. Of the 71 x 6 variant/opponent pairs, 282 use an adjusted plan. Of those, 113 keep as many swaps as the stock row, 133 lose one and 36 lose two to four. Sideboard cards that only a variant has (Ancient Grudge, Go for the Throat, Steel Sabotage outside the Annul slot, ...) never come in under these plans. A learned or expert plan should replace them.
 
-## Current manifest (built 2026-10-09)
+## Current manifest (rebuilt 2026-10-09 with the cards of #75)
 
-| archetype | train | dev | test | accepted main x side builds |
-|---|---|---|---|---|
-| jund_wildfire | 21 | 4 | 4 | 5 x 6 (2 combinations illegal), + stock |
-| mono_blue_terror | 3 | 1 | 1 | 1 x 4, + stock |
-| red_madness | 2 | 0 | 1 | 3 x 1 (stock is one of them) |
-| grixis_affinity | 8 | 1 | 1 | 2 x 5 (stock is one of them) |
-| elves | 2 | 1 | 1 | 4 x 1 (stock is one of them) |
-| tron | 2 | 0 | 1 | 1 x 2, + stock |
+71 variants. Spell Pierce, Prophetic Prism, Malevolent Rumble and Fiery
+Cannonade (#75) brought in the most-played Mono Blue Terror mains and most Tron
+builds (54 -> 71).
 
-Rejected (play share in brackets; full list with counts in `[[rejected]]` of the manifest):
+| archetype | train | dev | test |
+|---|---|---|---|
+| jund_wildfire | 21 | 4 | 4 |
+| mono_blue_terror | 9 | 2 | 2 |
+| red_madness | 2 | 0 | 1 |
+| grixis_affinity | 8 | 1 | 1 |
+| elves | 2 | 1 | 1 |
+| tron | 8 | 2 | 2 |
 
-- **Jund:** main "Nyxborn Hydra build, 3 Fanatical Offering" (17.5%), Snuff Out. "No Krark-Clan Shaman build" with the "Stock list" or "Pyroblast build 2" sideboard: 5 Nihil Spellbomb across the 75.
-- **Mono Blue Terror:** main "Stock list" (47%) and "Murmuring Mystic build" (18%), Spell Pierce. "14 Island build", Preordain and Deprive. "Boomerang build", Boomerang and Spell Pierce. Side "No Blue Elemental Blast build", Spreading Seas.
-- **Red Madness:** main "2 Faithless Looting build" (19%), Melded Moxite.
-- **Grixis Affinity:** main "Cryogen Relic build", Cryogen Relic. "2 Drossforge Bridge build", Chromatic Star.
-- **Elves:** both Birchlore Rangers builds (Birchlore Rangers, Elvish Vanguard, Jaspera Sentinel, Vines of Vastwood, Wellwisher, Distant Melody, Salt Road Packbeast). Side "No Spinewoods Paladin build" (30%), Primordial Pachyderm, Lignify, Rooftop Percher, Scattershot Archer. "Negate build", Negate, Prohibit, Hallow. "Nylea's Disciple build", Nylea's Disciple, Mwonvuli Acid-Moss, Scattershot Archer, Rooftop Percher.
-- **Tron:** main "Stock list" (40%) and "No Generous Ent build", Prophetic Prism. "No Candy Trail build", Rooftop Percher. Three Nyxborn Hydra builds, Malevolent Rumble (also Prophetic Prism, Firebolt, Wooded Ridgeline). Side "Stock list" (31%), Fiery Cannonade. "Breath Weapon build", Earth Rift. Both Coalition Honor Guard builds, Coalition Honor Guard.
+Sideboard plans: 282 of the 426 variant/opponent pairs use an adjusted plan
+(113 keep every stock swap, 133 lose one, 36 lose two to four).
 
-Implementing Spell Pierce, Prophetic Prism, Malevolent Rumble, Fiery Cannonade and Melded Moxite (docs/adding-cards.md) would unlock most of the missing play share. After adding cards, rerun `tools/build_variants.py`.
+Still rejected (build share; full list in `[[rejected]]` of the manifest):
+
+- **Jund:** main "Nyxborn Hydra build, 3 Fanatical Offering" (17.5%): Snuff Out. Two pairings with 5 Nihil Spellbomb across the 75.
+- **Mono Blue Terror:** "14 Island build" (14%): Deprive, Preordain. "Boomerang build" (11%): Boomerang. Side "No Blue Elemental Blast build" (16.5%): Spreading Seas.
+- **Red Madness:** main "2 Faithless Looting build" (19%): Melded Moxite.
+- **Grixis Affinity:** "Cryogen Relic build" (13%): Cryogen Relic. "2 Drossforge Bridge build" (7%): Chromatic Star.
+- **Elves:** side "No Spinewoods Paladin build" (30%): Lignify, Primordial Pachyderm, Rooftop Percher, Scattershot Archer. "Negate build" (13%): Hallow, Negate, Prohibit. Both Birchlore Rangers mains (7.5%, 7.3%) and "Nylea's Disciple build" (7%): Birchlore Rangers, Elvish Vanguard, Jaspera Sentinel, Vines of Vastwood, Wellwisher, Distant Melody, Salt Road Packbeast, Nylea's Disciple, Mwonvuli Acid-Moss.
+- **Tron:** side "Breath Weapon build" (23%): Earth Rift. "No Candy Trail build" (19%): Rooftop Percher. Nyxborn Hydra builds (9%, 8%): Firebolt, Wooded Ridgeline. Coalition Honor Guard builds (8% each). One pairing with 5 Breath Weapon.
+
+Next cards by unlocked share: the Elves sideboard set (30%), Earth Rift, Melded Moxite, Rooftop Percher, Snuff Out, Spreading Seas. After adding cards, rerun `tools/build_variants.py`.
 
 ## Decisions (2026-10-09, project owner)
 
 - The per-archetype split, the stock-deck weight rule (`policy:max`) and the
-  rule-adjusted sideboard plans are accepted as they are. The 22 plans that lose
-  two to four swaps are a known weakness, to be replaced by researched or learned
+  rule-adjusted sideboard plans are accepted as they are. The plans that lose
+  two to four swaps (22 at first, 36 after the rebuild) are a known weakness, to be replaced by researched or learned
   plans later.
 - Cards missing from the most-played builds are implemented rather than the
   builds dropped: Spell Pierce, Prophetic Prism, Malevolent Rumble and Fiery
-  Cannonade first (separate cards PR); the manifest is rebuilt when they land.
+  Cannonade first (#75); the manifest was rebuilt with them.

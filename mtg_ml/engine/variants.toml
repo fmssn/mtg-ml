@@ -1646,7 +1646,7 @@ why = "stock plan adjusted to this list: 1 Terminate not in this sideboard; trim
 id = "mono_blue_terror:stock"
 archetype = "mono_blue_terror"
 split = "train"
-weight = 0.03724
+weight = 0.185808
 constructed = true
 stock = true
 source = "decks.DECKS / SIDEBOARDS (see the decks.py docstring)"
@@ -1674,9 +1674,275 @@ provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "
 "Envelop" = 1
 
 [[variant]]
-id = "mono_blue_terror:murmuring-mystic-build-4-deem-inferior+stock-list"
+id = "mono_blue_terror:stock-list+stock-list"
 archetype = "mono_blue_terror"
 split = "dev"
+weight = 0.185808
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Stock list\" x sideboard build \"Stock list\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Mono Blue Terror", "archetype_lists" = 666, "main_build" = "Stock list", "main_lists" = 316, "main_share" = 0.474, "side_build" = "Stock list", "side_lists" = 261, "side_share" = 0.392, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Island" = 16
+"Brainstorm" = 4
+"Counterspell" = 4
+"Cryptic Serpent" = 4
+"Delver of Secrets" = 4
+"Lorien Revealed" = 4
+"Mental Note" = 4
+"Thought Scour" = 4
+"Tolarian Terror" = 4
+"Deem Inferior" = 3
+"Ponder" = 3
+"Dispel" = 2
+"Sleep of the Dead" = 2
+"Deep Analysis" = 1
+"Spell Pierce" = 1
+[variant.sideboard]
+"Annul" = 4
+"Hydroblast" = 4
+"Blue Elemental Blast" = 3
+"Gut Shot" = 3
+"Envelop" = 1
+[variant.plans.jund_wildfire]
+in = { "Annul" = 4, "Hydroblast" = 2 }
+out = { "Sleep of the Dead" = 2, "Deem Inferior" = 1, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Annul counters Jund's many artifacts (Familiar, Wellspring, Spellbomb, Lembas) and the Hydra, Hydroblast its red cards; Force Spike and the sorcery-speed removal out."
+[variant.plans.mono_blue_terror]
+in = { "Gut Shot" = 3, "Envelop" = 1 }
+out = { "Sleep of the Dead" = 2, "Dispel" = 2 }
+why = "stock plan adjusted to this list: only 0 of 2 Force Spike in this maindeck; 2 Dispel out in their slot. Stock: Mirror: Gut Shot kills Delver before it flips, Envelop counters Lorien Revealed, Ponder, Mental Note and Sleep of the Dead; the tap-down and two Force Spike (weak once both sides hold up Counterspell) go out."
+[variant.plans.red_madness]
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 3, "Gut Shot" = 2 }
+out = { "Sleep of the Dead" = 2, "Deem Inferior" = 3, "Ponder" = 1, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Hydroblast and Blue Elemental Blast counter burn and kill red creatures, Gut Shot kills the x/1s for free; Force Spike, the slow removal and a Ponder out."
+[variant.plans.grixis_affinity]
+in = { "Annul" = 4, "Envelop" = 1, "Gut Shot" = 3 }
+out = { "Sleep of the Dead" = 2, "Ponder" = 2, "Dispel" = 2, "Deep Analysis" = 1, "Spell Pierce" = 1 }
+why = "stock plan adjusted to this list: only 0 of 3 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot; 1 Spell Pierce out in their slot. Stock: Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+[variant.plans.elves]
+in = { "Gut Shot" = 3, "Envelop" = 1 }
+out = { "Deem Inferior" = 1, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Gut Shot kills a mana Elf for free, Envelop counters Lead the Stampede, Winding Way or Land Grant; Force Spike (Elves have mana to spare) and a Deem Inferior go out."
+[variant.plans.tron]
+in = { "Annul" = 4, "Envelop" = 1 }
+out = { "Sleep of the Dead" = 2, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: only 0 of 2 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
+
+[[variant]]
+id = "mono_blue_terror:stock-list+2-annul-build"
+archetype = "mono_blue_terror"
+split = "dev"
+weight = 0.093852
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Stock list\" x sideboard build \"2 Annul build\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Mono Blue Terror", "archetype_lists" = 666, "main_build" = "Stock list", "main_lists" = 316, "main_share" = 0.474, "side_build" = "2 Annul build", "side_lists" = 132, "side_share" = 0.198, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Island" = 16
+"Brainstorm" = 4
+"Counterspell" = 4
+"Cryptic Serpent" = 4
+"Delver of Secrets" = 4
+"Lorien Revealed" = 4
+"Mental Note" = 4
+"Thought Scour" = 4
+"Tolarian Terror" = 4
+"Deem Inferior" = 3
+"Ponder" = 3
+"Dispel" = 2
+"Sleep of the Dead" = 2
+"Deep Analysis" = 1
+"Spell Pierce" = 1
+[variant.sideboard]
+"Hydroblast" = 4
+"Blue Elemental Blast" = 3
+"Gut Shot" = 3
+"Steel Sabotage" = 3
+"Annul" = 2
+[variant.plans.jund_wildfire]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Hydroblast" = 2 }
+out = { "Sleep of the Dead" = 2, "Deem Inferior" = 1, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Annul counters Jund's many artifacts (Familiar, Wellspring, Spellbomb, Lembas) and the Hydra, Hydroblast its red cards; Force Spike and the sorcery-speed removal out."
+[variant.plans.mono_blue_terror]
+in = { "Gut Shot" = 3 }
+out = { "Sleep of the Dead" = 2, "Dispel" = 1 }
+why = "stock plan adjusted to this list: 1 Envelop not in this sideboard; only 0 of 2 Force Spike in this maindeck; 2 Dispel out in their slot; trimmed to 3 swaps. Stock: Mirror: Gut Shot kills Delver before it flips, Envelop counters Lorien Revealed, Ponder, Mental Note and Sleep of the Dead; the tap-down and two Force Spike (weak once both sides hold up Counterspell) go out."
+[variant.plans.red_madness]
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 3, "Gut Shot" = 2 }
+out = { "Sleep of the Dead" = 2, "Deem Inferior" = 3, "Ponder" = 1, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Hydroblast and Blue Elemental Blast counter burn and kill red creatures, Gut Shot kills the x/1s for free; Force Spike, the slow removal and a Ponder out."
+[variant.plans.grixis_affinity]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Gut Shot" = 3 }
+out = { "Sleep of the Dead" = 2, "Ponder" = 2, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; 1 Envelop not in this sideboard; only 0 of 3 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot; 1 Spell Pierce out in their slot; trimmed to 7 swaps. Stock: Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+[variant.plans.elves]
+in = { "Gut Shot" = 3 }
+out = { "Deem Inferior" = 1, "Dispel" = 2 }
+why = "stock plan adjusted to this list: 1 Envelop not in this sideboard; only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot; trimmed to 3 swaps. Stock: Gut Shot kills a mana Elf for free, Envelop counters Lead the Stampede, Winding Way or Land Grant; Force Spike (Elves have mana to spare) and a Deem Inferior go out."
+[variant.plans.tron]
+in = { "Annul" = 2, "Steel Sabotage" = 2 }
+out = { "Sleep of the Dead" = 2, "Dispel" = 2 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; 1 Envelop not in this sideboard; only 0 of 2 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot; trimmed to 4 swaps. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
+
+[[variant]]
+id = "mono_blue_terror:murmuring-mystic-build+stock-list"
+archetype = "mono_blue_terror"
+split = "train"
+weight = 0.071736
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Murmuring Mystic build\" x sideboard build \"Stock list\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Mono Blue Terror", "archetype_lists" = 666, "main_build" = "Murmuring Mystic build", "main_lists" = 122, "main_share" = 0.183, "side_build" = "Stock list", "side_lists" = 261, "side_share" = 0.392, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Island" = 16
+"Brainstorm" = 4
+"Counterspell" = 4
+"Cryptic Serpent" = 4
+"Lorien Revealed" = 4
+"Mental Note" = 4
+"Thought Scour" = 4
+"Tolarian Terror" = 4
+"Deem Inferior" = 3
+"Force Spike" = 3
+"Ponder" = 3
+"Murmuring Mystic" = 2
+"Sleep of the Dead" = 2
+"Deep Analysis" = 1
+"Dispel" = 1
+"Spell Pierce" = 1
+[variant.sideboard]
+"Annul" = 4
+"Hydroblast" = 4
+"Blue Elemental Blast" = 3
+"Gut Shot" = 3
+"Envelop" = 1
+[variant.plans.grixis_affinity]
+in = { "Annul" = 4, "Envelop" = 1, "Gut Shot" = 3 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Ponder" = 2, "Murmuring Mystic" = 1 }
+why = "stock plan adjusted to this list: only 0 of 1 Plunder the Trollshaws in this maindeck; 1 Murmuring Mystic out in their slot. Stock: Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+[variant.plans.tron]
+in = { "Annul" = 4, "Envelop" = 1 }
+out = { "Sleep of the Dead" = 2, "Force Spike" = 2, "Murmuring Mystic" = 1 }
+why = "stock plan adjusted to this list: only 0 of 1 Plunder the Trollshaws in this maindeck; 1 Murmuring Mystic out in their slot. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
+
+[[variant]]
+id = "mono_blue_terror:stock-list+3-annul-build"
+archetype = "mono_blue_terror"
+split = "train"
+weight = 0.070626
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Stock list\" x sideboard build \"3 Annul build\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Mono Blue Terror", "archetype_lists" = 666, "main_build" = "Stock list", "main_lists" = 316, "main_share" = 0.474, "side_build" = "3 Annul build", "side_lists" = 99, "side_share" = 0.149, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Island" = 16
+"Brainstorm" = 4
+"Counterspell" = 4
+"Cryptic Serpent" = 4
+"Delver of Secrets" = 4
+"Lorien Revealed" = 4
+"Mental Note" = 4
+"Thought Scour" = 4
+"Tolarian Terror" = 4
+"Deem Inferior" = 3
+"Ponder" = 3
+"Dispel" = 2
+"Sleep of the Dead" = 2
+"Deep Analysis" = 1
+"Spell Pierce" = 1
+[variant.sideboard]
+"Hydroblast" = 4
+"Annul" = 3
+"Blue Elemental Blast" = 3
+"Gut Shot" = 3
+"Steel Sabotage" = 2
+[variant.plans.jund_wildfire]
+in = { "Annul" = 3, "Steel Sabotage" = 1, "Hydroblast" = 2 }
+out = { "Sleep of the Dead" = 2, "Deem Inferior" = 1, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: 1 Steel Sabotage for Annul; only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Annul counters Jund's many artifacts (Familiar, Wellspring, Spellbomb, Lembas) and the Hydra, Hydroblast its red cards; Force Spike and the sorcery-speed removal out."
+[variant.plans.mono_blue_terror]
+in = { "Gut Shot" = 3 }
+out = { "Sleep of the Dead" = 2, "Dispel" = 1 }
+why = "stock plan adjusted to this list: 1 Envelop not in this sideboard; only 0 of 2 Force Spike in this maindeck; 2 Dispel out in their slot; trimmed to 3 swaps. Stock: Mirror: Gut Shot kills Delver before it flips, Envelop counters Lorien Revealed, Ponder, Mental Note and Sleep of the Dead; the tap-down and two Force Spike (weak once both sides hold up Counterspell) go out."
+[variant.plans.red_madness]
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 3, "Gut Shot" = 2 }
+out = { "Sleep of the Dead" = 2, "Deem Inferior" = 3, "Ponder" = 1, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Hydroblast and Blue Elemental Blast counter burn and kill red creatures, Gut Shot kills the x/1s for free; Force Spike, the slow removal and a Ponder out."
+[variant.plans.grixis_affinity]
+in = { "Annul" = 3, "Steel Sabotage" = 1, "Gut Shot" = 3 }
+out = { "Sleep of the Dead" = 2, "Ponder" = 2, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: 1 Steel Sabotage for Annul; 1 Envelop not in this sideboard; only 0 of 3 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot; 1 Spell Pierce out in their slot; trimmed to 7 swaps. Stock: Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+[variant.plans.elves]
+in = { "Gut Shot" = 3 }
+out = { "Deem Inferior" = 1, "Dispel" = 2 }
+why = "stock plan adjusted to this list: 1 Envelop not in this sideboard; only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot; trimmed to 3 swaps. Stock: Gut Shot kills a mana Elf for free, Envelop counters Lead the Stampede, Winding Way or Land Grant; Force Spike (Elves have mana to spare) and a Deem Inferior go out."
+[variant.plans.tron]
+in = { "Annul" = 3, "Steel Sabotage" = 1 }
+out = { "Sleep of the Dead" = 2, "Dispel" = 2 }
+why = "stock plan adjusted to this list: 1 Steel Sabotage for Annul; 1 Envelop not in this sideboard; only 0 of 2 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot; trimmed to 4 swaps. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
+
+[[variant]]
+id = "mono_blue_terror:stock-list+envelop-build"
+archetype = "mono_blue_terror"
+split = "train"
+weight = 0.045504
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Stock list\" x sideboard build \"Envelop build\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Mono Blue Terror", "archetype_lists" = 666, "main_build" = "Stock list", "main_lists" = 316, "main_share" = 0.474, "side_build" = "Envelop build", "side_lists" = 64, "side_share" = 0.096, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Island" = 16
+"Brainstorm" = 4
+"Counterspell" = 4
+"Cryptic Serpent" = 4
+"Delver of Secrets" = 4
+"Lorien Revealed" = 4
+"Mental Note" = 4
+"Thought Scour" = 4
+"Tolarian Terror" = 4
+"Deem Inferior" = 3
+"Ponder" = 3
+"Dispel" = 2
+"Sleep of the Dead" = 2
+"Deep Analysis" = 1
+"Spell Pierce" = 1
+[variant.sideboard]
+"Hydroblast" = 4
+"Gut Shot" = 3
+"Annul" = 2
+"Blue Elemental Blast" = 2
+"Envelop" = 2
+"Steel Sabotage" = 2
+[variant.plans.jund_wildfire]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Hydroblast" = 2 }
+out = { "Sleep of the Dead" = 2, "Deem Inferior" = 1, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Annul counters Jund's many artifacts (Familiar, Wellspring, Spellbomb, Lembas) and the Hydra, Hydroblast its red cards; Force Spike and the sorcery-speed removal out."
+[variant.plans.mono_blue_terror]
+in = { "Gut Shot" = 3, "Envelop" = 1 }
+out = { "Sleep of the Dead" = 2, "Dispel" = 2 }
+why = "stock plan adjusted to this list: only 0 of 2 Force Spike in this maindeck; 2 Dispel out in their slot. Stock: Mirror: Gut Shot kills Delver before it flips, Envelop counters Lorien Revealed, Ponder, Mental Note and Sleep of the Dead; the tap-down and two Force Spike (weak once both sides hold up Counterspell) go out."
+[variant.plans.red_madness]
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 2, "Gut Shot" = 2 }
+out = { "Sleep of the Dead" = 2, "Deem Inferior" = 3, "Ponder" = 1, "Dispel" = 2 }
+why = "stock plan adjusted to this list: 1 Blue Elemental Blast not in this sideboard; only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot; trimmed to 8 swaps. Stock: Hydroblast and Blue Elemental Blast counter burn and kill red creatures, Gut Shot kills the x/1s for free; Force Spike, the slow removal and a Ponder out."
+[variant.plans.grixis_affinity]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Envelop" = 1, "Gut Shot" = 3 }
+out = { "Sleep of the Dead" = 2, "Ponder" = 2, "Dispel" = 2, "Deep Analysis" = 1, "Spell Pierce" = 1 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; only 0 of 3 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot; 1 Spell Pierce out in their slot. Stock: Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+[variant.plans.elves]
+in = { "Gut Shot" = 3, "Envelop" = 1 }
+out = { "Deem Inferior" = 1, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: only 0 of 3 Force Spike in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Gut Shot kills a mana Elf for free, Envelop counters Lead the Stampede, Winding Way or Land Grant; Force Spike (Elves have mana to spare) and a Deem Inferior go out."
+[variant.plans.tron]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Envelop" = 1 }
+out = { "Sleep of the Dead" = 2, "Dispel" = 2, "Deep Analysis" = 1 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; only 0 of 2 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Dispel out in their slot; 1 Deep Analysis out in their slot. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
+
+[[variant]]
+id = "mono_blue_terror:murmuring-mystic-build-4-deem-inferior+stock-list"
+archetype = "mono_blue_terror"
+split = "train"
 weight = 0.03724
 constructed = true
 stock = false
@@ -1727,6 +1993,112 @@ why = "stock plan adjusted to this list: only 0 of 3 Force Spike in this maindec
 in = { "Annul" = 4, "Envelop" = 1 }
 out = { "Sleep of the Dead" = 2, "Murmuring Mystic" = 2, "Deem Inferior" = 1 }
 why = "stock plan adjusted to this list: only 0 of 2 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Murmuring Mystic out in their slot; 1 Deem Inferior out in their slot. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
+
+[[variant]]
+id = "mono_blue_terror:murmuring-mystic-build+2-annul-build"
+archetype = "mono_blue_terror"
+split = "train"
+weight = 0.036234
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Murmuring Mystic build\" x sideboard build \"2 Annul build\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Mono Blue Terror", "archetype_lists" = 666, "main_build" = "Murmuring Mystic build", "main_lists" = 122, "main_share" = 0.183, "side_build" = "2 Annul build", "side_lists" = 132, "side_share" = 0.198, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Island" = 16
+"Brainstorm" = 4
+"Counterspell" = 4
+"Cryptic Serpent" = 4
+"Lorien Revealed" = 4
+"Mental Note" = 4
+"Thought Scour" = 4
+"Tolarian Terror" = 4
+"Deem Inferior" = 3
+"Force Spike" = 3
+"Ponder" = 3
+"Murmuring Mystic" = 2
+"Sleep of the Dead" = 2
+"Deep Analysis" = 1
+"Dispel" = 1
+"Spell Pierce" = 1
+[variant.sideboard]
+"Hydroblast" = 4
+"Blue Elemental Blast" = 3
+"Gut Shot" = 3
+"Steel Sabotage" = 3
+"Annul" = 2
+[variant.plans.jund_wildfire]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Hydroblast" = 2 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Deem Inferior" = 1 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul. Stock: Annul counters Jund's many artifacts (Familiar, Wellspring, Spellbomb, Lembas) and the Hydra, Hydroblast its red cards; Force Spike and the sorcery-speed removal out."
+[variant.plans.mono_blue_terror]
+in = { "Gut Shot" = 3 }
+out = { "Sleep of the Dead" = 2, "Force Spike" = 1 }
+why = "stock plan adjusted to this list: 1 Envelop not in this sideboard; trimmed to 3 swaps. Stock: Mirror: Gut Shot kills Delver before it flips, Envelop counters Lorien Revealed, Ponder, Mental Note and Sleep of the Dead; the tap-down and two Force Spike (weak once both sides hold up Counterspell) go out."
+[variant.plans.grixis_affinity]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Gut Shot" = 3 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Ponder" = 2 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; 1 Envelop not in this sideboard; only 0 of 1 Plunder the Trollshaws in this maindeck; 1 Murmuring Mystic out in their slot; trimmed to 7 swaps. Stock: Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+[variant.plans.elves]
+in = { "Gut Shot" = 3 }
+out = { "Force Spike" = 3 }
+why = "stock plan adjusted to this list: 1 Envelop not in this sideboard; trimmed to 3 swaps. Stock: Gut Shot kills a mana Elf for free, Envelop counters Lead the Stampede, Winding Way or Land Grant; Force Spike (Elves have mana to spare) and a Deem Inferior go out."
+[variant.plans.tron]
+in = { "Annul" = 2, "Steel Sabotage" = 2 }
+out = { "Sleep of the Dead" = 2, "Force Spike" = 2 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; 1 Envelop not in this sideboard; only 0 of 1 Plunder the Trollshaws in this maindeck; 1 Murmuring Mystic out in their slot; trimmed to 4 swaps. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
+
+[[variant]]
+id = "mono_blue_terror:murmuring-mystic-build+3-annul-build"
+archetype = "mono_blue_terror"
+split = "test"
+weight = 0.027267
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Murmuring Mystic build\" x sideboard build \"3 Annul build\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Mono Blue Terror", "archetype_lists" = 666, "main_build" = "Murmuring Mystic build", "main_lists" = 122, "main_share" = 0.183, "side_build" = "3 Annul build", "side_lists" = 99, "side_share" = 0.149, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Island" = 16
+"Brainstorm" = 4
+"Counterspell" = 4
+"Cryptic Serpent" = 4
+"Lorien Revealed" = 4
+"Mental Note" = 4
+"Thought Scour" = 4
+"Tolarian Terror" = 4
+"Deem Inferior" = 3
+"Force Spike" = 3
+"Ponder" = 3
+"Murmuring Mystic" = 2
+"Sleep of the Dead" = 2
+"Deep Analysis" = 1
+"Dispel" = 1
+"Spell Pierce" = 1
+[variant.sideboard]
+"Hydroblast" = 4
+"Annul" = 3
+"Blue Elemental Blast" = 3
+"Gut Shot" = 3
+"Steel Sabotage" = 2
+[variant.plans.jund_wildfire]
+in = { "Annul" = 3, "Steel Sabotage" = 1, "Hydroblast" = 2 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Deem Inferior" = 1 }
+why = "stock plan adjusted to this list: 1 Steel Sabotage for Annul. Stock: Annul counters Jund's many artifacts (Familiar, Wellspring, Spellbomb, Lembas) and the Hydra, Hydroblast its red cards; Force Spike and the sorcery-speed removal out."
+[variant.plans.mono_blue_terror]
+in = { "Gut Shot" = 3 }
+out = { "Sleep of the Dead" = 2, "Force Spike" = 1 }
+why = "stock plan adjusted to this list: 1 Envelop not in this sideboard; trimmed to 3 swaps. Stock: Mirror: Gut Shot kills Delver before it flips, Envelop counters Lorien Revealed, Ponder, Mental Note and Sleep of the Dead; the tap-down and two Force Spike (weak once both sides hold up Counterspell) go out."
+[variant.plans.grixis_affinity]
+in = { "Annul" = 3, "Steel Sabotage" = 1, "Gut Shot" = 3 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Ponder" = 2 }
+why = "stock plan adjusted to this list: 1 Steel Sabotage for Annul; 1 Envelop not in this sideboard; only 0 of 1 Plunder the Trollshaws in this maindeck; 1 Murmuring Mystic out in their slot; trimmed to 7 swaps. Stock: Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+[variant.plans.elves]
+in = { "Gut Shot" = 3 }
+out = { "Force Spike" = 3 }
+why = "stock plan adjusted to this list: 1 Envelop not in this sideboard; trimmed to 3 swaps. Stock: Gut Shot kills a mana Elf for free, Envelop counters Lead the Stampede, Winding Way or Land Grant; Force Spike (Elves have mana to spare) and a Deem Inferior go out."
+[variant.plans.tron]
+in = { "Annul" = 3, "Steel Sabotage" = 1 }
+out = { "Sleep of the Dead" = 2, "Force Spike" = 2 }
+why = "stock plan adjusted to this list: 1 Steel Sabotage for Annul; 1 Envelop not in this sideboard; only 0 of 1 Plunder the Trollshaws in this maindeck; 1 Murmuring Mystic out in their slot; trimmed to 4 swaps. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
 
 [[variant]]
 id = "mono_blue_terror:murmuring-mystic-build-4-deem-inferior+2-annul-build"
@@ -1782,6 +2154,56 @@ why = "stock plan adjusted to this list: 1 Envelop not in this sideboard; only 0
 in = { "Annul" = 2, "Steel Sabotage" = 2 }
 out = { "Sleep of the Dead" = 2, "Murmuring Mystic" = 2 }
 why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; 1 Envelop not in this sideboard; only 0 of 2 Force Spike in this maindeck; only 0 of 1 Plunder the Trollshaws in this maindeck; 2 Murmuring Mystic out in their slot; 1 Deem Inferior out in their slot; trimmed to 4 swaps. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
+
+[[variant]]
+id = "mono_blue_terror:murmuring-mystic-build+envelop-build"
+archetype = "mono_blue_terror"
+split = "train"
+weight = 0.017568
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Murmuring Mystic build\" x sideboard build \"Envelop build\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Mono Blue Terror", "archetype_lists" = 666, "main_build" = "Murmuring Mystic build", "main_lists" = 122, "main_share" = 0.183, "side_build" = "Envelop build", "side_lists" = 64, "side_share" = 0.096, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Island" = 16
+"Brainstorm" = 4
+"Counterspell" = 4
+"Cryptic Serpent" = 4
+"Lorien Revealed" = 4
+"Mental Note" = 4
+"Thought Scour" = 4
+"Tolarian Terror" = 4
+"Deem Inferior" = 3
+"Force Spike" = 3
+"Ponder" = 3
+"Murmuring Mystic" = 2
+"Sleep of the Dead" = 2
+"Deep Analysis" = 1
+"Dispel" = 1
+"Spell Pierce" = 1
+[variant.sideboard]
+"Hydroblast" = 4
+"Gut Shot" = 3
+"Annul" = 2
+"Blue Elemental Blast" = 2
+"Envelop" = 2
+"Steel Sabotage" = 2
+[variant.plans.jund_wildfire]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Hydroblast" = 2 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Deem Inferior" = 1 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul. Stock: Annul counters Jund's many artifacts (Familiar, Wellspring, Spellbomb, Lembas) and the Hydra, Hydroblast its red cards; Force Spike and the sorcery-speed removal out."
+[variant.plans.red_madness]
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 2, "Gut Shot" = 2 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Deem Inferior" = 3 }
+why = "stock plan adjusted to this list: 1 Blue Elemental Blast not in this sideboard; trimmed to 8 swaps. Stock: Hydroblast and Blue Elemental Blast counter burn and kill red creatures, Gut Shot kills the x/1s for free; Force Spike, the slow removal and a Ponder out."
+[variant.plans.grixis_affinity]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Envelop" = 1, "Gut Shot" = 3 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Ponder" = 2, "Murmuring Mystic" = 1 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; only 0 of 1 Plunder the Trollshaws in this maindeck; 1 Murmuring Mystic out in their slot. Stock: Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+[variant.plans.tron]
+in = { "Annul" = 2, "Steel Sabotage" = 2, "Envelop" = 1 }
+out = { "Sleep of the Dead" = 2, "Force Spike" = 2, "Murmuring Mystic" = 1 }
+why = "stock plan adjusted to this list: 2 Steel Sabotage for Annul; only 0 of 1 Plunder the Trollshaws in this maindeck; 1 Murmuring Mystic out in their slot. Stock: Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
 
 [[variant]]
 id = "mono_blue_terror:murmuring-mystic-build-4-deem-inferior+3-annul-build"
@@ -2684,7 +3106,7 @@ provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "
 id = "tron:stock"
 archetype = "tron"
 split = "train"
-weight = 0.018396
+weight = 0.126048
 constructed = true
 stock = true
 source = "decks.DECKS / SIDEBOARDS (see the decks.py docstring)"
@@ -2719,6 +3141,300 @@ provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "
 "Kaervek's Torch" = 1
 "Pulse of Murasa" = 1
 "Whispersilk Cloak" = 1
+
+[[variant]]
+id = "tron:stock-list+stock-list"
+archetype = "tron"
+split = "dev"
+weight = 0.126048
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Stock list\" x sideboard build \"Stock list\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Tron", "archetype_lists" = 443, "main_build" = "Stock list", "main_lists" = 179, "main_share" = 0.404, "side_build" = "Stock list", "side_lists" = 138, "side_share" = 0.312, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Ancient Stirrings" = 4
+"Bramble Wurm" = 4
+"Candy Trail" = 4
+"Expedition Map" = 4
+"Maelstrom Colossus" = 4
+"Pinnacle Kill-Ship" = 4
+"Urza's Mine" = 4
+"Urza's Power Plant" = 4
+"Urza's Tower" = 4
+"Boulderbranch Golem" = 3
+"Crop Rotation" = 3
+"Forest" = 3
+"Generous Ent" = 3
+"Barrels of Blasting Jelly" = 2
+"Bonder's Ornament" = 2
+"Breath Weapon" = 2
+"Prophetic Prism" = 2
+"Bojuka Bog" = 1
+"Conduit Pylons" = 1
+"Haunted Fengraf" = 1
+"Unfathomable Truths" = 1
+[variant.sideboard]
+"Relic of Progenitus" = 3
+"Breath Weapon" = 2
+"Call Damage Control" = 2
+"Fiery Cannonade" = 2
+"Monstrous Emergence" = 2
+"Scour from Existence" = 2
+"Hydroblast" = 1
+"Kaervek's Torch" = 1
+[variant.plans.jund_wildfire]
+in = { "Breath Weapon" = 1, "Call Damage Control" = 2 }
+out = { "Candy Trail" = 2, "Unfathomable Truths" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; 1 Whispersilk Cloak not in this sideboard; only 1 of 2 Unfathomable Truths in this maindeck; 1 Breath Weapon out in their slot; trimmed to 3 swaps. Stock: Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+[variant.plans.mono_blue_terror]
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2 }
+out = { "Candy Trail" = 2, "Boulderbranch Golem" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; trimmed to 4 swaps. Stock: Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent, Whispersilk Cloak protects a threat from Deem Inferior; the life gain (Candy Trail, the Golem, Bramble Wurm) matters little against Blue."
+[variant.plans.red_madness]
+in = { "Breath Weapon" = 1, "Kaervek's Torch" = 1 }
+out = { "Unfathomable Truths" = 1, "Maelstrom Colossus" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; 1 Pulse of Murasa not in this sideboard; only 1 of 2 Unfathomable Truths in this maindeck; 1 Breath Weapon out in their slot; trimmed to 2 swaps. Stock: Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+[variant.plans.elves]
+in = { "Breath Weapon" = 1, "Monstrous Emergence" = 2 }
+out = { "Unfathomable Truths" = 1, "Candy Trail" = 2 }
+why = "stock plan adjusted to this list: only 1 of 2 Unfathomable Truths in this maindeck; 1 Breath Weapon out in their slot. Stock: Breath Weapon wipes the mana elves, Priest of Titania and Timberwatch Elf; Monstrous Emergence kills Avenging Hunter or a Hydra; the slow card draw goes out."
+[variant.plans.tron]
+in = { "Scour from Existence" = 2 }
+out = { "Candy Trail" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; trimmed to 2 swaps. Stock: Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
+
+[[variant]]
+id = "tron:stock-list+whispersilk-cloak-build"
+archetype = "tron"
+split = "train"
+weight = 0.088476
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Stock list\" x sideboard build \"Whispersilk Cloak build\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Tron", "archetype_lists" = 443, "main_build" = "Stock list", "main_lists" = 179, "main_share" = 0.404, "side_build" = "Whispersilk Cloak build", "side_lists" = 97, "side_share" = 0.219, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Ancient Stirrings" = 4
+"Bramble Wurm" = 4
+"Candy Trail" = 4
+"Expedition Map" = 4
+"Maelstrom Colossus" = 4
+"Pinnacle Kill-Ship" = 4
+"Urza's Mine" = 4
+"Urza's Power Plant" = 4
+"Urza's Tower" = 4
+"Boulderbranch Golem" = 3
+"Crop Rotation" = 3
+"Forest" = 3
+"Generous Ent" = 3
+"Barrels of Blasting Jelly" = 2
+"Bonder's Ornament" = 2
+"Breath Weapon" = 2
+"Prophetic Prism" = 2
+"Bojuka Bog" = 1
+"Conduit Pylons" = 1
+"Haunted Fengraf" = 1
+"Unfathomable Truths" = 1
+[variant.sideboard]
+"Relic of Progenitus" = 4
+"Breath Weapon" = 2
+"Call Damage Control" = 2
+"Monstrous Emergence" = 2
+"Scour from Existence" = 2
+"Kaervek's Torch" = 1
+"Pulse of Murasa" = 1
+"Whispersilk Cloak" = 1
+[variant.plans.jund_wildfire]
+in = { "Breath Weapon" = 1, "Call Damage Control" = 2, "Whispersilk Cloak" = 1 }
+out = { "Candy Trail" = 2, "Unfathomable Truths" = 1, "Bonder's Ornament" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; only 1 of 2 Unfathomable Truths in this maindeck; 1 Breath Weapon out in their slot; trimmed to 4 swaps. Stock: Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+[variant.plans.red_madness]
+in = { "Breath Weapon" = 1, "Kaervek's Torch" = 1, "Pulse of Murasa" = 1 }
+out = { "Unfathomable Truths" = 1, "Maelstrom Colossus" = 2 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; only 1 of 2 Unfathomable Truths in this maindeck; 1 Breath Weapon out in their slot; trimmed to 3 swaps. Stock: Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+[variant.plans.elves]
+in = { "Breath Weapon" = 1, "Monstrous Emergence" = 2 }
+out = { "Unfathomable Truths" = 1, "Candy Trail" = 2 }
+why = "stock plan adjusted to this list: only 1 of 2 Unfathomable Truths in this maindeck; 1 Breath Weapon out in their slot. Stock: Breath Weapon wipes the mana elves, Priest of Titania and Timberwatch Elf; Monstrous Emergence kills Avenging Hunter or a Hydra; the slow card draw goes out."
+
+[[variant]]
+id = "tron:no-candy-trail-build-2+stock-list"
+archetype = "tron"
+split = "train"
+weight = 0.026208
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"No Candy Trail build 2\" x sideboard build \"Stock list\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Tron", "archetype_lists" = 443, "main_build" = "No Candy Trail build 2", "main_lists" = 37, "main_share" = 0.084, "side_build" = "Stock list", "side_lists" = 138, "side_share" = 0.312, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Ancient Stirrings" = 4
+"Barrels of Blasting Jelly" = 4
+"Boulderbranch Golem" = 4
+"Bramble Wurm" = 4
+"Expedition Map" = 4
+"Giant's Boulder" = 4
+"Maelstrom Colossus" = 4
+"Pinnacle Kill-Ship" = 4
+"Urza's Mine" = 4
+"Urza's Power Plant" = 4
+"Urza's Tower" = 4
+"Crop Rotation" = 3
+"Forest" = 3
+"Generous Ent" = 3
+"Bonder's Ornament" = 2
+"Conduit Pylons" = 2
+"Unfathomable Truths" = 2
+"Bojuka Bog" = 1
+[variant.sideboard]
+"Relic of Progenitus" = 3
+"Breath Weapon" = 2
+"Call Damage Control" = 2
+"Fiery Cannonade" = 2
+"Monstrous Emergence" = 2
+"Scour from Existence" = 2
+"Hydroblast" = 1
+"Kaervek's Torch" = 1
+[variant.plans.jund_wildfire]
+in = { "Breath Weapon" = 2, "Call Damage Control" = 2 }
+out = { "Unfathomable Truths" = 2, "Bonder's Ornament" = 1, "Boulderbranch Golem" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; 1 Boulderbranch Golem out in their slot; 1 Generous Ent out in their slot; trimmed to 4 swaps. Stock: Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+[variant.plans.mono_blue_terror]
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2 }
+out = { "Boulderbranch Golem" = 3, "Bramble Wurm" = 1 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; 1 Boulderbranch Golem out in their slot; 1 Generous Ent out in their slot; trimmed to 4 swaps. Stock: Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent, Whispersilk Cloak protects a threat from Deem Inferior; the life gain (Candy Trail, the Golem, Bramble Wurm) matters little against Blue."
+[variant.plans.red_madness]
+in = { "Breath Weapon" = 2, "Kaervek's Torch" = 1 }
+out = { "Unfathomable Truths" = 2, "Maelstrom Colossus" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; 1 Pulse of Murasa not in this sideboard; trimmed to 3 swaps. Stock: Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+[variant.plans.grixis_affinity]
+in = { "Breath Weapon" = 2 }
+out = { "Boulderbranch Golem" = 1, "Generous Ent" = 1 }
+why = "stock plan adjusted to this list: only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Haunted Fengraf in this maindeck; 1 Boulderbranch Golem out in their slot; 1 Generous Ent out in their slot; trimmed to 2 swaps. Stock: Breath Weapon kills Refurbished Familiar, Krark-Clan Shaman and Kenku Artificer, Kaervek's Torch a Myr Enforcer; Candy Trail is too slow."
+[variant.plans.elves]
+in = { "Breath Weapon" = 2, "Monstrous Emergence" = 2 }
+out = { "Unfathomable Truths" = 2, "Boulderbranch Golem" = 1, "Generous Ent" = 1 }
+why = "stock plan adjusted to this list: only 0 of 2 Candy Trail in this maindeck; 1 Boulderbranch Golem out in their slot; 1 Generous Ent out in their slot. Stock: Breath Weapon wipes the mana elves, Priest of Titania and Timberwatch Elf; Monstrous Emergence kills Avenging Hunter or a Hydra; the slow card draw goes out."
+[variant.plans.tron]
+in = { "Scour from Existence" = 2 }
+out = { "Boulderbranch Golem" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; 1 Boulderbranch Golem out in their slot; 1 Generous Ent out in their slot; trimmed to 2 swaps. Stock: Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
+
+[[variant]]
+id = "tron:nyxborn-hydra-build-2-forest+stock-list"
+archetype = "tron"
+split = "train"
+weight = 0.024648
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Nyxborn Hydra build, 2 Forest\" x sideboard build \"Stock list\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Tron", "archetype_lists" = 443, "main_build" = "Nyxborn Hydra build, 2 Forest", "main_lists" = 35, "main_share" = 0.079, "side_build" = "Stock list", "side_lists" = 138, "side_share" = 0.312, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Ancient Stirrings" = 4
+"Barrels of Blasting Jelly" = 4
+"Bramble Wurm" = 4
+"Expedition Map" = 4
+"Giant's Boulder" = 4
+"Malevolent Rumble" = 4
+"Nyxborn Hydra" = 4
+"Unfathomable Truths" = 4
+"Urza's Mine" = 4
+"Urza's Power Plant" = 4
+"Urza's Tower" = 4
+"Writhing Chrysalis" = 4
+"Crop Rotation" = 3
+"Bonder's Ornament" = 2
+"Forest" = 2
+"Pulse of Murasa" = 2
+"Bojuka Bog" = 1
+"Conduit Pylons" = 1
+"Generous Ent" = 1
+[variant.sideboard]
+"Relic of Progenitus" = 3
+"Breath Weapon" = 2
+"Call Damage Control" = 2
+"Fiery Cannonade" = 2
+"Monstrous Emergence" = 2
+"Scour from Existence" = 2
+"Hydroblast" = 1
+"Kaervek's Torch" = 1
+[variant.plans.jund_wildfire]
+in = { "Breath Weapon" = 2, "Call Damage Control" = 2 }
+out = { "Unfathomable Truths" = 2, "Bonder's Ornament" = 1, "Malevolent Rumble" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Boulderbranch Golem in this maindeck; 3 Malevolent Rumble out in their slot; trimmed to 4 swaps. Stock: Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+[variant.plans.mono_blue_terror]
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2 }
+out = { "Bramble Wurm" = 1, "Malevolent Rumble" = 3 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; only 0 of 2 Boulderbranch Golem in this maindeck; 4 Malevolent Rumble out in their slot; trimmed to 4 swaps. Stock: Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent, Whispersilk Cloak protects a threat from Deem Inferior; the life gain (Candy Trail, the Golem, Bramble Wurm) matters little against Blue."
+[variant.plans.red_madness]
+in = { "Breath Weapon" = 2, "Kaervek's Torch" = 1 }
+out = { "Unfathomable Truths" = 2, "Bonder's Ornament" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; 1 Pulse of Murasa not in this sideboard; only 0 of 2 Maelstrom Colossus in this maindeck; 2 Malevolent Rumble out in their slot; trimmed to 3 swaps. Stock: Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+[variant.plans.grixis_affinity]
+in = { "Breath Weapon" = 2, "Kaervek's Torch" = 1 }
+out = { "Malevolent Rumble" = 3 }
+why = "stock plan adjusted to this list: only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Haunted Fengraf in this maindeck; 3 Malevolent Rumble out in their slot. Stock: Breath Weapon kills Refurbished Familiar, Krark-Clan Shaman and Kenku Artificer, Kaervek's Torch a Myr Enforcer; Candy Trail is too slow."
+[variant.plans.elves]
+in = { "Breath Weapon" = 2, "Monstrous Emergence" = 2 }
+out = { "Unfathomable Truths" = 2, "Malevolent Rumble" = 2 }
+why = "stock plan adjusted to this list: only 0 of 2 Candy Trail in this maindeck; 2 Malevolent Rumble out in their slot. Stock: Breath Weapon wipes the mana elves, Priest of Titania and Timberwatch Elf; Monstrous Emergence kills Avenging Hunter or a Hydra; the slow card draw goes out."
+[variant.plans.tron]
+in = { "Scour from Existence" = 2 }
+out = { "Malevolent Rumble" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Boulderbranch Golem in this maindeck; 3 Malevolent Rumble out in their slot; trimmed to 2 swaps. Stock: Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
+
+[[variant]]
+id = "tron:no-generous-ent-build+stock-list"
+archetype = "tron"
+split = "train"
+weight = 0.022464
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"No Generous Ent build\" x sideboard build \"Stock list\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Tron", "archetype_lists" = 443, "main_build" = "No Generous Ent build", "main_lists" = 32, "main_share" = 0.072, "side_build" = "Stock list", "side_lists" = 138, "side_share" = 0.312, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Ancient Stirrings" = 4
+"Bonder's Ornament" = 4
+"Boulderbranch Golem" = 4
+"Bramble Wurm" = 4
+"Candy Trail" = 4
+"Expedition Map" = 4
+"Maelstrom Colossus" = 4
+"Pinnacle Kill-Ship" = 4
+"Urza's Mine" = 4
+"Urza's Power Plant" = 4
+"Urza's Tower" = 4
+"Barrels of Blasting Jelly" = 3
+"Unfathomable Truths" = 3
+"Conduit Pylons" = 2
+"Crop Rotation" = 2
+"Forest" = 2
+"Prophetic Prism" = 2
+"Bojuka Bog" = 1
+"Haunted Fengraf" = 1
+[variant.sideboard]
+"Relic of Progenitus" = 3
+"Breath Weapon" = 2
+"Call Damage Control" = 2
+"Fiery Cannonade" = 2
+"Monstrous Emergence" = 2
+"Scour from Existence" = 2
+"Hydroblast" = 1
+"Kaervek's Torch" = 1
+[variant.plans.jund_wildfire]
+in = { "Breath Weapon" = 2, "Call Damage Control" = 2 }
+out = { "Candy Trail" = 2, "Unfathomable Truths" = 2 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; 1 Whispersilk Cloak not in this sideboard; trimmed to 4 swaps. Stock: Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+[variant.plans.mono_blue_terror]
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2 }
+out = { "Candy Trail" = 2, "Boulderbranch Golem" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; trimmed to 4 swaps. Stock: Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent, Whispersilk Cloak protects a threat from Deem Inferior; the life gain (Candy Trail, the Golem, Bramble Wurm) matters little against Blue."
+[variant.plans.red_madness]
+in = { "Breath Weapon" = 2, "Kaervek's Torch" = 1 }
+out = { "Unfathomable Truths" = 2, "Maelstrom Colossus" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; 1 Pulse of Murasa not in this sideboard; trimmed to 3 swaps. Stock: Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+[variant.plans.tron]
+in = { "Scour from Existence" = 2 }
+out = { "Candy Trail" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; trimmed to 2 swaps. Stock: Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
 
 [[variant]]
 id = "tron:no-candy-trail-build-2+whispersilk-cloak-build"
@@ -2783,9 +3499,119 @@ out = { "Boulderbranch Golem" = 2, "Generous Ent" = 1 }
 why = "stock plan adjusted to this list: only 0 of 2 Candy Trail in this maindeck; 1 Boulderbranch Golem out in their slot; 1 Generous Ent out in their slot. Stock: Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
 
 [[variant]]
-id = "tron:no-candy-trail-build-2+breath-weapon-build-2"
+id = "tron:nyxborn-hydra-build-2-forest+whispersilk-cloak-build"
+archetype = "tron"
+split = "train"
+weight = 0.017301
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Nyxborn Hydra build, 2 Forest\" x sideboard build \"Whispersilk Cloak build\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Tron", "archetype_lists" = 443, "main_build" = "Nyxborn Hydra build, 2 Forest", "main_lists" = 35, "main_share" = 0.079, "side_build" = "Whispersilk Cloak build", "side_lists" = 97, "side_share" = 0.219, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Ancient Stirrings" = 4
+"Barrels of Blasting Jelly" = 4
+"Bramble Wurm" = 4
+"Expedition Map" = 4
+"Giant's Boulder" = 4
+"Malevolent Rumble" = 4
+"Nyxborn Hydra" = 4
+"Unfathomable Truths" = 4
+"Urza's Mine" = 4
+"Urza's Power Plant" = 4
+"Urza's Tower" = 4
+"Writhing Chrysalis" = 4
+"Crop Rotation" = 3
+"Bonder's Ornament" = 2
+"Forest" = 2
+"Pulse of Murasa" = 2
+"Bojuka Bog" = 1
+"Conduit Pylons" = 1
+"Generous Ent" = 1
+[variant.sideboard]
+"Relic of Progenitus" = 4
+"Breath Weapon" = 2
+"Call Damage Control" = 2
+"Monstrous Emergence" = 2
+"Scour from Existence" = 2
+"Kaervek's Torch" = 1
+"Pulse of Murasa" = 1
+"Whispersilk Cloak" = 1
+[variant.plans.jund_wildfire]
+in = { "Breath Weapon" = 2, "Call Damage Control" = 2, "Whispersilk Cloak" = 1 }
+out = { "Unfathomable Truths" = 2, "Bonder's Ornament" = 1, "Malevolent Rumble" = 2 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Boulderbranch Golem in this maindeck; 3 Malevolent Rumble out in their slot; trimmed to 5 swaps. Stock: Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+[variant.plans.mono_blue_terror]
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2, "Whispersilk Cloak" = 1 }
+out = { "Bramble Wurm" = 1, "Malevolent Rumble" = 4 }
+why = "stock plan adjusted to this list: only 0 of 2 Candy Trail in this maindeck; only 0 of 2 Boulderbranch Golem in this maindeck; 4 Malevolent Rumble out in their slot. Stock: Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent, Whispersilk Cloak protects a threat from Deem Inferior; the life gain (Candy Trail, the Golem, Bramble Wurm) matters little against Blue."
+[variant.plans.red_madness]
+in = { "Breath Weapon" = 2, "Kaervek's Torch" = 1, "Pulse of Murasa" = 1 }
+out = { "Unfathomable Truths" = 2, "Bonder's Ornament" = 1, "Malevolent Rumble" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; only 0 of 2 Maelstrom Colossus in this maindeck; 2 Malevolent Rumble out in their slot; trimmed to 4 swaps. Stock: Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+[variant.plans.grixis_affinity]
+in = { "Breath Weapon" = 2, "Kaervek's Torch" = 1 }
+out = { "Malevolent Rumble" = 3 }
+why = "stock plan adjusted to this list: only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Haunted Fengraf in this maindeck; 3 Malevolent Rumble out in their slot. Stock: Breath Weapon kills Refurbished Familiar, Krark-Clan Shaman and Kenku Artificer, Kaervek's Torch a Myr Enforcer; Candy Trail is too slow."
+[variant.plans.elves]
+in = { "Breath Weapon" = 2, "Monstrous Emergence" = 2 }
+out = { "Unfathomable Truths" = 2, "Malevolent Rumble" = 2 }
+why = "stock plan adjusted to this list: only 0 of 2 Candy Trail in this maindeck; 2 Malevolent Rumble out in their slot. Stock: Breath Weapon wipes the mana elves, Priest of Titania and Timberwatch Elf; Monstrous Emergence kills Avenging Hunter or a Hydra; the slow card draw goes out."
+[variant.plans.tron]
+in = { "Scour from Existence" = 2, "Whispersilk Cloak" = 1 }
+out = { "Malevolent Rumble" = 3 }
+why = "stock plan adjusted to this list: only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Boulderbranch Golem in this maindeck; 3 Malevolent Rumble out in their slot. Stock: Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
+
+[[variant]]
+id = "tron:no-generous-ent-build+whispersilk-cloak-build"
 archetype = "tron"
 split = "test"
+weight = 0.015768
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"No Generous Ent build\" x sideboard build \"Whispersilk Cloak build\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Tron", "archetype_lists" = 443, "main_build" = "No Generous Ent build", "main_lists" = 32, "main_share" = 0.072, "side_build" = "Whispersilk Cloak build", "side_lists" = 97, "side_share" = 0.219, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Ancient Stirrings" = 4
+"Bonder's Ornament" = 4
+"Boulderbranch Golem" = 4
+"Bramble Wurm" = 4
+"Candy Trail" = 4
+"Expedition Map" = 4
+"Maelstrom Colossus" = 4
+"Pinnacle Kill-Ship" = 4
+"Urza's Mine" = 4
+"Urza's Power Plant" = 4
+"Urza's Tower" = 4
+"Barrels of Blasting Jelly" = 3
+"Unfathomable Truths" = 3
+"Conduit Pylons" = 2
+"Crop Rotation" = 2
+"Forest" = 2
+"Prophetic Prism" = 2
+"Bojuka Bog" = 1
+"Haunted Fengraf" = 1
+[variant.sideboard]
+"Relic of Progenitus" = 4
+"Breath Weapon" = 2
+"Call Damage Control" = 2
+"Monstrous Emergence" = 2
+"Scour from Existence" = 2
+"Kaervek's Torch" = 1
+"Pulse of Murasa" = 1
+"Whispersilk Cloak" = 1
+[variant.plans.jund_wildfire]
+in = { "Breath Weapon" = 2, "Call Damage Control" = 2, "Whispersilk Cloak" = 1 }
+out = { "Candy Trail" = 2, "Unfathomable Truths" = 2, "Bonder's Ornament" = 1 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; trimmed to 5 swaps. Stock: Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+[variant.plans.red_madness]
+in = { "Breath Weapon" = 2, "Kaervek's Torch" = 1, "Pulse of Murasa" = 1 }
+out = { "Unfathomable Truths" = 2, "Maelstrom Colossus" = 2 }
+why = "stock plan adjusted to this list: 1 Breath Weapon not in this sideboard; trimmed to 4 swaps. Stock: Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+
+[[variant]]
+id = "tron:no-candy-trail-build-2+breath-weapon-build-2"
+archetype = "tron"
+split = "dev"
 weight = 0.00756
 constructed = true
 stock = false
@@ -2841,6 +3667,126 @@ in = { "Scour from Existence" = 2 }
 out = { "Boulderbranch Golem" = 2 }
 why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; 1 Boulderbranch Golem out in their slot; 1 Generous Ent out in their slot; trimmed to 2 swaps. Stock: Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
 
+[[variant]]
+id = "tron:nyxborn-hydra-build-2-forest+breath-weapon-build-2"
+archetype = "tron"
+split = "train"
+weight = 0.00711
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"Nyxborn Hydra build, 2 Forest\" x sideboard build \"Breath Weapon build 2\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Tron", "archetype_lists" = 443, "main_build" = "Nyxborn Hydra build, 2 Forest", "main_lists" = 35, "main_share" = 0.079, "side_build" = "Breath Weapon build 2", "side_lists" = 40, "side_share" = 0.09, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Ancient Stirrings" = 4
+"Barrels of Blasting Jelly" = 4
+"Bramble Wurm" = 4
+"Expedition Map" = 4
+"Giant's Boulder" = 4
+"Malevolent Rumble" = 4
+"Nyxborn Hydra" = 4
+"Unfathomable Truths" = 4
+"Urza's Mine" = 4
+"Urza's Power Plant" = 4
+"Urza's Tower" = 4
+"Writhing Chrysalis" = 4
+"Crop Rotation" = 3
+"Bonder's Ornament" = 2
+"Forest" = 2
+"Pulse of Murasa" = 2
+"Bojuka Bog" = 1
+"Conduit Pylons" = 1
+"Generous Ent" = 1
+[variant.sideboard]
+"Blue Elemental Blast" = 4
+"Relic of Progenitus" = 4
+"Breath Weapon" = 3
+"Call Damage Control" = 2
+"Scour from Existence" = 2
+[variant.plans.jund_wildfire]
+in = { "Breath Weapon" = 3, "Call Damage Control" = 2 }
+out = { "Unfathomable Truths" = 2, "Bonder's Ornament" = 1, "Malevolent Rumble" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Boulderbranch Golem in this maindeck; 3 Malevolent Rumble out in their slot; trimmed to 5 swaps. Stock: Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+[variant.plans.mono_blue_terror]
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2 }
+out = { "Bramble Wurm" = 1, "Malevolent Rumble" = 3 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; only 0 of 2 Boulderbranch Golem in this maindeck; 4 Malevolent Rumble out in their slot; trimmed to 4 swaps. Stock: Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent, Whispersilk Cloak protects a threat from Deem Inferior; the life gain (Candy Trail, the Golem, Bramble Wurm) matters little against Blue."
+[variant.plans.red_madness]
+in = { "Breath Weapon" = 3 }
+out = { "Unfathomable Truths" = 2, "Bonder's Ornament" = 1 }
+why = "stock plan adjusted to this list: 1 Kaervek's Torch not in this sideboard; 1 Pulse of Murasa not in this sideboard; only 0 of 2 Maelstrom Colossus in this maindeck; 2 Malevolent Rumble out in their slot; trimmed to 3 swaps. Stock: Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+[variant.plans.grixis_affinity]
+in = { "Breath Weapon" = 2 }
+out = { "Malevolent Rumble" = 2 }
+why = "stock plan adjusted to this list: 1 Kaervek's Torch not in this sideboard; only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Haunted Fengraf in this maindeck; 3 Malevolent Rumble out in their slot; trimmed to 2 swaps. Stock: Breath Weapon kills Refurbished Familiar, Krark-Clan Shaman and Kenku Artificer, Kaervek's Torch a Myr Enforcer; Candy Trail is too slow."
+[variant.plans.elves]
+in = { "Breath Weapon" = 2 }
+out = { "Unfathomable Truths" = 2 }
+why = "stock plan adjusted to this list: 2 Monstrous Emergence not in this sideboard; only 0 of 2 Candy Trail in this maindeck; 2 Malevolent Rumble out in their slot; trimmed to 2 swaps. Stock: Breath Weapon wipes the mana elves, Priest of Titania and Timberwatch Elf; Monstrous Emergence kills Avenging Hunter or a Hydra; the slow card draw goes out."
+[variant.plans.tron]
+in = { "Scour from Existence" = 2 }
+out = { "Malevolent Rumble" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; only 0 of 2 Candy Trail in this maindeck; only 0 of 1 Boulderbranch Golem in this maindeck; 3 Malevolent Rumble out in their slot; trimmed to 2 swaps. Stock: Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
+
+[[variant]]
+id = "tron:no-generous-ent-build+breath-weapon-build-2"
+archetype = "tron"
+split = "test"
+weight = 0.00648
+constructed = true
+stock = false
+source = "Pauper-Research 90d combined: main build \"No Generous Ent build\" x sideboard build \"Breath Weapon build 2\""
+provenance = { "snapshot_commit" = "592796a3f7879883da9af47eff1438948aeed161", "snapshot_date" = "2026-10-05", "dashboard_generated" = "2026-10-04", "period" = "2026-07-05..2026-10-02", "scope" = "combined", "snapshot_archetype" = "Tron", "archetype_lists" = 443, "main_build" = "No Generous Ent build", "main_lists" = 32, "main_share" = 0.072, "side_build" = "Breath Weapon build 2", "side_lists" = 40, "side_share" = 0.09, "weight_basis" = "main_share*side_share" }
+[variant.main]
+"Ancient Stirrings" = 4
+"Bonder's Ornament" = 4
+"Boulderbranch Golem" = 4
+"Bramble Wurm" = 4
+"Candy Trail" = 4
+"Expedition Map" = 4
+"Maelstrom Colossus" = 4
+"Pinnacle Kill-Ship" = 4
+"Urza's Mine" = 4
+"Urza's Power Plant" = 4
+"Urza's Tower" = 4
+"Barrels of Blasting Jelly" = 3
+"Unfathomable Truths" = 3
+"Conduit Pylons" = 2
+"Crop Rotation" = 2
+"Forest" = 2
+"Prophetic Prism" = 2
+"Bojuka Bog" = 1
+"Haunted Fengraf" = 1
+[variant.sideboard]
+"Blue Elemental Blast" = 4
+"Relic of Progenitus" = 4
+"Breath Weapon" = 3
+"Call Damage Control" = 2
+"Scour from Existence" = 2
+[variant.plans.jund_wildfire]
+in = { "Breath Weapon" = 3, "Call Damage Control" = 2 }
+out = { "Candy Trail" = 2, "Unfathomable Truths" = 2, "Bonder's Ornament" = 1 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; trimmed to 5 swaps. Stock: Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+[variant.plans.mono_blue_terror]
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2 }
+out = { "Candy Trail" = 2, "Boulderbranch Golem" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; trimmed to 4 swaps. Stock: Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent, Whispersilk Cloak protects a threat from Deem Inferior; the life gain (Candy Trail, the Golem, Bramble Wurm) matters little against Blue."
+[variant.plans.red_madness]
+in = { "Breath Weapon" = 3 }
+out = { "Unfathomable Truths" = 2, "Maelstrom Colossus" = 1 }
+why = "stock plan adjusted to this list: 1 Kaervek's Torch not in this sideboard; 1 Pulse of Murasa not in this sideboard; trimmed to 3 swaps. Stock: Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+[variant.plans.grixis_affinity]
+in = { "Breath Weapon" = 2 }
+out = { "Candy Trail" = 2 }
+why = "stock plan adjusted to this list: 1 Kaervek's Torch not in this sideboard; trimmed to 2 swaps. Stock: Breath Weapon kills Refurbished Familiar, Krark-Clan Shaman and Kenku Artificer, Kaervek's Torch a Myr Enforcer; Candy Trail is too slow."
+[variant.plans.elves]
+in = { "Breath Weapon" = 2 }
+out = { "Unfathomable Truths" = 2 }
+why = "stock plan adjusted to this list: 2 Monstrous Emergence not in this sideboard; trimmed to 2 swaps. Stock: Breath Weapon wipes the mana elves, Priest of Titania and Timberwatch Elf; Monstrous Emergence kills Avenging Hunter or a Hydra; the slow card draw goes out."
+[variant.plans.tron]
+in = { "Scour from Existence" = 2 }
+out = { "Candy Trail" = 2 }
+why = "stock plan adjusted to this list: 1 Whispersilk Cloak not in this sideboard; trimmed to 2 swaps. Stock: Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
+
 [[rejected]]
 archetype = "jund_wildfire"
 board = "main"
@@ -2871,24 +3817,6 @@ missing = []
 [[rejected]]
 archetype = "mono_blue_terror"
 board = "main"
-build = "Stock list"
-lists = 316
-share = 0.474
-reason = "cards not implemented"
-missing = ["Spell Pierce"]
-
-[[rejected]]
-archetype = "mono_blue_terror"
-board = "main"
-build = "Murmuring Mystic build"
-lists = 122
-share = 0.183
-reason = "cards not implemented"
-missing = ["Spell Pierce"]
-
-[[rejected]]
-archetype = "mono_blue_terror"
-board = "main"
 build = "14 Island build"
 lists = 93
 share = 0.14
@@ -2902,7 +3830,7 @@ build = "Boomerang build"
 lists = 72
 share = 0.108
 reason = "cards not implemented"
-missing = ["Boomerang", "Spell Pierce"]
+missing = ["Boomerang"]
 
 [[rejected]]
 archetype = "mono_blue_terror"
@@ -2988,15 +3916,6 @@ missing = ["Mwonvuli Acid-Moss", "Nylea's Disciple", "Rooftop Percher", "Scatter
 [[rejected]]
 archetype = "tron"
 board = "main"
-build = "Stock list"
-lists = 179
-share = 0.404
-reason = "cards not implemented"
-missing = ["Prophetic Prism"]
-
-[[rejected]]
-archetype = "tron"
-board = "main"
 build = "No Candy Trail build"
 lists = 83
 share = 0.187
@@ -3010,7 +3929,7 @@ build = "Nyxborn Hydra build"
 lists = 40
 share = 0.09
 reason = "cards not implemented"
-missing = ["Firebolt", "Malevolent Rumble", "Prophetic Prism"]
+missing = ["Firebolt"]
 
 [[rejected]]
 archetype = "tron"
@@ -3019,34 +3938,7 @@ build = "Nyxborn Hydra build, 2 Conduit Pylons"
 lists = 37
 share = 0.084
 reason = "cards not implemented"
-missing = ["Malevolent Rumble", "Wooded Ridgeline"]
-
-[[rejected]]
-archetype = "tron"
-board = "main"
-build = "Nyxborn Hydra build, 2 Forest"
-lists = 35
-share = 0.079
-reason = "cards not implemented"
-missing = ["Malevolent Rumble"]
-
-[[rejected]]
-archetype = "tron"
-board = "main"
-build = "No Generous Ent build"
-lists = 32
-share = 0.072
-reason = "cards not implemented"
-missing = ["Prophetic Prism"]
-
-[[rejected]]
-archetype = "tron"
-board = "side"
-build = "Stock list"
-lists = 138
-share = 0.312
-reason = "cards not implemented"
-missing = ["Fiery Cannonade"]
+missing = ["Wooded Ridgeline"]
 
 [[rejected]]
 archetype = "tron"
@@ -3074,3 +3966,12 @@ lists = 34
 share = 0.077
 reason = "cards not implemented"
 missing = ["Coalition Honor Guard"]
+
+[[rejected]]
+archetype = "tron"
+board = "75"
+build = "Stock list + Breath Weapon build 2"
+lists = 0
+share = 0.0364
+reason = "tron Stock list + Breath Weapon build 2: 5 copies of Breath Weapon across maindeck and sideboard"
+missing = []
