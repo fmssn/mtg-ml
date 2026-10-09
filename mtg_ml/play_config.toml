@@ -5,13 +5,83 @@
 # the scripted bots and the dev scenarios. Use `serve --play-config PATH` for
 # another offer. A player deck that has no matchup (match.MATCHUPS) with any
 # offered opponent is listed but cannot be chosen.
+#
+# [models."<name>"] pins a checkpoint: `<name>.pt` under the models directory
+# must have this SHA-256 and feature-set version. A local server skips an
+# opponent whose checkpoint is missing; a hosted server (mtg_ml.hosted) refuses
+# to start unless every one is present and matches (live.validate_offer).
+# Weights stay outside Git. Pin a fixed snapshot, never a trainer's latest.pt.
 
-player_decks = ["jund_wildfire", "mono_blue_terror"]
+player_decks = ["jund_wildfire", "mono_blue_terror", "red_madness", "grixis_affinity", "elves", "tron"]
+
+[models."r7-lr075/iter_04026"]
+sha256 = "1400629e0060c65a237f3455fd4b28a3becb82d5fbc8ce527104bc9db0cd335c"
+features = 7
+games = 8245248
+source = "h100-private:~/mtg-ml-checkpoints/20261008-r7-fs7-h256-lr075/snapshots/iter_04026.pt"
+evaluation = "r7 overnight campaign (PR #68): full 144-cell deck matrix and 21 head-to-head pairings at iter_04026; lr075 at 8.25M games sampled 0.563, greedy 0.662 vs the blue bot, L1 Elo 4.9"
+trained_at = "4a32795"  # training code (PR #68 head)
+runtime = "b06fac4"  # first default-branch commit that plays feature set 7 (#63); later revisions keep it
+
+[models."r4-control/policy"]
+sha256 = "cb19222d1868a72671c73c80268d75aea977e87758493804c80f895f85024f72"
+features = 3
+source = "h100-private:~/mtg-ml-checkpoints/20261007-r4-control/policy.pt"
+evaluation = "round 4 control (docs/experiments/ledger.md); legacy, kept for its sampled Delver play"
+
+# r7 lr075, greedy, with every deck: 36 ordered pairs, mirrors included.
+[[opponents]]
+id = "r7-jund"
+label = "r7 · Jund Wildfire"
+note = "r7 lr075 (8.2M self-play games, greedy) playing Jund Wildfire"
+model = "r7-lr075/iter_04026"
+deck = "jund_wildfire"
+greedy = true
+
+[[opponents]]
+id = "r7-blue"
+label = "r7 · Mono Blue Terror"
+note = "r7 lr075 (8.2M self-play games, greedy) playing Mono Blue Terror"
+model = "r7-lr075/iter_04026"
+deck = "mono_blue_terror"
+greedy = true
+
+[[opponents]]
+id = "r7-madness"
+label = "r7 · Red Madness"
+note = "r7 lr075 (8.2M self-play games, greedy) playing Red Madness"
+model = "r7-lr075/iter_04026"
+deck = "red_madness"
+greedy = true
+
+[[opponents]]
+id = "r7-affinity"
+label = "r7 · Grixis Affinity"
+note = "r7 lr075 (8.2M self-play games, greedy) playing Grixis Affinity"
+model = "r7-lr075/iter_04026"
+deck = "grixis_affinity"
+greedy = true
+
+[[opponents]]
+id = "r7-elves"
+label = "r7 · Elves"
+note = "r7 lr075 (8.2M self-play games, greedy) playing Elves"
+model = "r7-lr075/iter_04026"
+deck = "elves"
+greedy = true
+
+[[opponents]]
+id = "r7-tron"
+label = "r7 · Tron"
+note = "r7 lr075 (8.2M self-play games, greedy) playing Tron"
+model = "r7-lr075/iter_04026"
+deck = "tron"
+greedy = true
 
 [[opponents]]
 id = "delver"
-label = "Delver"
-note = "The r4-control model (self-play RL) playing Mono Blue Terror"
-model = "r4-control/model"
+label = "Delver (legacy r4)"
+note = "Legacy: the r4-control model (self-play RL, sampling) playing Mono Blue Terror"
+model = "r4-control/policy"
 deck = "mono_blue_terror"
 greedy = false

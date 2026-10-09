@@ -76,6 +76,59 @@ def load_play_config(path: pathlib.Path | None = None) -> dict:
         return tomllib.load(f)
 
 
+def sha256_file(path: pathlib.Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def validate_offer(models_dir: pathlib.Path | None, config: dict, strict: bool = False) -> tuple[dict[str, dict], list[str]]:
+    """Check the offered opponents' checkpoints against their pins
+    (`[models."<name>"]` in the play config: sha256, features). Returns the
+    usable models (name -> pin, with the measured sha256) and the problems.
+    `strict` (a hosted server): every opponent's model must be pinned, present
+    and match, and must not be a trainer's moving `latest`; any problem fails.
+    Otherwise a missing checkpoint just leaves its opponents out, as before."""
+    from .rl.rollout import load_policy
+
+    pins, found = config.get("models", {}), ({} if models_dir is None else find_models(models_dir))
+    ok: dict[str, dict] = {}
+    problems: list[str] = []
+    for name in dict.fromkeys(o.get("model") for o in config.get("opponents", [])):
+        pin = pins.get(name)
+        if pathlib.PurePosixPath(str(name)).name == "latest":
+            problems.append(f"{name}: a trainer's latest.pt moves; pin a fixed snapshot")
+            continue
+        if name not in found:
+            if strict:
+                problems.append(f"{name}: no {name}.pt under {models_dir}")
+            continue
+        if pin is None:
+            if strict:
+                problems.append(f"{name}: not pinned in the play config ([models.\"{name}\"] with sha256 and features)")
+            else:
+                ok[name] = {}
+            continue
+        digest = sha256_file(found[name])
+        if digest != pin.get("sha256"):
+            problems.append(f"{name}: sha256 {digest} does not match the pinned {pin.get('sha256')}")
+            continue
+        try:
+            features = load_policy(str(found[name])).features
+        except Exception as e:  # a checkpoint this code cannot load
+            problems.append(f"{name}: cannot load: {e}")
+            continue
+        if features != pin.get("features"):
+            problems.append(f"{name}: feature set {features}, pinned {pin.get('features')}")
+            continue
+        ok[name] = {**pin, "sha256": digest}
+    return ok, problems
+
+
 def matchup_for(player_deck: str, opponent_deck: str) -> tuple[str, int] | None:
     """(matchup, player's seat) for two decks, or None when no matchup pairs them."""
     for k, (a, b) in MATCHUPS.items():
@@ -518,6 +571,11 @@ class LiveManager:
         offer (play_config.toml: player decks, opponents); None offers every
         checkpoint and matchup. `filer`: files flags as GitHub issues (None: never)."""
         self.config, self.filer = config, filer
+        self.pinned: dict[str, dict] | None = None  # validated checkpoints (validate_offer); None: not checked
+        if config is not None and not scripted:
+            self.pinned, problems = validate_offer(models_dir, config)
+            for p in problems:
+                print(f"play offer: {p} (its opponents are left out)")
         if models_dir is not None:
             import torch
 
@@ -542,7 +600,7 @@ class LiveManager:
 
     def _offer(self) -> list[dict]:
         """The configured opponents whose checkpoint this server has."""
-        models = self._models()
+        models = self._models() if self.pinned is None else self.pinned
         return [o for o in self.config.get("opponents", []) if o.get("model") in models and o.get("deck") in DECK_TITLES]
 
     def _resolve(self, req: dict) -> dict:
