@@ -10,7 +10,10 @@ make test-fast    # what to run while iterating
 make test         # full suite, both engines if native is built
 make lint         # ruff check (CI blocks on it)
 make difftest     # Python vs Rust in lockstep
+make test-remote  # full suite on h100-private (also test-fast-remote, difftest-remote)
 ```
+
+Prefer the `-remote` targets for full suites and fuzzing; the Mac's CPU is shared by every workspace.
 
 Make targets use this checkout's `.venv` when present. For direct Python commands,
 use `.venv/bin/python` or activate `.venv`. `make native` rebuilds into that same
