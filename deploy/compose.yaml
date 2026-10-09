@@ -1,0 +1,70 @@
+# Production stack on the Hetzner box (docs/hosting.md). Run as root from the
+# repository checkout:  docker compose -f deploy/compose.yaml up -d
+#
+# The app listens on loopback only; public traffic arrives through the outbound
+# Cloudflare tunnel (cloudflared -> http://app:8080 on the compose network) and
+# is gated by Cloudflare Access. Nothing is published on a public interface.
+name: mtg-play
+
+x-logging: &bounded-logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        GIT_REV: ${GIT_REV:-unknown}
+    # Pin a tag per release; rollback = set MTG_PLAY_IMAGE to the previous tag.
+    image: ${MTG_PLAY_IMAGE:-mtg-play:local}
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - /etc/mtg-play/app.env
+    volumes:
+      - /srv/mtg-play/models:/models:ro
+      - /srv/mtg-play/state:/data/state
+      - /srv/mtg-play/replays:/data/replays
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    user: "10001:10001"
+    # CX33: 4 vCPU, 8 GB. Leave headroom for the OS, Docker and cloudflared.
+    mem_limit: 6g
+    pids_limit: 512
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('MTG_HOSTED_PORT', '8080'), timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+    logging: *bounded-logs
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.0
+    command: ["tunnel", "--no-autoupdate", "run"]
+    # TUNNEL_TOKEN only; the file is root-only (0600) under /etc/mtg-play (0700).
+    env_file:
+      - /etc/mtg-play/cloudflared.env
+    depends_on:
+      app:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 128
+    restart: unless-stopped
+    logging: *bounded-logs
