@@ -1,37 +1,68 @@
-# Live training dashboard
+# Training tracker
 
-A read-only monitor for `tools/training_campaign.py` campaigns. It reads the
-campaign manifest, complete metric records, outcome records, bounded log tails,
-live trainer processes and `nvidia-smi`. The dashboard distinguishes provisional
-numbers from completed screens, excludes warm-up from throughput, and reports
-stopped jobs and stale SSH data. It polls every 15 seconds even when the page is
-closed; it cannot start, stop or modify training.
+The one place to follow model training: a read-only web page with a **Live**
+view (every running or recent run side by side: progress, games/h, decisions/s,
+PPO entropy / KL / clip / explained variance, sampled and greedy benchmark, L1
+Elo over time, GPU and host load) and a **History** view (every row of
+`docs/experiments/ledger.jsonl`: parent, flags, benchmark, L1 Elo, verdict; a
+sortable, filterable table plus Elo and benchmark charts over the ledger).
+The page is self-contained (inline CSS/JS, SVG charts, no CDN), light and dark.
 
-Run from the workspace with its Python environment:
+It reads versioned files produced by `mtg_ml` only: campaign manifests
+(`campaign.json` from `tools/training_campaign.py` / `tools/overnight_campaign.py`),
+`<run>/metrics.jsonl`, `process.json`, `train.log` and the ledger. It cannot
+start, stop or modify training.
+
+## Discovery
+
+The server rescans on every poll (15 s), so new runs appear without a restart.
+`--root GLOB` (repeatable; default `~/mtg-ml-*/campaigns/*` and `~/mtg-ml-*/runs/*`)
+matches directories; one with a `campaign.json` is a campaign (each arm is a
+run), one with a `metrics.jsonl` is a plain `mtg_ml.rl.train --run` directory.
+Runs idle for more than `--recent-hours` (72) are hidden. `--campaign DIR`
+(repeatable) names a campaign explicitly and is always shown. A live trainer is
+recognised from `/proc` (`mtg_ml.rl.train --run ...`), which also yields its flags.
+`metrics.jsonl` is read incrementally, so large logs stay cheap.
+`--ledger` defaults to the ledger of the checkout the server runs from.
 
 ```bash
-scp apps/training-dashboard/snapshot.py \
-  h100-private:/home/taiga-support/mtg-ml-256-opt/dashboard_snapshot.py
-.venv/bin/python apps/training-dashboard/server.py \
-  --port 55012 \
-  --host h100-private \
-  --remote-script /home/taiga-support/mtg-ml-256-opt/dashboard_snapshot.py \
-  --campaign /home/taiga-support/mtg-ml-256-opt/campaigns/screens-20261008-dedicated
+python apps/training-dashboard/server.py --port 8768 \
+  --root '~/mtg-ml-*/campaigns/*' --root '~/mtg-ml-*/runs/*'
 ```
 
-Open <http://127.0.0.1:55012>. The server binds only to the local loopback
-interface and uses the existing `h100-private` SSH connection. No credentials
-are stored in the dashboard. `--host`, `--remote-script`, `--campaign`,
-`--interval` and `--cache` can be overridden; the default cache is
-`.context/training-dashboard/state.json`. SSH mode requires explicit host,
-campaign and remote script paths; `--python` defaults to remote `python3`.
+Endpoints (GET only): `/`, `/api/state`, `/api/history`,
+`/report/<campaign>.md|.json` (morning report of a discovered campaign), `/healthz`.
 
-Charts use actual recorded learner decisions / iteration wall time. Learner,
-collection and publication stages overlap and must not be added together.
-Remaining time is an estimate for the selected screen from its last five
-iterations. Running GPU-hours use the last recorded elapsed time; completed
-GPU-hours use the runner's charged time, including startup. Strength per hour
-requires the subsequent paired training/evaluation runs.
+## Hosting on the training box
+
+Server on the training machine, loopback bind, `tailscale serve` HTTPS, tailnet
+only, no credentials, no Funnel. One idempotent command (run on the box):
+
+```bash
+DASHBOARD_CPU=3 bash tools/dashboard_host.sh start --port 8768 --https 8444
+bash tools/dashboard_host.sh status
+bash tools/dashboard_host.sh stop --port 8768 --https 8444
+```
+
+`start` creates the detached tmux session `mtg-tracker` (nice 10, `taskset` when
+`DASHBOARD_CPU` is set) if missing, waits for `/healthz`, checks
+`tailscale serve status` and adds `--https=<https>` only if that port is free
+(it refuses a port that proxies elsewhere; 443 and 8188, ComfyUI, are rejected).
+`stop` removes only the entry that proxies to this server. Serve changes fall
+back to passwordless `sudo` when the user is not the tailscale operator.
+
+URL pattern: `https://<machine>.tailc02128.ts.net:<https-port>`, for example
+`https://gpu-server1.tailc02128.ts.net:8444` (h100-private2) or
+`https://gpu-server.tailc02128.ts.net:<port>` (h100-private). To deploy a new
+checkout, rsync it to a fresh directory on the box and run `stop` then `start`
+from there (the server reads code and ledger from its own checkout).
+
+## Legacy mode
+
+`--source ssh --host H --remote-script S --campaign DIR` keeps the old
+single-campaign monitor over SSH (the `index.html` screens page, written for the
+256-width computational screens). The tracker shows campaigns on the training
+host, old screen campaigns included, as plain runs.
 
 ## Fresh training campaigns on h100-private2
 
@@ -51,27 +82,6 @@ trainers, leaving monitoring available. `stop-monitoring` stops its dashboard
 and watcher. The optional third argument is the tmux prefix (use `mtg-r7-smoke`
 for smoke runs). Training logs rotate at 2 MB with three backups; service output
 stays in a bounded 2,000-line tmux history. No service automatically respawns.
-
-The dashboard supports both original screen manifests and `mode: training`
-manifests. Training snapshots expose progress, rolling rates, PPO statistics,
-benchmark/L1 history and incremental matrix results. Old SSH monitoring remains
-supported with `--python` selecting the remote interpreter.
-
-On the training host (inside a detached tmux session):
-
-```bash
-taskset -c 3 nice -n 10 .venv/bin/python apps/training-dashboard/server.py \
-  --source local --campaign /home/taiga-support/mtg-ml-r7/campaigns/overnight \
-  --cache /home/taiga-support/mtg-ml-r7/dashboard-state.json --port 8767
-# Add only this port; do not reset the existing ComfyUI configuration.
-tailscale serve --bg --https=8443 http://127.0.0.1:8767
-```
-
-The Python listener remains loopback-only. Tailscale Serve provides HTTPS within
-the tailnet at `https://gpu-server1.tailc02128.ts.net:8443`; do not enable Funnel.
-The endpoints are GET-only `/`, `/api/state`, and `/healthz`. No model loading or
-GPU allocation occurs in the dashboard. Snapshot failures retain the last data
-with a visible error; interrupted trainers are distinguished from delayed updates.
 
 Mirror sideboard rows are fixed tactical assumptions, not validated optimal
 choices. Mirrors remain explicit-only; the fresh campaign assigns cross-pair

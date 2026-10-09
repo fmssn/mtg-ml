@@ -110,6 +110,7 @@ const fmt={
 };
 const state={live:null,hist:null,hidden:new Set(),metric:null,xaxis:'games',sort:{key:'date',dir:-1},filter:'',open:new Set(),view:'live'};
 const colors={};let colorN=0;
+function nameRuns(runs){const n={};for(const r of runs)n[r.label]=(n[r.label]||0)+1;for(const r of runs)r.dn=n[r.label]>1&&r.campaign?r.campaign.replace(/^overnight-/,'')+' · '+r.label:r.label}
 const colorOf=id=>colors[id]??(colors[id]=PAL[colorN++%PAL.length]);
 
 /* ---------- theme ---------- */
@@ -182,7 +183,7 @@ function renderLive(){
      <div class="gpu"><div>util ${fmt.n(u)}%</div><div class="bar"><i style="width:${u}%"></i></div><div>mem ${fmt.n(g.used_mib/1024,1)} / ${fmt.n(g.total_mib/1024,0)} GiB</div><div class="bar"><i style="width:${mem*100}%"></i></div></div></div>`}).join('')}
     <div class="card"><h3>Host <span class="note">${esc(S.host)}</span></h3><div class="gpu"><div>load ${S.load.map(x=>fmt.n(x,1)).join(' / ')} on ${S.cpu_count} cores</div>${S.disk?`<div>disk free ${fmt.n(S.disk.free/2**30,0)} of ${fmt.n(S.disk.total/2**30,0)} GiB</div>`:''}</div></div></div>`}
   if(all.length){
-  h+=`<div><h2>Runs</h2></div><div class="chips" id="chips">${all.map(r=>`<span class="chip" role="button" tabindex="0" aria-pressed="${!state.hidden.has(r.id)}" data-id="${esc(r.id)}"><span class="swatch" style="background:var(${colorOf(r.id)})"></span>${esc(r.campaign?r.campaign.replace(/^overnight-/,'')+' · ':'')}${esc(r.label)}</span>`).join('')}</div>`;
+  h+=`<div><h2>Runs</h2></div><div class="chips" id="chips">${all.map(r=>`<span class="chip" role="button" tabindex="0" aria-pressed="${!state.hidden.has(r.id)}" data-id="${esc(r.id)}"><span class="swatch" style="background:var(${colorOf(r.id)})"></span>${esc(r.dn)}</span>`).join('')}</div>`;
   h+=`<div class="grid wide">${all.map(r=>runCard(r)).join('')}</div>`;
   h+=`<div><h2>Compare</h2></div><div class="grid wide" id="figs"></div>`;
   for(const c of S.campaigns||[]){if(c.alerts.length)h+=`<div class="banner bad">${esc(c.name)}: ${esc(c.alerts.join('; '))}</div>`;}
@@ -201,7 +202,7 @@ function runCard(r){
   const bv=e&&state.metric?e.bench[state.metric]:null,gv=e&&state.metric?e.greedy[state.metric]:null;
   const t=(a,b,u='')=>`<div class="tile"><small>${a}</small><b>${b}${u?` <em>${u}</em>`:''}</b></div>`;
   const flags=Object.entries(r.flags||{}).map(([k,v])=>`${k} ${v}`).join('\n');
-  return `<div class="card${off?' off':''}"><div class="head"><h3><span class="swatch" style="background:var(${colorOf(r.id)})"></span>${esc(r.label)}</h3><span class="pill ${pillCls[r.status]||'pend'}">${esc(r.status)}</span></div>
+  return `<div class="card${off?' off':''}"><div class="head"><h3><span class="swatch" style="background:var(${colorOf(r.id)})"></span>${esc(r.dn)}</h3><span class="pill ${pillCls[r.status]||'pend'}">${esc(r.status)}</span></div>
    <div class="note">${esc(r.campaign||r.path)}${r.pid?` · pid ${r.pid}`:''} · metrics ${fmt.age(r.metrics_age_s)}</div>
    ${pg!=null?`<div class="bar" title="${fmt.pct(pg)}"><i style="width:${pg*100}%"></i></div>`:''}
    <div class="tiles">${t('games',fmt.big(r.games),r.target_games?'/ '+fmt.big(r.target_games):'')}${t('iteration',fmt.n(r.iteration))}${t('elapsed',fmt.dur(r.elapsed_s))}
@@ -213,7 +214,7 @@ function runCard(r){
 function renderFigs(runs){
   const box=$('#figs');box.innerHTML='';
   const xs=state.xaxis==='games'?{fx:fmt.big}:{fx:v=>v.toFixed(1)+' h'};
-  const mk=(title,sub,fn,o={})=>{const f=figure(title,sub);box.appendChild(f);const ser=runs.map(r=>({name:r.label,color:colorOf(r.id),...fn(r)})).filter(s=>s.points.length);
+  const mk=(title,sub,fn,o={})=>{const f=figure(title,sub);box.appendChild(f);const ser=runs.map(r=>({name:r.dn,color:colorOf(r.id),...fn(r)})).filter(s=>s.points.length);
     lineChart($('.plot',f),ser,{title,...xs,...o});legend(f,ser)};
   const ev=(get,o={})=>r=>({points:r.evals.map(e=>[state.xaxis==='games'?e.games_total:e.elapsed_s/3600,get(e)]).filter(p=>p[0]!=null&&p[1]!=null),dots:true,...o});
   const ser=k=>r=>{const xv=r.series.map(s=>state.xaxis==='games'?s.games_total:s.elapsed_s/3600),y=smooth(r.series.map(s=>s[k]),8);return{points:xv.map((x,i)=>[x,y[i]]).filter(p=>p[0]!=null)}};
@@ -240,7 +241,7 @@ function renderHistory(){
   <div class="grid wide" id="hfigs"></div>
   <div class="tablewrap"><table><thead><tr>${COLS.map(([k,l,n])=>`<th class="${n?'num':''}" data-k="${k}" ${state.sort.key===k?`aria-sort="${state.sort.dir>0?'ascending':'descending'}"`:''}>${l}</th>`).join('')}</tr></thead><tbody>`;
   for(const r of rows){
-    h+=`<tr class="row" data-id="${esc(r.id)}"><td class="mono">${esc(r.date)}</td><td>${esc(r.id)}</td><td class="note">${esc(r.parent||'–')}</td><td class="num">${fmt.big(r.games)}</td><td class="num">${fmt.pct(r.sampled)}</td><td class="num">${fmt.pct(r.greedy)}</td><td class="num">${fmt.n(r.elo,1)}</td><td><span class="pill ${r.verdict_class}">${esc((r.verdict||'–').split(/[:(;]/)[0].trim().slice(0,28))}</span></td></tr>`;
+    h+=`<tr class="row" data-id="${esc(r.id)}"><td class="mono">${esc(r.date)}</td><td>${esc(r.id)}</td><td class="note">${esc(r.parent||'–')}</td><td class="num">${r.games?fmt.big(r.games):'–'}</td><td class="num">${fmt.pct(r.sampled)}</td><td class="num">${fmt.pct(r.greedy)}</td><td class="num">${fmt.n(r.elo,1)}</td><td><span class="pill ${r.verdict_class}">${esc((v=>v.length>24?v.slice(0,23)+'…':v)((r.verdict||'–').split(/[:(;]/)[0].trim()))}</span></td></tr>`;
     if(state.open.has('h:'+r.id))h+=`<tr class="detail"><td colspan="8"><div class="kv"><span>change</span><span>${esc(r.change||'–')}</span><span>verdict</span><span>${esc(r.verdict||'–')}</span><span>flags</span><span>${esc(r.flags||'–')}</span><span>code</span><span>${esc(r.code||'–')} ${r.engine?'· engine: '+esc(r.engine):''}</span><span>results</span><span>${esc(Object.entries(r.results||{}).map(([k,v])=>k+' = '+JSON.stringify(v)).join('\n'))}</span><span>archive</span><span>${esc(r.archive||'–')}</span></div></td></tr>`}
   h+='</tbody></table></div>';
   el.innerHTML=h;
@@ -267,7 +268,9 @@ async function loadHistory(){try{state.hist=await (await fetch('api/history',{ca
 let failures=0;
 async function poll(){
   try{const d=await (await fetch('api/state',{cache:'no-store'})).json();failures=0;
-    if(d.snapshot){state.live=d.snapshot}
+    if(d.snapshot){state.live=d.snapshot;nameRuns(state.live.runs);
+      if(!state.seeded){state.seeded=true;const fresh=state.live.runs.some(r=>r.status==='running'||(r.metrics_age_s!=null&&r.metrics_age_s<86400));
+        if(fresh)for(const r of state.live.runs)if(r.status!=='running'&&!(r.metrics_age_s!=null&&r.metrics_age_s<86400))state.hidden.add(r.id)}}
     const age=d.last_attempt?Date.now()/1000-d.last_attempt:null,bad=d.error||(age!=null&&age>60);
     $('#conn').innerHTML=`<span class="dot ${d.error?'bad':bad?'stale':''}"></span>${d.snapshot?esc(d.snapshot.host)+' · updated '+fmt.age(Date.now()/1000-d.snapshot.observed_at):'no data'}`;
     $('#banner').innerHTML=d.error?`<div class="banner bad">Snapshot error, showing last data: ${esc(d.error)}</div>`:'';
