@@ -536,7 +536,7 @@ def _item_cost(game, item, x: int | None = None):
     if item.kind == "spell":
         card = item.card
         base = game._mode_cost(card, item.method)
-        return base.with_x(item.x if x is None else x).reduced(game._cost_reduction(item.controller, card)), card.face.additional_sac, set()
+        return base.with_x(item.x if x is None else x).reduced(game._cost_reduction(item.controller, card)), game._pay_filter(item.controller, card, item.method), set()
     src = item.source
     for ab in src.face.abilities:
         if f"{src.name}: {ab.name}" == item.name:
@@ -744,7 +744,7 @@ def _static_preview(game, player: int, i: int, features: int) -> list[str]:
         return []
     effect = d.overload_effect if mode == "overload" else d.effect if choice is None else d.modes[choice].effect
     cost = base.with_x(0).reduced(game._cost_reduction(player, card))
-    return _kills_preview(game, player, _ops(effect), card) + _mana_preview(game, player, cost, d.additional_sac, set())
+    return _kills_preview(game, player, _ops(effect), card) + _mana_preview(game, player, cost, game._pay_filter(player, card, mode), set())
 
 
 # ---------------------------------------------------------------------------

@@ -132,6 +132,8 @@ pub enum SacFilter {
     /// Bargain: an artifact, enchantment or token.
     ArtifactEnchantmentOrToken,
     Land,
+    /// Not a sacrifice: a creature must stay behind while paying (Monstrous Emergence).
+    KeepCreature,
 }
 
 impl SacFilter {
@@ -142,6 +144,7 @@ impl SacFilter {
             "mountain" => Ok(SacFilter::Mountain),
             "artifact_enchantment_or_token" => Ok(SacFilter::ArtifactEnchantmentOrToken),
             "land" => Ok(SacFilter::Land),
+            "keep_creature" => Ok(SacFilter::KeepCreature),
             _ => Err(format!("unknown sacrifice filter {s:?}")),
         }
     }
@@ -152,6 +155,7 @@ impl SacFilter {
             SacFilter::Mountain => "mountain",
             SacFilter::ArtifactEnchantmentOrToken => "artifact_enchantment_or_token",
             SacFilter::Land => "land",
+            SacFilter::KeepCreature => "keep_creature",
         }
     }
 }

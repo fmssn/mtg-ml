@@ -726,7 +726,7 @@ fn item_cost(st: &State, item: &StackItem, x: Option<i32>) -> (ManaCost, Option<
     if item.kind == SKind::Spell {
         let ci = item.card.expect("spell has a card");
         let base = st.mode_cost(ci, item.method).expect("cast mode has a cost");
-        return (base.with_x(x.unwrap_or(item.x)).reduced(st.cost_reduction(item.controller, ci)), st.c(ci).face().additional_sac, vec![]);
+        return (base.with_x(x.unwrap_or(item.x)).reduced(st.cost_reduction(item.controller, ci)), st.pay_filter(item.controller, ci, item.method), vec![]);
     }
     if let Some(s) = &item.source {
         let src = st.src(s);
@@ -960,7 +960,7 @@ pub fn option_preview(st: &State, player: u8, kind: Kind, o: &Opt, features: u8,
             };
             kills_preview(st, player, effect, st.c(*ci), out);
             let cost = base.with_x(0).reduced(st.cost_reduction(player, *ci));
-            mana_preview(st, player, &cost, d.additional_sac, &[], out);
+            mana_preview(st, player, &cost, st.pay_filter(player, *ci, *method), &[], out);
         }
         _ => {}
     }

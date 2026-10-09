@@ -60,6 +60,7 @@ MAX_HAND = 7
 # Cast modes from the hand, in the order they are offered.
 HAND_MODES = ("normal", "bestow", "overload", "alternative", "phyrexian", "bargain", "omen", "evidence", "prototype")
 BARGAIN_SAC = "artifact_enchantment_or_token"  # bargain's sacrifice filter
+KEEP_CREATURE = "keep_creature"  # not a sacrifice: a creature must stay on the battlefield while paying (Monstrous Emergence)
 FILTER_HURT = 1 << 20  # auto_mana: a mana filter is the payment of last resort
 
 
@@ -1563,6 +1564,8 @@ class Game:
                 out.append(c)
             elif flt == "land" and self.is_land(c):
                 out.append(c)
+            elif flt == KEEP_CREATURE and self.is_creature(c):
+                out.append(c)
         return out
 
     def _cost_feasible(
@@ -1828,6 +1831,18 @@ class Game:
         """Sacrifice filter of an additional cost: the card's own, or bargain's."""
         return BARGAIN_SAC if mode == "bargain" else card.face.additional_sac
 
+    def _pay_filter(self, p: int, card: Card, mode: str) -> str | None:
+        """The filter `_cost_feasible` / `_pay_mana` must leave a permanent for:
+        the additional sacrifice, or, for Monstrous Emergence with no creature
+        card in hand to reveal, a creature that mana payment (sacrificing an
+        Eldrazi Spawn) must not remove. Not the sacrifice itself (`_mode_additional_sac`)."""
+        add = self._mode_additional_sac(card, mode)
+        d = card.face
+        if add is None and (d.additional_power or d.additional_choose_creature):
+            if not any(c is not card and c.face.is_type("Creature") for c in self.players[p].hand):
+                return KEEP_CREATURE
+        return add
+
     def _mode_sac(self, card: Card, mode: str) -> tuple[str, int] | None:
         """Lands sacrificed instead of (part of) the cost: (filter, count)."""
         if mode == "alternative":
@@ -1893,7 +1908,7 @@ class Game:
         if sac is not None and len(self.sac_candidates(p, sac[0])) < sac[1]:
             return False
         cost = base.with_x(0).reduced(self._cost_reduction(p, card))
-        return self._cost_feasible(p, RemainingCost.of(cost), self._mode_additional_sac(card, mode))
+        return self._cost_feasible(p, RemainingCost.of(cost), self._pay_filter(p, card, mode))
 
     def _power_sources(self, p: int, card: Card) -> list[Card]:
         """Monstrous Emergence's additional cost: creatures `p` controls
@@ -1946,16 +1961,17 @@ class Game:
         base = self._mode_cost(card, mode)
         reduction = self._cost_reduction(p, card)
         add_sac = self._mode_additional_sac(card, mode)
+        pay_filter = self._pay_filter(p, card, mode)
         if base.x:
             xs = []
             x = 0
-            while self._cost_feasible(p, RemainingCost.of(base.with_x(x).reduced(reduction)), add_sac):
+            while self._cost_feasible(p, RemainingCost.of(base.with_x(x).reduced(reduction)), pay_filter):
                 xs.append(x)
                 x += 1
             item.x = yield from self.ask(p, O.CHOOSE_X, f"Choose X for {card.name}", [Option(f"X={v}", ("x", v), v) for v in xs])
         yield from self._choose_targets(p, item)
         cost = base.with_x(item.x).reduced(reduction)
-        yield from self._pay_mana(p, RemainingCost.of(cost), add_sac, what=card.name)
+        yield from self._pay_mana(p, RemainingCost.of(cost), pay_filter, what=card.name)
         life_cost = d.phyrexian_life if mode == "phyrexian" else d.flashback_life if mode == "flashback" else 0
         if life_cost:
             self.players[p].life -= life_cost
