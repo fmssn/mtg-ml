@@ -70,3 +70,13 @@ Rejected (play share in brackets; full list with counts in `[[rejected]]` of the
 - **Tron:** main "Stock list" (40%) and "No Generous Ent build", Prophetic Prism. "No Candy Trail build", Rooftop Percher. Three Nyxborn Hydra builds, Malevolent Rumble (also Prophetic Prism, Firebolt, Wooded Ridgeline). Side "Stock list" (31%), Fiery Cannonade. "Breath Weapon build", Earth Rift. Both Coalition Honor Guard builds, Coalition Honor Guard.
 
 Implementing Spell Pierce, Prophetic Prism, Malevolent Rumble, Fiery Cannonade and Melded Moxite (docs/adding-cards.md) would unlock most of the missing play share. After adding cards, rerun `tools/build_variants.py`.
+
+## Decisions (2026-10-09, project owner)
+
+- The per-archetype split, the stock-deck weight rule (`policy:max`) and the
+  rule-adjusted sideboard plans are accepted as they are. The 22 plans that lose
+  two to four swaps are a known weakness, to be replaced by researched or learned
+  plans later.
+- Cards missing from the most-played builds are implemented rather than the
+  builds dropped: Spell Pierce, Prophetic Prism, Malevolent Rumble and Fiery
+  Cannonade first (separate cards PR); the manifest is rebuilt when they land.
