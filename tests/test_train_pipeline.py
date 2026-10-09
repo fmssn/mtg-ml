@@ -8,6 +8,7 @@ process of its own, merged into the metrics rows when it ends.
 
 import gc
 import json
+import math
 import multiprocessing as mp
 import os
 import threading
@@ -158,7 +159,8 @@ def test_abandoned_thread_call_cannot_block_the_exit():
     assert not collector._thread.is_alive()
 
 
-def test_shared_result_round_trip(tmp_path):
+@pytest.mark.parametrize("zero_returns", [False, True], ids=["rollout-returns", "zero-returns"])
+def test_shared_result_round_trip(tmp_path, zero_returns):
     """The merged result parked by the collector and mapped by the trainer
     trains exactly like the result itself."""
     net = PolicyNet(hidden=16)
@@ -166,6 +168,11 @@ def test_shared_result_round_trip(tmp_path):
     torch.save({"config": net.config, "model": net.state_dict()}, path)
     specs = [GameSpec(s, (LEARNER, LEARNER)) for s in range(3)] + [GameSpec(9, (LEARNER, RANDOM))]
     res = run_job(Job(specs, path, 1, shaping=0.1, max_turns=8))
+    if zero_returns:
+        # Short, reward-free rollouts can have zero return variance, making
+        # explained variance undefined. Exercise that case regardless of RNG.
+        res.returns = [0.0] * len(res.actions)
+        res.advantages = [0.0] * len(res.actions)
     got = SharedResult(res).attach()
     assert len(got.samples) == len(res.samples) and list(got.samples) == list(res.samples)
     assert list(got.actions) == res.actions and list(got.kinds) == res.kinds and got.lengths == res.lengths and got.games == res.games
@@ -176,6 +183,10 @@ def test_shared_result_round_trip(tmp_path):
         n.load_state_dict(net.state_dict())
         opt = torch.optim.Adam(n.parameters(), lr=1e-3)
         stats.append((ppo_update(n, opt, data, PPOConfig(epochs=2, minibatch=64), gen=torch.Generator().manual_seed(0)), n.state_dict()))
+    explained_var = [metrics.pop("explained_var") for metrics, _ in stats]
+    if zero_returns:
+        assert all(math.isnan(value) for value in explained_var)
+    assert explained_var[0] == explained_var[1] or all(math.isnan(value) for value in explained_var)
     assert stats[0][0] == stats[1][0]
     assert all(torch.equal(stats[0][1][k], stats[1][1][k]) for k in stats[0][1])
     release(got)

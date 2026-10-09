@@ -99,6 +99,8 @@ def _rules(face, token=False):
             "additional_sacrifice": face.additional_sac, "additional_discard": face.additional_discard,
             "escape_exile": face.escape_exile, "shape": face.shape,
             "power": face.power, "toughness": face.toughness, "token": token,
+            "bestow": None if face.bestow is None else str(face.bestow),
+            "flashback": None if face.flashback is None else str(face.flashback),
             "keywords": sorted(face.keywords),
             "abilities": [{"name": a.name, "cost": str(a.cost), "mana_cost": mana_cost(a.cost), "tap": a.tap, "sac_self": a.sac_self, "sac_other": a.sac_other,
                            "mana": a.mana, "mana_amount": a.mana_amount, "zone": a.zone, "sorcery_speed": a.sorcery_speed,
@@ -108,33 +110,46 @@ def _rules(face, token=False):
             "modes": [{"name": m.name, "targets": [t.kind for t in m.targets]} for m in face.modes]}
 
 
+def stack_view(g, viewer):
+    """Public stack facts, including live or last-known source characteristics.
+
+    Only explicitly public scalar trigger data crosses this boundary. In
+    particular, never serialize the engine's arbitrary StackItem.data mapping.
+    """
+    def ref(r):
+        tag, value = r
+        if tag == "player":
+            return {"player": "self" if value == viewer else "opponent"}
+        if tag == "stack":
+            return {"sid": value}
+        return {"oid": value}
+
+    out = []
+    for it in g.stack:
+        source = it.card if it.card is not None else it.source
+        live = None if source is None else g.perm(source.oid)
+        c = live if live is not None else source
+        src = None if c is None else {
+            "name": c.name, "oid": c.oid, "controller": "self" if c.controller == viewer else "opponent",
+            "keywords": sorted(g.keywords(c)), "power": g.power(c), "toughness": g.toughness(c),
+        }
+        entry = {"sid": it.sid, "name": it.name, "kind": it.kind,
+                 "controller": "self" if it.controller == viewer else "opponent",
+                 "source": src, "targets": [ref(r) for r in it.targets], "x": it.x, "method": it.method,
+                 "card": card_ref(g, it.card, viewer) if it.kind == "spell" else None}
+        if it.kind == "trigger" and it.name.endswith(": ward"):
+            entry["ward"] = {"sid": it.data["sid"], "amount": it.data["amount"]}
+        out.append(entry)
+    return out
+
+
 def inputs(g, viewer, own_deck):
     """Trusted translation; no raw Option.value or rule callbacks survive."""
     d = g.decision
     require(d is not None and d.player == viewer, "decision", "view requested for nondecider")
     require(d.kind in KINDS, "decision.kind", f"unsupported semantics {d.kind}")
     state = observe(g, viewer)
-    # Stack targets in observe() are display strings. Specialists need actual
-    # references (duplicate spell names are common), never parsed labels. Only
-    # explicitly public data is translated; trigger.data may hold private cards.
-    def target_ref(ref):
-        tag, n = ref
-        if tag == "player":
-            return {"player": "self" if n == viewer else "opponent"}
-        if tag == "stack":
-            return {"sid": n}
-        return {"oid": n}
-
-    context = {"stack": []}
-    for item in g.stack:
-        entry = {"sid": item.sid, "name": item.name, "kind": item.kind,
-                 "controller": "self" if item.controller == viewer else "opponent",
-                 "targets": [target_ref(t) for t in item.targets], "method": item.method, "x": item.x,
-                 "card": card_ref(g, item.card, viewer) if item.kind == "spell" else None,
-                 "source": {"name": item.source.name, "oid": item.source.oid} if item.source is not None else None}
-        if item.kind == "trigger" and item.name.endswith(": ward"):
-            entry["ward"] = {"sid": item.data["sid"], "amount": item.data["amount"]}
-        context["stack"].append(entry)
+    context = {"stack": stack_view(g, viewer), "blocked": sorted(g.blocked)}
     combat = g.combat_subjects if d.kind in {"declare_attacker", "declare_blocker", "assign_damage"} else None
     if combat is not None:
         require(len(combat) == len(d.options), "decision.subject", "missing structured combat subjects")
@@ -155,6 +170,10 @@ def inputs(g, viewer, own_deck):
     permitted = {c.name: c for c in g.battlefield}
     permitted.update({c.name: c for p in g.players for z in ("graveyard", "exile", "hand", "library") for c in getattr(p, z)
                       if z in {"graveyard", "exile"} or (z == "hand" and p.idx == viewer) or viewer in c.known_to})
+    for it in g.stack:
+        c = it.card if it.card is not None else it.source
+        if c is not None:
+            permitted.setdefault(c.name, c)  # spells and ability sources are public
     for i, o in enumerate(g.legal_options()):
         key, v = o.key, o.value
         data = {"choice": key}
@@ -173,11 +192,12 @@ def inputs(g, viewer, own_deck):
                         data["spell_mode"] = key[4]
                 elif v[0] in {"activate", "mana"}:
                     data["ability"] = key[2]
+                    data["ability_index"] = v[2]
                     if v[0] == "activate":
                         cost = c.face.abilities[v[2]].cost
                         data["cost"], data["mana_cost"] = str(cost), mana_cost(cost)
                     else:
-                        data["color"] = key[2]
+                        data["color"] = c.face.abilities[v[2]].mana[0]
         elif d.kind == "target":
             if v is None:
                 data["target"] = None
