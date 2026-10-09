@@ -2,6 +2,49 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## 20261009-r8-evals-1 · trust-test baseline (r7 lr075) and specialist benchmark of r8 arm C (evaluation only)
+
+- **Question**: (1) what does the new trust test (`python -m mtg_ml.benchmark.trust`, #94) say about the r7 lr075 final policy, as a baseline for later checkpoints; (2) where does r8 arm C (`r8-jund-blue-ft`, Jund-vs-Blue fine-tune of lr075) stand against the Jund and Blue specialists, compared with r4-control and r7 lr075.
+- **Code**: `6ca2fb59e1cfab95a5aa290a76e49a948d18f6b7` (default branch with #94), deployed to `~/mtg-ml-eval/code` (own venv, native built) on both hosts. Raw outputs: `h100-private:~/mtg-ml-eval/results/` (`specialist-C/`, `trust-r7-lr075/trust.json` 14 MB, `trust.md`, logs); not in git.
+- **Resources**: both boxes were fully allocated to training, so each job ran with 8 workers at `nice -n 19`, OMP threads 1, unpinned. Wall-clock numbers below are therefore for a loaded machine.
+
+### Trust test, r7 lr075 final (`policy.pt`, sha256 672aaa0c..., 8.35M games, fs7, fair contract)
+
+Run on h100-private2 (8 workers, loaded box), 5,970 s (1.66 h). Default bo3 format and default thresholds, sampled (primary) and greedy. **Reduced sample sizes to fit the 2 h budget at 8 workers**: 200 matches per pairing and mode (default 400) and 40 matches per ordered matchup, mode and pool member (default 200). Intervals are wider than the defaults give (about +-0.07 per pairing, +-0.15 per exploit matchup). Exploit pool: frozen snapshots iter 488 (early), 1708, 2928, 3904 (late) of the lr075 run.
+
+| check | sampled | greedy |
+|---|---|---|
+| per pairing (need 70% inside) | PASS, 11/14 inside, 1 above, 2 below | FAIL, 8/14 inside, 1 above, 5 below |
+| per deck bias (margin 0.02) | FAIL, flagged: tron | FAIL, flagged: jund_wildfire, tron |
+| exploitability (margin 0.02) | FAIL, 7 clearly exploitable matchups, max pool win rate 0.825 | FAIL, 7 clearly exploitable, max 0.875 |
+| overall | **FAIL** | **FAIL** |
+
+Sampled details:
+- Outside the Pauper-Research interval: red_madness vs grixis_affinity (model 0.460, reference 0.376 [0.309, 0.449], above); red_madness vs tron (0.330 vs 0.544 [0.442, 0.643], below); grixis_affinity vs tron (0.150 vs 0.358 [0.262, 0.467], below). elves vs tron (0.560 vs 0.778, thin reference, 27 matches) is below but not counted.
+- Per-deck bias (model minus reference): jund -0.036, blue -0.024, red_madness -0.022, grixis_affinity -0.041, elves -0.009, **tron +0.163 [+0.091, +0.235]** (the only flag). The model overrates Tron against Madness, Affinity and Elves in the pairings above.
+- Exploitable (best pool member beats the final model, interval clear of 50% by more than 0.02): elves>jund (iter 1708, 0.675), grixis_affinity>mono_blue (3904, 0.775), mono_blue>red_madness (488, 0.675), red_madness>elves (3904, 0.825), red_madness>jund (3904, 0.725), tron>grixis_affinity (488, 0.750), tron>jund (3904, 0.725). Pool members of different training stages each win some matchups, and the late snapshot 3904 wins four of the seven, so this is not just old-policy noise: the final model is not uniformly dominant in these decks.
+- Greedy adds jund_wildfire to the bias flags and drops per-pairing to 8/14 inside.
+- Thresholds are the documented uncalibrated starting values; treat this as a baseline for comparing later checkpoints rather than an absolute verdict.
+
+### Specialist benchmark, r8 arm C
+
+Checkpoint: `r8-jund-blue-ft` `policy/v00763.pt`, sha256 `7a48daa89d25da65ec85743524c99a7a09822c7946ef5e01ec8296b4686b148d`, iteration 763, **1,562,624 games** of the arm (from the lr075 parent, fresh optimizer and pool; the arm was still running, a completed file two iterations behind the newest was copied). Protocol exactly as in `20261009-specialist-benchmark`: `tools/benchmark_checkpoint.py --blocks 100 --contract fair`, 100 four-game blocks per cell and mode (n = 400, Wilson 95% about +-0.05), all six cells, 0 errors, 8 workers (about 25 min). The r4-control and r7 rows are copied from that entry (same protocol, same dev stream).
+
+Score of the checkpoint, sampled / greedy:
+
+| checkpoint | Jund vs Blue spec. | Blue vs Jund spec. | Jund vs Jund spec. (mirror) | Blue vs Blue spec. (mirror) | Jund vs legacy Blue | Blue vs legacy Jund |
+|---|---|---|---|---|---|---|
+| **r8 arm C @ 1.56M games (fs7)** | 62.7 / **72.0** | 78.2 / 80.5 | 51.0 / 63.7 | 59.5 / 65.0 | 73.5 / 83.3 | 90.0 / 91.2 |
+| r4-control (fs3, diagnostic) | **64.0** / 65.5 | **85.3 / 87.0** | 32.8 / 36.2 | 48.7 / 48.7 | 74.3 / 74.3 | 93.0 / 93.0 |
+| r7 lr075 final (8.35M, its parent) | 46.3 / 49.0 | 68.8 / 75.7 | 57.8 / 68.5 | 57.8 / 67.0 | 55.5 / 70.8 | 84.3 / 88.5 |
+
+**Findings**
+- Against the Blue specialist as Jund (the arm's training matchup) C gains +16 points sampled and +23 greedy over its parent lr075. It reaches r4-control's level sampled (62.7 vs 64.0, inside the +-5 interval, so not better) and is above it greedy (72.0 vs 65.5, +6.5 points, borderline at this n).
+- C keeps most of the other cells: both mirrors stay above 50% (Jund mirror 51.0 / 63.7 against 32.8 / 36.2 for r4-control), although they dropped from the parent's 57.8 / 68.5 (Jund mirror sampled -7 points, within the noise at n = 400; greedy -5). Blue vs Jund specialist is +9 sampled over lr075 but 7 below r4-control sampled.
+- C was trained on the matchup with the Jund and Blue decks only, so the Blue-as-learner cells improving (blue_vs_sjund 68.8 to 78.2) shows the fine-tune transfers across seats.
+- C is still training (6M-game target), so these are an interim reading at 1.56M games.
+- Verdict: **inconclusive** (evaluation only); the benchmark above is interim for C, the trust test is a baseline for lr075.
+
 ## 20261009-r8 · three-arm follow-up to r7: continue lr075, feature set 8 + belief head, Jund-vs-Blue fine-tune
 
 - **Status:** `r8-lr075-continue` and `r8-jund-blue-ft` running since 18:35 Berlin October 9 (16:35 UTC). **`r8-fs8-belief` failed at 18:43 Berlin after 108,409 games (iteration 58, 7 min)** with `NativeRulesError: decision 'choose_card' (Monstrous Emergence: choose a creature you control or reveal a creature card) has no options`, raised in a rollout worker (the native engine offered the additional-cost choice with no legal option; the smoke of 6 updates did not hit it). Only this arm samples varied deck lists (`--variants train`); the r7 matrix runs 8.35M games without it. Fixed by PR #93 (Monstrous Emergence cannot be paid for by sacrificing its only creature). **Relaunched from scratch at 19:38 Berlin** (17:38 UTC) on `0d3c0d40879de23ef65bfd711151149f1ab6b40b` (default branch with #93) in a new checkout `~/mtg-ml-r8/code-b`, campaign `~/mtg-ml-r8/campaigns/r8b-20261009`, same flags, seed 8, GPUs 87/90, CPUs 32-63. The crashed run dir stays in `r8-20261009/r8-fs8-belief` for reference. Stop: `ssh h100-private2 'CODE=~/mtg-ml-r8/code-b bash ~/mtg-ml-r8/launch/r8_host.sh stop ~/mtg-ml-r8/campaigns/r8b-20261009'`. Arms A and C run on 889798b; #93 touches only the Monstrous Emergence rule, so the code differs for B only there. Launch record: [r8-launch.json](r8-launch.json). Results will be added to this entry; the arm ids below are the archive ids.
