@@ -80,12 +80,40 @@ def reference(parent, ref, field) -> Path:
     return path.resolve()
 
 
+def unique_list(values, field):
+    require(isinstance(values, list) and len(set(map(str, values))) == len(values), field, "list of unique entries required")
+
+
+def validate_assessment(a):
+    require(isinstance(a, dict), "assessment", "final split requires an assessment record")
+    identifier(a.get("id"), "assessment.id")
+    require("/" not in a["id"], "assessment.id", "must not contain '/'")
+    exposed = a.get("exposed")
+    require(isinstance(exposed, dict) and set(exposed) == {"checkpoints", "puzzle_groups"}, "assessment.exposed", "checkpoints and puzzle_groups required")
+    unique_list(exposed["checkpoints"], "assessment.exposed.checkpoints")
+    for h in exposed["checkpoints"]:
+        sha(h, "assessment.exposed.checkpoints")
+    unique_list(exposed["puzzle_groups"], "assessment.exposed.puzzle_groups")
+    for g in exposed["puzzle_groups"]:
+        identifier(g, "assessment.exposed.puzzle_groups")
+    unique_list(a.get("supersedes"), "assessment.supersedes")
+    for s in a["supersedes"]:
+        identifier(s, "assessment.supersedes")
+        require(s != a["id"], "assessment.supersedes", "cannot supersede itself")
+
+
 def validate_manifest(d):
     header(d, "BenchmarkManifest")
     identifier(d.get("id"), "id")
     require(isinstance(d.get("suite_version"), str) and re.fullmatch(r"\d+\.\d+\.\d+", d["suite_version"]), "suite_version", "semantic version required")
     require(d.get("split") in {"dev", "final", "power-pilot"}, "split", "unsupported split")
-    require(d.get("stream") == "benchmark-v1/" + d["split"], "stream", "split/stream mismatch")
+    if d["split"] == "final":
+        # Each final assessment gets its own seed stream; retuning needs a new ID.
+        validate_assessment(d.get("assessment"))
+        require(d.get("stream") == "benchmark-v1/final/" + d["assessment"]["id"], "stream", "final stream must name its assessment")
+    else:
+        require("assessment" not in d, "assessment", "only final manifests carry an assessment")
+        require(d.get("stream") == "benchmark-v1/" + d["split"], "stream", "split/stream mismatch")
     require(d.get("information_contract") in {FAIR, DIAGNOSTIC}, "information_contract", "unsupported contract")
     freeze = d["freeze"]
     sha(freeze.get("code_revision"), "freeze.code_revision", True)

@@ -32,7 +32,12 @@ def test_bad_json_rejected(tmp_path, text):
         read_json(p)
 
 
-@pytest.mark.parametrize("change", ["version", "bool_version", "count", "bool_count", "deck_hash", "bundle_hash", "cards", "cell", "duplicate", "mode", "stream", "missing"])
+def assessment(name, supersedes=()):
+    return {"id": name, "exposed": {"checkpoints": ["a" * 64], "puzzle_groups": ["synthetic-jund-removal"]}, "supersedes": list(supersedes)}
+
+
+@pytest.mark.parametrize("change", ["version", "bool_version", "count", "bool_count", "deck_hash", "bundle_hash", "cards", "cell", "duplicate", "mode", "stream", "missing",
+                                    "final_no_assessment", "final_stream", "dev_assessment", "exposed_hash"])
 def test_manifest_errors_name_artifact(tmp_path, change):
     m, _ = fixture(tmp_path, puzzles=False)
     d = copy.deepcopy(m.data)
@@ -48,6 +53,12 @@ def test_manifest_errors_name_artifact(tmp_path, change):
     if change == "mode": d["modes"] = ["sampled", "sampled"]
     if change == "stream": d["stream"] = "benchmark-v1/final"
     if change == "missing": del d["freeze"]
+    if change == "final_no_assessment": d.update(split="final", stream="benchmark-v1/final")
+    if change == "final_stream": d.update(split="final", stream="benchmark-v1/final/a2", assessment=assessment("a1"))
+    if change == "dev_assessment": d["assessment"] = assessment("a1")
+    if change == "exposed_hash":
+        d.update(split="final", stream="benchmark-v1/final/a1", assessment=assessment("a1"))
+        d["assessment"]["exposed"]["checkpoints"] = ["not-a-hash"]
     p = tmp_path / "bad.json"
     write_json(p, d)
     with pytest.raises(ValueError, match="bad.json"):
@@ -88,6 +99,20 @@ def test_exact_seed_tags_and_slots(tmp_path):
     assert simulator_seed(m.data["stream"], "jund_vs_blue", 0) != actor_seed(m.data["stream"], "jund_vs_blue", 0, 0, "sampled")
     assert puzzle_seed(m.data["stream"], "p", 0, "sampled") == puzzle_seed(m.data["stream"], "p", 0, "sampled")
     assert bootstrap_seed(m.data["stream"], "s", "greedy") != puzzle_seed(m.data["stream"], "s", 0, "greedy")
+
+
+def test_final_assessment_id_enters_every_seed(tmp_path):
+    m, _ = fixture(tmp_path, puzzles=False)
+    seeds = []
+    for name, prior in (("a1", ()), ("a2", ("a1",))):
+        d = copy.deepcopy(m.data)
+        d.update(split="final", stream=f"benchmark-v1/final/{name}", assessment=assessment(name, prior))
+        p = tmp_path / f"final-{name}.json"
+        write_json(p, d)
+        seeds.append({(s.cell, s.block): (s.simulator_seed, s.actor_seed) for s in episodes(load_manifest(p))})
+    assert seeds[0].keys() == seeds[1].keys()
+    assert all(seeds[0][k][0] != seeds[1][k][0] and seeds[0][k][1] != seeds[1][k][1] for k in seeds[0])
+    assert seeds[0][("jund_vs_blue", 0)][0] != simulator_seed("benchmark-v1/dev", "jund_vs_blue", 0)
 
 
 def test_atomic_exclusive_publish(tmp_path):
