@@ -188,6 +188,47 @@ interval is the 95% Wilson interval of wins over n. Caveats:
   lists differ from our builds, so a gap on one pairing is weak evidence; the per-deck bias check
   across pairings is the meaningful test.
 
+### Running the trust test
+
+```bash
+.venv/bin/python -m mtg_ml.benchmark.trust runs/r7/final.pt \
+    --pool ckpts/r7-it200.pt ckpts/r7-it400.pt --matches 400 --workers 48 --out runs/trust/r7
+```
+
+`mtg_ml.benchmark.trust` plays the checkpoint against itself in the 15 non-mirror pairings of the six
+decks (native engine by default), sampled and greedy, on paired deals: each block is one deal played
+in four slots (both seats, both starts), the seed stream is `trust-v1`, and every pairing sees the same
+block count. A unit is one sideboarded best-of-three match: game 1 with the maindecks, games 2 and 3 with each
+seat's plan from `engine/sideboard_plans.toml` (as `mtg_ml.match`), the loser on the play, each model seat
+carrying what it witnessed into the next game. The score is the match win rate (a tied match counts
+half), like the reference's match points. `--matches` is rounded up to whole four-match blocks.
+`--format game1` plays single maindeck games instead, for diagnostics only (the markdown says so; the
+checks are only defined for bo3). Each pool checkpoint then plays the final model in all 30 ordered
+matchups (`--exploit-matches`, default 200 per matchup and mode). It
+writes `trust.json` (format `TrustTestResult` v1: checkpoint SHA and features, code revision, card spec
+and reference file hashes, engine, parameters, every game row, per-mode comparisons and the three
+check results) and `trust.md` (the short summary). The exit code follows `--primary-mode` (default
+sampled): 0 only if all three checks pass; a run without `--pool` cannot pass. Statistics reuse
+`mtg_ml.benchmark.stats` (block bootstrap, one shared index list per replicate). Sets below 7 need
+`--contract diagnostic`. `--agent random` is a smoke test.
+
+| check | rule | flag (default) |
+|---|---|---|
+| per pairing | model match win rate (tied match half) is `inside` when its point estimate lies in the reference 95% Wilson interval (bounds inclusive), else `above`/`below`; the report also says whether the model's own interval overlaps the reference's. Thin and missing reference pairings are shown but not counted. Pass: the inside fraction of counted pairings is at least | `--min-inside 0.70` |
+| per deck | bias = mean of (model - reference) over the deck's non-thin pairings. Its 95% interval adds the model's block-bootstrap variance and the reference's binomial variance (normal approximation). A deck is flagged when the interval excludes 0 by more than the margin (lower bound above +margin, or upper bound below -margin). Pass: no flagged deck and every deck computable | `--bias-margin 0.02` |
+| exploitability | per ordered matchup, the best pool member's win rate and interval; clearly exploitable when the interval's lower bound exceeds 0.5 plus the margin. Pass: none | `--exploit-margin 0.02` |
+
+Also `--replicates 2000` (bootstrap), `--modes sampled,greedy`, `--workers`, `--engine`.
+
+Caveats. The thresholds (0.70, 0.02, 0.02) are uncalibrated starting values (the result JSON records
+`threshold_status`). Sideboarding uses the scripted plan table for both seats, and the reference's
+players sideboard their own way and mix Bo1 events. The 30 exploitability cells times the pool size are many
+comparisons, so the lower-bound rule is deliberately one-sided and conservative. Run time scales with
+matches: about 3.3 CPU-seconds per best-of-three match on an M-series Mac with a small untrained net
+(measured; h100-private's cores are not measured), so 400 matches per pairing and both modes
+(12,000 matches) is about 15 minutes on 48 cores, plus about 15 minutes per pool member at the default
+200 matches per matchup.
+
 ### Card-choice protocol
 
 Variant decks differ from the base list by a few cards. For each variant:
