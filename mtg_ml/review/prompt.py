@@ -62,6 +62,8 @@ FEATURE_NOTES = {
     4: """Adds combat relations: attacker slots, blocked/unblocked flags, blocker counts/power/lethality, and which attacker a blocker blocks (slot/name/characteristics). Global inputs include attacking and unblocked power, incoming lethal and life after unblocked damage. Block previews describe attacker/blocker death and lethal damage still unblocked. X has numeric/max/entering-power previews and an option-to-spell pointer. Mana colour supply/hand needs and colour previews cover land plays, basic searches and payments.""",
     5: """Adds card-shape tokens derived from the structured card specification: costs, ability/trigger/effect ops and target kinds. These describe what cards do without giving the model raw card text. The decider's own hand cards are entities, and cast/play-land/plot options point at them; stack items include their resolving ops.""",
     6: """Adds simulated option previews (`pv:sim:*`) from applying an option to an exact game copy, plus assume-opponent-passes previews (`pv:simp:*`). Observable deltas include life, creatures/permanents gained/lost, zones, mana/colours and lethal flags. Simulations stop at hidden information, relevant decisions, game end or a bounded horizon and can be skipped; they are not unrestricted search or knowledge of hidden draws. Existing static previews remain.""",
+    7: """Hidden-list information contract: no archetype labels (`self:deck:*`, `opp:deck:*`) and no absolute seat token. The viewer's own registered main, registered sideboard and current-main counts are inputs (`self:list:*`, every copy, hashed). Entity lists are no longer capped: every battlefield object, stack item and own-hand card keeps its action pointer. Every candidate option receives both simulated preview streams, however many candidates there are.""",
+    8: """Set 7's hashed features unchanged, plus exact witnessed opponent-card evidence for the belief head: what this player actually saw of the opponent's cards in the current game and in each finished game of the best-of-three. The evidence feeds the belief head, not the hashed inputs; hidden cards and library order are still not observed.""",
 }
 
 
@@ -90,7 +92,8 @@ def observation_sheet(config: dict | None = None) -> str:
         else:
             lines.append("There is no recurrent memory between decisions; current event tokens still describe own and public opponent actions.")
     lines += [f"- Feature set {v}: {FEATURE_NOTES[v]}" for v in versions]
-    lines.append("Numbers use hashed/bucketed/thermometer representations, not raw arithmetic. Entity lists are capped at 64. Feature presence does not prove the policy learned to use it. For a claimed gap, inspect the checkpoint-version inputs at the cited decision against docs/features.md, mtg_ml/encode.py and mtg_ml/rl/features.py.")
+    capped = "Entity lists are capped at 64 (feature sets below 7). " if config is None or features < 7 else ""
+    lines.append("Numbers use hashed/bucketed/thermometer representations, not raw arithmetic. " + capped + "Feature presence does not prove the policy learned to use it. For a claimed gap, inspect the checkpoint-version inputs at the cited decision against docs/features.md, mtg_ml/encode.py and mtg_ml/rl/features.py.")
     return "\n".join(lines) + "\n"
 
 
