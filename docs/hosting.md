@@ -144,19 +144,19 @@ the only published port is bound to 127.0.0.1.
 ## 3. Checkpoints (read-only, SHA-256 checked)
 
 Copy each checkpoint named in `mtg_ml/play_config.toml` `[models]` to
-`/srv/mtg-play/models/<name>.pt`, e.g. `r7-lr075/iter_04026.pt` and
+`/srv/mtg-play/models/<name>.pt`, e.g. `r7-lr075/policy.pt` and
 `r4-control/policy.pt` (the `source` field says where each lives on h100-private).
 
 ```bash
 ssh root@<ipv4> 'install -d -m 0755 /srv/mtg-play/models/r7-lr075 /srv/mtg-play/models/r4-control'
-scp iter_04026.pt root@<ipv4>:/srv/mtg-play/models/r7-lr075/iter_04026.pt
-scp policy.pt     root@<ipv4>:/srv/mtg-play/models/r4-control/policy.pt
+scp r7-lr075/policy.pt   root@<ipv4>:/srv/mtg-play/models/r7-lr075/policy.pt
+scp r4-control/policy.pt root@<ipv4>:/srv/mtg-play/models/r4-control/policy.pt
 ssh root@<ipv4> 'chown -R root:root /srv/mtg-play/models && find /srv/mtg-play/models -type f -exec chmod 0444 {} + \
-  && sha256sum /srv/mtg-play/models/r7-lr075/iter_04026.pt /srv/mtg-play/models/r4-control/policy.pt'
+  && sha256sum /srv/mtg-play/models/r7-lr075/policy.pt /srv/mtg-play/models/r4-control/policy.pt'
 ```
 
 Compare the printed hashes with the `sha256` fields in `play_config.toml`
-(`1400629e…cd335c` for r7-lr075/iter_04026, `cb19222d…f85024f72` for
+(`672aaa0c…68f636e` for r7-lr075/policy, `cb19222d…f85024f72` for
 r4-control/policy). The container check below verifies them again.
 
 ## 4. Configuration
