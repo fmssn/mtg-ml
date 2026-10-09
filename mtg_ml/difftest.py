@@ -37,6 +37,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 
+from .match import MATCHUPS
 from .trace import Scenario, make_agents, scenarios
 
 # ---------------------------------------------------------------------------
@@ -405,11 +406,11 @@ def main(argv=None) -> None:
         action="append",
         default=[],
         metavar="SEAT:NAME:N",
-        help="swap N copies of a card into seat SEAT's deck (0 = Jund, 1 = Blue), e.g. '1:Vapor Snag:4'; repeatable",
+        help="swap N copies of a card into seat SEAT's deck (seat index; the deck depends on --matchup), e.g. '1:Vapor Snag:4'; repeatable",
     )
     f.add_argument("--auto-mana", action="store_true", help="play with Game(auto_mana=True): colour-preserving auto payment")
     f.add_argument("--auto-pass", action="store_true", help="play with Game(auto_pass=True): collapse uneventful priority passes")
-    f.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue, jund_madness, blue_madness, jund_elves, blue_elves or madness_elves")
+    f.add_argument("--matchup", default="jund_blue", help=f"match.MATCHUPS: {', '.join(MATCHUPS)} (seat 0 deck first; mirrors are used only where named)")
     r = sub.add_parser("repro", help="replay a saved divergence")
     r.add_argument("file")
     args = ap.parse_args(argv)
