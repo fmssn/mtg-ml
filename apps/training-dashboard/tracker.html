@@ -24,7 +24,9 @@
   --c1:#3987e5;--c2:#d95926;--c3:#199e70;--c4:#a47be0;--c5:#d4ae3a;--c6:#e0689a;--c7:#3fb4cc;--c8:#9aab4a;color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);font:16px/1.55 var(--body);margin:0;padding:28px 16px 64px}
+main,#live,#history{grid-template-columns:minmax(0,1fr)}
 main{max-width:1240px;margin:0 auto;display:grid;gap:26px}
+main>*{min-width:0}
 h1,h2,h3{font-family:var(--display);line-height:1.15;margin:0;text-wrap:balance}
 h1{font-size:34px;font-weight:700;letter-spacing:-.01em}
 h2{font-size:24px;font-weight:700;padding-bottom:8px;border-bottom:2px solid var(--fg)}
@@ -34,15 +36,15 @@ a{color:var(--accent)}
 .mono,td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .note{font-size:13.5px;color:var(--muted)}
 header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:end;gap:14px}
-.right{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.right{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
 button,select,input{font:13px var(--mono);color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
 button{cursor:pointer}button:hover{border-color:var(--accent)}
 button:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 nav{display:flex;gap:6px}nav button[aria-pressed=true]{background:var(--accent);color:var(--surface);border-color:var(--accent)}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}.dot.bad{background:var(--bad)}.dot.stale{background:var(--warn)}
 .banner{background:var(--accent-soft);border-radius:6px;padding:12px 16px;font-size:14px}.banner.bad{color:var(--bad);border:1px solid var(--bad)}
-.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
-.grid.wide{grid-template-columns:repeat(auto-fill,minmax(420px,1fr))}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(min(280px,100%),1fr))}
+.grid.wide{grid-template-columns:repeat(auto-fill,minmax(min(420px,100%),1fr))}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px 16px;display:grid;gap:10px;align-content:start;min-width:0}
 .card.off{opacity:.55}
 .card head,.card .head{display:flex;justify-content:space-between;gap:8px;align-items:start}
@@ -115,7 +117,7 @@ const colorOf=id=>colors[id]??(colors[id]=PAL[colorN++%PAL.length]);
 
 /* ---------- theme ---------- */
 const root=document.documentElement;
-try{const t=localStorage.getItem('theme');if(t)root.dataset.theme=t}catch(e){}
+try{const t=new URLSearchParams(location.search).get('theme')||localStorage.getItem('theme');if(t)root.dataset.theme=t}catch(e){}
 $('#theme').onclick=()=>{const dark=root.dataset.theme?root.dataset.theme==='dark':matchMedia('(prefers-color-scheme:dark)').matches;
   root.dataset.theme=dark?'light':'dark';try{localStorage.setItem('theme',root.dataset.theme)}catch(e){}render()};
 matchMedia('(prefers-color-scheme:dark)').addEventListener('change',()=>render());

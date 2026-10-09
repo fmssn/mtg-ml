@@ -108,6 +108,7 @@ class Monitor:
 def handler(monitor):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            self.path = self.path.split('?', 1)[0]
             tracking = isinstance(monitor, TrackerMonitor)
             if self.path in ('/', '/index.html'):
                 page = 'tracker.html' if tracking else 'index.html'
