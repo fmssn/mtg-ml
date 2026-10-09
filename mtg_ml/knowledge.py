@@ -47,8 +47,8 @@ class MatchKnowledge:
     games: tuple[tuple[tuple[str, int], ...], ...] = ()
 
     def __post_init__(self):
-        if len(self.games) >= MAX_GAMES:
-            raise ValueError(f"a best-of-three carries at most {MAX_GAMES - 1} finished games into the next one")
+        if len(self.games) > MAX_GAMES:
+            raise ValueError(f"a best-of-three has at most {MAX_GAMES} games")
 
     def with_game(self, witnessed: Mapping[str, int]) -> "MatchKnowledge":
         """This record plus one more finished game (`Game.witnessed(viewer)` at its end)."""

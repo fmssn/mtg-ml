@@ -16,7 +16,9 @@ Without it every worker runs its own CPU copy of the network (`rollout.py`,
   on the host and runs the rest on the GPU, which reads the requests straight
   from the data block (registered with CUDA, mapped into the device's address
   space) and writes (action, log-prob, value) per decision straight into the
-  reply areas.
+  reply areas. A request area holds the records, option lengths, state
+  tokens, event tokens, belief evidence (feature set 8: (card, slot, copies)
+  triples; empty otherwise) and option tokens, in that order.
 * every policy the server holds (pool checkpoints and the learner; one
   config) is stacked (`rl/stacked.py`): one batched forward serves all rows
   of a batch, rows sorted by policy, so one forward per batch, not one per
@@ -55,11 +57,12 @@ from multiprocessing import shared_memory
 
 SLOTS_PER_WORKER = 8192  # (game, seat) slots per worker: jobs of up to 4096 games
 MAX_ROWS = 4096  # decisions per request: one per live game of a group (rollout.MAX_LIVE)
-REC = 9  # ints per decision record: slot, fresh, s_off, s_len, e_off, e_len, opt_off, n_opts, o_off
+REC = 11  # ints per decision record: slot, fresh, s_off, s_len, e_off, e_len, opt_off, n_opts, o_off, v_off, v_len (evidence ints)
 GREEDY_FLAG = 2  # or-ed into a record's `fresh` word (bit 0): take the most likely option instead of sampling (`Job.greedy`)
 HDR = 128  # ints per request header
 H_TICKET, H_ROWS, H_OPTS, H_S, H_E, H_O, H_ENT, H_RUNS = range(8)
 H_WIDTH = 8  # largest entity count of an individual decision
+H_V = 9  # belief evidence ints of the request
 RUNS0 = 16  # header: (policy id, rows) per run of equal policy from here
 MAX_RUNS = (HDR - RUNS0) // 2
 RESP_STRIDE = 16  # ints between reply tickets (a cache line each)
@@ -175,8 +178,8 @@ class InferenceClient:
 
     def submit(self, group: int, rows: list) -> tuple:
         """rows: (policy key, slot, fresh, state, option lengths, option
-        tokens, events), grouped by policy key (rows of one policy
-        contiguous). Returns a handle.
+        tokens, events[, belief evidence]), grouped by policy key (rows of
+        one policy contiguous). Returns a handle.
 
         A request larger than the slot (ServerConfig.request_ints) is split
         into consecutive chunks that fit: the first goes out now, `collect`
@@ -188,7 +191,7 @@ class InferenceClient:
             raise ValueError(f"group {group}: the server has {L.groups} request slots per worker (ServerConfig.groups)")
         chunks, cur, size = [], [], 0
         for r in rows:
-            need = REC + len(r[4]) + len(r[3]) + len(r[6]) + len(r[5])  # record, option lengths, state, events, option tokens
+            need = REC + len(r[4]) + len(r[3]) + len(r[6]) + len(r[5]) + (len(r[7]) if len(r) > 7 else 0)  # record, option lengths, state, events, option tokens, evidence
             if need > L.request_ints:
                 raise ValueError(f"one decision of {need} ints ({len(r[4])} options, {len(r[5])} option tokens, {len(r[3])} state) does not fit a request slot (ServerConfig.request_ints = {L.request_ints})")
             if cur and size + need > L.request_ints:
@@ -204,10 +207,10 @@ class InferenceClient:
         n = len(rows)
         if n > MAX_ROWS:
             raise ValueError(f"{n} decisions in one request, at most {MAX_ROWS}")
-        rec, olen, s, e, o = array("i"), array("i"), array("i"), array("i"), array("i")
+        rec, olen, s, e, o, v = array("i"), array("i"), array("i"), array("i"), array("i"), array("i")
         runs = array("i")
         last = None
-        for key, sl, fr, st, ol, of, ev in rows:
+        for key, sl, fr, st, ol, of, ev, *bel in rows:
             if key != last:
                 if len(runs) == 2 * MAX_RUNS:
                     raise ValueError(f"more than {MAX_RUNS} policies in one request")
@@ -215,17 +218,20 @@ class InferenceClient:
                 runs.append(0)
                 last = key
             runs[-1] += 1
-            rec.extend((sl, fr, len(s), len(st), len(e), len(ev), len(olen), len(ol), len(o)))
+            bel = bel[0] if bel else ()
+            rec.extend((sl, fr, len(s), len(st), len(e), len(ev), len(olen), len(ol), len(o), len(v), len(bel)))
+            v.extend(bel)
             s.extend(st)
             e.extend(ev)
             olen.extend(ol)
             o.extend(of)
         k = self.wid * L.groups + group
         pos = L.in_base(k)
-        if REC * n + len(olen) + len(s) + len(e) + len(o) > L.request_ints:
-            raise ValueError(f"request of {REC * n + len(olen) + len(s) + len(e) + len(o)} ints does not fit (ServerConfig.request_ints = {L.request_ints})")
+        total = REC * n + len(olen) + len(s) + len(e) + len(v) + len(o)
+        if total > L.request_ints:
+            raise ValueError(f"request of {total} ints does not fit (ServerConfig.request_ints = {L.request_ints})")
         d = self.d
-        for part in (rec, olen, s, e, o):
+        for part in (rec, olen, s, e, v, o):
             d[pos : pos + len(part)] = part
             pos += len(part)
         if self.np is not None and len(s):
@@ -242,6 +248,7 @@ class InferenceClient:
         c = self.c
         c[h + 1 : h + RUNS0] = array("i", (n, len(olen), len(s), len(e), len(o), n_ent, len(runs) // 2) + (0,) * (RUNS0 - 8))
         c[h + H_WIDTH] = ent_width
+        c[h + H_V] = len(v)
         c[h + RUNS0 : h + RUNS0 + len(runs)] = runs
         ticket = self.tickets[group] = self.tickets[group] % 0x3FFFFFFF + 1
         c[h] = ticket  # publish last: the server reads the header once it sees the ticket
@@ -436,11 +443,13 @@ class ServerConfig:
 
 
 # Padded shapes come in levels: level k has 32 * 1.5^k rows and, per row,
-# room for 4 options, 256 state, 32 event and 32 option tokens, and 16
-# entities (a decision averages 3, 216, ~10, 20 and 12). A batch runs at
-# the smallest level that holds every one of its sizes, so a run sees about
-# a dozen shapes (one CUDA graph each).
-_UNITS = (1, 4, 256, 32, 32, 16)  # rows, options, state / event / option tokens, entities
+# room for 4 options, 256 state, 32 event and 32 option tokens, 16
+# entities and 32 belief evidence triples (a decision averages 3, 216, ~10,
+# 20 and 12; evidence grows over a match). A batch runs at the smallest
+# level that holds every one of its sizes, so a run sees about a dozen
+# shapes (one CUDA graph each).
+_UNITS = (1, 4, 256, 32, 32, 16, 32)  # rows, options, state / event / option tokens, entities, evidence triples
+Q_ROWS = 8  # per-request words of a batch header: in/out/hidden bases, rows, options, state, event, evidence ints
 
 
 def _level_dims(need: tuple) -> tuple:
@@ -526,7 +535,7 @@ class _Server:
         Q = L.slots
         self.Q = Q
         cuda = self.device.type == "cuda"
-        self.lanes = [_Lane(torch, self.device, 8 + 7 * Q + 3 * 4096) for _ in range(cfg.streams if cuda and not cfg.dry_run else 1)]
+        self.lanes = [_Lane(torch, self.device, 8 + Q_ROWS * Q + 3 * 4096) for _ in range(cfg.streams if cuda and not cfg.dry_run else 1)]
         self.stack = None
         self.ids: dict = {}  # policy key -> id (stack slot, or LEGACY + n)
         self.cpu_nets: dict = {}  # id -> the network on the CPU (memory-mapped)
@@ -696,7 +705,7 @@ class _Server:
         row_req = np.repeat(req, ln)
         row_loc = np.repeat(st - (np.cumsum(ln) - ln), ln) + np.arange(R)
         row_pol = np.repeat(pid, ln)
-        tot = H[:, H_ROWS : H_RUNS].sum(0)  # rows, options, state / event / option tokens, entities
+        tot = np.append(H[:, H_ROWS : H_RUNS].sum(0), H[:, H_V].sum() // 3)  # rows, options, state / event / option tokens, entities, evidence triples
         t1 = time.perf_counter()
         tickets = H[:, H_TICKET]
         self.seen[pend] = tickets
@@ -741,7 +750,7 @@ class _Server:
         from .features import STATE_DIM
 
         ents = sum(np.count_nonzero(self.dn[b + r[2] : b + r[2] + r[3]] == STATE_DIM) for b, r in zip(state_area, rec))
-        return np.array([len(rec), rec[:, 7].sum(), rec[:, 3].sum(), rec[:, 5].sum(), sum(o.sum() for o in olen), ents])
+        return np.array([len(rec), rec[:, 7].sum(), rec[:, 3].sum(), rec[:, 5].sum(), sum(o.sum() for o in olen), ents, rec[:, 10].sum() // 3])
 
     def _dry(self, pend, row_req, row_loc) -> None:
         np = self.np
@@ -756,8 +765,8 @@ class _Server:
         """Launch the batch on `lane` (CUDA: asynchronously; the caller
         records the lane's event)."""
         torch = self.torch
-        R, N, S, Ev, O, E = (int(x) for x in tot)
-        need = (R + 1, N + 1, S, Ev, O, E + 1)
+        R, N, S, Ev, O, E, V = (int(x) for x in tot)
+        need = (R + 1, N + 1, S, Ev, O, E + 1, V + 1 if self.stack.belief is not None else 0)
         use_graphs = self.device.type == "cuda" and self.cfg.graphs
         dims = _level_dims(need) if use_graphs or self.pad_eager else need
         if self.stack.config.get("entity_attn"):
@@ -765,17 +774,18 @@ class _Server:
             dims += (1 << (width - 1).bit_length(),)
         R_p = dims[0]
         Q, n = self.Q, len(pend)
-        hl = 8 + 7 * Q + 3 * R_p
+        hl = 8 + Q_ROWS * Q + 3 * R_p
         if hl > lane.stage.shape[0]:
             lane.stage = torch.zeros(2 * hl, dtype=torch.int32, pin_memory=lane.stage.is_pinned())
         st = lane.stage.numpy()
-        st[:8] = (R, N, S, Ev, O, E, n, 0)
-        q = st[8 : 8 + 7 * Q].reshape(7, Q)
+        st[:8] = (R, N, S, Ev, O, E, n, V)
+        q = st[8 : 8 + Q_ROWS * Q].reshape(Q_ROWS, Q)
         q[0, :n] = self.in_base[pend]
         q[1, :n] = self.out_base[pend]
         q[2, :n] = self.wbase[pend]
-        q[3:, :n] = H[:, H_ROWS : H_E + 1].T  # rows, options, state tokens, event tokens
-        r = st[8 + 7 * Q : hl].reshape(3, R_p)
+        q[3:7, :n] = H[:, H_ROWS : H_E + 1].T  # rows, options, state tokens, event tokens
+        q[7, :n] = H[:, H_V]  # evidence ints
+        r = st[8 + Q_ROWS * Q : hl].reshape(3, R_p)
         r[0, :R], r[0, R:] = row_req, 0
         r[1, :R], r[1, R:] = row_loc, 0
         r[2, :R], r[2, R:] = row_pol, row_pol[-1]  # padded rows keep the order sorted
@@ -806,7 +816,7 @@ class _Server:
             return None
         self.drain()
         t0 = time.perf_counter()
-        hdr = torch.zeros(8 + 7 * self.Q + 3 * dims[0], dtype=torch.int32, device=self.device)
+        hdr = torch.zeros(8 + Q_ROWS * self.Q + 3 * dims[0], dtype=torch.int32, device=self.device)
         if lane.pool is None:
             lane.pool = torch.cuda.graph_pool_handle()
         s = torch.cuda.Stream(self.device)
@@ -839,7 +849,7 @@ class _Server:
             self.hidden.index_copy_(0, gslot, hn)
         self.region_f[pos] = out
 
-    def _body(self, hdr, noise, R_p: int, N_p: int, S_p: int, Ev_p: int, O_p: int, E_p: int, ent_width: int = 1):
+    def _body(self, hdr, noise, R_p: int, N_p: int, S_p: int, Ev_p: int, O_p: int, E_p: int, V_p: int, ent_width: int = 1):
         """`_forward` without its writes: (replies, their positions in the
         data block, new hidden states, their rows)."""
         torch = self.torch
@@ -849,19 +859,20 @@ class _Server:
         region = self.region
         dev = region.device
         h = hdr.long()
-        R, N, S, Ev, O = h[0], h[1], h[2], h[3], h[4]
-        in_base, out_base, wbase, q_rows, q_opts, q_s, q_ev = h[8 : 8 + 7 * Q].view(7, Q)
-        req, loc, pol = h[8 + 7 * Q : 8 + 7 * Q + 3 * R_p].view(3, R_p)
+        R, N, S, Ev, O, V = h[0], h[1], h[2], h[3], h[4], h[7]
+        in_base, out_base, wbase, q_rows, q_opts, q_s, q_ev, q_v = h[8 : 8 + Q_ROWS * Q].view(Q_ROWS, Q)
+        req, loc, pol = h[8 + Q_ROWS * Q : 8 + Q_ROWS * Q + 3 * R_p].view(3, R_p)
         ar = lambda k: torch.arange(k, device=dev)  # noqa: E731
         rvalid = ar(R_p) < R
         rec = region[(in_base[req] + REC * loc)[:, None] + ar(REC)].long()
         rec = torch.where(rvalid[:, None], rec, 0)
-        slot, flags, s_off, s_len, e_off, e_len, opt_off, n_opt, o_off = rec.unbind(1)
+        slot, flags, s_off, s_len, e_off, e_len, opt_off, n_opt, o_off, v_off, v_len = rec.unbind(1)
         fresh = flags & 1
-        a_opt = in_base + REC * q_rows  # areas of each request: option lengths, state, event and option tokens
+        a_opt = in_base + REC * q_rows  # areas of each request: option lengths, state, event tokens, evidence, option tokens
         a_s = a_opt + q_opts
         a_e = a_s + q_s
-        a_o = a_e + q_ev
+        a_v = a_e + q_ev
+        a_o = a_v + q_v
         s_row, s_k = segments(s_len, S_p)
         s_valid = ar(S_p) < S
         s_tok = region[torch.where(s_valid, a_s[req[s_row]] + s_off[s_row] + s_k, 0)].long()
@@ -877,10 +888,16 @@ class _Server:
         ot_valid = ar(O_p) < O
         r = o_row[ot_opt]
         ot_tok = region[torch.where(ot_valid, a_o[req[r]] + o_off[r] + o_start[ot_opt] - o_start[first[r]] + ot_k, 0)].long()
+        bel = {}
+        if self.stack.belief is not None:  # evidence triples, padding (past V) in the last row
+            v_row, v_k = segments(torch.div(v_len, 3, rounding_mode="floor"), V_p)
+            v_valid = ar(V_p) < V
+            at = torch.where(v_valid, a_v[req[v_row]] + v_off[v_row] + 3 * v_k, 0)
+            bel = {"v_card": region[at].long(), "v_slot": region[at + 1].long(), "v_cnt": region[at + 2].long(), "v_row": v_row, "v_valid": v_valid}
         x = StepInput(
             pol=pol, gslot=torch.where(rvalid, slot + wbase[req], self.n_workers * SLOTS_PER_WORKER), fresh=(fresh != 0) | ~rvalid,
             s_len=s_len, e_len=e_len, n_opt=n_opt, s_tok=s_tok, s_row=s_row, s_valid=s_valid, ev_tok=ev_tok, ev_valid=ev_valid,
-            o_len=o_len, o_row=o_row, ot_tok=ot_tok, ot_opt=ot_opt, ot_valid=ot_valid, n_ent=E_p, ent_width=ent_width,
+            o_len=o_len, o_row=o_row, ot_tok=ot_tok, ot_opt=ot_opt, ot_valid=ot_valid, n_ent=E_p, ent_width=ent_width, **bel,
         )  # fmt: skip
         # greedy rows: constant noise exp(-1) makes the Gumbel perturbation 0, so the draw is the argmax
         noise = torch.where((flags & GREEDY_FLAG != 0)[o_row], math.exp(-1.0), noise)
@@ -893,7 +910,7 @@ class _Server:
         """Policies outside the stack (transformer trunk, another config):
         one eager forward per policy from the request areas, on the host."""
         torch, np = self.torch, self.np
-        from .rollout import _batch
+        from .model import step_batch
 
         self.stats["legacy"] += 1
         dn, df = self.dn, self.df
@@ -914,16 +931,17 @@ class _Server:
                     a_opt = base + REC * int(hd[H_ROWS])
                     a_s = a_opt + int(hd[H_OPTS])
                     a_e = a_s + int(hd[H_S])
-                    a_o = a_e + int(hd[H_E])
-                    sl, fr, s_off, s_len, e_off, e_len, opt_off, n_opt, o_off = (int(v) for v in dn[base + REC * row_loc[r] : base + REC * (row_loc[r] + 1)])
+                    a_v = a_e + int(hd[H_E])
+                    a_o = a_v + int(hd[H_V])
+                    sl, fr, s_off, s_len, e_off, e_len, opt_off, n_opt, o_off, v_off, v_len = (int(v) for v in dn[base + REC * row_loc[r] : base + REC * (row_loc[r] + 1)])
                     ol = dn[a_opt + opt_off : a_opt + opt_off + n_opt]
-                    parts = (dn[a_s + s_off : a_s + s_off + s_len], ol, dn[a_o + o_off : a_o + o_off + int(ol.sum())], dn[a_e + e_off : a_e + e_off + e_len])
+                    parts = (dn[a_s + s_off : a_s + s_off + s_len], ol, dn[a_o + o_off : a_o + o_off + int(ol.sum())], dn[a_e + e_off : a_e + e_off + e_len], dn[a_v + v_off : a_v + v_off + v_len])
                     xs.append(tuple(array("i", p.tobytes()) for p in parts))
                     gslots.append(sl + int(self.wbase[k]))
                     fresh.append(fr & 1)
                     greedy.append(bool(fr & GREEDY_FLAG))
                     outs.append(L.out_base(k) + 3 * int(row_loc[r]))
-                batch, width = _batch(torch, xs)
+                batch, width = step_batch(xs)
                 batch = batch.to(self.device)
                 hidden = None
                 if net.memory == "gru":

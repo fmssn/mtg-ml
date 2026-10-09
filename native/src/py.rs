@@ -684,6 +684,16 @@ impl PyGame {
 
     // -- views ---------------------------------------------------------------
 
+    /// `Game.witnessed(viewer)`: opponent card name -> established minimum copies.
+    fn witnessed<'py>(&self, py: Python<'py>, viewer: u8) -> PyResult<Bound<'py, PyDict>> {
+        Self::pidx(viewer as usize)?;
+        let d = PyDict::new_bound(py);
+        for (name, n) in self.st().witnessed_counts(viewer) {
+            d.set_item(name, n)?;
+        }
+        Ok(d)
+    }
+
     /// `view.observe(game, viewer)`.
     fn observe<'py>(&self, py: Python<'py>, viewer: u8) -> PyResult<Bound<'py, PyDict>> {
         Self::pidx(viewer as usize)?;

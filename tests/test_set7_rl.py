@@ -57,21 +57,23 @@ def test_new_evaluation_balances_roles_deck_seats_and_starts():
     assert all(not sp.swap_seats for sp in legacy)
 
 
-def test_bo3_mapping_stays_fixed_and_loser_starts_next_game(tmp_path, monkeypatch):
+def test_bo3_evaluation_plays_whole_matches_with_fixed_mapping(tmp_path, monkeypatch):
+    """Batched best-of-three evaluation hands every match to the rollout as one
+    `GameSpec.bo3` spec (games 1 -> 2 -> 3 in one worker, knowledge carried),
+    with its seat mapping and first start fixed, and scores the match rows."""
     path = checkpoint(tmp_path)
     rounds = []
 
     def play(_, specs, job, jobs):
         rounds.append(specs)
-        # Canonical player 1 wins twice; results are already normalized by rollout.
-        return Result(games=[(sp.seats, 1, "life", 1, 0, sp.seed) for sp in specs])
+        return Result(matches=[(sp.seats, sp.seed, sp.matchup, (), 1) for sp in specs])
 
     monkeypatch.setattr(evaluate, "play", play)
     result = evaluate.head_to_head_bo3(None, path, BOT, 8, 1)
-    assert len(rounds) == 2
-    assert [sp.swap_seats for sp in rounds[0]] == [sp.swap_seats for sp in rounds[1]]
-    assert all(sp.starting_player == 0 for sp in rounds[1])
-    assert {sp.game_args()["starting_player"] for sp in rounds[1]} == {0, 1}
+    assert len(rounds) == 1 and all(sp.bo3 and sp.match_game == 1 for sp in rounds[0])
+    assert {(sp.seats, sp.starting_player, sp.swap_seats) for sp in rounds[0]} == {
+        (seats, start, swap) for seats in ((LEARNER, BOT), (BOT, LEARNER)) for start in (0, 1) for swap in (False, True)
+    }
     assert result["all"][2] == 8
 
 

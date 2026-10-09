@@ -68,6 +68,8 @@ class SharedResult:
         shm.close()
         self.lengths, self.games, self.timing = res.lengths, res.games, res.timing
         self.trajectory_ids = getattr(res, "trajectory_ids", [])
+        self.matches = getattr(res, "matches", [])
+        self.belief_targets = getattr(res, "belief_targets", [])
         self.inference_stats = getattr(res, "inference_stats", {})
         self.residency = getattr(res, "residency", {})
 
@@ -80,7 +82,8 @@ class SharedResult:
         shm = shared_memory.SharedMemory(name=self.name)
         if unlink:
             shm.unlink()
-        out = Result(lengths=self.lengths, games=self.games, timing=self.timing, trajectory_ids=self.trajectory_ids)
+        out = Result(lengths=self.lengths, games=self.games, timing=self.timing, trajectory_ids=self.trajectory_ids,
+                     matches=self.matches, belief_targets=self.belief_targets)
         out.inference_stats, out.residency = self.inference_stats, self.residency
         out.samples = PackedSamples()
         pos, views = 0, []

@@ -49,7 +49,7 @@ from functools import wraps
 
 from ..backend import ENV_VAR, engine_name
 from ..encode import FEATURE_VERSIONS, information_contract
-from ..match import DEFAULT_MATCHUP, MatchResult, game_seed, matchup_decks
+from ..match import DEFAULT_MATCHUP, matchup_decks
 from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, create_pool, play, policy_features
 
 EVAL_SEED = 10_000_000
@@ -149,33 +149,23 @@ def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: in
 def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
                      seat: int | None = None, matchup: str = DEFAULT_MATCHUP, features: dict | None = None) -> dict:  # fmt: skip
     """Best-of-three matches on paired seeds (`seat`, `jund_only`: seat 0: one
-    match per seed, the learner in that seat). Each round plays the next game
-    of every unfinished match as one batch. Returns match scores like `score`."""
+    match per seed, the learner in that seat). Each match is one best-of-three
+    spec (`GameSpec.bo3`): its games run in order in one worker, with fixed
+    registrations, policies and seat mapping, and each player's witnessed
+    opponent cards carried into the next game. Returns match scores like `score`."""
     seat = 0 if jund_only else seat
     if _balance_seats(learner_path, opponent, features):
         roles = (seat,) if seat is not None else (0, 1)
         block = [(role, start, swap) for role in roles for start in (0, 1) for swap in (False, True)]
-        live = [(EVAL_SEED + i, _seats(role, opponent), MatchResult(), swap, start)
+        live = [(EVAL_SEED + i, _seats(role, opponent), swap, start)
                 for i in range(matches) for role, start, swap in (block[i % len(block)],)]
     elif seat is not None:
-        live = [(EVAL_SEED + s, _seats(seat, opponent), MatchResult(), False, None) for s in range(matches)]
+        live = [(EVAL_SEED + s, _seats(seat, opponent), False, None) for s in range(matches)]
     else:
-        live = [(EVAL_SEED + s, seats, MatchResult(), False, None) for s in range(matches // 2) for seats in ((LEARNER, opponent), (opponent, LEARNER))]
-    while True:
-        todo = {}
-        for seed, seats, res, swap, first_start in live:
-            if not res.over:
-                n, start = res.next_game(seed)
-                if n == 1 and first_start is not None:
-                    start = first_start
-                todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n, matchup=matchup, swap_seats=swap))
-        if not todo:
-            break
-        job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass, features=features or {})
-        for seats, winner, reason, _, _, seed in play(procs, [sp for _, sp in todo.values()], job, n_jobs).games:
-            res, spec = todo[(seed, seats)]
-            res.games.append((spec.starting_player, winner, reason))
-    return score([(seats, res.winner) for _, seats, res, _, _ in live], matchup)
+        live = [(EVAL_SEED + s, seats, False, None) for s in range(matches // 2) for seats in ((LEARNER, opponent), (opponent, LEARNER))]
+    specs = [GameSpec(seed=seed, seats=seats, starting_player=start, matchup=matchup, swap_seats=swap, bo3=True) for seed, seats, swap, start in live]
+    job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass, features=features or {})
+    return score([(seats, winner) for seats, _, _, _, winner in play(procs, specs, job, n_jobs).matches], matchup)
 
 
 def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy_games: int = 0, auto_mana: bool = False, auto_pass: bool = False,

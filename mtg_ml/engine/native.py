@@ -741,6 +741,10 @@ class NativeGame:
 
     # -- views -----------------------------------------------------------------
 
+    def witnessed(self, viewer: int) -> dict[str, int]:
+        """Game.witnessed: opponent card name -> established minimum copies."""
+        return self._g.witnessed(viewer)
+
     def observe(self, viewer: int) -> dict:
         return self._g.observe(viewer)
 
