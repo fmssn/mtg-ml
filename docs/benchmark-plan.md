@@ -1,9 +1,13 @@
 # Scripted bot and tactical puzzle benchmark plan
 
-**Status: proposed interfaces and implementation roadmap.** This PR adds
-documentation only. The benchmark package, registrations, artifacts and commands
-below are proposed; they are not available yet. Implementation belongs to the
-follow-up PRs in [Delivery and acceptance](#delivery-and-acceptance).
+**Status: partly implemented.** The foundation (#64,
+[benchmark-foundation.md](benchmark-foundation.md)), the Blue specialist (#65,
+[benchmark-blue.md](benchmark-blue.md)) and the Jund specialist (#66,
+[benchmark-jund.md](benchmark-jund.md)) have merged. Still to deliver: the
+tactical runner and reviewed puzzle corpus (PR 4), then the frozen release with
+public `run`/`compare` commands, release statistics and the release gates below
+(PR 5). Sections describing those parts remain proposals; see
+[Delivery and acceptance](#delivery-and-acceptance).
 
 The first release will measure preboard Jund Wildfire and Mono Blue Terror play
 against two deterministic scripted specialists, alongside reviewed tactical
@@ -68,7 +72,15 @@ slots, since the engine shuffles seat libraries in order.
 Derive the seed from SHA-256 of canonical JSON
 `[stream, cell, block_index]`, using the first eight digest bytes as an unsigned
 big-endian integer modulo `2**31`. Streams are
-`benchmark-v1/dev`, `benchmark-v1/final` and `benchmark-v1/power-pilot`.
+`benchmark-v1/dev`, `benchmark-v1/power-pilot` and
+`benchmark-v1/final/<assessment-id>`. Changing `suite_version` alone does not
+change any seed, so every final assessment names itself: a final manifest
+carries an `assessment` record (`id`, `exposed.checkpoints` as checkpoint
+SHA-256s, `exposed.puzzle_groups` as leakage-group IDs, and `supersedes`), and
+its stream must embed that ID. The ID therefore enters every simulator, actor,
+puzzle and bootstrap seed below. Development and power-pilot manifests carry no
+assessment and keep their streams, so existing development evidence is
+unaffected. The foundation validator enforces this.
 Use separate tagged hashes for policy sampling (`[stream, cell, block_index,
 slot, mode, "actor"]`), puzzle sampling (`[stream, puzzle_id, repetition, mode,
 "actor"]`) and bootstrap resampling (`[stream, suite_id, mode, "bootstrap"]`).
@@ -94,7 +106,10 @@ size before final evaluation, following
 [PR57's uncertainty protocol](generalized-pauper-review.md#71-common-contract-for-every-experiment).
 Final streams and puzzle groups are reserved for a frozen release assessment;
 checkpoint/bot tuning uses development only. Retuning after final inspection
-requires fresh final groups/streams and an explicit new assessment.
+requires a new assessment ID (hence fresh seeds), fresh final puzzle groups and
+a `supersedes` link to the inspected assessment. Its `exposed` lists record
+every checkpoint and puzzle group whose final results were seen before the
+retune; exposed puzzle groups are retired from later final splits.
 
 ## Proposed bot and adapter interface
 
@@ -186,7 +201,7 @@ falling back to current defaults.
 
 | Contract | Required content |
 |---|---|
-| `BenchmarkManifest` | `id`, `suite_version`, split/seed stream, code/card-spec freeze, embedded deck maps and hashes, pinned bots, four cells, puzzle bundle reference, input contract, modes, block count, puzzle repetitions, engine settings/limits and bootstrap configuration |
+| `BenchmarkManifest` | `id`, `suite_version`, split/seed stream, final-only `assessment` (ID, exposed checkpoints/puzzle groups, superseded assessments), code/card-spec freeze, embedded deck maps and hashes, pinned bots, four cells, puzzle bundle reference, input contract, modes, block count, puzzle repetitions, engine settings/limits and bootstrap configuration |
 | `TacticalPuzzle` | `id`, deck, category, template and source group IDs, split, accepted review/rationale, memory mode, case references to scenario/evidence and hidden-completion identity, pinned response policy, objective, stopping boundary, decision cap and optional acceptable first-action selectors |
 | `BenchmarkResult` | Manifest reference/hash, candidate checkpoint hash/path, recorded feature version/input contract and code, engine/build/runtime/hardware, modes/seeds/settings, planned/completed counts, game and puzzle records, summaries/interval method and replay references |
 
@@ -253,6 +268,22 @@ show the exact Blue map and its real initial digest.
 }
 ```
 
+A final manifest replaces the split and stream above and adds its assessment
+record. This excerpt shows a retune after the first final assessment exposed
+one checkpoint and one puzzle group:
+
+```json
+{
+  "split": "final",
+  "stream": "benchmark-v1/final/release-1-b",
+  "assessment": {
+    "id": "release-1-b",
+    "exposed": {"checkpoints": ["<inspected-checkpoint-sha256>"], "puzzle_groups": ["jund-removal-before-endstep"]},
+    "supersedes": ["release-1-a"]
+  }
+}
+```
+
 ## Tactical puzzle construction and scoring
 
 Target 100 accepted puzzles, 50 per deck. For each deck allocate ten to each of
@@ -265,6 +296,16 @@ stay in the same group. Merge intersecting template/source groups transitively;
 the resulting leakage groups are also the puzzle bootstrap units. Keep the
 final groups out of bot development fixtures
 and routine CI; public repository storage does not itself prevent contamination.
+
+Fifty final puzzles per deck, five per deck/category, may collapse into fewer
+independent leakage groups, and the game-count power calculation says nothing
+about them. Before the final assessment, predeclare the smallest puzzle-success
+difference the release should detect, and size the corpus from development
+group-level variance. Minimum coverage, counted in independent leakage groups:
+at least 20 per deck before reporting a deck-level puzzle interval, and at
+least 5 per deck/category before a category-level claim. Below those minimums
+the interval is `unavailable` and the score is reported as descriptive only.
+Category scores stay descriptive until a predeclared analysis supports them.
 
 Reuse [`ExecutableScenario` version 1](expert-data.md#review-and-compile),
 its evidence/assumption accounting, accepted reviews, legal `setup_actions`,
@@ -514,11 +555,11 @@ Workers affect scheduling only, not row identity or gameplay randomness.
 
 | Follow-up PR | Deliverable | Acceptance gate |
 |---|---|---|
-| 1. Benchmark foundation | Versioned loaders/validation, visibility and checkpoint adapters, explicit deck/seat mapping, deterministic seed blocks and result writer in a new benchmark package | Synthetic development fixtures validate contracts, both-engine parity, all four slots, memory resets, hash/version errors and repeatability across worker counts; no new bot strategy |
-| 2. Jund specialist | Separate `benchmark-jund@1` registration, ordered rules/parameters and reviewed development fixtures | Every reachable decision has a handler; all reviewed critical development fixtures pass; full-game smoke panel finishes legally; paired comparison against the legacy Jund pilot is recorded |
-| 3. Blue specialist | Separate `benchmark-blue@1` registration, ordered rules/parameters and reviewed development fixtures | Same gate for Blue, including cantrip/library knowledge, counter/ward interactions and mana reservation |
+| 1. Benchmark foundation (merged, #64) | Versioned loaders/validation, visibility and checkpoint adapters, explicit deck/seat mapping, deterministic seed blocks and result writer in a new benchmark package | Synthetic development fixtures validate contracts, both-engine parity, all four slots, memory resets, hash/version errors and repeatability across worker counts; no new bot strategy |
+| 2. Jund specialist (merged, #66) | Separate `benchmark-jund@1` registration, ordered rules/parameters and reviewed development fixtures | Every reachable decision has a handler; all reviewed critical development fixtures pass; full-game smoke panel finishes legally; paired comparison against the legacy Jund pilot is recorded |
+| 3. Blue specialist (merged, #65) | Separate `benchmark-blue@1` registration, ordered rules/parameters and reviewed development fixtures | Same gate for Blue, including cantrip/library knowledge, counter/ward interactions and mana reservation |
 | 4. Tactical runner and corpus | Agent-driven attempts, declarative objectives/boundaries, total response policies, case aggregation and 100 reviewed puzzles split by groups | Both-engine verification of witnesses and adverse responses; equivalent solutions succeed; wrong targets/sequencing, missing history, ambiguous selectors and horizon misses are correctly classified |
-| 5. Frozen benchmark release | Validated suite freeze, paired statistics/CLI, existing-bot/checkpoint baselines, power-pilot sizing and reserved final assessment | Complete provenance and rows; no hidden-information dependence; reported scores/intervals match raw rows; baseline results and machine-qualified latency published |
+| 5. Frozen benchmark release | Validated suite freeze, paired statistics/CLI, existing-bot/checkpoint baselines, power-pilot sizing and reserved final assessment | Complete provenance and rows; no hidden-information dependence; reported scores/intervals match raw rows; calibration controls and turn-limit sensitivity pass; archived release bundle; baseline results and machine-qualified latency published |
 
 The foundation may use synthetic development fixtures and legacy adapters for
 smoke checks; it cannot advertise the new benchmark as released before the two
@@ -534,8 +575,12 @@ pilots** against an identical fixed legacy Jund/Blue opponent panel, starting
 with the 400-block-per-cell pilot; report per-cell and equal-weight mean paired
 differences and intervals. A deterministic fixture pass and legal game completion
 are necessary, but a claim of stronger play additionally needs a positive paired
-mean difference with a 95% lower bound above zero, without a confirmed loss
-greater than three percentage points in either cell. If evidence is inconclusive,
+mean difference with a 95% lower bound above zero **and** a 95% lower bound
+above −3 percentage points in every cell. "No confirmed loss" is not enough: a
+cell interval of −10 to +2pp has not ruled out a large regression, so it makes
+the claim inconclusive. A cell upper bound below −3pp is a regression. The
+merged #65/#66 tools apply the weaker gate, but their published results also
+clear this one; later comparisons and the release use it. If evidence is inconclusive,
 report it and size further development evaluation from the pilot rather than
 claiming expert strength from a bot-versus-bot win rate. Two asymmetric decks
 need not have a 50% equilibrium score.
@@ -551,12 +596,42 @@ tests go into an engine-parametrized module registered in
 [`tests/conftest.py`](../tests/conftest.py). Follow repository commands and
 rebuild the local native extension after any later Rust change.
 
+### Release gates
+
+The frozen release (PR 5) also requires these end-to-end checks, run through the
+public `run`/`compare` path rather than unit fixtures alone:
+
+- **Calibration controls.** Comparing a checkpoint against itself yields exactly
+  zero paired difference and a degenerate interval. Agents scripted to make known
+  tactical mistakes (wrong target, wrong order, missed payment, passing through
+  the boundary) fail; reviewed witness lines pass. Objective-loophole fixtures
+  fail, for example achieving the removal while losing the game or violating a
+  life/resource clause. Baseline results (both scripted specialists, the legacy
+  bots and the reference checkpoints) report per deck/category whether the suite
+  is saturated or near floor; a saturated or floor category is flagged and kept
+  out of headline claims.
+- **Turn-limit sensitivity.** Following
+  [PR57's correctness protocol](generalized-pauper-review.md#72-f--are-we-training-the-intended-game-priority-1),
+  rerun the baseline panel at 100, 200 and 400 turns on identical seeds. With a
+  predeclared 0.5pp margin, the paired score-change interval between 100 and
+  each longer cap must stay within ±0.5pp for each cell and the mean; report the
+  cap-draw proportion. Otherwise raise `max_turns` or label results as a
+  restricted-game benchmark.
+- **Durable evidence.** Archive a release bundle outside any workspace (the
+  append-only `~/mtg-ml-checkpoints` archive on h100-private or a release
+  asset): manifests, raw game/puzzle rows, reviews, dependency versions/lock,
+  native build identity, exact analysis commands and failure replays. Hashes
+  alone do not preserve reproducibility after workspace cleanup, so docs cite
+  the archived paths, never workspace-local `.context` directories. Existing
+  Blue specialist evidence still names `.context` paths; archive it before the
+  release cites it.
+
 Admission of fair checkpoint results and release of the combat puzzles depend
 on the separate PR57 correctness work: complete combat allocation options,
 nontruncating relevant observations, hidden-opponent actor inputs and explicit
 deck/seat handling. Verify these capabilities at the selected release revision
 instead of assuming a particular future PR number or feature version supplies
-them. This documentation PR implements none of those changes and requires no
+them. The benchmark PRs implement none of those changes and require no
 training run or remote campaign.
 
 BO3/sideboarding, other archetypes, list-transfer panels, search, human pilots,
