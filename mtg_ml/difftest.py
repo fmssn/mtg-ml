@@ -6,6 +6,8 @@ step the harness compares
 
 * the decision: player, kind, prompt, option labels and keys (in order);
 * `observe()` for both players and `state_features()` for both players;
+* `witnessed()` for both players (belief evidence), which must also never
+  decrease during a game;
 * `featurize()` for the deciding player in the latest feature set and in set 1
   (native fast path vs Python);
 * a dump of the full hidden state (libraries in order, `known_to`, object
@@ -159,7 +161,7 @@ def snapshot(g, full: bool = True) -> dict:
     from .engine.view import observe
     from .rl.features import event_hashes, featurize
 
-    s = {"decision": decision_view(g), "observe0": observe(g, 0), "observe1": observe(g, 1)}
+    s = {"decision": decision_view(g), "observe0": observe(g, 0), "observe1": observe(g, 1), "witnessed0": g.witnessed(0), "witnessed1": g.witnessed(1)}
     if full:
         s["features0"] = state_features(g, 0)
         s["features1"] = state_features(g, 1)
@@ -230,10 +232,17 @@ def run_lockstep(sc: Scenario, script: list[int] | None = None, full_every: int 
         return div(0, f"construction failed: {e}")
     agents = make_agents(sc)
     n = 0
+    seen: list[dict[str, int]] = [{}, {}]
     while True:
         diff = _check(py, nat, full=full_every > 0 and n % full_every == 0)
         if diff:
             return div(n, diff)
+        for v in (0, 1):  # established copy counts only grow
+            w = py.witnessed(v)
+            lost = {k: (c, w.get(k, 0)) for k, c in seen[v].items() if w.get(k, 0) < c}
+            if lost:
+                return div(n, f"witnessed({v}) decreased: {lost}")
+            seen[v] = w
         if fork_every and n % fork_every == fork_every - 1 and not py.over:
             diff = _check_fork(py, nat, sc.seed * 31 + n)
             if diff:

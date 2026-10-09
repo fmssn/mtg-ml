@@ -187,7 +187,11 @@ class LiveGame:
         else:
             from .rl.agent import ModelAgent
 
+            from .knowledge import MatchKnowledge
+
             self.model = ModelAgent(str(model_path), 1 - seat, sample=not greedy, seed=seed)
+            # what the model witnessed of the player's cards in this match's earlier games; a rematch is a new match
+            self.model.set_knowledge(MatchKnowledge.from_dict((match or {}).get("model_knowledge")))
         self.agents = [None, None]
         self.agents[seat], self.agents[1 - seat] = Human(), self.model
         self.names = ["", ""]
@@ -847,6 +851,11 @@ class LiveManager:
             return
         if game.match is not None:
             game.match["results"].append((game.g.starting_player, game.winner))
+            if hasattr(game.model, "set_knowledge"):  # even after a concession: what it saw stays seen
+                from .knowledge import MatchKnowledge
+
+                k = MatchKnowledge.from_dict(game.match.get("model_knowledge")).with_game(game.g.witnessed(1 - game.seat))
+                game.match["model_knowledge"] = k.to_dict()
         model = game.names[1 - game.seat].split(":", 1)[1].split(" ")[0].replace("/", "_")
         game.replay_file = f"human-vs-{model}-{game.id}.json" if game.seat == 0 else f"{model}-vs-human-{game.id}.json"
         self._write(game)

@@ -177,6 +177,9 @@ class MatchResult:
     games: list[tuple[int, int | None, str]] = field(default_factory=list)  # (starting player, winner, reason)
     plans: list[tuple[SideboardPlan, SideboardPlan]] = field(default_factory=list)  # per game, each seat's plan (play_match only)
     seen: list[tuple[tuple[str, ...], tuple[str, ...]]] = field(default_factory=list)  # per game, opponent_seen of each seat (play_match only)
+    # each seat's MatchKnowledge after the games so far (play_match only): what it
+    # witnessed of the other's cards, carried into the next game of the match
+    knowledge: list = field(default_factory=list)
 
     def history(self, seat: int) -> list[SeatGame]:
         """The finished games from `seat`'s point of view (needs `plans` and `seen`)."""
@@ -227,13 +230,20 @@ def choose_plans(res: MatchResult, game_no: int, matchup: str, policies: Sequenc
 
 def play_match(agents, seed: int = 0, engine: str | None = None, matchup: str = DEFAULT_MATCHUP, policies: Sequence[SideboardPolicy] | None = None, **game_kw) -> MatchResult:
     """agents: [seat0, seat1] objects with act(game), reused across games.
-    policies: each seat's SideboardPolicy (default: PlanMatrixPolicy for both)."""
+    policies: each seat's SideboardPolicy (default: PlanMatrixPolicy for both).
+    Agents with `set_knowledge` (`rl.agent.ModelAgent`) get, before each game,
+    what their seat witnessed of the opponent's cards in the earlier games."""
     from .agents import take  # agents imports the engine; keep this module light
+    from .knowledge import EMPTY
 
     policies = policies or (PlanMatrixPolicy(), PlanMatrixPolicy())
     Game = game_class(engine)
     res = MatchResult()
+    res.knowledge = [EMPTY, EMPTY]
     while not res.over:
+        for s in (0, 1):
+            if hasattr(agents[s], "set_knowledge"):
+                agents[s].set_knowledge(res.knowledge[s])
         n, start = res.next_game(seed)
         plans = choose_plans(res, n, matchup, policies)
         decks = tuple(expand(p.apply()) for p in plans)
@@ -246,4 +256,5 @@ def play_match(agents, seed: int = 0, engine: str | None = None, matchup: str = 
         res.games.append((start, g.winner, g.end_reason))
         res.plans.append(plans)
         res.seen.append((opponent_seen(g, 0), opponent_seen(g, 1)))
+        res.knowledge = [res.knowledge[s].with_game(g.witnessed(s)) for s in (0, 1)]
     return res

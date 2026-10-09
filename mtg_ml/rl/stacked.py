@@ -19,6 +19,11 @@ the network, samples one option per decision (Gumbel-max) with its
 log-prob, and updates the hidden-state table in place. So all of it can be
 captured in one CUDA graph per padded shape.
 
+A feature-set-8 stack also runs each policy's belief head (`model.BeliefNet`)
+on the evidence triples of `StepInput.v_*` and adds its projection to the
+policy core, as `PolicyNet.forward` does; `step_forward(..., belief=True)`
+returns the predictions too.
+
 Padding conventions (the caller guarantees them): the last row is padding
 (R_p > rows), and so is the last option (N_p > options); padded tokens,
 options and entities belong to the last row; padded rows have the policy
@@ -142,7 +147,7 @@ def _table_dims(config: dict) -> dict:
 
 # Config keys no weight depends on: policies differing only there share a stack
 # (a run on a newer feature set plays pool snapshots of an older one).
-_NO_WEIGHTS = ("features",)
+_NO_WEIGHTS = ("features", "belief_coef")
 
 
 def stack_config(config: dict) -> dict:
@@ -178,6 +183,15 @@ class PolicyStack:
                     self.wt[name] = torch.zeros(capacity, shape[1], shape[0], device=self.device)
         # what the forward reads: matrices as (w, transposed w), the rest as is
         self.lin = {k: (v, self.wt[k]) if k in self.wt else v for k, v in self.dense.items()}
+        self.belief = None
+        if config.get("belief"):  # the head's card order, on the device (the same for every policy of the stack)
+            from .belief import MAX_BASIC, MAX_NONBASIC, BeliefSpec
+
+            spec = BeliefSpec.from_config(config["belief"])
+            basic = spec.basic
+            idx = lambda want: torch.tensor([i for i, b in enumerate(basic) if b == want], dtype=torch.long, device=self.device)  # noqa: E731
+            caps = torch.tensor([MAX_BASIC if b else MAX_NONBASIC for b in basic], dtype=torch.float32, device=self.device)
+            self.belief = {"nonbasic": idx(False), "basic": idx(True), "caps": caps, "vocab": len(spec.vocab)}
 
     @staticmethod
     def supports(config: dict) -> bool:
@@ -228,6 +242,12 @@ class StepInput:
     ot_valid: torch.Tensor  # (O_p,) bool
     n_ent: int  # E_p: padded entity count (>= entities of the batch)
     ent_width: int = 1  # host-known maximum entities per decision (a graph shape)
+    # belief evidence (feature set 8 stacks): one (card, slot, copies) triple per entry
+    v_card: torch.Tensor | None = None  # (V_p,)
+    v_slot: torch.Tensor | None = None  # (V_p,)
+    v_cnt: torch.Tensor | None = None  # (V_p,)
+    v_row: torch.Tensor | None = None  # (V_p,) row of each triple, non-decreasing (padding: the last row)
+    v_valid: torch.Tensor | None = None  # (V_p,) bool
 
 
 def excl_cumsum(x: torch.Tensor) -> torch.Tensor:
@@ -380,12 +400,43 @@ def structure(stack: PolicyStack, x: StepInput) -> dict:
     return st
 
 
-def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | None, noise: torch.Tensor | None = None, write_hidden: bool = True):
+def _belief(stack: PolicyStack, x: StepInput):
+    """The belief head of each row's policy on its evidence: (BeliefOut,
+    summary (R_p, archetypes + vocabulary)), as `BeliefNet` computes them."""
+    from .belief import MAX_BASIC, MAX_NONBASIC
+    from .model import BeliefOut
+
+    D, L, info = stack.dense, stack.lin, stack.belief
+    pol = x.pol
+    R_p, H = pol.shape[0], stack.config["hidden"]
+    p = "belief_net"
+    if x.v_card is None:
+        pooled = D[f"{p}.tok.bias"].new_zeros(R_p, H)
+    else:
+        vp = pol[x.v_row]
+        valid = x.v_valid
+        card, slot, cnt = (torch.where(valid, t, 0) for t in (x.v_card, x.v_slot, x.v_cnt.clamp(max=MAX_BASIC)))
+        tok = D[f"{p}.card.weight"][vp, card] + D[f"{p}.slot.weight"][vp, slot] + D[f"{p}.count.weight"][vp, cnt]
+        t = torch.relu(grouped_linear(torch.relu(tok), L[f"{p}.tok.weight"], L[f"{p}.tok.bias"], vp))
+        pooled = _sum_into(t.new_zeros(R_p, H), x.v_row, t * valid[:, None].to(t.dtype))
+    h = torch.relu(grouped_linear(pooled, L[f"{p}.trunk.0.weight"], L[f"{p}.trunk.0.bias"], pol))
+    h = torch.relu(grouped_linear(h, L[f"{p}.trunk.2.weight"], L[f"{p}.trunk.2.bias"], pol))
+    arch = grouped_linear(h, L[f"{p}.arch.weight"], L[f"{p}.arch.bias"], pol)
+    nb = grouped_linear(h, L[f"{p}.nonbasic.weight"], L[f"{p}.nonbasic.bias"], pol).view(R_p, -1, MAX_NONBASIC + 1)
+    bs = grouped_linear(h, L[f"{p}.basic.weight"], L[f"{p}.basic.bias"], pol).view(R_p, -1, MAX_BASIC + 1) if info["basic"].numel() else None
+    exp = arch.new_zeros(R_p, info["vocab"]).index_copy(1, info["nonbasic"], (torch.softmax(nb, -1) * torch.arange(MAX_NONBASIC + 1, device=nb.device)).sum(-1))
+    if bs is not None:
+        exp = exp.index_copy(1, info["basic"], (torch.softmax(bs, -1) * torch.arange(MAX_BASIC + 1, device=bs.device)).sum(-1))
+    return BeliefOut(arch, nb, bs), torch.cat([torch.softmax(arch, -1), exp / info["caps"]], 1)
+
+
+def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | None, noise: torch.Tensor | None = None, write_hidden: bool = True, belief: bool = False):
     """Forward + sampling of a padded batch. Returns (action, log-prob,
     value), each (R_p,); writes the new hidden states into `hidden_table`
     at `x.gslot` (write_hidden=False: returns them as a fourth item, None
     without memory, for the caller to write). `noise` (N_p,) uniform in
-    (0, 1) for the Gumbel-max draw (default: drawn here)."""
+    (0, 1) for the Gumbel-max draw (default: drawn here). belief: also the
+    belief head's predictions (`model.BeliefOut`, None without a head), last."""
     cfg = stack.config
     D = stack.lin
     pol = x.pol
@@ -396,6 +447,10 @@ def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | 
         h0 = torch.where(x.fresh.unsqueeze(1), 0.0, hidden_table.index_select(0, x.gslot))
         hp, hv = h0[:, :H], h0[:, H:]
     c, hn, ents = _core(stack, "policy_core", x, st, hp)
+    bel = None
+    if stack.belief is not None:
+        bel, summary = _belief(stack, x)
+        c = c + grouped_linear(summary, D["belief_proj.weight"], D["belief_proj.bias"], pol)
     if cfg["value_net"] == "separate":
         cv, hvn, _ = _core(stack, "value_core", x, st, hv)
         v = torch.relu(grouped_linear(cv, D["value_head.0.weight"], D["value_head.0.bias"], pol))
@@ -434,7 +489,8 @@ def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | 
     act = big.scatter_reduce(0, x.o_row, torch.where(key == km[x.o_row], pos, N_p), "amin")
     chosen = (first + act).clamp_(max=N_p - 1)
     logp = scores.index_select(0, chosen) - lse
-    return (act, logp, values) if write_hidden else (act, logp, values, hn)
+    out = (act, logp, values) if write_hidden else (act, logp, values, hn)
+    return out + (bel,) if belief else out
 
 
 # ---------------------------------------------------------------------------
@@ -444,8 +500,9 @@ def step_forward(stack: PolicyStack, x: StepInput, hidden_table: torch.Tensor | 
 
 def step_input(decisions: list, pols: list[int], gslots: list[int], fresh: list[bool], device="cpu", pad: int = 1, n_ent: int | None = None) -> StepInput:
     """A StepInput from decisions (state, option lengths, option tokens,
-    events) whose `pols` are non-decreasing, with `pad` padded rows (>= 1)
-    and one padded option. Padded rows use hidden slot gslots[-1] + 1."""
+    events[, belief evidence]) whose `pols` are non-decreasing, with `pad`
+    padded rows (>= 1) and one padded option (and one padded evidence
+    triple). Padded rows use hidden slot gslots[-1] + 1."""
     from .features import STATE_DIM
 
     t = lambda v: torch.tensor(v, dtype=torch.long, device=device)  # noqa: E731
@@ -461,7 +518,12 @@ def step_input(decisions: list, pols: list[int], gslots: list[int], fresh: list[
     o_row, _ = segments(t(n_opt), len(o_len))
     ot_opt, _ = segments(t(o_len), len(ot_tok))
     ents = sum(list(d[0]).count(STATE_DIM) for d in decisions)
+    v = t([w for d in decisions for w in (d[4] if len(d) > 4 else ())] + [0, 0, 0]).view(-1, 3)
+    v_len = t([len(d[4]) // 3 if len(d) > 4 else 0 for d in decisions] + [0] * (pad - 1) + [1])
+    v_valid = torch.ones(v.shape[0], dtype=torch.bool, device=device)
+    v_valid[-1] = False
     return StepInput(
+        v_card=v[:, 0], v_slot=v[:, 1], v_cnt=v[:, 2], v_row=segments(v_len, v.shape[0])[0], v_valid=v_valid,
         pol=t(list(pols) + [pols[-1]] * pad),
         gslot=t(list(gslots) + [max(gslots) + 1] * pad),
         fresh=t(list(fresh) + [True] * pad).bool(),

@@ -115,10 +115,11 @@ from dataclasses import asdict, dataclass, field, fields
 import torch
 
 from ..backend import ENV_VAR, engine_name
-from ..encode import FEATURES, FEATURE_VERSIONS, information_contract
-from ..match import matchup_decks, parse_matchups
+from ..encode import BELIEF_FEATURES, FEATURES, FEATURE_VERSIONS, information_contract
+from ..match import game_seed, matchup_decks, parse_matchups
 from .collect import PoolProcess, PoolThread, cpu_layout, fmt_cpus, parse_cpus, release
 from .evaluate import DECK_KEYS, EVAL_BLOCKS, evaluate_policy
+from .belief import BeliefSpec
 from .model import PolicyNet, load_partial
 from .ppo import PPOConfig, load_optimizer_state, make_optimizer, ppo_update, set_lr
 from .rollout import BOT, KIND_ID, LEARNER, GameSpec, Job, checkpoint_config, create_pool, play
@@ -138,6 +139,9 @@ def request_ints_for(games_per_iter: int, workers: int, groups: int = Job.groups
     games = -(-games_per_iter // max(workers, 1))
     per_request = -(-games // max(groups, 1))
     return max(1 << 18, 1 << (per_request * REQUEST_INTS_PER_GAME - 1).bit_length())
+
+
+GAMES_PER_MATCH = 2.5  # --match-rollouts: matches per iteration = games_per_iter / this; budgets count the games actually played
 
 
 @dataclass
@@ -173,7 +177,10 @@ class TrainConfig:
     self_play_frac: float = 0.5
     bot_frac: float = 0.0  # share of games against the scripted bots (taken out of the pool share)
     bot_seat: str = "both"  # bot games: "both" seats at random, or "jund": the learner always Jund (seat 0) vs the blue bot, the benchmark matchup
-    postboard_frac: float = 0.5  # share of training games played with sideboarded decks (match games 2/3)
+    postboard_frac: float = 0.5  # share of training games played with sideboarded decks (match games 2/3); isolated-game mode only
+    match_rollouts: int = 0  # 1: training games are whole best-of-three matches (games 1 -> 2 -> 3, knowledge carried; about games_per_iter / GAMES_PER_MATCH matches per iteration); 0: isolated games (legacy)
+    variants: str = ""  # registered 75s of training matches: "" = the stock lists, else an `engine.variants` split ("train") sampled per match and position
+    belief: int = 0  # 1: feature set 8 with the belief head (docs/belief-head.md); needs --match-rollouts 1 and --variants
     eval_bo3_matches: int = 100  # best-of-three matches vs the bots at each evaluation (0 = off)
     snapshot_every: int = 10
     pool_recent_frac: float = 0.5  # share of pool games against the newest snapshot
@@ -291,9 +298,25 @@ class Trainer:
             config["entity_attn"] = cfg.entity_attn or config.get("entity_attn", 0)
             if cfg.features:  # no weights depend on it: a fine-tune may move to a newer feature set
                 config["features"] = cfg.features
+            if cfg.belief and "belief" not in config:  # explicit upgrade: new belief head, zero projection (`_init_from`)
+                config.update(features=BELIEF_FEATURES, belief=BeliefSpec.default().to_config())
             self.net = PolicyNet(**config, value_bound=cfg.value_bound)
         else:
-            self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn, features=cfg.features or FEATURES)
+            belief = BeliefSpec.default() if cfg.belief else None
+            self.net = PolicyNet(hidden=cfg.hidden, memory=cfg.memory, trunk=cfg.trunk, value_net=cfg.value_net, value_hidden=cfg.value_hidden, value_bound=cfg.value_bound, entity_attn=cfg.entity_attn,
+                                 features=BELIEF_FEATURES if cfg.belief else cfg.features or FEATURES, belief=belief)
+        if self.net.belief is not None and not (cfg.match_rollouts and cfg.variants and not cfg.exploit):
+            raise ValueError("training a belief head needs varied-list match rollouts: --match-rollouts 1 --variants train (and no --exploit)")
+        if self.net.belief is not None and len([d for d in cfg.learner_devices.split(",") if d]) > 1:
+            raise ValueError("the multi-device update (rl/distributed.py) does not carry belief targets yet: train a belief head on one learner device")
+        if cfg.variants:
+            from ..engine.variants import sampling_prior
+
+            self.variant_prior = sampling_prior(cfg.variants)
+            for m, _ in self.matchups:
+                missing = [d for d in matchup_decks(m) if d not in self.variant_prior]
+                if missing:
+                    raise ValueError(f"--variants {cfg.variants}: no {missing} variants in that split")
         start_iteration = ck["iteration"] if ck is not None else 0
         active_shaping = cfg.shaping * max(0.0, 1 - start_iteration / max(cfg.shaping_anneal_iters, 1))
         if active_shaping and self.net.value_bound == "tanh":
@@ -391,7 +414,7 @@ class Trainer:
         ck = torch.load(path, map_location=self.cfg.device, weights_only=False)
         with torch.device("meta"):  # its config with today's defaults filled in
             config = PolicyNet(**ck["config"]).config
-        skip = ("entity_attn", "value_bound", "features")  # value_bound and features have no weights
+        skip = ("entity_attn", "value_bound", "features", "belief", "belief_coef")  # no weights, or new layers (belief head, zero projection) `load_partial` initialises
         own = {k: v for k, v in self.net.config.items() if k not in skip}
         theirs = {k: v for k, v in config.items() if k not in skip}
         if own != theirs or config.get("entity_attn", 0) > self.net.config.get("entity_attn", 0):
@@ -529,7 +552,7 @@ class Trainer:
         job, specs = desc["job"], desc["specs"]
         self._pin(job.learner_path)
         if len(self.matchups) > 1:
-            self.spec_matchup.update({s.seed: s.matchup for s in specs})
+            self.spec_matchup.update({seed: s.matchup for s in specs for seed in ([game_seed(s.seed, n) for n in (1, 2, 3)] if s.bo3 else [s.seed])})
         pending = self.collector.call(play, specs, job, self.cfg.workers)
         return _Rollout(pending, job.shaping, desc["it"] - job.learner_version + 1, desc["rng"], descriptor=desc)
 
@@ -542,7 +565,7 @@ class Trainer:
         c, specs = self.cfg, []
         base = TRAIN_SEED_BASE + (it + 1) * 1_000_003 + c.seed * 7919
         weights = self._pfsp_weights() if c.pool_sampling == "pfsp" else None
-        for k in range(c.games_per_iter):
+        for k in range(math.ceil(c.games_per_iter / GAMES_PER_MATCH) if c.match_rollouts else c.games_per_iter):
             if c.exploit:
                 main = os.path.abspath(c.exploit)
                 seats = (LEARNER, main) if self.exploit_seat == 0 else (main, LEARNER)
@@ -561,13 +584,20 @@ class Trainer:
                     else:
                         opp = self.rng.choices(self.pool, weights)[0] if weights else self.rng.choice(self.pool)
                     seats = (LEARNER, opp) if self.rng.random() < 0.5 else (opp, LEARNER)
-            game_no = 2 if self.rng.random() < c.postboard_frac else 1
+            game_no = 1 if c.match_rollouts else 2 if self.rng.random() < c.postboard_frac else 1
             matchup = self.matchups[0][0]
             if len(self.matchups) > 1:
                 matchup = self.rng.choices([m for m, _ in self.matchups], [w for _, w in self.matchups])[0]
-                self.spec_matchup[base + k] = matchup
-            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no, matchup=matchup,
-                                  swap_seats=self.rng.random() < 0.5 if self.net.features >= 7 else False))
+                for seed in ([game_seed(base + k, n) for n in (1, 2, 3)] if c.match_rollouts else [base + k]):
+                    self.spec_matchup[seed] = matchup
+            swap = self.rng.random() < 0.5 if self.net.features >= 7 else False
+            variants = None
+            if c.variants:
+                from ..engine.variants import sample_variant
+
+                variants = tuple(sample_variant(d, self.rng, c.variants).id for d in matchup_decks(matchup))
+            specs.append(GameSpec(seed=base + k, seats=seats, match_game=game_no, matchup=matchup, swap_seats=swap,
+                                  bo3=bool(c.match_rollouts), variants=variants))
         return specs
 
     def _matchup_stats(self, games: list) -> dict:
@@ -575,6 +605,10 @@ class Trainer:
         by = {m: [] for m, _ in self.matchups}
         for g in games:
             by[self.spec_matchup.pop(g[-1])].append(g)
+        if self.cfg.match_rollouts:  # games a match did not need (a 2-0)
+            for seed in {(g[-1] - 1) // 4 for g in games}:
+                for n in (1, 2, 3):
+                    self.spec_matchup.pop(game_seed(seed, n), None)
         out = {}
         for m, gs in by.items():
             out[f"matchup_share/{m}"] = len(gs) / max(len(games), 1)
@@ -735,6 +769,7 @@ class Trainer:
                     "decisions": len(data.actions),
                     "games": len(data.games),
                     "games_total": self.games_total,
+                    "matches": len(getattr(data, "matches", [])),
                     "game_turns": sum(g[3] for g in data.games) / max(len(data.games), 1),
                     "draws": sum(g[1] is None for g in data.games) / max(len(data.games), 1),
                     "jund_wins_selfplay": _rate([g for g in data.games if g[0] == (LEARNER, LEARNER)], 0),
@@ -1003,7 +1038,8 @@ def parse_args(argv=None) -> TrainConfig:
             if f.name == "ppo":
                 continue
             v = getattr(obj, f.name)
-            typ = (lambda x: None if x.lower() == "none" else float(x)) if f.name == "target_kl" else type(v)
+            typ = (lambda x: None if x.lower() == "none" else float(x)) if f.name == "target_kl" else (
+                lambda x: None if x.lower() == "none" else tuple(float(y) for y in x.split(","))) if f.name == "belief_coef" else type(v)
             ap.add_argument(f"--{prefix}{f.name.replace('_', '-')}", type=typ, default=v, choices=CHOICES.get(f.name) if obj is cfg else None)
     a = vars(ap.parse_args(argv))
     for f in fields(ppo):

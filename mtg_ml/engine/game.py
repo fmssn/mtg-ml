@@ -158,6 +158,7 @@ def _copy_state(state: dict) -> dict:
         "blocked": set,
         "blocks": dict,
         "mulligans_taken": list,
+        "_witnessed": lambda ws: [dict(w) for w in ws],
     }
     out: dict = {"decision": None}
     for k, v in state.items():
@@ -267,6 +268,11 @@ class Game:
         self.over = False
         self.end_reason = ""
         self.decision: Decision | None = None
+        # Per viewer: the most distinct nontoken cards of each (front-face)
+        # name of the opponent's that were visible to them at once, recorded
+        # whenever a visible card is about to stop being visible (see
+        # `witnessed`). Never read by the rules: witnessing changes nothing.
+        self._witnessed: list[dict[str, int]] = [{}, {}]
 
         for p, deck in zip(self.players, decks):
             for name in deck:
@@ -309,6 +315,51 @@ class Game:
     @property
     def current_main(self):
         return self._current_main
+
+    def witnessed(self, viewer: int) -> dict[str, int]:
+        """Opponent cards `viewer` has seen this game, as established minimum
+        copy counts: per front-face card name, the most distinct nontoken
+        cards of the opponent's with that name that were visible to `viewer`
+        at the same moment (battlefield, stack, graveyard, exile, known hand
+        and library cards, cards revealed to them). Never links copies by
+        hidden identity, so a card seen, shuffled away and seen again counts
+        once. Monotonic within a game; keys sorted."""
+        if viewer not in (0, 1):
+            raise IndexError(f"player index {viewer} out of range (0..2)")
+        out = dict(self._witnessed[viewer])
+        for name, n in self._visible_counts(viewer).items():
+            if n > out.get(name, 0):
+                out[name] = n
+        return dict(sorted(out.items()))
+
+    def _visible_counts(self, viewer: int, extra: Card | None = None) -> dict[str, int]:
+        """Front-face name -> number of the opponent's nontoken cards visible
+        to `viewer` now; `extra` (a card about to stop being visible, possibly
+        between zones) counts too."""
+        opp = 1 - viewer
+        them = self.players[opp]
+        cards = [c for c in self.battlefield if c.owner == opp]
+        cards += them.graveyard
+        cards += them.exile
+        cards += [c for c in them.hand if viewer in c.known_to]
+        cards += [c for c in them.library if viewer in c.known_to]
+        cards += [it.card for it in self.stack if it.card is not None and it.card.owner == opp and it.card.zone == "stack"]
+        if extra is not None and all(c is not extra for c in cards):
+            cards.append(extra)
+        counts: dict[str, int] = {}
+        for c in cards:
+            if not c.is_token:
+                counts[c.defn.name] = counts.get(c.defn.name, 0) + 1
+        return counts
+
+    def _witness(self, viewer: int, extra: Card | None = None) -> None:
+        """Record what `viewer` sees now: called just before a card of the
+        opponent's stops being visible to them (the only moments a visible
+        count goes down, so the running maximum stays exact)."""
+        w = self._witnessed[viewer]
+        for name, n in self._visible_counts(viewer, extra).items():
+            if n > w.get(name, 0):
+                w[name] = n
 
     def legal_options(self) -> list[Option]:
         return [] if self.decision is None else self.decision.options
@@ -929,6 +980,10 @@ class Game:
     ) -> Card | None:
         """Move `card` to zone `to`. Returns the card (new object), or None if
         it was a token that ceased to exist."""
+        if to == "library" and not card.is_token:
+            v = 1 - card.owner
+            if v in card.known_to and v not in (known_to or ()):
+                self._witness(v, card)  # its opponent loses sight of it
         frm = card.zone
         lki = card.snapshot() if frm == "battlefield" else None
         if frm == "battlefield":
@@ -1035,6 +1090,8 @@ class Game:
 
     def shuffle(self, p: int) -> None:
         lib = self.players[p].library
+        if any(1 - p in c.known_to for c in lib):
+            self._witness(1 - p)  # the opponent loses sight of the cards they knew
         self.shuffles += 1
         self.rng.shuffle(lib)
         for c in lib:

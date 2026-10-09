@@ -64,9 +64,12 @@ fn thermo<O: FeatureOut>(o: &mut O, name: &str, n: i64, steps: &[i64]) {
 /// 2026-10-06; 2: + readiness, known positions, skip_untap, stack targets, X,
 /// option previews; 3: + `opp:deck:`; 4: + combat relations, incoming
 /// damage, choose_x previews and pointer, mana colours; 5: + card shapes,
-/// hand entities; 6: + simulated option previews, `sim.rs`).
+/// hand entities; 6: + simulated option previews, `sim.rs`; 7: hidden-list
+/// counts; 8: set 7's hashed features plus witnessed-card evidence for the
+/// belief head, which Python builds from `Game.witnessed`: the strings here
+/// are set 7's).
 pub const FEATURES: u8 = 7;
-pub const FEATURE_VERSIONS: &[u8] = &[1, 2, 3, 4, 5, 6, 7];
+pub const FEATURE_VERSIONS: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8];
 
 pub fn check_features(features: u8) -> Result<u8, String> {
     if FEATURE_VERSIONS.contains(&features) {

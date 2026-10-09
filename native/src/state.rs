@@ -630,6 +630,11 @@ pub struct State {
     pub sim_assume_pass: bool,
     /// `Game.shuffles`: library shuffles so far.
     pub shuffles: u32,
+    /// `Game._witnessed`: per viewer, the most distinct nontoken cards of
+    /// each front-face definition of the opponent's visible to them at once,
+    /// recorded just before a visible card stops being visible. Never read
+    /// by the rules.
+    pub witnessed: [Vec<(DefId, i32)>; 2],
 }
 
 /// `str.capitalize()` (first character upper, the rest lower).
@@ -705,6 +710,7 @@ impl State {
             sim_viewer: None,
             sim_assume_pass: false,
             shuffles: 0,
+            witnessed: [vec![], vec![]],
             snapshots: false,
             snap: None,
             edited: false,
@@ -1060,6 +1066,12 @@ impl State {
     /// `Game._move`. Returns the card (now a new object) or None for a token
     /// that ceased to exist.
     pub fn move_card(&mut self, ci: CIdx, to: Zone, controller: Option<u8>, position: Pos, known_to: Option<u8>, tapped: bool) -> Option<CIdx> {
+        if to == Zone::Library && !self.c(ci).is_token {
+            let v = 1 - self.c(ci).owner;
+            if self.c(ci).known_to & pbit(v) != 0 && known_to.unwrap_or(0) & pbit(v) == 0 {
+                self.witness(v, Some(ci)); // its opponent loses sight of it
+            }
+        }
         let frm = self.c(ci).zone;
         let lki = if frm == Zone::Battlefield { Some(self.c(ci).clone()) } else { None };
         if frm == Zone::Battlefield {
@@ -1137,6 +1149,65 @@ impl State {
             self.after_leave_battlefield(l, ci, to);
         }
         Some(ci)
+    }
+
+    /// `Game._visible_counts`: front-face definition -> number of the
+    /// opponent's nontoken cards visible to `viewer` now, plus `extra` (a
+    /// card about to stop being visible, possibly between zones).
+    pub fn visible_counts(&self, viewer: u8, extra: Option<CIdx>) -> Vec<(DefId, i32)> {
+        let opp = 1 - viewer;
+        let them = &self.players[opp as usize];
+        let seen = |c: CIdx| self.c(c).known_to & pbit(viewer) != 0;
+        let mut cards: Vec<CIdx> = self.battlefield.iter().copied().filter(|&c| self.c(c).owner == opp).collect();
+        cards.extend(them.graveyard.iter().copied());
+        cards.extend(them.exile.iter().copied());
+        cards.extend(them.hand.iter().copied().filter(|&c| seen(c)));
+        cards.extend(them.library.iter().copied().filter(|&c| seen(c)));
+        cards.extend(self.stack.iter().filter_map(|it| it.card).filter(|&c| self.c(c).owner == opp && self.c(c).zone == Zone::Stack));
+        if let Some(e) = extra {
+            if !cards.contains(&e) {
+                cards.push(e);
+            }
+        }
+        let mut counts: Vec<(DefId, i32)> = vec![];
+        for c in cards {
+            let card = self.c(c);
+            if card.is_token {
+                continue;
+            }
+            match counts.iter_mut().find(|(d, _)| *d == card.def) {
+                Some(e) => e.1 += 1,
+                None => counts.push((card.def, 1)),
+            }
+        }
+        counts
+    }
+
+    /// `Game._witness`: record what `viewer` sees now.
+    pub fn witness(&mut self, viewer: u8, extra: Option<CIdx>) {
+        let counts = self.visible_counts(viewer, extra);
+        let w = &mut self.witnessed[viewer as usize];
+        for (d, n) in counts {
+            match w.iter_mut().find(|(x, _)| *x == d) {
+                Some(e) => e.1 = e.1.max(n),
+                None => w.push((d, n)),
+            }
+        }
+    }
+
+    /// `Game.witnessed`: (front-face name, established minimum copies),
+    /// sorted by name.
+    pub fn witnessed_counts(&self, viewer: u8) -> Vec<(String, i32)> {
+        let mut out: Vec<(String, i32)> = vec![];
+        for (d, n) in self.witnessed[viewer as usize].iter().copied().chain(self.visible_counts(viewer, None)) {
+            let name = &db().def(d).name;
+            match out.iter_mut().find(|(x, _)| x == name) {
+                Some(e) => e.1 = e.1.max(n),
+                None => out.push((name.clone(), n)),
+            }
+        }
+        out.sort();
+        out
     }
 
     /// Enters tapped unless its controller controls N other Forests (Gingerbread Cabin).
@@ -1233,6 +1304,10 @@ impl State {
     }
 
     pub fn shuffle(&mut self, p: usize) {
+        let v = 1 - p as u8;
+        if self.players[p].library.iter().any(|&c| self.c(c).known_to & pbit(v) != 0) {
+            self.witness(v, None); // the opponent loses sight of the cards they knew
+        }
         self.shuffles += 1;
         let mut lib = std::mem::take(&mut self.players[p].library);
         self.rng.shuffle(&mut lib);

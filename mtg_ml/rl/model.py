@@ -10,6 +10,8 @@
     memory         z, h' = GRU([s, e], h)       (memory="gru")
                    z     = MLP([s, e])          (memory="none")
     core           c = s + z
+                   (feature set 8: + belief_proj([archetype probs,
+                    expected counts / cap]).detach(), zero at init)
     option indices --EmbeddingBag(sum)--> MLP --> a                (N, H)
                    (trunk="entity": plus a projection of the vector of
                     every entity the option points at)
@@ -31,6 +33,18 @@ Two calling modes:
 Logits are scattered into a (B, max_options) matrix and padding is masked
 to -inf, so a softmax over a row is a distribution over exactly the legal
 options of that decision.
+
+Belief head (feature set 8, `PolicyNet(belief=BeliefSpec)`): `BeliefNet`
+reads only the decision's witnessed-card evidence (`Batch.v_*`, flat
+(card, slot, copies) triples of `rl.belief`), never the state, events or
+options: per triple card + slot + count embeddings -> MLP, summed per
+decision -> MLP -> archetype logits and per-card count logits (0..4 copies,
+basic lands 0..75). The policy core gets a zero-initialised projection of
+the detached (archetype probabilities, expected counts), so PPO gradients
+never reach the belief branch and the supervised belief loss (`ppo.py`)
+trains only it. `forward(..., aux=True)` returns the predictions as a
+fourth item (`BeliefOut`, None without a belief head); the default return
+contract is unchanged.
 """
 
 from __future__ import annotations
@@ -42,7 +56,8 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import PackedSequence
 
-from ..encode import check_features
+from ..encode import BELIEF_FEATURES, check_features
+from .belief import MAX_BASIC, MAX_NONBASIC, SLOTS, BeliefSpec
 from .features import OPTION_DIM, STATE_DIM
 from .samples import FIELDS, PackedSamples
 
@@ -84,18 +99,29 @@ class Batch:
     # padded shape's), which fixes the attention's (samples, width) layout.
     e_pos: torch.Tensor | None = None  # (E,)
     ent_width: int | None = None
+    # Belief evidence (feature set 8): one (card, slot, copies) triple per
+    # entry, level "v"; None: no evidence (the belief head then sees none).
+    v_card: torch.Tensor | None = None  # (T,) belief vocabulary index
+    v_slot: torch.Tensor | None = None  # (T,) 0 = current game, g = finished game g of the match
+    v_cnt: torch.Tensor | None = None  # (T,) established copies
+    v_off: torch.Tensor | None = None  # (B,) offsets into the triples
 
     def to(self, device) -> "Batch":
         return Batch(*(x.to(device) if torch.is_tensor(x) else x for x in (getattr(self, f) for f in self.__dataclass_fields__)))
 
 
 def collate(samples) -> Batch:
-    """samples: (state indices, [option indices, ...], event indices), or a
-    `PackedSamples` (then all of it; see `collate_packed` for subsets)."""
+    """samples: (state indices, [option indices, ...], event indices[, belief
+    evidence triples]), or a `PackedSamples` (then all of it; see
+    `collate_packed` for subsets). The batch carries evidence fields (empty
+    for samples without)."""
     if isinstance(samples, PackedSamples):
-        return collate_packed(samples)
+        return collate_packed(samples, evidence=True)
     s_idx, s_off, e_idx, e_off, o_idx, o_off, o_row, o_pos, n_opts = [], [], [], [], [], [], [], [], []
-    for row, (state, opts, events) in enumerate(samples):
+    v_idx, v_off = [], []
+    for row, (state, opts, events, *ev) in enumerate(samples):
+        v_off.append(len(v_idx) // 3)
+        v_idx.extend(ev[0] if ev else ())
         s_off.append(len(s_idx))
         s_idx.extend(state)
         e_off.append(len(e_idx))
@@ -107,7 +133,18 @@ def collate(samples) -> Batch:
             o_row.append(row)
             o_pos.append(pos)
     t = lambda x: torch.tensor(x, dtype=torch.long)  # noqa: E731
-    return Batch(t(s_idx), t(s_off), t(e_idx), t(e_off), t(o_idx), t(o_off), t(o_row), t(o_pos), t(n_opts))
+    v = t(v_idx).view(-1, 3)
+    return Batch(t(s_idx), t(s_off), t(e_idx), t(e_off), t(o_idx), t(o_off), t(o_row), t(o_pos), t(n_opts), v_card=v[:, 0], v_slot=v[:, 1], v_cnt=v[:, 2], v_off=t(v_off))
+
+
+def step_batch(xs: list) -> tuple[Batch, int]:
+    """Step-mode input of decisions xs = (state, option lengths, option
+    tokens, events[, belief evidence]) as int32 arrays (`rollout._batch`
+    plus the evidence fields). Returns (Batch, most options of a decision)."""
+    ps = PackedSamples()
+    for x in xs:
+        ps.append(x)
+    return collate_packed(ps, evidence=True), max(ps.n_opts)
 
 
 def _excl(x: torch.Tensor) -> torch.Tensor:
@@ -141,13 +178,26 @@ def _ints(a) -> torch.Tensor:
 
 def _with_starts(t: dict) -> dict:
     t["s_start"], t["e_start"], t["opt_start"], t["o_start"] = _excl(t["s_len"]), _excl(t["e_len"]), _excl(t["n_opts"]), _excl(t["o_len"])
+    if "v_len" in t:
+        t["v_start"] = _excl(t["v_len"])
     return t
 
 
-def collate_packed(ps: PackedSamples | dict, idx=None) -> Batch:
+def collate_packed(ps: PackedSamples | dict, idx=None, evidence: bool = False) -> Batch:
     """Batch of samples `idx` (default: all, in order) of a PackedSamples, or
-    of its `packed_tensors` on a device (then built there)."""
+    of its `packed_tensors` on a device (then built there). evidence: also
+    the belief evidence fields (default None: what networks without a
+    belief head read; `collate` and `step_batch` include them)."""
     t = ps if isinstance(ps, dict) else packed_tensors(ps)
+    ev = {}
+    if evidence and "v_len" in t:
+        if idx is None:
+            v_v, v_off = t["v_idx"], _excl(t["v_len"])
+        else:
+            rows_ = torch.as_tensor(idx, dtype=torch.long, device=t["n_opts"].device)
+            v_v, v_off = _segments(t["v_idx"], t["v_start"][rows_], t["v_len"][rows_])
+        v = v_v.view(-1, 3)
+        ev = {"v_card": v[:, 0], "v_slot": v[:, 1], "v_cnt": v[:, 2], "v_off": torch.div(v_off, 3, rounding_mode="floor")}
     dev = t["n_opts"].device
     if idx is None:
         no = t["n_opts"]
@@ -163,7 +213,7 @@ def collate_packed(ps: PackedSamples | dict, idx=None) -> Batch:
         o_v, o_off = _segments(t["o_idx"], t["o_start"][opt_ids], t["o_len"][opt_ids])
     o_row = torch.repeat_interleave(torch.arange(no.shape[0], device=dev), no)
     o_pos = torch.arange(o_row.shape[0], device=dev) - torch.repeat_interleave(_excl(no), no)
-    return Batch(s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, no.clone())
+    return Batch(s_v, s_off, e_v, e_off, o_v, o_off, o_row, o_pos, no.clone(), **ev)
 
 
 def structure(b: Batch, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM) -> Batch:
@@ -216,7 +266,9 @@ _FIELD_LEVELS = {
     "o_idx": ("o", None), "o_off": ("opt", "o"), "o_row": ("opt", "row"), "o_pos": ("opt", None), "n_opts": ("row", None),
     "st_idx": ("st", None), "st_off": ("row", "st"), "bag_off": ("bag", "st"), "g_bag": ("row", "bag"), "e_bag": ("ent", "bag"), "e_row": ("ent", "row"),
     "ot_idx": ("ot", None), "ot_off": ("opt", "ot"), "p_opt": ("ptr", "opt"), "p_ent": ("ptr", "ent"), "e_pos": ("ent", None),
+    "v_card": ("v", None), "v_slot": ("v", None), "v_cnt": ("v", None), "v_off": ("row", "v"),
 }  # fmt: skip
+EVIDENCE_FIELDS = ("v_card", "v_slot", "v_cnt", "v_off")
 
 
 def _level_sizes(b: Batch) -> dict:
@@ -224,11 +276,14 @@ def _level_sizes(b: Batch) -> dict:
     B, dev = b.n_opts.shape[0], b.n_opts.device
     per_row = lambda rows, x: torch.zeros(B, dtype=torch.long, device=dev).index_add_(0, rows, x)  # noqa: E731
     n_ent = per_row(b.e_row, torch.ones_like(b.e_row))
-    return {
+    out = {
         "row": torch.ones_like(b.n_opts), "s": _lengths(b.s_off, b.s_idx.shape[0]), "e": _lengths(b.e_off, b.e_idx.shape[0]),
         "opt": b.n_opts, "o": per_row(b.o_row, _lengths(b.o_off, b.o_idx.shape[0])), "st": _lengths(b.st_off, b.st_idx.shape[0]),
         "bag": n_ent + 1, "ent": n_ent, "ot": per_row(b.o_row, _lengths(b.ot_off, b.ot_idx.shape[0])), "ptr": per_row(b.o_row[b.p_opt], torch.ones_like(b.p_opt)),
     }  # fmt: skip
+    if b.v_off is not None:
+        out["v"] = _lengths(b.v_off, b.v_card.shape[0])
+    return out
 
 
 def _piece_starts(b: Batch, bounds: list[int]) -> tuple[dict, torch.Tensor]:
@@ -252,6 +307,8 @@ def split(b: Batch, bounds: list[int]) -> list[Batch]:
     fields = {}
     for name, (lvl, ref) in _FIELD_LEVELS.items():
         x = getattr(b, name)
+        if x is None:  # no evidence
+            continue
         if ref is not None:
             x = x - torch.repeat_interleave(at[level[ref], :-1], n[level[lvl]], output_size=x.shape[0])
         fields[name] = x.split(counts[level[lvl]])
@@ -278,6 +335,10 @@ PAD_FIELDS = {  # the fields the structured forward reads: (level, level its val
     "e_idx": ("e", None, "token"), "e_off": ("row", "e", "spread:e"), "ot_idx": ("ot", None, "token"), "ot_off": ("opt", "ot", "spread:ot"),
     "o_row": ("opt", "row", "cycle:row"), "o_pos": ("opt", None, "zero"), "p_opt": ("ptr", "opt", "cycle:opt"), "p_ent": ("ptr", "ent", "cycle:ent"),
 }  # fmt: skip
+PAD_EVIDENCE = {  # belief evidence (`pad_split` of a batch that carries it): padded triples are (0, 0, 0) in padded rows
+    "v_card": ("v", None, "zero"), "v_slot": ("v", None, "zero"), "v_cnt": ("v", None, "zero"), "v_off": ("row", "v", "spread:v"),
+}  # fmt: skip
+_PADDED_LEVELS = ("st", "e", "ot", "ptr", "v")  # token levels padded to at least one more than any piece holds
 
 
 def bucket(x: int, per_octave: int = 8) -> int:
@@ -295,14 +356,14 @@ def pad_sizes(counts: dict[str, list[int]]) -> dict[str, int]:
     row, ent = bucket(max(counts["row"]) + 1), bucket(max(counts["ent"]) + 1)
     opt = bucket(max(o + row - r for o, r in zip(counts["opt"], counts["row"])))
     entw = {"entw": bucket(max(max(counts["entw"]), 1), 4)} if "entw" in counts else {}  # entity attention: entities per sample
-    return {"row": row, "ent": ent, "bag": row + ent, "opt": opt, **entw, **{k: bucket(max(counts[k]) + 1) for k in counts if k in ("st", "e", "ot", "ptr") or k.startswith("u_")}}
+    return {"row": row, "ent": ent, "bag": row + ent, "opt": opt, **entw, **{k: bucket(max(counts[k]) + 1) for k in counts if k in _PADDED_LEVELS or k.startswith("u_")}}
 
 
 def pad_fits(sizes: dict[str, int], counts: dict[str, list[int]]) -> bool:
     """Whether pieces with these counts fit padded `sizes` (of other pieces)."""
     return (
         sizes["bag"] == sizes["row"] + sizes["ent"]
-        and all(sizes.get(k, 0) > max(counts[k]) for k in counts if k in ("row", "ent", "st", "e", "ot", "ptr") or k.startswith("u_"))
+        and all(sizes.get(k, 0) > max(counts[k]) for k in counts if k in ("row", "ent") + _PADDED_LEVELS or k.startswith("u_"))
         and sizes["opt"] >= max(o + sizes["row"] - r for o, r in zip(counts["opt"], counts["row"]))
         and ("entw" not in counts or sizes.get("entw", 0) >= max(counts["entw"]))
     )
@@ -323,7 +384,10 @@ def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | No
 
     ent_width (entity attention): also field e_pos (level ent; -1 at padded
     entities) and counts["entw"], the most entities of a sample per piece,
-    which `sizes` turns into sizes["entw"]."""
+    which `sizes` turns into sizes["entw"].
+
+    A batch with belief evidence (`b.v_off`) also gets the PAD_EVIDENCE
+    fields (level "v")."""
     level, at = _piece_starts(b, bounds)
     M, dev = len(bounds) - 1, at.device
     piece = torch.arange(M, device=dev)
@@ -386,7 +450,8 @@ def pad_split(b: Batch, bounds: list[int], sizes=pad_sizes, transpose: dict | No
             grid = torch.full((M, D), int(pad), dtype=torch.long, device=dev)
         return grid.reshape(-1).index_copy(0, dest, x).view(M, D)
 
-    out = {name: place(getattr(b, name).long(), lvl, pad, ref) for name, (lvl, ref, pad) in PAD_FIELDS.items()}
+    padded = PAD_FIELDS | (PAD_EVIDENCE if b.v_off is not None else {})
+    out = {name: place(getattr(b, name).long(), lvl, pad, ref) for name, (lvl, ref, pad) in padded.items()}
     for key, (tok_lvl, bag_lvl, vocab, sbag, seg_at, uid) in lists.items():
         out[f"t_{key}_bag"] = place(sbag, tok_lvl, f"cycle:{bag_lvl}")  # padded tokens to padded bags: zero gradient
         out[f"t_{key}_off"] = place(seg_at, f"u_{key}", f"spread:{tok_lvl}")
@@ -405,7 +470,7 @@ def padded_batch(f: dict, ent_width: int | None = None) -> Batch:
     bag_t = {k: (f[f"t_{k}_bag"], f[f"t_{k}_off"], f[f"t_{k}_uid"], f.get(f"t_{k}_w")) for k in ("st", "e", "ot") if f"t_{k}_bag" in f}
     return Batch(
         None, None, f["e_idx"], f["e_off"], None, None, f["o_row"], f["o_pos"], None, **{k: f[k] for k in PAD_FIELDS if k not in ("e_idx", "e_off", "o_row", "o_pos")},
-        bag_t=bag_t or None, e_pos=f.get("e_pos"), ent_width=ent_width,
+        bag_t=bag_t or None, e_pos=f.get("e_pos"), ent_width=ent_width, **{k: f.get(k) for k in PAD_EVIDENCE},
     )  # fmt: skip
 
 
@@ -738,6 +803,74 @@ def _sequence_layout(lengths: list[int], device: torch.device, packed: bool):
     return idx, layout
 
 
+class BeliefOut(NamedTuple):
+    """Belief head predictions per decision. arch (B, archetypes) logits;
+    nonbasic (B, nonbasic cards, MAX_NONBASIC + 1) and basic (B, basic
+    lands, MAX_BASIC + 1, or None without any) count logits, cards in the
+    order of `BeliefNet.nonbasic_idx` / `basic_idx` (vocabulary indices)."""
+
+    arch: torch.Tensor
+    nonbasic: torch.Tensor
+    basic: torch.Tensor | None
+
+
+DEFAULT_BELIEF_COEF = {"archetype": 0.1, "counts": 0.1}
+
+
+class BeliefNet(nn.Module):
+    """The belief encoder and heads. Reads only the evidence triples: per
+    triple card (exact vocabulary index), slot and copy-count embeddings,
+    summed, ReLU, Linear, ReLU; summed per decision; Linear, ReLU, Linear,
+    ReLU; then the archetype head and the per-card count heads."""
+
+    def __init__(self, spec: BeliefSpec, hidden: int):
+        super().__init__()
+        V, A = len(spec.vocab), len(spec.archetypes)
+        self.hidden = hidden
+        self.card = nn.Embedding(V, hidden)
+        self.slot = nn.Embedding(SLOTS, hidden)
+        self.count = nn.Embedding(MAX_BASIC + 1, hidden)
+        for e in (self.card, self.slot, self.count):
+            nn.init.normal_(e.weight, std=0.05)
+        self.tok = nn.Linear(hidden, hidden)
+        self.trunk = nn.Sequential(nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU())
+        self.arch = nn.Linear(hidden, A)
+        basic = spec.basic
+        nb, bs = [i for i in range(V) if not basic[i]], [i for i in range(V) if basic[i]]
+        # Persistent buffers: `rollout.load_net` builds on the meta device and assigns the state dict.
+        self.register_buffer("nonbasic_idx", torch.tensor(nb, dtype=torch.long))
+        self.register_buffer("basic_idx", torch.tensor(bs, dtype=torch.long))
+        caps = torch.tensor([MAX_BASIC if b else MAX_NONBASIC for b in basic], dtype=torch.float32)
+        self.register_buffer("caps", caps)
+        self.nonbasic = nn.Linear(hidden, len(nb) * (MAX_NONBASIC + 1))
+        self.basic = nn.Linear(hidden, len(bs) * (MAX_BASIC + 1)) if bs else None
+        self.n_vocab, self.n_arch = V, A
+
+    def forward(self, b: Batch, rows: int) -> BeliefOut:
+        if b.v_off is None or b.v_card.shape[0] == 0:
+            pooled = self.tok.weight.new_zeros(rows, self.hidden)
+        else:
+            card, slot, cnt = b.v_card.long(), b.v_slot.long(), b.v_cnt.long().clamp(max=MAX_BASIC)
+            x = torch.relu(self.tok(torch.relu(self.card(card) + self.slot(slot) + self.count(cnt))))
+            n = _lengths(b.v_off, card.shape[0])
+            row = torch.repeat_interleave(torch.arange(rows, device=x.device), n, output_size=card.shape[0])
+            pooled = x.new_zeros(rows, self.hidden).index_add(0, row, x)
+        h = self.trunk(pooled)
+        nb = self.nonbasic(h).view(rows, -1, MAX_NONBASIC + 1)
+        bs = self.basic(h).view(rows, -1, MAX_BASIC + 1) if self.basic is not None else None
+        return BeliefOut(self.arch(h), nb, bs)
+
+    def summary(self, out: BeliefOut) -> torch.Tensor:
+        """(archetype probabilities, expected copies / range per vocabulary
+        card): (B, archetypes + vocabulary), what the policy reads."""
+        probs = torch.softmax(out.arch.float(), -1)
+        exp = torch.zeros(probs.shape[0], self.n_vocab, device=probs.device, dtype=probs.dtype)
+        exp = exp.index_copy(1, self.nonbasic_idx, (torch.softmax(out.nonbasic.float(), -1) * torch.arange(MAX_NONBASIC + 1, device=probs.device)).sum(-1))
+        if out.basic is not None:
+            exp = exp.index_copy(1, self.basic_idx, (torch.softmax(out.basic.float(), -1) * torch.arange(MAX_BASIC + 1, device=probs.device)).sum(-1))
+        return torch.cat([probs, exp / self.caps], 1)
+
+
 class PolicyNet(nn.Module):
     """hidden: policy width. trunk: "mlp" (EmbeddingBag + MLP),
     "transformer" (2 layers over the active state features) or "entity"
@@ -756,7 +889,17 @@ class PolicyNet(nn.Module):
     without them). features: the feature-set version the network reads
     (`encode.FEATURE_VERSIONS`; no weights depend on it, the hashed inputs
     do): 1, the default and what a config without the key means, or 2;
-    in `config` only when not 1, so older configs are unchanged."""
+    in `config` only when not 1, so older configs are unchanged.
+
+    belief (feature set 8, required there and only there): a `BeliefSpec`
+    (or its `to_config()`), which adds the belief head (`BeliefNet`,
+    `belief_net.*`) and its zero-initialised projection into the policy
+    core (`belief_proj.*`). `net.belief` is the spec (None without). In
+    `config` as `belief` (the spec's config) and `belief_coef` (the
+    auxiliary loss coefficients, {"archetype", "counts"}, default 0.1 each,
+    read by `ppo_update`). A set-7 checkpoint loads into a belief network
+    with `load_partial` (the new weights keep their init; the projection is
+    zero, so the network computes what the checkpoint did)."""
 
     def __init__(
         self,
@@ -770,9 +913,15 @@ class PolicyNet(nn.Module):
         value_bound: str = "none",
         entity_attn: int = 0,
         features: int = 1,
+        belief: BeliefSpec | dict | None = None,
+        belief_coef: dict | None = None,
     ):
         super().__init__()
         check_features(features)
+        if isinstance(belief, dict):
+            belief = BeliefSpec.from_config(belief)
+        if (belief is not None) != (features >= BELIEF_FEATURES):
+            raise ValueError(f"feature set {features}: a belief head (BeliefSpec) is {'required' if features >= BELIEF_FEATURES else 'only for feature sets >= ' + str(BELIEF_FEATURES)}")
         if memory not in MEMORY_KINDS or trunk not in TRUNKS or value_net not in VALUE_NETS or value_bound not in VALUE_BOUNDS:
             raise ValueError(f"memory in {MEMORY_KINDS}, trunk in {TRUNKS}, value_net in {VALUE_NETS}, value_bound in {VALUE_BOUNDS}")
         if entity_attn < 0 or (entity_attn and trunk != "entity"):
@@ -785,6 +934,10 @@ class PolicyNet(nn.Module):
             self.config["entity_attn"] = entity_attn
         if features != 1:
             self.config["features"] = features
+        self.belief = belief
+        if belief is not None:
+            self.config["belief"] = belief.to_config()
+            self.config["belief_coef"] = dict(DEFAULT_BELIEF_COEF, **(belief_coef or {}))
         self.features = features
         self.value_bound = value_bound
         self.hidden = hidden
@@ -808,18 +961,31 @@ class PolicyNet(nn.Module):
         nn.init.zeros_(last.bias)
         self.value_hidden = value_hidden if value_net == "separate" else 0
         self.state_size = hidden + self.value_hidden
+        if belief is not None:
+            self.belief_net = BeliefNet(belief, hidden)
+            self.belief_proj = nn.Linear(len(belief.archetypes) + len(belief.vocab), hidden)
+            nn.init.zeros_(self.belief_proj.weight)
+            nn.init.zeros_(self.belief_proj.bias)
+        else:
+            self.belief_net = self.belief_proj = None
 
     def initial_state(self, n: int = 1) -> torch.Tensor:
         return torch.zeros(n, self.state_size)
 
-    def forward(self, b: Batch, hidden: torch.Tensor | None = None, lengths: list[int] | SequenceLayout | None = None, max_options: int | None = None):
+    def forward(self, b: Batch, hidden: torch.Tensor | None = None, lengths: list[int] | SequenceLayout | None = None, max_options: int | None = None, aux: bool = False):
         """Returns (logits (B, max_opts), values (B,), new hidden (B, state_size) or None).
         `max_options` (= n_opts.max()) can be passed to avoid a device sync.
-        Sequence mode takes `lengths` or, for padded pieces, a SequenceLayout."""
+        Sequence mode takes `lengths` or, for padded pieces, a SequenceLayout.
+        aux: also the belief head's predictions, a fourth item (`BeliefOut`,
+        None without a belief head)."""
         hp = hv = None
         if hidden is not None:
             hp, hv = hidden[:, : self.hidden].contiguous(), hidden[:, self.hidden :].contiguous()
         c, hn = self.policy_core(b, hp, lengths)
+        bel = None
+        if self.belief_net is not None:
+            bel = self.belief_net(b, c.shape[0])
+            c = c + self.belief_proj(self.belief_net.summary(bel).detach()).to(c.dtype)  # PPO gradients stop here
         if self.value_net == "separate":
             cv, hvn = self.value_core(b, hv, lengths)
             values = self.value_head(cv).squeeze(-1)
@@ -835,7 +1001,7 @@ class PolicyNet(nn.Module):
         width = int(b.n_opts.max()) if max_options is None else max_options
         logits = torch.full((c.shape[0], width), float("-inf"), device=c.device, dtype=scores.dtype)
         logits[b.o_row, b.o_pos] = scores
-        return logits, values, hn
+        return (logits, values, hn, bel) if aux else (logits, values, hn)
 
     def _options(self, b: Batch) -> torch.Tensor:
         """Summed option token embeddings, plus the projected vectors of the
@@ -864,13 +1030,14 @@ class PolicyNet(nn.Module):
         return super().load_state_dict(state_dict, strict=strict, assign=assign)
 
 
-NEW_LAYER_KEYS = (".state.attn.",)  # weights a checkpoint may lack: `load_partial` leaves them at their (identity) init
+NEW_LAYER_KEYS = (".state.attn.", "belief_net.", "belief_proj.")  # weights a checkpoint may lack: `load_partial` leaves them at their init (identity, or a zero belief projection)
 
 
 def load_partial(net: PolicyNet, state_dict: dict) -> list[str]:
     """Load a checkpoint's weights into `net` when `net` only adds layers
-    that start as the identity (entity attention): every weight of the
-    checkpoint must fit, and the weights it lacks must all be such layers.
+    that start as the identity (entity attention) or add zero (the belief
+    head behind its zero projection: upgrading a set-7 checkpoint to set 8):
+    every weight of the checkpoint must fit, and the weights it lacks must all be such layers.
     Returns the names of those weights, which keep their initialisation, so
     `net` computes what the checkpoint's model did."""
     missing, unexpected = net.load_state_dict(state_dict, strict=False)
