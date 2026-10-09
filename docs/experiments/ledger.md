@@ -18,7 +18,7 @@ Score of the checkpoint, sampled / greedy:
 
 **Findings**
 - Both specialists are clearly stronger than the legacy bots. Each checkpoint scores 8–18 points less against the specialist than against the legacy bot of the same deck.
-- The standing matchup (learner Jund vs Blue) is hard. Neither r7 arm reaches 50%; r4-control gets 64%: it spent all 17.6M training games on this matchup, against roughly 1M for r7 (jund_blue is 2 of 16 matchup weights).
+- The standing matchup (learner Jund vs Blue) is hard. Neither r7 arm reaches 50%; r4-control gets 64%: it spent all 17.6M training games on this matchup, against roughly 0.4M for r7 (jund_blue is 2 of 36 matchup weights).
 - r4-control loses the Jund mirror to the Jund specialist (33–36%). It was trained on Jund vs Blue only. The r7 arms, trained on six decks including mirrors, win both mirrors.
 - lr075 beats lr150 in every cell, by 5–11 points. This matches the morning report (L1 −14 vs −38).
 - r7's greedy play is 4–14 points above its sampled play (entropy ~0.35). r4-control's gap is at most 3.4.
