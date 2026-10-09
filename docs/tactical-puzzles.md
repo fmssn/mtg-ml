@@ -5,8 +5,10 @@ evaluated agent chooses **every** decision from a reviewed position: targets,
 payments, order and passes. The pinned specialist plays the other seat. The
 attempt is scored by the resulting outcome, not by matching a recorded line.
 The development corpus starts at seven puzzles. The remaining corpus (100
-puzzles, with dev and final groups), paired intervals and the public
-`run`/`compare` commands are later PRs.
+puzzles, with dev and final groups) is a later PR. Paired intervals and the
+`run`/`compare` commands exist ([benchmark release](benchmark-release.md)), but
+puzzle intervals stay `unavailable` below 20 independent leakage groups per
+deck, which seven puzzles cannot reach. That is the correct result.
 
 ## Run it
 
@@ -37,7 +39,7 @@ make native                                   # required for --engine native
 | status | reason | meaning |
 |---|---|---|
 | success | `objective_met` | first stopping boundary (or game end) reached with the objective true |
-| failure | `objective_failed` | boundary or game end reached, objective false |
+| failure | `objective_failed` | boundary or game end reached, objective false; also when the game ended with the learner losing (`game_lost: true`), whatever the objective says |
 | failure | `horizon_exhausted` | the case's decision cap (≤ 64, both players) ran out first, including repeated passes |
 | error | `illegal_action` | the learner returned an index outside the legal options |
 | error | `agent_exception` | the learner raised (or a scripted line no longer matched) |
@@ -47,7 +49,10 @@ make native                                   # required for --engine native
 Errors are not attempts: a puzzle with any error row is unscored and the run is
 incomplete. A puzzle succeeds only if every one of its cases succeeds.
 An objective that is true initially is credited only if it is still true at the
-boundary.
+boundary. Reaching the goal and then losing the game is not a solution: if the
+game is over and the opponent won, the case fails with `game_lost: true`, even
+when every objective clause holds (for example, removing a creature and then
+decking out). A violated life clause fails the same way.
 
 ## Authoring a puzzle
 

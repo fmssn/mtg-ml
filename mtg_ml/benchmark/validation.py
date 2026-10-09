@@ -11,6 +11,7 @@ from ..expert.scenarios import compile_scenario, select, at_path
 from ..replay import visible_events
 from .artifacts import load_manifest, load_puzzle, load, validate_bundle, reference, require
 from .jsonio import file_digest, read_json, digest
+from .stats import leakage_groups
 from .views import inputs, thaw
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -159,22 +160,9 @@ def validate(manifest_path, engines=("python", "native"), registry=None):
         puzzles = [load_puzzle(reference(bundle.path, ref, "bundle.puzzles")) for ref in bundle.data["puzzles"]]
         require(len({p.data["id"] for p in puzzles}) == len(puzzles), "bundle.puzzles", "duplicate puzzle id")
         # Connected source/template groups must not straddle dev/final.
-        groups = []
-        for p in puzzles:
-            groups.append(({("template", p.data["template_id"]), ("source", p.data["source_group_id"])}, {p.data["split"]}))
-        changed = True
-        while changed:
-            changed = False
-            for i in range(len(groups)):
-                for j in range(i + 1, len(groups)):
-                    if groups[i][0] & groups[j][0]:
-                        groups[i] = (groups[i][0] | groups[j][0], groups[i][1] | groups[j][1])
-                        groups.pop(j)
-                        changed = True
-                        break
-                if changed:
-                    break
-        require(all(len(splits) == 1 for _, splits in groups), "bundle.split", "intersecting leakage groups cross splits")
+        splits = {p.data["id"]: p.data["split"] for p in puzzles}
+        groups = leakage_groups([p.data for p in puzzles])
+        require(all(len({splits[i] for i in ids}) == 1 for ids in groups.values()), "bundle.split", "intersecting leakage groups cross splits")
         bots = {b["id"]: b for b in d["bots"]}
         for puzzle in puzzles:
             expected_split = "dev" if d["split"] == "power-pilot" else d["split"]

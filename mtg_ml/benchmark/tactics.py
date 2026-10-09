@@ -176,7 +176,7 @@ def attempt_case(puzzle, case, decks, learner_factory, response_factory, *, mode
     from .validation import boundary, objective
     d = puzzle.data
     cap = d["max_decisions"] if max_decisions is None else max_decisions
-    row = dict(status=ERROR, reason="engine_error", objective_met=False, first_action_correct=None, decisions=0)
+    row = dict(status=ERROR, reason="engine_error", objective_met=False, first_action_correct=None, decisions=0, game_lost=False)
     g, seat, trace, chosen_first = None, None, [], False
     try:
         scenario, evidence = load_case(puzzle, case)
@@ -223,7 +223,10 @@ def attempt_case(puzzle, case, decks, learner_factory, response_factory, *, mode
             take(g, agents, index)
             row["decisions"] = len(g.actions) - start
             if boundary(g, seat, d["stop"]):
-                met = objective(g, seat, d["objective"]["all"], objects)
+                # Reaching the goal and then losing the game is not a solution.
+                lost = g.over and g.winner == 1 - seat
+                met = not lost and objective(g, seat, d["objective"]["all"], objects)
+                row["game_lost"] = bool(lost)
                 row.update(status=SUCCESS if met else FAILURE, reason="objective_met" if met else "objective_failed", objective_met=met)
                 break
             if row["decisions"] >= cap:
@@ -256,16 +259,22 @@ def _plan_puzzles(manifest):
     return puzzles
 
 
-def _attempt_planned(plan, puzzles, decks, learner_factory, registry, engine):
+def _attempt_planned(plan, puzzles, decks, learner_factory, registry, engine, learner_for=None):
     p = puzzles[plan["puzzle"]]
     case = next(c for c in p.data["cases"] if c["id"] == plan["case"])
+    if learner_for is not None:
+        learner_factory = learner_for(plan, p, case)
     row = attempt_case(p, case, decks, learner_factory, ResponseFactory(registry, case["response_policy"]["id"]),
                        mode=plan["mode"], actor_seed=plan["actor_seed"], engine=engine)
     return dict(plan) | row
 
 
-def run_puzzles(manifest, learner_factory, registry, *, engine="python", cells=None, modes=None, workers=1):
-    """Rows for every planned case, ready for results.build_result(puzzle_rows=...)."""
+def run_puzzles(manifest, learner_factory, registry, *, engine="python", cells=None, modes=None, workers=1, learner_for=None):
+    """Rows for every planned case, ready for results.build_result(puzzle_rows=...).
+
+    `learner_for(plan, puzzle, case)`, when given, picks the learner factory per case instead of
+    `learner_factory` (calibration plays reviewed witness and mistake lines this way); it must be
+    picklable when workers > 1."""
     puzzles = _plan_puzzles(manifest)
     bots = {b["id"]: b for b in manifest.data["bots"]}
     for p in puzzles.values():
@@ -275,11 +284,11 @@ def run_puzzles(manifest, learner_factory, registry, *, engine="python", cells=N
             registry.verify(bots[rp["id"]], manifest.data["information_contract"])
     plans = puzzle_plan(manifest, cells, modes)
     run = partial(_attempt_planned, puzzles=puzzles, decks=manifest.data["decks"], learner_factory=learner_factory,
-                  registry=registry, engine=engine)
+                  registry=registry, engine=engine, learner_for=learner_for)
     if workers == 1:
         return list(map(run, plans))
     try:
-        pickle.dumps((learner_factory, registry))
+        pickle.dumps((learner_factory, registry, learner_for))
     except (TypeError, AttributeError, pickle.PicklingError) as e:
         raise ValueError("workers: factories and registry must be importable/picklable") from e
     gc.collect()
