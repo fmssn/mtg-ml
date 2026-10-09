@@ -44,10 +44,10 @@ def require_target(pr, *, repo=None, expected_base=None, expected_head=None):
     for rule in rules:
         has_pr_rule |= rule.get("type") == "pull_request"
         parameters = rule.get("parameters", {})
-        if rule.get("type") == "required_status_checks" and parameters.get("strict_required_status_checks_policy"):
+        if rule.get("type") == "required_status_checks":
             checks.update(check["context"] for check in parameters.get("required_status_checks", []))
     if branch.get("protected") is not True or not has_pr_rule or not REQUIRED_CHECKS <= checks:
-        raise PolicyError("Default branch must enforce PRs and up-to-date lint, python and native checks.")
+        raise PolicyError("Default branch must enforce PRs and required lint, python and native checks.")
     return current
 
 
