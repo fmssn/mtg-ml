@@ -76,6 +76,59 @@ def load_play_config(path: pathlib.Path | None = None) -> dict:
         return tomllib.load(f)
 
 
+def sha256_file(path: pathlib.Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def validate_offer(models_dir: pathlib.Path | None, config: dict, strict: bool = False) -> tuple[dict[str, dict], list[str]]:
+    """Check the offered opponents' checkpoints against their pins
+    (`[models."<name>"]` in the play config: sha256, features). Returns the
+    usable models (name -> pin, with the measured sha256) and the problems.
+    `strict` (a hosted server): every opponent's model must be pinned, present
+    and match, and must not be a trainer's moving `latest`; any problem fails.
+    Otherwise a missing checkpoint just leaves its opponents out, as before."""
+    from .rl.rollout import load_policy
+
+    pins, found = config.get("models", {}), ({} if models_dir is None else find_models(models_dir))
+    ok: dict[str, dict] = {}
+    problems: list[str] = []
+    for name in dict.fromkeys(o.get("model") for o in config.get("opponents", [])):
+        pin = pins.get(name)
+        if pathlib.PurePosixPath(str(name)).name == "latest":
+            problems.append(f"{name}: a trainer's latest.pt moves; pin a fixed snapshot")
+            continue
+        if name not in found:
+            if strict:
+                problems.append(f"{name}: no {name}.pt under {models_dir}")
+            continue
+        if pin is None:
+            if strict:
+                problems.append(f"{name}: not pinned in the play config ([models.\"{name}\"] with sha256 and features)")
+            else:
+                ok[name] = {}
+            continue
+        digest = sha256_file(found[name])
+        if digest != pin.get("sha256"):
+            problems.append(f"{name}: sha256 {digest} does not match the pinned {pin.get('sha256')}")
+            continue
+        try:
+            features = load_policy(str(found[name])).features
+        except Exception as e:  # a checkpoint this code cannot load
+            problems.append(f"{name}: cannot load: {e}")
+            continue
+        if features != pin.get("features"):
+            problems.append(f"{name}: feature set {features}, pinned {pin.get('features')}")
+            continue
+        ok[name] = {**pin, "sha256": digest}
+    return ok, problems
+
+
 def matchup_for(player_deck: str, opponent_deck: str) -> tuple[str, int] | None:
     """(matchup, player's seat) for two decks, or None when no matchup pairs them."""
     for k, (a, b) in MATCHUPS.items():
@@ -134,7 +187,11 @@ class LiveGame:
         else:
             from .rl.agent import ModelAgent
 
+            from .knowledge import MatchKnowledge
+
             self.model = ModelAgent(str(model_path), 1 - seat, sample=not greedy, seed=seed)
+            # what the model witnessed of the player's cards in this match's earlier games; a rematch is a new match
+            self.model.set_knowledge(MatchKnowledge.from_dict((match or {}).get("model_knowledge")))
         self.agents = [None, None]
         self.agents[seat], self.agents[1 - seat] = Human(), self.model
         self.names = ["", ""]
@@ -154,6 +211,9 @@ class LiveGame:
         self.log: list[str] = []
         self.engine_seen = 0  # engine log lines copied into self.log
         self.replay_file: str | None = None
+        # A hosted game keeps its seed (which, with the choices, gives away the
+        # bot's hand and library) to itself until the game is over.
+        self.hide_seed = False
         self._advance()
 
     def _sync_log(self) -> list[str]:
@@ -294,7 +354,7 @@ class LiveGame:
     def _meta(self) -> dict:
         g = self.g
         return {
-            "seed": self.seed,
+            "seed": None if self.hide_seed and not self.over else self.seed,
             "engine": engine_name(self.engine),
             "agents": self.names,
             "decks": [DECK_TITLES[d] for d in matchup_decks(self.matchup)],
@@ -511,13 +571,20 @@ class LiveManager:
     thread of its own. A move takes milliseconds, so one thread is plenty."""
 
     def __init__(self, models_dir: pathlib.Path | None, replay_dir: pathlib.Path, engine: str | None = None, max_games: int = MAX_GAMES, scripted: bool = False,
-                 config: dict | None = None, filer=None):
+                 config: dict | None = None, filer=None, pinned: dict[str, dict] | None = None):
         """`models_dir` None: no checkpoints (only the scripted bot, with `scripted`).
         `scripted`: a development server (serve --dev): every checkpoint and
         matchup, the scripted bots and the dev scenarios. `config`: the play
         offer (play_config.toml: player decks, opponents); None offers every
-        checkpoint and matchup. `filer`: files flags as GitHub issues (None: never)."""
+        checkpoint and matchup. `filer`: files flags as GitHub issues (None: never).
+        `pinned`: the offer's checkpoints, already validated (the hosted server
+        validates strictly itself)."""
         self.config, self.filer = config, filer
+        self.pinned: dict[str, dict] | None = pinned  # validated checkpoints (validate_offer); None: not checked
+        if config is not None and not scripted and pinned is None:
+            self.pinned, problems = validate_offer(models_dir, config)
+            for p in problems:
+                print(f"play offer: {p} (its opponents are left out)")
         if models_dir is not None:
             import torch
 
@@ -527,7 +594,7 @@ class LiveManager:
         self.worker = ThreadPoolExecutor(1, thread_name_prefix="live")
 
     def options(self) -> dict:
-        out = {"mode": "dev" if self.scripted else "play" if self.config is not None else "open"}
+        out = {"mode": "dev" if self.scripted else "play" if self.config is not None else "open", "filing": self.filer is not None and self.filer.available()}
         if self.config is not None and not self.scripted:
             offer = self._offer()
             out["player_decks"] = [{"deck": d, "title": DECK_TITLES[d], "opponents": [o["id"] for o in offer if matchup_for(d, o["deck"])]} for d in self.config.get("player_decks", [])]
@@ -542,7 +609,7 @@ class LiveManager:
 
     def _offer(self) -> list[dict]:
         """The configured opponents whose checkpoint this server has."""
-        models = self._models()
+        models = self._models() if self.pinned is None else self.pinned
         return [o for o in self.config.get("opponents", []) if o.get("model") in models and o.get("deck") in DECK_TITLES]
 
     def _resolve(self, req: dict) -> dict:
@@ -784,6 +851,11 @@ class LiveManager:
             return
         if game.match is not None:
             game.match["results"].append((game.g.starting_player, game.winner))
+            if hasattr(game.model, "set_knowledge"):  # even after a concession: what it saw stays seen
+                from .knowledge import MatchKnowledge
+
+                k = MatchKnowledge.from_dict(game.match.get("model_knowledge")).with_game(game.g.witnessed(1 - game.seat))
+                game.match["model_knowledge"] = k.to_dict()
         model = game.names[1 - game.seat].split(":", 1)[1].split(" ")[0].replace("/", "_")
         game.replay_file = f"human-vs-{model}-{game.id}.json" if game.seat == 0 else f"{model}-vs-human-{game.id}.json"
         self._write(game)

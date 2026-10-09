@@ -202,7 +202,7 @@ All fields are optional unless marked. Unknown fields are an error in both engin
 | `[[dungeon]]` | top-level: `name`, `rooms = [{ name, next, targets, effect }]`, first room on top; rooms are the dungeon's triggers. Only the Undercity exists (initiative: `take_initiative`, the upkeep venture, combat damage to the holder takes it) |
 | `equipped_power`, `equipped_toughness` | Equipment: what the creature it is attached to gets (Black Mage's Rod: `equipped_power = 1`); `equipped_keywords` the keywords it gets (Whispersilk Cloak: `["unblockable", "shroud"]`). Equip is an ordinary ability (`cost`, `sorcery_speed = true`, `targets = ["creature_you_control"]`, op `attach_source_to_target`); an attached permanent without `bestow` is Equipment |
 
-Target kinds: `creature`, `nonlegendary_creature`, `nonartifact_creature`, `creature_you_control`, `creature_you_dont_control`, `land`, `nonland_permanent`, `permanent`, `artifact`, `noncreature_artifact`, `blue_permanent`, `red_permanent`, `spell`, `blue_spell`, `red_spell`, `instant_spell`, `sorcery_spell`, `artifact_spell`, `player`, `opponent`, `player_with_creature`, `creature_of_target_player` (a creature controlled by the player chosen as the previous target: Searing Blaze), `another_creature` (a creature not already chosen as a target of the same spell: Cast into the Fire), `artifact_or_enchantment_spell`, `artifact_or_enchantment_you_dont_control`, `artifact_or_enchantment`, `any`. A permanent with `shroud` is never a legal target (`Game.targetable`: candidates and the resolution re-check).
+Target kinds: `creature`, `nonlegendary_creature`, `nonartifact_creature`, `creature_you_control`, `creature_you_dont_control`, `land`, `nonland_permanent`, `permanent`, `artifact`, `noncreature_artifact`, `blue_permanent`, `red_permanent`, `spell`, `blue_spell`, `red_spell`, `instant_spell`, `sorcery_spell`, `artifact_spell`, `player`, `opponent`, `player_with_creature`, `creature_of_target_player` (a creature controlled by the player chosen as the previous target: Searing Blaze), `another_creature` (a creature not already chosen as a target of the same spell: Cast into the Fire), `artifact_or_enchantment_spell`, `artifact_or_enchantment_you_dont_control`, `artifact_or_enchantment`, `noncreature_spell` (a bestowed spell counts: it is an Aura spell; Spell Pierce), `any`. A permanent with `shroud` is never a legal target (`Game.targetable`: candidates and the resolution re-check).
 
 Sacrifice filters (`additional_sac`, `sac_other`, land-sacrifice costs): `artifact`, `artifact_or_creature`, `mountain`, `artifact_enchantment_or_token` (bargain), `land` (Crop Rotation).
 
@@ -221,7 +221,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 
 | op | parameters | effect |
 |---|---|---|
-| `draw` | `n`, `n_cast_from_graveyard`, `each_controlling` | the controller draws `n` (or `n_cast_from_graveyard` when the spell was cast from a graveyard); `each_controlling`: instead each player who controls a permanent with that name (Bonder's Ornament) |
+| `draw` | `n`, `who = "you"` (default) or `"target_player"`, `n_cast_from_graveyard`, `each_controlling` | the controller draws `n` (or `n_cast_from_graveyard` when the spell was cast from a graveyard); `each_controlling`: instead each player who controls a permanent with that name (Bonder's Ornament) |
 | `mill` | `who` = `you` \| `target_player`, `n` | mill `n` |
 | `counter_target` | `if_color` | counter the targeted spell (only if it has colour `if_color`, e.g. `"U"`) |
 | `counter_target_unless_paid` | `cost` | its controller may pay `cost`; otherwise counter it (Force Spike) |
@@ -237,7 +237,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 | `damage_target` | `n`, `index`, `n_landfall` | the source (the spell itself, or the ability's source) deals `n` damage to target `index` (default 0; creature or player); `n_landfall` instead if a land entered under the controller's control this turn |
 | `damage_target_controller` | `n` | the source deals `n` damage to the controller of the targeted permanent (Smash to Smithereens; list it before the op that removes the permanent) |
 | `damage_each_opponent` | `n`, `if_discarded_nonland` | the source deals `n` damage to each opponent (only if the card discarded as the additional cost was not a land) |
-| `damage_each_creature` | `n` or `x = true`, `without`, `whose = "opponent"` | the source deals `n` (or X) damage to each creature (without the keyword; only the opponent's) |
+| `damage_each_creature` | `n` or `x = true`, `without`, `except_subtype`, `whose = "opponent"` | the source deals `n` (or X) damage to each creature (without the keyword; not of the creature type `except_subtype`, changelings included: Fiery Cannonade; only the opponent's) |
 | `discard` | `n` | the controller discards `n` cards of their choice |
 | `return_to_battlefield` | `tapped` | graveyard trigger: this card returns to the battlefield, if it is still that object in the graveyard |
 | `exile_graveyard` | | exile the target player's graveyard |
@@ -257,7 +257,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 | `take_initiative` | | the controller takes the initiative and ventures into Undercity |
 | `reveal_to_battlefield` | `n`, `type`, `counters`, `hexproof` | reveal the top `n`, put a `type` card from among them onto the battlefield with `counters` +1/+1 counters (hexproof until your next turn), shuffle (Throne of the Dead Three) |
 | `surveil` | `n` (only 1) | surveil 1 |
-| `look_top` | `n`, `type`, `colorless`, `what` | look at the top `n`, may put a matching card into your hand (revealed), the rest on the bottom (Ancient Stirrings) |
+| `look_top` | `n`, `type` or `permanent = true`, `colorless`, `rest` = `bottom` (default) \| `graveyard`, `what` | look at the top `n`, may put a matching card into your hand (revealed), the rest on the bottom (Ancient Stirrings); `rest = "graveyard"`: all `n` are revealed and the rest go to the graveyard (Malevolent Rumble) |
 | `cascade` | | on a `cast` trigger: cascade below the spell's mana value (Maelstrom Colossus) |
 | `station` | | charge counters on the source equal to the power of the creature tapped for `tap_other` |
 | `damage_target_from` | `from` = `x` \| `chosen_power`, `index` | damage equal to X (Kaervek's Torch), or to the power of the creature chosen for `additional_choose_creature` |
@@ -289,3 +289,7 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 - **Features need no registration.** State features and option keys are hashed strings (`encode.state_features`, `rl.features.option_tokens`), so a new card name or a new key shape gets buckets automatically, in both engines (`native/src/features.rs` hashes the same strings). Existing checkpoints still load, but they have never seen the new card: expect to fine-tune, and compare against the bots before and after.
 - **New decision kinds** must be added to `PUBLIC_KINDS` if the opponent may see the choice (and to `is_public` in Rust).
 - **Bots only play what they know.** `BlueBot.cast_score` and `JundBot.cast_score` return "never" for unknown names, and `card_value` / `CURVE` / `REMOVAL` / `THREATS` tables drive discards, search and mulligans. Add the card there, with a test in `tests/test_bots.py` if the decision matters.
+
+Flashback may additionally specify `flashback_life` (default 0). The life cost
+is checked when listing casts and paid with other casting costs, even if the
+spell is subsequently countered. New pilot cards do not alter fixed decklists.

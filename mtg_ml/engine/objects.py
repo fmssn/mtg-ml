@@ -57,8 +57,23 @@ ORDER_TRIGGERS = "order_triggers"
 DECLARE_ATTACKER = "declare_attacker"
 DECLARE_BLOCKER = "declare_blocker"
 ASSIGN_DAMAGE = "assign_damage"
+ASSIGN_DAMAGE_AMOUNT = "assign_damage_amount"
 CHOOSE_MODE = "choose_mode"  # e.g. Deem Inferior: second from top or bottom
 MULLIGAN = "mulligan"  # keep or mulligan the opening hand (London mulligan)
+
+
+@dataclass(frozen=True)
+class DamageAllocation:
+    """Public progress of a sequential combat allocation; recipient -1 is the defender."""
+
+    attacker: int
+    blockers: tuple[int, ...]
+    lethal: tuple[int, ...]
+    assigned: tuple[int, ...]
+    recipient: int
+    remaining: int
+    defender: int
+    player_damage: int  # -1 before choosing the defender's share
 
 # ---------------------------------------------------------------------------
 # Static definitions
@@ -168,6 +183,7 @@ class CardDef(_Immutable):
     additional_sac: str | None = None  # 'artifact_or_creature'
     cost_reduction: Callable[..., int] | None = None  # (game, player) -> int
     flashback: ManaCost | None = None
+    flashback_life: int = 0
     escape: ManaCost | None = None
     escape_exile: int = 0
     bestow: ManaCost | None = None

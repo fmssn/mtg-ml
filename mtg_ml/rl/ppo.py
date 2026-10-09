@@ -18,6 +18,15 @@ whole step (forward, losses, backward, gradient clipping, fused Adam) is a
 CUDA graph replayed per minibatch (`_StepGraphs`), one launch instead of
 ~400. The padded path runs eagerly too (mode="padded"), which is how the
 tests check it on the CPU.
+
+Belief head (feature set 8): the loss adds coef_arch * CE(archetype) +
+coef_counts * CE(copies) averaged over the vocabulary cards, against the
+per-trajectory targets `Result.belief_targets` ((archetype index, counts
+array) per trajectory, aligned with `Result.lengths`), which every decision
+of the trajectory shares. Rows look their targets up by trajectory: eagerly
+in per-update tables, in padded pieces in per-piece tables (fixed shapes).
+The policy reads the belief predictions detached, so PPO gradients never
+reach the belief branch and the belief loss trains only it.
 """
 
 from __future__ import annotations
@@ -32,14 +41,19 @@ from itertools import accumulate
 import torch
 from torch import nn
 
-from .model import PAD_FIELDS, PolicyNet, SequenceLayout, bucket, collate_packed, packed_tensors, pad_fits, pad_sequences, pad_sizes, pad_split, padded_batch, split, structure
+from .belief import MAX_BASIC, MAX_NONBASIC
+from .model import DEFAULT_BELIEF_COEF, PAD_EVIDENCE, PAD_FIELDS, PolicyNet, SequenceLayout, bucket, collate_packed, packed_tensors, pad_fits, pad_sequences, pad_sizes, pad_split, padded_batch, split, structure
 from .rollout import KINDS, Result
 
 STATS = ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac")  # minibatch means
 # After them, per decision kind (`rollout.KINDS`), sums over the non-trivial
 # decisions only: their count, entropy and approx KL (`_losses`).
 KIND_STATS = ("n", "entropy", "approx_kl")
-N_STATS = len(STATS) + len(KINDS) * len(KIND_STATS)
+# Then the belief head's minibatch means (zero without one): its two losses,
+# archetype accuracy, exact-count accuracy and mean absolute error of the
+# expected copies, both averaged over the vocabulary cards.
+BELIEF_STATS = ("arch_loss", "count_loss", "arch_acc", "count_acc", "count_mae")
+N_STATS = len(STATS) + len(KINDS) * len(KIND_STATS) + len(BELIEF_STATS)
 TRIVIAL_P = 0.99  # a decision whose behaviour probability of the taken option is at least this is trivial
 _LOG_TRIVIAL_P = math.log(TRIVIAL_P)
 
@@ -56,6 +70,8 @@ class PPOConfig:
     max_grad_norm: float = 0.5
     target_kl: float | None = 0.03  # stop the epoch loop early past this
     capture: int = 2  # on CUDA: 1 every step a CUDA graph replay over padded minibatches, 2 also the forward and losses compiled by Inductor (~15% faster, ~10-30 s of compiling per process), 0 plain eager steps
+    precision: str = "fp32"  # selective BF16 dense/attention; optimizer and probability math stay FP32
+    belief_coef: tuple[float, float] | None = None  # (archetype, counts) belief loss coefficients; None: the network's config `belief_coef`
 
 
 def make_optimizer(params, lr: float, device, tensor_lr: bool = False) -> torch.optim.Optimizer:
@@ -135,7 +151,39 @@ def trajectory_minibatches(lengths: list[int], size: int, gen=None) -> tuple[tor
     return order, chunks
 
 
-def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, rt, w=None, n=None, kind=None):
+def _belief_coef(net: PolicyNet, cfg: PPOConfig) -> tuple[float, float]:
+    if cfg.belief_coef is not None:
+        return tuple(float(x) for x in cfg.belief_coef)
+    c = dict(DEFAULT_BELIEF_COEF, **net.config.get("belief_coef", {}))
+    return float(c["archetype"]), float(c["counts"])
+
+
+def belief_losses(net: PolicyNet, out, arch, counts, mean):
+    """(archetype CE, count CE averaged over the vocabulary cards) per row
+    reduced by `mean`, and the BELIEF_STATS (detached), of predictions `out`
+    (`model.BeliefOut`) against per-row targets arch (B,) and counts (B, V)."""
+    bn = net.belief_net
+    alog = torch.log_softmax(out.arch.float(), -1)
+    arch_ce = -alog.gather(1, arch[:, None])[:, 0]
+    t_nb = counts.index_select(1, bn.nonbasic_idx)
+    nlog = torch.log_softmax(out.nonbasic.float(), -1)
+    ce = -nlog.gather(2, t_nb[:, :, None])[:, :, 0].sum(1)
+    hit = (out.nonbasic.argmax(-1) == t_nb).float().sum(1)
+    err = ((nlog.exp() * torch.arange(MAX_NONBASIC + 1, device=nlog.device)).sum(-1) - t_nb).abs().sum(1)
+    if out.basic is not None:
+        t_b = counts.index_select(1, bn.basic_idx)
+        blog = torch.log_softmax(out.basic.float(), -1)
+        ce = ce - blog.gather(2, t_b[:, :, None])[:, :, 0].sum(1)
+        hit = hit + (out.basic.argmax(-1) == t_b).float().sum(1)
+        err = err + ((blog.exp() * torch.arange(MAX_BASIC + 1, device=blog.device)).sum(-1) - t_b).abs().sum(1)
+    V = counts.shape[1]
+    arch_loss, count_loss = mean(arch_ce), mean(ce / V)
+    with torch.no_grad():
+        stats = torch.stack([arch_loss, count_loss, mean((alog.argmax(-1) == arch).float()), mean(hit / V), mean(err / V)])
+    return arch_loss, count_loss, stats
+
+
+def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, rt, w=None, n=None, kind=None, belief=None):
     """The PPO loss of one minibatch and its statistics (N_STATS,), detached:
     the STATS means, then per decision kind (`kind`, ids into KINDS; None:
     all "other") the KIND_STATS sums over the non-trivial decisions. With
@@ -146,8 +194,17 @@ def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, 
     TRIVIAL_P. That is p_max < TRIVIAL_P except for the rare draws of a
     <1% option from a near-certain decision, which count as non-trivial;
     the rollout records only the taken option's log-prob, so this is the
-    test it allows for free. Forced moves (one option) never count."""
-    logits, values, _ = net(b, lengths=lengths, max_options=width)
+    test it allows for free. Forced moves (one option) never count.
+
+    belief: (trajectory of each row, archetype per trajectory, counts per
+    trajectory (trajectories, V)): the targets of the belief loss, for a
+    network with a belief head."""
+    if cfg.precision not in ("fp32", "bf16"):
+        raise ValueError("precision must be fp32 or bf16")
+    device_type = ad.device.type
+    with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=cfg.precision == "bf16"):
+        logits, values, _, bel = net(b, lengths=lengths, max_options=width, aux=True)
+    logits, values = logits.float(), values.float()
     logp_all = torch.log_softmax(logits, dim=-1)
     logp = logp_all.gather(1, a[:, None]).squeeze(1)
     ratio = (logp - olp).exp()
@@ -157,6 +214,14 @@ def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, 
     row_ent = -(logp_all.exp() * logp_all.masked_fill(torch.isinf(logits), 0.0)).sum(-1)  # masked_entropy, sharing the log_softmax
     ent = mean(row_ent)
     loss = pg_loss + cfg.vf_coef * v_loss - cfg.ent_coef * ent
+    b_stats = None
+    if bel is not None:
+        if belief is None:
+            raise ValueError("a network with a belief head needs belief targets (Result.belief_targets)")
+        traj, arch_t, counts_t = belief
+        ca, cc = _belief_coef(net, cfg)
+        arch_loss, count_loss, b_stats = belief_losses(net, bel, arch_t[traj], counts_t[traj], mean)
+        loss = loss + ca * arch_loss + cc * count_loss
     with torch.no_grad():
         row_kl = (ratio - 1) - (logp - olp)
         kl = mean(row_kl)
@@ -168,7 +233,7 @@ def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, 
         if kind is None:
             kind = torch.zeros_like(a)
         by_kind = per.new_zeros(len(KINDS), len(KIND_STATS)).index_add_(0, kind, per)
-        stats = torch.cat([base, by_kind.view(-1)])
+        stats = torch.cat([base, by_kind.view(-1), base.new_zeros(len(BELIEF_STATS)) if b_stats is None else b_stats.to(base.dtype)])
     return loss, stats
 
 
@@ -202,6 +267,9 @@ def _inputs(shapes: dict) -> list[tuple[str, str, int]]:
     float32, size); the transposed token lists are those with a u_ size."""
     R, keys = shapes["row"], [k for k in ("st", "e", "ot") if f"u_{k}" in shapes]
     out = [(name, "i", shapes[lvl]) for name, (lvl, _, _) in PAD_FIELDS.items()]
+    if "v" in shapes:  # belief evidence and targets: per row its trajectory in the piece's tables
+        out += [(name, "i", shapes[lvl]) for name, (lvl, _, _) in PAD_EVIDENCE.items()]
+        out += [("b_traj", "i", R), ("b_arch", "i", shapes["traj"]), ("b_counts", "i", shapes["traj"] * shapes["vocab"])]
     out += [(f"t_{k}_{x}", "i", shapes[k] if x == "bag" else shapes[f"u_{k}"]) for k in keys for x in ("bag", "off", "uid")]
     out += [(name, "i", R) for name in ("pos_in", "pos_out", "action", "kind")] + [(name, "f", R) for name in ("old_logp", "adv", "ret", "weight")]
     out += [("e_pos", "i", shapes["ent"])] if "entw" in shapes else []  # entity attention
@@ -223,25 +291,34 @@ def _padded_losses(net, cfg, shapes, gru, ints, flts):
     its GRU batch of shape gru = (sequences, steps)."""
     v = {k: (ints if buf == "i" else flts).narrow(0, at, size) for k, (buf, at, size) in _layout(shapes).items()}
     seq = SequenceLayout(v["pos_in"], v["pos_out"], *gru)
-    return _losses(net, cfg, padded_batch(v, shapes.get("entw")), seq, shapes["width"], v["action"], v["old_logp"], v["adv"], v["ret"], v["weight"], v["n"][0], v["kind"])
+    belief = (v["b_traj"], v["b_arch"], v["b_counts"].view(shapes["traj"], shapes["vocab"])) if "v" in shapes else None
+    return _losses(net, cfg, padded_batch(v, shapes.get("entw")), seq, shapes["width"], v["action"], v["old_logp"], v["adv"], v["ret"], v["weight"], v["n"][0], v["kind"], belief)
 
 
 def _need(counts: dict, extra: dict) -> dict:
     """Padded shapes for an epoch's pieces: `pad_sizes` per level, plus the
-    logit width."""
-    return pad_sizes(counts) | {"width": extra["width"]}
+    logit width (and, with belief targets, the trajectories per piece and
+    the vocabulary size)."""
+    out = pad_sizes(counts) | {"width": extra["width"]}
+    if "traj" in extra:
+        out |= {"traj": bucket(extra["traj"] + 1), "vocab": extra["vocab"]}
+    return out
 
 
-def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None, choose_gru=None, kinds=None, ent_width=False):
+def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None, choose_gru=None, kinds=None, ent_width=False, belief=None):
     """The minibatches of an epoch padded to one set of shapes, packed as
     (pieces, ·) int64 and float32 tensors in `_layout` order, and the GRU
     batch of each, (trajectories, longest), rounded to 4 sizes per octave:
     the GRU's time is ~linear in both. `choose(counts, extra)` picks the
     shapes (`_need` or a cached one they fit), `choose_gru(shapes, gru)`
     may pick a bigger GRU batch; `transpose` and `ent_width` (entity
-    attention) go to `pad_split`."""
+    attention) go to `pad_split`. belief: (trajectory id of each decision
+    in epoch order (CPU), archetype per trajectory, counts per trajectory
+    (trajectories, V)), for per-piece target tables."""
     dev = acts.device
     extra = {"width": int(width.max())}
+    if belief is not None:
+        extra |= {"traj": max(len(c) for c in chunks), "vocab": belief[2].shape[1]}
     fields, shapes, counts = pad_split(big, bounds, lambda counts: choose(counts, extra), transpose, ent_width)
     M, R = len(chunks), shapes["row"]
     gru = [(bucket(len(c), 4), bucket(max(c), 4)) for c in chunks]
@@ -255,6 +332,20 @@ def _padded_epoch(big, bounds, chunks, acts, rec, width, choose, transpose=None,
     kinds = torch.zeros_like(acts) if kinds is None else kinds
     fields.update(pos_in=pos_in.to(dev), pos_out=pos_out.to(dev), action=padded(acts), kind=padded(kinds), old_logp=padded(rec[0]), adv=padded(rec[1]), ret=padded(rec[2]))
     fields.update(weight=padded(torch.ones_like(rec[0])), n=n.to(dev, torch.float32)[:, None])
+    if belief is not None:
+        tid, arch_t, counts_t = belief
+        TP, V = shapes["traj"], shapes["vocab"]
+        k = torch.tensor([len(c) for c in chunks], dtype=torch.long)
+        lens = torch.tensor([x for c in chunks for x in c], dtype=torch.long)
+        first = torch.cat([torch.zeros(1, dtype=torch.long), lens.cumsum(0)[:-1]])
+        ids = tid[first]  # each trajectory of the epoch, in order
+        tp = torch.repeat_interleave(torch.arange(M), k)
+        slot = tp * TP + torch.arange(len(lens)) - (k.cumsum(0) - k)[tp]  # its place in its piece's table
+        local = (slot - tp * TP).to(dev)
+        fields["b_traj"] = padded(torch.repeat_interleave(local, lens.to(dev), output_size=int(lens.sum())))
+        slot, ids = slot.to(dev), ids.to(dev)
+        fields["b_arch"] = arch_t.new_zeros(M * TP).index_copy(0, slot, arch_t[ids]).view(M, TP)
+        fields["b_counts"] = counts_t.new_zeros(M * TP, V).index_copy(0, slot, counts_t[ids]).view(M, TP * V)
     spec = _inputs(shapes)
     ints = torch.cat([fields[name] for name, buf, _ in spec if buf == "i"], 1)
     flts = torch.cat([fields[name] for name, buf, _ in spec if buf == "f"], 1)
@@ -291,7 +382,8 @@ class _StepGraphs:
         state = tuple(t.data_ptr() for p in params for t in opt.state.get(p, {}).values() if torch.is_tensor(t))
         lr = lambda x: ("tensor", x.data_ptr(), x.device) if torch.is_tensor(x) else x  # noqa: E731
         groups = tuple((lr(g["lr"]), g["betas"], g["eps"], g["weight_decay"], g.get("amsgrad"), g.get("maximize")) for g in opt.param_groups)
-        return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm, cfg.capture)
+        coef = _belief_coef(net, cfg) if getattr(net, "belief_net", None) is not None else None
+        return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm, cfg.capture, cfg.precision, coef)
 
     def choose(self, counts: dict, extra: dict) -> dict:
         """The smallest captured shape these pieces fit, else a new one with
@@ -434,7 +526,9 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     and over the non-trivial decisions (`_losses`): their share `nt_frac`,
     `nt_entropy`, `nt_approx_kl` (all epochs), `nt_approx_kl_first` /
     `_last`, and per decision kind with any: `kind/<kind>/share` (of the
-    non-trivial decisions), `kind/<kind>/entropy`, `kind/<kind>/approx_kl`.
+    non-trivial decisions), `kind/<kind>/entropy`, `kind/<kind>/approx_kl`,
+    and with a belief head `belief/<BELIEF_STATS>` (means over every step),
+    trained against `data.belief_targets`.
     mode: "eager" (each minibatch as
     it is), "padded" (minibatches padded to static shapes, run eagerly: the
     math of the captured path, so it is testable on the CPU) or "graph"
@@ -465,6 +559,17 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     recorded = torch.stack([old_logp, adv, ret]).to(dev)
     kinds = data.kinds if len(data.kinds) == n else array("b", bytes(n))  # Results built by hand may lack them: all "other"
     kinds = torch.frombuffer(kinds if isinstance(kinds, array) and kinds.typecode == "b" else array("b", kinds), dtype=torch.int8).to(dev, torch.long)
+    has_belief = getattr(net, "belief_net", None) is not None
+    belief = None
+    if has_belief:
+        targets = getattr(data, "belief_targets", None) or []
+        if len(targets) != len(data.lengths):
+            raise ValueError(f"a network with a belief head needs one belief target per trajectory: {len(targets)} for {len(data.lengths)}")
+        V = net.belief_net.n_vocab
+        arch_t = torch.tensor([int(t[0]) for t in targets], dtype=torch.long)
+        counts_t = torch.frombuffer(array("i", (c for t in targets for c in t[1])), dtype=torch.int32).long().view(len(targets), V) if targets else torch.zeros(0, V, dtype=torch.long)
+        tid = torch.repeat_interleave(torch.arange(len(targets)), torch.tensor(data.lengths, dtype=torch.long))  # trajectory of each decision (CPU)
+        tables = (arch_t.to(dev), counts_t.to(dev))
     totals = [0.0] * N_STATS
     steps = 0
     stop = False
@@ -473,19 +578,22 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
         order, chunks = trajectory_minibatches(data.lengths, cfg.minibatch, gen)
         bounds = list(accumulate((sum(c) for c in chunks), initial=0))
         rows = order.to(dev)
-        big = structure(collate_packed(samples, rows), sd, od)
+        big = structure(collate_packed(samples, rows, evidence=has_belief), sd, od)
+        if has_belief:
+            tid_e = tid[order]
+            belief = (tid_e.to(dev), *tables)
         acts, rec, width, knd = actions[rows], recorded[:, rows], n_opts[order], kinds[rows]
         acc = graphs.acc if graphs else torch.zeros(N_STATS, dtype=torch.float64, device=dev)
         if mode == "eager":
             for b, lens, lo, hi in zip(split(big, bounds), chunks, bounds, bounds[1:]):
                 opt.zero_grad(set_to_none=True)
-                loss, stats = _losses(net, cfg, b, lens, int(width[lo:hi].max()), acts[lo:hi], *rec[:, lo:hi], kind=knd[lo:hi])
+                loss, stats = _losses(net, cfg, b, lens, int(width[lo:hi].max()), acts[lo:hi], *rec[:, lo:hi], kind=knd[lo:hi], belief=belief and (belief[0][lo:hi], *tables))
                 _step(net, opt, cfg, loss)
                 acc += stats
         else:
             shapes, gru, ints, flts = _padded_epoch(
                 big, bounds, chunks, acts, rec, width, graphs.choose if graphs else _need, transpose, graphs and graphs.choose_gru,
-                kinds=knd, ent_width=bool(net.config.get("entity_attn")),
+                kinds=knd, ent_width=bool(net.config.get("entity_attn")), belief=(tid_e, *tables) if has_belief else None,
             )
             del big
             if graphs:
@@ -527,10 +635,11 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     for name, (k_n, k_ent, k_kl) in zip(KINDS, by_kind.tolist()):
         if k_n:
             out.update({f"kind/{name}/share": k_n / nt_n, f"kind/{name}/entropy": k_ent / k_n, f"kind/{name}/approx_kl": k_kl / k_n})
+    if has_belief:
+        out.update({f"belief/{k}": v / max(steps, 1) for k, v in zip(BELIEF_STATS, totals[N_STATS - len(BELIEF_STATS) :])})
     return out
 
 
 def _by_kind(stats: list[float]) -> torch.Tensor:
     """The per-kind sums of a statistics vector as a (kinds, KIND_STATS) tensor."""
-    return torch.tensor(stats[len(STATS) :], dtype=torch.float64).view(len(KINDS), len(KIND_STATS))
-
+    return torch.tensor(stats[len(STATS) : len(STATS) + len(KINDS) * len(KIND_STATS)], dtype=torch.float64).view(len(KINDS), len(KIND_STATS))

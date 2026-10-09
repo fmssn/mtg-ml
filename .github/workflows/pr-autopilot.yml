@@ -91,6 +91,19 @@ jobs:
           [[ $(jq -r .isDraft <<< "$info") == false ]] || skip "draft"
           [[ $(jq -r .author.login <<< "$info") == "$OWNER" ]] || skip "not the owner's PR"
           [[ $(jq -r .headRepositoryOwner.login <<< "$info") == "$OWNER" ]] || skip "from a fork"
+          # --auto is not a CI gate on an unprotected stack parent. This inline
+          # check also permits bootstrapping policy.py onto the default branch.
+          # Keep it aligned with policy.py's final mutation checks.
+          gh pr merge "$pr" --disable-auto
+          default=$(gh api "repos/$GH_REPO" --jq .default_branch)
+          [[ $(jq -r .baseRefName <<< "$info") == "$default" ]] || skip "stacked PR: keep draft until its parent lands, then retarget"
+          encoded=$(jq -rn --arg ref "$default" '$ref | @uri')
+          [[ $(gh api "repos/$GH_REPO/branches/$encoded" --jq .protected) == true ]] || skip "default branch is unprotected"
+          rules=$(gh api "repos/$GH_REPO/rules/branches/$encoded")
+          jq -e 'any(.[]; .type == "pull_request") and
+            ([.[] | select(.type == "required_status_checks")
+              | .parameters.required_status_checks[].context] | contains(["lint", "python", "native"]))' <<< "$rules" > /dev/null \
+            || skip "default branch must require lint, python and native checks"
           labels=" $(jq -r '[.labels[].name] | join(" ")' <<< "$info") "
 
           for l in needs-opus needs-human autopilot:opus-used autopilot:round-1 autopilot:round-2; do
@@ -125,7 +138,6 @@ jobs:
           fi
 
           # Pause previous auto-merge before this head starts a new review.
-          gh pr merge "$pr" --disable-auto
           echo "PR #$pr: $mode (round $round)"
           {
             echo "pr=$pr"; echo "mode=$mode"; echo "round=$round"
@@ -273,10 +285,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: gh workflow run pr-autopilot.yml -f pr="$PR" -f reason=escalate
 
-  # Something landed on the default branch (or the half-hourly sweep): bring every
-  # ready PR up to date so the required checks run against the new base. Conflicts
-  # go to the autopilot.
-  update-branches:
+  # Something landed on the default branch (or the half-hourly sweep): hand every
+  # ready PR that now conflicts to the autopilot. PRs are not updated otherwise: the
+  # ruleset does not require an up-to-date branch, so a merge does not re-run CI on
+  # every open PR. CI on the default branch catches semantic conflicts after merge.
+  check-conflicts:
     if: github.event_name == 'push' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
@@ -302,15 +315,19 @@ jobs:
                 | .number')
           failed=0
           for pr in $prs; do
-            # Pushed as the App, so CI runs on the updated branch.
-            if out=$(gh api -X PUT "repos/$GH_REPO/pulls/$pr/update-branch" 2>&1); then
-              echo "#$pr updated"
-            elif grep -qi conflict <<< "$out"; then
-              echo "#$pr conflicts, handing to the autopilot"
-              GH_TOKEN=$DISPATCH_TOKEN gh workflow run pr-autopilot.yml -f pr="$pr" -f reason=conflict
-            else
-              echo "#$pr: $out"
-              failed=1
-            fi
+            # GitHub computes mergeability lazily: UNKNOWN until asked, then settles.
+            state=UNKNOWN
+            for _ in 1 2 3 4 5 6; do
+              state=$(gh pr view "$pr" --json mergeable --jq .mergeable) || state=ERROR
+              [ "$state" = UNKNOWN ] || break
+              sleep 5
+            done
+            case $state in
+              MERGEABLE) echo "#$pr mergeable" ;;
+              CONFLICTING)
+                echo "#$pr conflicts, handing to the autopilot"
+                GH_TOKEN=$DISPATCH_TOKEN gh workflow run pr-autopilot.yml -f pr="$pr" -f reason=conflict ;;
+              *) echo "#$pr: mergeable=$state"; failed=1 ;;
+            esac
           done
           exit "$failed"

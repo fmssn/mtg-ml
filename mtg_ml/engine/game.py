@@ -87,7 +87,7 @@ class _Snapshot:
 
 
 # Attributes a copy shares (immutable, or rebuilt by `Game.copy`) or skips.
-_SHARED = frozenset({"_args", "cards_db", "deck_names"})
+_SHARED = frozenset({"_args", "cards_db", "deck_names", "_registered_main", "_registered_sideboards", "_current_main"})
 _SKIPPED = frozenset({"_gen", "_snap", "decision"})
 _SCALARS = (int, str, bool, float, type(None))
 
@@ -158,6 +158,7 @@ def _copy_state(state: dict) -> dict:
         "blocked": set,
         "blocks": dict,
         "mulligans_taken": list,
+        "_witnessed": lambda ws: [dict(w) for w in ws],
     }
     out: dict = {"decision": None}
     for k, v in state.items():
@@ -189,10 +190,18 @@ class Game:
         auto_mana: bool = False,
         auto_pass: bool = False,
         deck_names: tuple[str | None, str | None] | None = None,
+        registered_main: tuple | None = None,
+        registered_sideboards: tuple | None = None,
         _snapshots: bool = False,
     ):
         from .cards import CARDS  # local import: cards module imports engine helpers
 
+        decks = tuple(tuple(d) for d in decks)
+        self._current_main = decks
+        self._registered_main = tuple(tuple(d) for d in registered_main) if registered_main is not None else decks
+        self._registered_sideboards = tuple(tuple(d) for d in registered_sideboards) if registered_sideboards is not None else ((), ())
+        if len(decks) != 2 or len(self.registered_main) != 2 or len(self.registered_sideboards) != 2:
+            raise ValueError("deck registration needs two seats")
         self._args = dict(
             decks=decks,
             seed=seed,
@@ -207,6 +216,8 @@ class Game:
             auto_mana=auto_mana,
             auto_pass=auto_pass,
             deck_names=deck_names,
+            registered_main=self.registered_main,
+            registered_sideboards=self.registered_sideboards,
         )
         self.match_game = match_game  # 1 = preboard, 2/3 = after sideboarding
         # Names of decks that are not the default for their seat (match.py):
@@ -239,6 +250,8 @@ class Game:
         self.attackers: list[int] = []
         self.blocked: set[int] = set()
         self.blocks: dict[int, int] = {}  # blocker oid -> attacker oid
+        self.damage_allocation: O.DamageAllocation | None = None
+        self.combat_subjects: list[list[int]] = []  # per-option public objects, never parsed from labels
         # (remaining cost, sacrifice filter, excluded sources) of a pending
         # pay_mana decision; read only by encode's payment preview
         self.paying: tuple | None = None
@@ -255,6 +268,11 @@ class Game:
         self.over = False
         self.end_reason = ""
         self.decision: Decision | None = None
+        # Per viewer: the most distinct nontoken cards of each (front-face)
+        # name of the opponent's that were visible to them at once, recorded
+        # whenever a visible card is about to stop being visible (see
+        # `witnessed`). Never read by the rules: witnessing changes nothing.
+        self._witnessed: list[dict[str, int]] = [{}, {}]
 
         for p, deck in zip(self.players, decks):
             for name in deck:
@@ -285,6 +303,63 @@ class Game:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def registered_main(self):
+        return self._registered_main
+
+    @property
+    def registered_sideboards(self):
+        return self._registered_sideboards
+
+    @property
+    def current_main(self):
+        return self._current_main
+
+    def witnessed(self, viewer: int) -> dict[str, int]:
+        """Opponent cards `viewer` has seen this game, as established minimum
+        copy counts: per front-face card name, the most distinct nontoken
+        cards of the opponent's with that name that were visible to `viewer`
+        at the same moment (battlefield, stack, graveyard, exile, known hand
+        and library cards, cards revealed to them). Never links copies by
+        hidden identity, so a card seen, shuffled away and seen again counts
+        once. Monotonic within a game; keys sorted."""
+        if viewer not in (0, 1):
+            raise IndexError(f"player index {viewer} out of range (0..2)")
+        out = dict(self._witnessed[viewer])
+        for name, n in self._visible_counts(viewer).items():
+            if n > out.get(name, 0):
+                out[name] = n
+        return dict(sorted(out.items()))
+
+    def _visible_counts(self, viewer: int, extra: Card | None = None) -> dict[str, int]:
+        """Front-face name -> number of the opponent's nontoken cards visible
+        to `viewer` now; `extra` (a card about to stop being visible, possibly
+        between zones) counts too."""
+        opp = 1 - viewer
+        them = self.players[opp]
+        cards = [c for c in self.battlefield if c.owner == opp]
+        cards += them.graveyard
+        cards += them.exile
+        cards += [c for c in them.hand if viewer in c.known_to]
+        cards += [c for c in them.library if viewer in c.known_to]
+        cards += [it.card for it in self.stack if it.card is not None and it.card.owner == opp and it.card.zone == "stack"]
+        if extra is not None and all(c is not extra for c in cards):
+            cards.append(extra)
+        counts: dict[str, int] = {}
+        for c in cards:
+            if not c.is_token:
+                counts[c.defn.name] = counts.get(c.defn.name, 0) + 1
+        return counts
+
+    def _witness(self, viewer: int, extra: Card | None = None) -> None:
+        """Record what `viewer` sees now: called just before a card of the
+        opponent's stops being visible to them (the only moments a visible
+        count goes down, so the running maximum stays exact)."""
+        w = self._witnessed[viewer]
+        for name, n in self._visible_counts(viewer, extra).items():
+            if n > w.get(name, 0):
+                w[name] = n
 
     def legal_options(self) -> list[Option]:
         return [] if self.decision is None else self.decision.options
@@ -905,6 +980,10 @@ class Game:
     ) -> Card | None:
         """Move `card` to zone `to`. Returns the card (new object), or None if
         it was a token that ceased to exist."""
+        if to == "library" and not card.is_token:
+            v = 1 - card.owner
+            if v in card.known_to and v not in (known_to or ()):
+                self._witness(v, card)  # its opponent loses sight of it
         frm = card.zone
         lki = card.snapshot() if frm == "battlefield" else None
         if frm == "battlefield":
@@ -1011,6 +1090,8 @@ class Game:
 
     def shuffle(self, p: int) -> None:
         lib = self.players[p].library
+        if any(1 - p in c.known_to for c in lib):
+            self._witness(1 - p)  # the opponent loses sight of the cards they knew
         self.shuffles += 1
         self.rng.shuffle(lib)
         for c in lib:
@@ -1317,6 +1398,8 @@ class Game:
             return d.is_type("Artifact")
         if k == "artifact_or_enchantment_spell":
             return d.is_type("Artifact") or d.is_type("Enchantment")
+        if k == "noncreature_spell":  # a bestowed spell is an Aura spell (702.103b)
+            return not d.is_type("Creature") or it.method == "bestow"
         return False
 
     def target_legal(self, item: StackItem, i: int) -> bool:
@@ -1796,6 +1879,8 @@ class Game:
             return False
         if d.additional_discard and len(self.players[p].hand) - (card.zone == "hand") < 1:
             return False
+        if mode == "flashback" and self.players[p].life < d.flashback_life:
+            return False
         if mode == "phyrexian" and self.players[p].life < d.phyrexian_life:
             return False
         if mode == "alternative" and d.alternative_reveal and any(c.face.is_type("Land") for c in self.players[p].hand if c is not card):
@@ -1871,9 +1956,10 @@ class Game:
         yield from self._choose_targets(p, item)
         cost = base.with_x(item.x).reduced(reduction)
         yield from self._pay_mana(p, RemainingCost.of(cost), add_sac, what=card.name)
-        if mode == "phyrexian":
-            self.players[p].life -= d.phyrexian_life
-            self._log(f"p{p} pays {d.phyrexian_life} life for {card.name}")
+        life_cost = d.phyrexian_life if mode == "phyrexian" else d.flashback_life if mode == "flashback" else 0
+        if life_cost:
+            self.players[p].life -= life_cost
+            self._log(f"p{p} pays {life_cost} life for {card.name}")
         if add_sac:
             mv = yield from self._choose_sacrifice(p, add_sac, card.name)
             if d.additional_sac:
@@ -2319,11 +2405,13 @@ class Game:
         chosen: list[Card] = []
         while True:
             options = [Option("Done declaring attackers", ("attack", None), None)]
+            self.combat_subjects = [[]]
             for gi in range(len(groups)):
                 left = [c for c in groups[gi] if c not in chosen]
                 if left:
                     c = left[0]
                     options.append(Option(f"Attack with {c.name}#{c.oid}", ("attack", c.name), gi))
+                    self.combat_subjects.append([c.oid])
             gi = yield from self.ask(p, O.DECLARE_ATTACKER, "Declare attackers", options)
             if gi is None:
                 break
@@ -2349,6 +2437,7 @@ class Game:
             attackers = [self.perm(a) for a in self.attackers]
             attackers = [a for a in attackers if a is not None and self._can_block(b, a) and self._menace_ok(a, blockers[i + 1 :])]
             options = [Option(f"{b.name}#{b.oid} does not block", ("block", b.name, None), None)]
+            self.combat_subjects = [[b.oid]]
             refs = self._referenced_oids()
             seen = set()
             for a in attackers:
@@ -2357,6 +2446,7 @@ class Game:
                     continue
                 seen.add(k)
                 options.append(Option(f"{b.name}#{b.oid} blocks {a.name}#{a.oid}", ("block", b.name, a.name), a))
+                self.combat_subjects.append([b.oid, a.oid])
             a = yield from self.ask(d, O.DECLARE_BLOCKER, f"Block with {b.name}#{b.oid}?", options)
             if a is not None:
                 self.blocks[b.oid] = a.oid
@@ -2409,14 +2499,19 @@ class Game:
             if len(blockers) == 1 and not trample:
                 assignments.append((a, ("perm", blockers[0].oid), pw))
                 continue
-            options = []
             lethal = [self._lethal(a, b) for b in blockers]
-            for split in _damage_splits(pw, lethal, trample):
-                parts = [f"{s} to {b.name}#{b.oid}" for s, b in zip(split, blockers)]
-                if trample:
-                    parts.append(f"{split[-1]} to player")
-                options.append(Option(", ".join(parts), ("damage", tuple(split)), split))
-            split = yield from self.ask(self.active, O.ASSIGN_DAMAGE, f"Assign {pw} damage from {a.name}#{a.oid}", options)
+            splits = _damage_splits(pw, lethal, trample)
+            if splits is None:
+                split = yield from self._allocate_damage(a, blockers, lethal, pw, trample, defender)
+            else:
+                options = []
+                for split in splits:
+                    parts = [f"{s} to {b.name}#{b.oid}" for s, b in zip(split, blockers)]
+                    if trample:
+                        parts.append(f"{split[-1]} to player")
+                    options.append(Option(", ".join(parts), ("damage", tuple(split)), split))
+                self.combat_subjects = [[a.oid] + [b.oid for b in blockers] for _ in options]
+                split = yield from self.ask(self.active, O.ASSIGN_DAMAGE, f"Assign {pw} damage from {a.name}#{a.oid}", options)
             for s, b in zip(split, blockers):
                 if s:
                     assignments.append((a, ("perm", b.oid), s))
@@ -2439,48 +2534,45 @@ class Game:
             yield
 
 
-MAX_DAMAGE_SPLITS = 1024  # an ASSIGN_DAMAGE decision with more splits offers the lethal splits instead (`_damage_splits`)
-LETHAL_SPLIT_BLOCKERS = 10  # the lethal splits choose among the first this many blockers (at most 2^10 = MAX_DAMAGE_SPLITS options)
+    def _allocate_damage(self, a, blockers, lethal, pw, trample, defender):
+        assigned = [0] * len(blockers)
+        remaining, player_damage = pw, -1 if trample else 0
+        for recipient in ([-1] if trample else []) + list(range(len(blockers))):
+            self.damage_allocation = O.DamageAllocation(a.oid, tuple(b.oid for b in blockers), tuple(lethal), tuple(assigned), recipient, remaining, defender, player_damage)
+            name = "player" if recipient == -1 else blockers[recipient].name
+            target = "player" if recipient == -1 else f"{name}#{blockers[recipient].oid}"
+            options = [Option(f"{n} to {target} from {a.name}#{a.oid}", ("damage_amount", a.name, name, recipient, n, remaining, tuple(assigned), player_damage), n)
+                       for n in _damage_amounts(remaining, lethal, recipient, player_damage)]
+            n = yield from self.ask(self.active, O.ASSIGN_DAMAGE_AMOUNT, f"Assign damage from {a.name}#{a.oid} to {target} ({remaining} remaining)", options)
+            remaining -= n
+            if recipient == -1:
+                player_damage = n
+            else:
+                assigned[recipient] = n
+        self.damage_allocation = None
+        return tuple(assigned) + ((player_damage,) if trample else ())
 
 
-def _damage_splits(pw: int, lethal: list[int], trample: bool) -> list[tuple]:
-    """The ways an attacker with power `pw` blocked by blockers needing
-    `lethal` damage may divide its combat damage: one int per blocker, plus
-    the player's share last with trample (which takes lethal damage on every
-    blocker first, 702.19c).
+MAX_DAMAGE_SPLITS = 1024  # enumerate small decisions; larger ones use exact sequential allocation
 
-    Every division while there are at most MAX_DAMAGE_SPLITS of them (C(pw +
-    slots - 1, slots - 1) before the trample filter). Past that the full set
-    explodes (a 28-power attacker blocked by seven creatures: 1.3M options,
-    one 19M-int inference request), and the decision offers the lethal splits
-    instead: for every subset S of the first LETHAL_SPLIT_BLOCKERS blockers
-    whose lethal damage fits, exactly lethal damage to each blocker of S and
-    the rest to the player (trample, S = every blocker) or else to the first
-    blocker of S (to the first blocker when S is empty). Deduplicated, in
-    subset order (bit i = blocker i). Both engines (state.rs `damage_splits`)."""
+
+def _damage_amounts(remaining: int, lethal: list[int], recipient: int, player_damage: int) -> range:
+    """Legal next amounts. Every prefix admits a complete legal assignment."""
+    if recipient == -1:
+        return range(max(0, remaining - sum(lethal)) + 1)
+    if recipient == len(lethal) - 1:
+        return range(remaining, remaining + 1)
+    minimum = lethal[recipient] if player_damage > 0 else 0
+    reserve = sum(lethal[recipient + 1:]) if player_damage > 0 else 0
+    return range(minimum, remaining - reserve + 1)
+
+
+def _damage_splits(pw: int, lethal: list[int], trample: bool) -> list[tuple] | None:
+    """Small complete allocations, or None to request sequential allocation (510.1c, 702.19b)."""
     slots = len(lethal) + (1 if trample else 0)
-    if _comb(pw + slots - 1, slots - 1) <= MAX_DAMAGE_SPLITS:
-        return [split for split in _compositions(pw, slots) if not (trample and split[-1] > 0 and any(s < l for s, l in zip(split, lethal)))]
-    out: list[tuple] = []
-    seen = set()
-    b = min(len(lethal), LETHAL_SPLIT_BLOCKERS)
-    for mask in range(1 << b):
-        chosen = [i for i in range(b) if mask >> i & 1]
-        rest = pw - sum(lethal[i] for i in chosen)
-        if rest < 0:
-            continue
-        split = [0] * slots
-        for i in chosen:
-            split[i] = lethal[i]
-        if trample and len(chosen) == len(lethal):
-            split[-1] += rest
-        else:
-            split[chosen[0] if chosen else 0] += rest
-        t = tuple(split)
-        if t not in seen:
-            seen.add(t)
-            out.append(t)
-    return out
+    if _comb(pw + slots - 1, slots - 1) > MAX_DAMAGE_SPLITS:
+        return None
+    return [split for split in _compositions(pw, slots) if not (trample and split[-1] > 0 and any(s < l for s, l in zip(split, lethal)))]
 
 
 def _comb(n: int, k: int) -> int:

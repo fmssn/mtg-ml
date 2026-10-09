@@ -78,9 +78,10 @@ pub enum TK {
     ArtifactOrEnchantmentYouDontControl,
     SorcerySpell,
     ArtifactOrEnchantment,
+    NoncreatureSpell,
 }
 
-const TK_NAMES: [(&str, TK); 27] = [
+const TK_NAMES: [(&str, TK); 28] = [
     ("creature", TK::Creature),
     ("nonlegendary_creature", TK::NonlegendaryCreature),
     ("nonartifact_creature", TK::NonartifactCreature),
@@ -108,6 +109,7 @@ const TK_NAMES: [(&str, TK); 27] = [
     ("artifact_or_enchantment_you_dont_control", TK::ArtifactOrEnchantmentYouDontControl),
     ("sorcery_spell", TK::SorcerySpell),
     ("artifact_or_enchantment", TK::ArtifactOrEnchantment),
+    ("noncreature_spell", TK::NoncreatureSpell),
 ];
 
 impl TK {
@@ -223,7 +225,7 @@ pub struct SearchFilter {
 #[derive(Clone, Debug)]
 pub enum Op {
     /// each_controlling: each player who controls a permanent with this name draws instead.
-    Draw { n: i32, n_cast_from_graveyard: Option<i32>, each_controlling: Option<String> },
+    Draw { n: i32, n_cast_from_graveyard: Option<i32>, each_controlling: Option<String>, target_player: bool },
     Mill { target_player: bool, n: i32 },
     /// if_color: colour bit the target spell must have (0 = any).
     CounterTarget { if_color: u8 },
@@ -250,7 +252,8 @@ pub enum Op {
     DamageTargetFrom { index: usize, chosen_power: bool },
     DamageEachOpponent { n: i32, if_discarded_nonland: bool },
     /// x: the amount is the item's X (n unused); opponent_only: whose = "opponent".
-    DamageEachCreature { n: i32, x: bool, without: u32, opponent_only: bool },
+    /// except_subtype: a creature type that is spared, changelings included (Fiery Cannonade).
+    DamageEachCreature { n: i32, x: bool, without: u32, opponent_only: bool, except_subtype: Option<String> },
     Discard { n: i32 },
     ReturnToBattlefield { tapped: bool },
     ExileGraveyard,
@@ -263,7 +266,8 @@ pub enum Op {
     Scry { n: i32 },
     Surveil,
     /// Look at the top n, may take a matching card (Ancient Stirrings).
-    LookTop { filter: SearchFilter, n: i32, what: String },
+    /// rest_graveyard: all n are revealed and the rest go to the graveyard (Malevolent Rumble).
+    LookTop { filter: SearchFilter, n: i32, what: String, rest_graveyard: bool },
     Cascade,
     Station,
     ReturnRandomFromGraveyard { types: u16 },
@@ -454,6 +458,7 @@ pub struct CardDef {
     pub additional_sac: Option<SacFilter>,
     pub cost_reduction: Option<CostRed>,
     pub flashback: Option<ManaCost>,
+    pub flashback_life: i32,
     pub escape: Option<ManaCost>,
     pub escape_exile: i32,
     pub bestow: Option<ManaCost>,
@@ -724,7 +729,7 @@ fn check_keys(t: &Table, allowed: &[&str], what: &str) -> Result<(), String> {
 /// (`test_spec_field_sets_identical`).
 pub const SHAPE_CARD_FIELDS: &[&str] = &[
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow", "plot",
-    "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect", "modes",
+    "overload", "flashback_life", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect", "modes",
     "overload_effect", "abilities", "triggers", "bargain", "collect_evidence", "equipped_power", "equipped_toughness", "equipped_keywords",
     "omen", "enters_tapped_unless_forests", "additional_power", "prototype", "station", "additional_choose_creature",
 ];
@@ -777,7 +782,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
         let t = v.as_table().ok_or("ops must be tables")?;
         let op = req_str(t, "op")?;
         let keys: &[&str] = match op {
-            "draw" => &["op", "n", "n_cast_from_graveyard", "each_controlling"],
+            "draw" => &["op", "n", "n_cast_from_graveyard", "each_controlling", "who"],
             "mill" => &["op", "who", "n"],
             "counter_target_unless_paid" => &["op", "cost"],
             "tap_target" => &["op", "skip_untap"],
@@ -791,7 +796,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "scry" | "discard" | "exile_from_graveyards" | "damage_target_controller" | "surveil" => &["op", "n"],
             "damage_target" => &["op", "n", "index", "n_landfall", "n_metalcraft"],
             "damage_target_from" => &["op", "from", "index"],
-            "look_top" => &["op", "n", "colorless", "type", "what"],
+            "look_top" => &["op", "n", "colorless", "type", "permanent", "rest", "what"],
             "return_random_from_graveyard" => &["op", "type"],
             "return_cards_from_graveyards" => &["op", "types", "n", "each_type", "whose"],
             "damage_each_opponent" => &["op", "n", "if_discarded_nonland"],
@@ -799,7 +804,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "destroy_target" => &["op", "if_color", "mv_is_x"],
             "return_to_battlefield" => &["op", "tapped"],
             "lose_life" => &["op", "who", "n"],
-            "damage_each_creature" => &["op", "n", "without", "x", "whose"],
+            "damage_each_creature" => &["op", "n", "without", "x", "whose", "except_subtype"],
             "search_library" => &["op", "supertype", "type", "subtypes_any", "dest", "tapped", "reveal", "what"],
             "optional_payment" => &["op", "cost", "prompt", "then"],
             "custom" => &["op", "fn"],
@@ -813,7 +818,17 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
         check_keys(t, keys, &format!("op {op:?}"))?;
         let n = || get_int(t, "n")?.ok_or_else(|| format!("op {op:?} needs n"));
         ops.push(match op {
-            "draw" => Op::Draw { n: n()?, n_cast_from_graveyard: get_int(t, "n_cast_from_graveyard")?, each_controlling: get_str(t, "each_controlling")?.map(|s| s.to_string()) },
+            "draw" => {
+                if t.contains_key("who") && t.contains_key("each_controlling") {
+                    return Err("draw: who and each_controlling are mutually exclusive".into());
+                }
+                let target_player = match get_str(t, "who")? {
+                    None | Some("you") => false,
+                    Some("target_player") => true,
+                    Some(w) => return Err(format!("draw: unknown who {w:?}")),
+                };
+                Op::Draw { n: n()?, n_cast_from_graveyard: get_int(t, "n_cast_from_graveyard")?, each_controlling: get_str(t, "each_controlling")?.map(|s| s.to_string()), target_player }
+            },
             "mill" => Op::Mill {
                 target_player: match req_str(t, "who")? {
                     "you" => false,
@@ -885,6 +900,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                         Some("opponent") => true,
                         Some(w) => return Err(format!("damage_each_creature: unknown whose {w:?}")),
                     },
+                    except_subtype: get_str(t, "except_subtype")?.map(|s| s.to_string()),
                 }
             }
             "discard" => Op::Discard { n: n()? },
@@ -965,15 +981,23 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "look_top" => Op::LookTop {
                 filter: SearchFilter {
                     supertype: None,
-                    types: match get_str(t, "type")? {
-                        Some(s) => type_bit(s)?,
-                        None => 0,
+                    // `permanent`: any permanent type (the mask matches any of its bits).
+                    types: match (get_str(t, "type")?, get_bool(t, "permanent")?) {
+                        (Some(_), true) => return Err("look_top: type and permanent are mutually exclusive".into()),
+                        (Some(s), false) => type_bit(s)?,
+                        (None, true) => T_ARTIFACT | T_BATTLE | T_CREATURE | T_ENCHANTMENT | T_LAND | T_PLANESWALKER,
+                        (None, false) => 0,
                     },
                     subtypes_any: vec![],
                     colorless: get_bool(t, "colorless")?,
                 },
                 n: n()?,
                 what: req_str(t, "what")?.to_string(),
+                rest_graveyard: match get_str(t, "rest")? {
+                    None | Some("bottom") => false,
+                    Some("graveyard") => true,
+                    Some(r) => return Err(format!("look_top: unknown rest {r:?}")),
+                },
             },
             "cascade" => Op::Cascade,
             "station" => Op::Station,
@@ -1204,6 +1228,7 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         name: req_str(t, "name")?.to_string(),
         phyrexian_cost: if phy.colored.is_empty() { None } else { Some(cost.minus_colored(&phy)) },
         phyrexian_life: 2 * phy.mana_value(),
+        flashback_life: get_int(t, "flashback_life")?.unwrap_or(0),
         bargain: get_bool(t, "bargain")?,
         cost,
         types,
@@ -1384,6 +1409,9 @@ fn card_shape(t: &Table, cost: &ManaCost, colors: u8) -> Result<Vec<String>, Str
             v.push(format!("e:cost:{k}"));
         }
     }
+    if truthy(t, "flashback_life") {
+        v.push("e:cost:flashback_life".into());
+    }
     if t.contains_key("flashback_cost") {
         v.push("e:cost:flashback".into());
         v.push("e:cost:sac_lands".into());
@@ -1540,6 +1568,7 @@ fn parse_dungeon(id: DefId, t: &Table, db: &CardDb, tokens: &HashMap<String, Def
         additional_sac: None,
         cost_reduction: None,
         flashback: None,
+        flashback_life: 0,
         escape: None,
         escape_exile: 0,
         bestow: None,
@@ -1590,7 +1619,13 @@ mod tests {
         assert_eq!(back.name, "Insectile Aberration");
         assert_eq!(back.colors, color_bit(b'U'));
         assert_eq!(db.def(db.cards["Writhing Chrysalis"]).colors, 0);
-        assert_eq!(db.cards.len(), 128);
+        assert_eq!(db.cards.len(), 134);
+        assert!(db.cards.contains_key("Murmuring Mystic"));
+        assert!(db.tokens.contains_key("Bird Illusion"));
+        let analysis = db.def(db.cards["Deep Analysis"]);
+        assert_eq!(analysis.flashback_life, 3);
+        assert_eq!(analysis.flashback.as_ref().unwrap().mana_value(), 2);
+        assert_eq!(analysis.targets, vec![TK::Player]);
         assert!(db.undercity.is_some() && db.room_next[0] == vec![1, 2]);
         let gut = db.def(db.cards["Gut Shot"]);
         assert_eq!((gut.colors, gut.phyrexian_life, gut.cost.mana_value()), (color_bit(b'R'), 2, 1));

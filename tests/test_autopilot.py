@@ -197,6 +197,7 @@ def test_failed_ci_context_survives_escalation(modules, tmp_path, monkeypatch, m
 
 
 def setup_guard(tmp_path, monkeypatch, finish, result=None, receipt=None, changed=()):
+    monkeypatch.setattr(finish, "require_target", lambda *args, **kw: {})
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
     monkeypatch.setattr(sys, "argv", ["finish.py", "fix", "1", "branch", "1", "base"])
@@ -246,6 +247,147 @@ def test_auto_merge_matches_reviewed_head(modules, tmp_path, monkeypatch):
     assert finish.main() == 0
     merge = next(c for c in calls if "--auto" in c)
     assert merge[-2:] == ("--match-head-commit", "reviewed-sha")
+
+
+@pytest.fixture
+def merge_policy(monkeypatch):
+    monkeypatch.syspath_prepend(str(AP))
+    policy = importlib.import_module("policy")
+    responses = {
+        "repo": {"nameWithOwner": "owner/repo", "defaultBranchRef": {"name": "main"}},
+        "pr": {"state": "OPEN", "isDraft": False, "baseRefName": "main", "headRefOid": "reviewed-sha"},
+        "branch": {"protected": True},
+        "rules": [{"type": "pull_request"}, {"type": "required_status_checks", "parameters": {
+            "strict_required_status_checks_policy": True,
+            "required_status_checks": [{"context": name} for name in ("lint", "python", "native")],
+        }}],
+    }
+    def read(*args):
+        if args[0] in ("repo", "pr"):
+            return responses[args[0]]
+        return responses["rules" if "/rules/" in args[1] else "branch"]
+    monkeypatch.setattr(policy, "read_json", read)
+    return policy, responses
+
+
+@pytest.mark.parametrize("strict", [True, False])
+@pytest.mark.parametrize("scenario", ["stack", "draft", "closed", "unprotected", "missing-check", "no-pr-rule", "retarget", "new-head"])
+def test_merge_policy_rejects_unsafe_targets(merge_policy, scenario, strict):
+    policy, data = merge_policy
+    data["rules"][1]["parameters"]["strict_required_status_checks_policy"] = strict
+    kwargs = {"expected_base": "main", "expected_head": "reviewed-sha"}
+    if scenario == "stack":
+        data["pr"]["baseRefName"] = "feature/parent"
+    elif scenario == "draft":
+        data["pr"]["isDraft"] = True
+    elif scenario == "closed":
+        data["pr"]["state"] = "MERGED"
+    elif scenario == "unprotected":
+        data["branch"]["protected"] = False
+    elif scenario == "missing-check":
+        data["rules"][1]["parameters"]["required_status_checks"].pop()
+    elif scenario == "no-pr-rule":
+        data["rules"].pop(0)
+    elif scenario == "retarget":
+        kwargs["expected_base"] = "old-parent"
+    else:
+        data["pr"]["headRefOid"] = "new-head"
+    with pytest.raises(policy.PolicyError):
+        policy.require_target(1, **kwargs)
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_merge_policy_accepts_protected_current_default(merge_policy, strict):
+    policy, data = merge_policy
+    data["rules"][1]["parameters"]["strict_required_status_checks_policy"] = strict
+    assert policy.require_target(1, expected_base="main", expected_head="reviewed-sha")["baseRefName"] == "main"
+
+
+def test_policy_read_failure_is_closed(monkeypatch):
+    monkeypatch.syspath_prepend(str(AP))
+    policy = importlib.import_module("policy")
+    def fail(*args, **kw):
+        raise subprocess.CalledProcessError(1, args[0])
+    monkeypatch.setattr(policy.subprocess, "check_output", fail)
+    with pytest.raises(policy.PolicyError):
+        policy.require_target(1)
+
+
+@pytest.mark.parametrize("strict", [True, False])
+@pytest.mark.parametrize("scenario", ["allowed", "stack", "draft", "closed", "foreign-author", "fork", "unprotected", "missing-check", "no-pr-rule", "api-failure"])
+def test_workflow_gate_blocks_before_review(tmp_path, scenario, strict):
+    workflow = (AP.parent / "workflows/pr-autopilot.yml").read_text()
+    start = workflow.index('          info=$(gh pr view "$pr" --json state,isDraft')
+    end = workflow.index('          labels=', start)
+    guard = "\n".join(line[10:] for line in workflow[start:end].splitlines())
+    fake = tmp_path / "gh"
+    fake.write_text(f"#!{sys.executable}\n" + """import json, os, sys
+args = sys.argv[1:]
+scenario = os.environ['SCENARIO']
+if scenario == 'api-failure':
+    sys.exit(1)
+if args[0] == 'pr':
+    if args[1] == 'view':
+        print(json.dumps({
+            'state': 'CLOSED' if scenario == 'closed' else 'OPEN',
+            'isDraft': scenario == 'draft',
+            'baseRefName': 'parent' if scenario == 'stack' else 'main',
+            'author': {'login': 'other' if scenario == 'foreign-author' else 'owner'},
+            'headRepositoryOwner': {'login': 'other' if scenario == 'fork' else 'owner'},
+        }))
+        sys.exit(0)
+    assert args == ['pr', 'merge', '1', '--disable-auto']
+    sys.exit(0)
+if '/rules/' in args[1]:
+    checks = ['lint', 'python'] + ([] if scenario == 'missing-check' else ['native'])
+    rules = [] if scenario == 'no-pr-rule' else [{'type':'pull_request'}]
+    rules.append({'type':'required_status_checks', 'parameters': {
+        'strict_required_status_checks_policy':os.environ['STRICT'] == 'true',
+        'required_status_checks':[{'context':c} for c in checks]}})
+    print(json.dumps(rules))
+elif '/branches/' in args[1]:
+    print('false' if scenario == 'unprotected' else 'true')
+else:
+    print('main')
+""")
+    fake.chmod(0o755)
+    env = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ["PATH"], SCENARIO=scenario,
+               STRICT="true" if strict else "false", OWNER="owner", GH_REPO="o/r")
+    script = 'set -euo pipefail\npr=1\nskip() { echo "held: $1"; exit 0; }\n' + guard + '\necho allowed\n'
+    result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+    assert ("allowed" in result.stdout) == (scenario == "allowed")
+    assert (result.returncode != 0) == (scenario == "api-failure")
+
+
+@pytest.mark.parametrize("fail_at", [1, 2])
+def test_retarget_or_protection_change_holds_controller(modules, tmp_path, monkeypatch, fail_at):
+    finish = modules[3]
+    calls = setup_guard(tmp_path, monkeypatch, finish, report())
+    inspected = []
+    def require(*args, **kw):
+        inspected.append(kw)
+        if len(inspected) == fail_at:
+            raise finish.PolicyError("Target changed")
+    monkeypatch.setattr(finish, "require_target", require)
+    assert finish.main() == 0
+    assert not any("--auto" in call for call in calls)
+    assert any("--disable-auto" in call for call in calls)
+    assert "blocked" in (tmp_path / "output").read_text()
+    if fail_at == 2:
+        assert inspected[-1]["expected_head"] == "reviewed-sha"
+
+
+def test_target_is_rechecked_before_push(modules, tmp_path, monkeypatch):
+    finish = modules[3]
+    calls = setup_guard(tmp_path, monkeypatch, finish, report())
+    def deny(*args, **kw):
+        raise finish.PolicyError("Stacked PR")
+    monkeypatch.setattr(finish, "require_target", deny)
+    git_calls = []
+    monkeypatch.setattr(finish, "sh", lambda *args, **kw: git_calls.append(args))
+    assert finish.push("head", "main", "1") == "blocked"
+    assert not git_calls
+    assert any("--disable-auto" in call for call in calls)
 
 
 def test_failed_auto_merge_never_emits_success(modules, tmp_path, monkeypatch):

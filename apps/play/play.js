@@ -123,17 +123,46 @@ const clean = label => String(label).replace(/#\d+/g, '');
 
 // ---------------------------------------------------------------- server
 // The game's token (kept per game id in this browser, never shown or sent
-// anywhere else) goes with every request about the game: the server refuses
-// a game id without it.
+// anywhere else) goes with every request about the game, in the
+// X-Game-Token header only (never in a URL): the server refuses a game id
+// without it. On the hosted server the account (Cloudflare Access) must own
+// the game too.
 const gameToken = gid => loadJSON('mtgml-play-tokens', {})[gid] || '';
 async function api(path, body) {
   const headers = {};
   if (S.gid) headers['X-Game-Token'] = gameToken(S.gid);
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const r = await fetch(API + path, body === undefined ? {headers} : {method: 'POST', headers, body: JSON.stringify(body)});
-  let j; try { j = await r.json(); } catch (e) { throw new Error(`server answered ${r.status}`); }
-  if (!r.ok || j.error) throw new Error(j.error || `server answered ${r.status}`);
+  // redirect 'manual': an expired Access session answers with a redirect to
+  // the login page, which a fetch cannot follow; it shows up as opaqueredirect.
+  const init = {headers, redirect: 'manual', credentials: 'same-origin'};
+  const r = await fetch(API + path, body === undefined ? init : {...init, method: 'POST', body: JSON.stringify(body)});
+  if (r.type === 'opaqueredirect' || r.status === 0) { signedOut(); throw apiError('Your sign-in expired. Reload the page to sign in again.', 401, {auth: true}); }
+  let j; try { j = await r.json(); } catch (e) { throw apiError(`server answered ${r.status}`, r.status, {}); }
+  if (!r.ok || j.error) {
+    const err = apiError(j.error || `server answered ${r.status}`, r.status, j);
+    if (err.kind === 'auth') signedOut();
+    throw err;
+  }
   return j;
+}
+// An error with what the page needs to react: kind 'auth' (Access session
+// gone: reload), 'unrecoverable' (the server cannot rebuild this game),
+// 'gone' (unknown or expired game).
+function apiError(message, status, j) {
+  const e = new Error(message);
+  e.status = status;
+  e.kind = j.auth ? 'auth' : j.unrecoverable ? 'unrecoverable' : (j.expired || status === 404 || /no such game/i.test(message)) ? 'gone' : '';
+  return e;
+}
+function signedOut() {
+  if ($('#signedout')) return;
+  const d = document.createElement('div');
+  d.id = 'signedout';
+  d.className = 'signedout';
+  d.setAttribute('role', 'alert');
+  d.innerHTML = `<span>Your sign-in expired. Your game is saved on the server.</span><button class="primary" type="button">Reload and sign in</button>`;
+  d.querySelector('button').onclick = () => location.reload();
+  document.body.appendChild(d);
 }
 
 function applyView(view) {
@@ -153,14 +182,14 @@ function applyView(view) {
 function resetGame(id) {
   // Every auto-pass mode and plan resets at a game boundary (Forge bug: End Turn carried over).
   Object.assign(S, {gid: id, flags: [], stopLog: [], lastAutoPassed: 0, yields: new Set(), holdOnce: false, autoPassed: 0, stats: {dealt: 0, taken: 0, played: 0}, lastPriority: -1, lastCast: {}, seenUids: new Set(), pendingSpells: [], raw: [], shown: -1, prev: null, fx: {life: {}, dmg: {}, flash: {}, enter: {}}, queue: [], plan: null, ui: null, lastMine: -1, passMode: null, lastOpp: '',
-    fullControl: false, feed: [], logDone: 0, error: null, skip: false, reserved: [], payPlan: null, payAssign: null, paying: null, autoRest: false, justTapped: null, spotDone: new Set()});
+    fullControl: false, feed: [], logDone: 0, error: null, errorKind: '', skip: false, reserved: [], payPlan: null, payAssign: null, paying: null, autoRest: false, justTapped: null, spotDone: new Set()});
   $('#log').innerHTML = '';
   renderFeed();
 }
 
 async function send(index) {
   const frame = last();
-  S.busy = true; S.error = null; S.ui = null; closePop(); closeOverlay(); renderDock();
+  S.busy = true; S.error = null; S.errorKind = ''; S.ui = null; closePop(); closeOverlay(); renderDock();
   if (S.shown >= 0) render(S.shown, {noAnim: true});  // drop the highlights of the decision just made
   try {
     const kind = S.raw[frame].decision.kind;
@@ -169,7 +198,7 @@ async function send(index) {
     if (kind === 'priority') S.lastPriority = frame;
     applyView(v);
   } catch (e) {
-    S.error = e.message;
+    S.error = e.message; S.errorKind = e.kind || '';
   } finally { S.busy = false; }
 }
 
@@ -857,7 +886,7 @@ function openFlagForm(category, fi, review) {
   const sel = fi != null && plays.some(([i]) => i === fi) ? fi : plays[0]?.[0];
   const m = $('#modal');
   m.innerHTML = `<div class="mbox flagbox"><h2>${bot ? '⚑ Bot played wrong' : '⚠ Bug: engine / UI'}</h2>
-    <div class="note">${review != null ? `From the review (the game is over): the public GitHub issue gets everything, including the bot&#39;s hand, its options with probabilities and value, the seed and a command that rebuilds the game up to this decision.${rvDecisionText(review)}` : bot ? 'A bad decision by the bot. It becomes a public GitHub issue with what you could see (never the bot&#39;s hidden cards).' : 'Wrong rules, an illegal play, or the page misbehaving. It becomes a public GitHub issue with the board as you see it.'}</div>
+    <div class="note">${S.filing === false ? `Saved with the game for the developers (this server does not publish reports).${review != null ? rvDecisionText(review) : ''}` : review != null ? `From the review (the game is over): the public GitHub issue gets everything, including the bot&#39;s hand, its options with probabilities and value, the seed and a command that rebuilds the game up to this decision.${rvDecisionText(review)}` : bot ? 'A bad decision by the bot. It becomes a public GitHub issue with what you could see (never the bot&#39;s hidden cards).' : 'Wrong rules, an illegal play, or the page misbehaving. It becomes a public GitHub issue with the board as you see it.'}</div>
     <form id="fFlag">${bot && review == null ? `<label>Which play</label><select name="frame">${plays.map(([i, t]) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : ''}
       <label>What happened? (one line)</label><input name="what" maxlength="200" required placeholder="${bot ? 'e.g. attacked into my 4/4 with a 2/2' : 'e.g. my creature did not untap'}">
       <label>Anything else (optional)</label><textarea name="note" rows="3" maxlength="2000" placeholder="${bot ? 'What would you have done?' : 'Steps, what you expected'}"></textarea>
@@ -875,7 +904,7 @@ function openFlagForm(category, fi, review) {
     btn.disabled = true; btn.textContent = 'Sending…';
     saveJSON('mtgml-play-name', f.who.value.trim());
     const body = {category, what: f.what.value.trim(), note: f.note.value, pseudonym: f.who.value.trim()};
-    if (review != null) { body.review_frame = review; body.token = loadJSON('mtgml-play-tokens', {})[S.gid]; }
+    if (review != null) body.review_frame = review;  // the token goes in the header (api)
     else if (bot) body.frame = +f.frame.value;
     try {
       const out = await api(`${encodeURIComponent(S.gid)}/flag`, body);
@@ -912,7 +941,7 @@ function plainTarget(label, p) {  // "Target Sagu Wildling#12 (opponent)" from p
   const theirs = (rel[1] === 'self') === (p !== S.seat);  // relative to the chooser
   return `${theirs ? "the opponent's" : 'your'} ${name}`;
 }
-const LOG_KINDS_SKIP = new Set(['priority', 'pay_mana', 'declare_attacker', 'declare_blocker', 'mulligan', 'order_triggers', 'assign_damage', 'sacrifice']);
+const LOG_KINDS_SKIP = new Set(['priority', 'pay_mana', 'declare_attacker', 'declare_blocker', 'mulligan', 'order_triggers', 'assign_damage', 'assign_damage_amount', 'sacrifice']);
 function logEntry(cls, text, extra = '') { return {cls, text, extra}; }
 function frameLog(i) {
   const f = S.raw[i], prevS = i > 0 ? S.raw[i - 1].state : null, out = [];
@@ -1616,11 +1645,17 @@ function renderDock() {
   $('#modehint').innerHTML = modeHint(d, ui);
   $('#bAll').style.visibility = d && ui ? 'visible' : 'hidden';
   if (S.error) {
-    const gone = /no such game/i.test(S.error), down = /failed to fetch|networkerror|load failed/i.test(S.error);
-    const msg = gone ? 'This game is no longer on the server (the server restarted or the game expired).' : down ? 'Lost the connection to the game server.' : S.error;
-    pr.innerHTML = `<span class="k">${gone ? 'Game ended' : 'Problem'}</span><span class="err">${esc(msg)}</span>`;
-    ch.innerHTML = gone ? '' : `<button class="choice" data-resync="1">Reload the game from the server</button>`;
-    if (gone) { P.textContent = 'New game'; P.dataset.act = 'new'; } else { P.textContent = down ? 'Reconnect' : 'Retry'; P.dataset.act = 'resync'; }
+    const kind = S.errorKind || '';
+    const auth = kind === 'auth', lost = kind === 'unrecoverable';
+    const gone = lost || kind === 'gone' || /no such game/i.test(S.error), down = /failed to fetch|networkerror|load failed/i.test(S.error);
+    const msg = auth ? 'Your sign-in expired. Reload the page to sign in again; the game is saved on the server.'
+      : lost ? S.error
+      : gone ? (/expired/i.test(S.error) ? S.error : 'This game is no longer on the server (it expired or belongs to another account).')
+      : down ? 'Lost the connection to the game server.' : S.error;
+    pr.innerHTML = `<span class="k">${auth ? 'Signed out' : lost ? 'Cannot resume' : gone ? 'Game ended' : 'Problem'}</span><span class="err">${esc(msg)}</span>`;
+    ch.innerHTML = gone || auth ? '' : `<button class="choice" data-resync="1">Reload the game from the server</button>`;
+    if (auth) { P.textContent = 'Reload'; P.dataset.act = 'reload'; }
+    else if (gone) { P.textContent = 'New game'; P.dataset.act = 'new'; } else { P.textContent = down ? 'Reconnect' : 'Retry'; P.dataset.act = 'resync'; }
     P.disabled = false;
     return;
   }
@@ -1693,6 +1728,12 @@ function renderDock() {
       ch.innerHTML = d.refs.map((r, i) => r.type === 'mulligan' ? `<button class="choice" data-opt="${i}">${esc(d.options[i].replace(/^Mulligan \(to (\d+)\)$/, 'Mulligan to $1'))}</button>` : '').join('');
       break;
     }
+    case 'assign_damage_amount': {
+      pr.innerHTML = `<span class="k">Assign combat damage</span>${esc(clean(d.prompt))}`;
+      ch.innerHTML = d.refs.map((r, i) => `<button class="choice" data-opt="${i}">${r.amount} damage</button>`).join('');
+      P.textContent = 'Choose damage amount'; P.disabled = true;
+      break;
+    }
     case 'assign_damage': {
       pr.innerHTML = `<span class="k">Assign combat damage</span>${esc(clean(d.prompt))}`;
       const i = splitIndex(d, ui.dmg);
@@ -1718,6 +1759,7 @@ const resultText = () => { const w = S.meta?.winner; return w == null ? `Draw ($
 
 // Kinds shown as a card browser: options that name cards.
 function overlayKind(d) {
+  if (d.kind === 'assign_damage_amount') return false;
   if (d.kind === 'mulligan') return true;
   if (d.kind === 'order' && d.refs.some(r => r.top)) return true;
   if ((d.kind === 'choose_mode' || d.kind === 'yes_no') && d.cards?.length) return true;
@@ -2263,6 +2305,7 @@ function primary() {
   const a = P.dataset.act || '';
   if (a === 'new') return openNewGame();
   if (a === 'resync') return resync();
+  if (a === 'reload') return location.reload();
   if (a.startsWith('opt:')) { const i = +a.slice(4); if (i >= 0) return act(i); return; }
   if (a === 'autopay') { const d = myDecision(); S.autoRest = true; return act(planPay(d)); }
   if (a === 'paycommit') return payCommit();
@@ -2510,9 +2553,8 @@ function ping() { sound('decide'); }
 async function openReview() {
   if (!S.gid || !S.over) { toast('The review opens when the game is over.'); return; }
   if (S.paying) payCancel(true);
-  const token = loadJSON('mtgml-play-tokens', {})[S.gid];
   let rep;
-  try { rep = await api(`${encodeURIComponent(S.gid)}/review?token=${encodeURIComponent(token || '')}`); } catch (e) { toast(e.message); return; }
+  try { rep = await api(`${encodeURIComponent(S.gid)}/review`); } catch (e) { toast(e.message); return; }
   Object.assign(S.cards, rep.cards);
   S.rv = {rep, back: {raw: S.raw, shown: S.shown, ui: S.ui, prev: S.prev}, i: 0, drawq: false};
   S.rv.a = rvAnalyse(rep);
@@ -2809,6 +2851,7 @@ async function openNewGame() {
     m.innerHTML = `<div class="mbox"><h2>Live play is off</h2><div class="err">${esc(e.message)}</div><p class="note">Start the server with <code>python -m mtg_ml.replay serve --models DIR</code> (add <code>--dev</code> for scenarios and the scripted bot).</p></div>`;
     return;
   }
+  S.filing = opt.filing;
   if (opt.mode === 'play') return newGamePlay(m, opt);
   const last = loadJSON('mtgml-play-last', {});
   const mus = Object.entries(opt.matchups);
@@ -2904,13 +2947,20 @@ async function resync() {
     S.lastMine = S.raw.length - 1;
     render(last(), {noAnim: true});
     pump();
-  } catch (e) { S.error = e.message; renderDock(); }
+  } catch (e) { S.error = e.message; S.errorKind = e.kind || ''; renderDock(); }
 }
 
 (async function init() {
   const h = new URLSearchParams(location.hash.slice(1));
+  api('options').then(o => { S.filing = o.filing; }).catch(() => {});  // whether reports are published
   if (h.get("g") && !gameToken(h.get("g"))) toast("That game was started in another browser: its key is not here.");
-  else if (h.get("g")) { S.gid = h.get("g"); try { await resync(); if (!S.error) return; } catch (e) { /* fall through */ } S.error = null; S.gid = null; toast("Your last game is no longer on the server (it was restarted or the game expired)."); }
+  else if (h.get("g")) {
+    S.gid = h.get("g");
+    try { await resync(); if (!S.error) return; } catch (e) { /* fall through */ }
+    if (S.errorKind === 'auth') return;  // the sign-in banner says what to do
+    if (S.errorKind === 'unrecoverable') { renderDock(); return; }  // say so; "New game" starts another
+    S.error = null; S.errorKind = ''; S.gid = null; toast("Your last game is no longer on the server (it expired or the server lost it).");
+  }
   openNewGame();
 })();
 

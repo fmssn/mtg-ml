@@ -376,6 +376,7 @@ pub enum Kind {
     DeclareAttacker,
     DeclareBlocker,
     AssignDamage,
+    AssignDamageAmount,
     ChooseMode,
     Mulligan,
 }
@@ -396,6 +397,7 @@ impl Kind {
             Kind::DeclareAttacker => "declare_attacker",
             Kind::DeclareBlocker => "declare_blocker",
             Kind::AssignDamage => "assign_damage",
+            Kind::AssignDamageAmount => "assign_damage_amount",
             Kind::ChooseMode => "choose_mode",
             Kind::Mulligan => "mulligan",
         }
@@ -523,6 +525,18 @@ pub enum EquivKey {
     },
 }
 
+#[derive(Clone, Debug)]
+pub struct DamageAllocation {
+    pub attacker: u32,
+    pub blockers: Vec<u32>,
+    pub lethal: Vec<i32>,
+    pub assigned: Vec<i32>,
+    pub recipient: i32,
+    pub remaining: i32,
+    pub defender: u8,
+    pub player_damage: i32,
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -530,6 +544,8 @@ pub enum EquivKey {
 #[derive(Clone)]
 pub struct Args {
     pub decks: [Vec<String>; 2],
+    pub registered_main: [Vec<String>; 2],
+    pub registered_sideboards: [Vec<String>; 2],
     pub seed: i128,
     pub starting_player: Option<u8>,
     pub auto_single: bool,
@@ -599,6 +615,8 @@ pub struct State {
     /// `Game.paying`: (remaining cost, sacrifice filter, excluded sources) of
     /// a pending pay_mana decision; read only by the payment preview.
     pub paying: Option<(Remaining, Option<SacFilter>, Vec<u32>)>,
+    pub damage_allocation: Option<DamageAllocation>,
+    pub combat_subjects: Vec<Vec<u32>>,
     pub active: u8,
     pub starting_player: u8,
     pub skip_first_draw: bool,
@@ -612,6 +630,11 @@ pub struct State {
     pub sim_assume_pass: bool,
     /// `Game.shuffles`: library shuffles so far.
     pub shuffles: u32,
+    /// `Game._witnessed`: per viewer, the most distinct nontoken cards of
+    /// each front-face definition of the opponent's visible to them at once,
+    /// recorded just before a visible card stops being visible. Never read
+    /// by the rules.
+    pub witnessed: [Vec<(DefId, i32)>; 2],
 }
 
 /// `str.capitalize()` (first character upper, the rest lower).
@@ -677,6 +700,8 @@ impl State {
             end_reason: "",
             decision: None,
             paying: None,
+            damage_allocation: None,
+            combat_subjects: vec![],
             active: 0,
             starting_player: 0,
             skip_first_draw: false,
@@ -685,6 +710,7 @@ impl State {
             sim_viewer: None,
             sim_assume_pass: false,
             shuffles: 0,
+            witnessed: [vec![], vec![]],
             snapshots: false,
             snap: None,
             edited: false,
@@ -1040,6 +1066,12 @@ impl State {
     /// `Game._move`. Returns the card (now a new object) or None for a token
     /// that ceased to exist.
     pub fn move_card(&mut self, ci: CIdx, to: Zone, controller: Option<u8>, position: Pos, known_to: Option<u8>, tapped: bool) -> Option<CIdx> {
+        if to == Zone::Library && !self.c(ci).is_token {
+            let v = 1 - self.c(ci).owner;
+            if self.c(ci).known_to & pbit(v) != 0 && known_to.unwrap_or(0) & pbit(v) == 0 {
+                self.witness(v, Some(ci)); // its opponent loses sight of it
+            }
+        }
         let frm = self.c(ci).zone;
         let lki = if frm == Zone::Battlefield { Some(self.c(ci).clone()) } else { None };
         if frm == Zone::Battlefield {
@@ -1117,6 +1149,65 @@ impl State {
             self.after_leave_battlefield(l, ci, to);
         }
         Some(ci)
+    }
+
+    /// `Game._visible_counts`: front-face definition -> number of the
+    /// opponent's nontoken cards visible to `viewer` now, plus `extra` (a
+    /// card about to stop being visible, possibly between zones).
+    pub fn visible_counts(&self, viewer: u8, extra: Option<CIdx>) -> Vec<(DefId, i32)> {
+        let opp = 1 - viewer;
+        let them = &self.players[opp as usize];
+        let seen = |c: CIdx| self.c(c).known_to & pbit(viewer) != 0;
+        let mut cards: Vec<CIdx> = self.battlefield.iter().copied().filter(|&c| self.c(c).owner == opp).collect();
+        cards.extend(them.graveyard.iter().copied());
+        cards.extend(them.exile.iter().copied());
+        cards.extend(them.hand.iter().copied().filter(|&c| seen(c)));
+        cards.extend(them.library.iter().copied().filter(|&c| seen(c)));
+        cards.extend(self.stack.iter().filter_map(|it| it.card).filter(|&c| self.c(c).owner == opp && self.c(c).zone == Zone::Stack));
+        if let Some(e) = extra {
+            if !cards.contains(&e) {
+                cards.push(e);
+            }
+        }
+        let mut counts: Vec<(DefId, i32)> = vec![];
+        for c in cards {
+            let card = self.c(c);
+            if card.is_token {
+                continue;
+            }
+            match counts.iter_mut().find(|(d, _)| *d == card.def) {
+                Some(e) => e.1 += 1,
+                None => counts.push((card.def, 1)),
+            }
+        }
+        counts
+    }
+
+    /// `Game._witness`: record what `viewer` sees now.
+    pub fn witness(&mut self, viewer: u8, extra: Option<CIdx>) {
+        let counts = self.visible_counts(viewer, extra);
+        let w = &mut self.witnessed[viewer as usize];
+        for (d, n) in counts {
+            match w.iter_mut().find(|(x, _)| *x == d) {
+                Some(e) => e.1 = e.1.max(n),
+                None => w.push((d, n)),
+            }
+        }
+    }
+
+    /// `Game.witnessed`: (front-face name, established minimum copies),
+    /// sorted by name.
+    pub fn witnessed_counts(&self, viewer: u8) -> Vec<(String, i32)> {
+        let mut out: Vec<(String, i32)> = vec![];
+        for (d, n) in self.witnessed[viewer as usize].iter().copied().chain(self.visible_counts(viewer, None)) {
+            let name = &db().def(d).name;
+            match out.iter_mut().find(|(x, _)| x == name) {
+                Some(e) => e.1 = e.1.max(n),
+                None => out.push((name.clone(), n)),
+            }
+        }
+        out.sort();
+        out
     }
 
     /// Enters tapped unless its controller controls N other Forests (Gingerbread Cabin).
@@ -1213,6 +1304,10 @@ impl State {
     }
 
     pub fn shuffle(&mut self, p: usize) {
+        let v = 1 - p as u8;
+        if self.players[p].library.iter().any(|&c| self.c(c).known_to & pbit(v) != 0) {
+            self.witness(v, None); // the opponent loses sight of the cards they knew
+        }
         self.shuffles += 1;
         let mut lib = std::mem::take(&mut self.players[p].library);
         self.rng.shuffle(&mut lib);
@@ -1580,6 +1675,8 @@ impl State {
             TK::SorcerySpell => d.is_type(T_SORCERY),
             TK::ArtifactSpell => d.is_type(T_ARTIFACT),
             TK::ArtifactOrEnchantmentSpell => d.is_type(T_ARTIFACT) || d.is_type(T_ENCHANTMENT),
+            // A bestowed spell is an Aura spell (702.103b).
+            TK::NoncreatureSpell => !d.is_type(T_CREATURE) || it.method == Method::Bestow,
             _ => false,
         }
     }
@@ -1950,6 +2047,9 @@ impl State {
             return false;
         }
         if d.additional_discard && (self.players[p as usize].hand.len() as i32 - (c.zone == Zone::Hand) as i32) < 1 {
+            return false;
+        }
+        if mode == Method::Flashback && self.players[p as usize].life < d.flashback_life {
             return false;
         }
         if mode == Method::Phyrexian && self.players[p as usize].life < d.phyrexian_life {
@@ -2372,59 +2472,36 @@ pub enum Tgt {
     Player(u8),
 }
 
-/// An ASSIGN_DAMAGE decision with more splits offers the lethal splits instead (`damage_splits`).
+/// Enumerate small decisions; larger ones use exact sequential allocation.
 pub const MAX_DAMAGE_SPLITS: u64 = 1024;
-/// The lethal splits choose among the first this many blockers.
-pub const LETHAL_SPLIT_BLOCKERS: usize = 10;
 
 /// C(n, k), saturating at MAX_DAMAGE_SPLITS + 1 (as game.py's `_comb`).
 fn comb_capped(n: u64, k: u64) -> u64 {
     let mut r: u64 = 1;
     for i in 0..k.min(n - k) {
         r = r * (n - i) / (i + 1);
-        if r > MAX_DAMAGE_SPLITS {
-            return MAX_DAMAGE_SPLITS + 1;
-        }
+        if r > MAX_DAMAGE_SPLITS { return MAX_DAMAGE_SPLITS + 1; }
     }
     r
 }
 
-/// game.py's `_damage_splits`: every division of `pw` combat damage among the
-/// blockers (plus the player last with trample, after lethal damage to every
-/// blocker) while there are at most MAX_DAMAGE_SPLITS, else the lethal splits:
-/// for each subset of the first LETHAL_SPLIT_BLOCKERS blockers whose lethal
-/// damage fits, lethal to each, the rest to the player (trample, every blocker
-/// chosen) or to the first chosen blocker (the first blocker if none).
-pub fn damage_splits(pw: i32, lethal: &[i32], trample: bool) -> Vec<Vec<i32>> {
+/// game.py `_damage_amounts`: each legal prefix admits a complete assignment.
+pub fn damage_amounts(remaining: i32, lethal: &[i32], recipient: i32, player_damage: i32) -> std::ops::RangeInclusive<i32> {
+    if recipient == -1 { return 0..=(remaining - lethal.iter().sum::<i32>()).max(0); }
+    let i = recipient as usize;
+    if i == lethal.len() - 1 { return remaining..=remaining; }
+    let minimum = if player_damage > 0 { lethal[i] } else { 0 };
+    let reserve = if player_damage > 0 { lethal[i + 1..].iter().sum() } else { 0 };
+    minimum..=remaining - reserve
+}
+
+/// Complete small allocations, or None for sequential allocation (510.1c, 702.19b).
+pub fn damage_splits(pw: i32, lethal: &[i32], trample: bool) -> Option<Vec<Vec<i32>>> {
     let slots = lethal.len() + usize::from(trample);
-    if comb_capped((pw as u64) + slots as u64 - 1, slots as u64 - 1) <= MAX_DAMAGE_SPLITS {
-        return compositions(pw, slots)
-            .into_iter()
-            .filter(|split| !(trample && *split.last().unwrap() > 0 && split.iter().zip(lethal).any(|(s, l)| s < l)))
-            .collect();
-    }
-    let b = lethal.len().min(LETHAL_SPLIT_BLOCKERS);
-    let mut out: Vec<Vec<i32>> = vec![];
-    for mask in 0u32..(1u32 << b) {
-        let chosen: Vec<usize> = (0..b).filter(|i| mask >> i & 1 == 1).collect();
-        let rest = pw - chosen.iter().map(|&i| lethal[i]).sum::<i32>();
-        if rest < 0 {
-            continue;
-        }
-        let mut split = vec![0; slots];
-        for &i in &chosen {
-            split[i] = lethal[i];
-        }
-        if trample && chosen.len() == lethal.len() {
-            split[slots - 1] += rest;
-        } else {
-            split[chosen.first().copied().unwrap_or(0)] += rest;
-        }
-        if !out.contains(&split) {
-            out.push(split);
-        }
-    }
-    out
+    if comb_capped((pw as u64) + slots as u64 - 1, slots as u64 - 1) > MAX_DAMAGE_SPLITS { return None; }
+    Some(compositions(pw, slots).into_iter()
+        .filter(|split| !(trample && *split.last().unwrap() > 0 && split.iter().zip(lethal).any(|(s, l)| s < l)))
+        .collect())
 }
 
 /// All tuples of `parts` non-negative ints summing to `total`, in the order
@@ -2455,4 +2532,52 @@ pub fn ref_index(r: Ref) -> u32 {
 
 pub fn is_instant_or_sorcery(d: &CardDef) -> bool {
     d.types & (T_INSTANT | T_SORCERY) != 0
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::damage_amounts;
+    use std::collections::BTreeSet;
+
+    fn sequential(rem: i32, lethal: &[i32], recipient: i32, player: i32, assigned: Vec<i32>, trample: bool, out: &mut BTreeSet<Vec<i32>>) {
+        if recipient == lethal.len() as i32 {
+            let mut split = assigned;
+            if trample { split.push(player); }
+            assert!(out.insert(split)); // every complete assignment occurs exactly once
+            return;
+        }
+        for n in damage_amounts(rem, lethal, recipient, player) {
+            let mut next = assigned.clone();
+            if recipient >= 0 { next.push(n); }
+            sequential(rem - n, lethal, recipient + 1, if recipient == -1 { n } else { player }, next, trample, out);
+        }
+    }
+
+    fn oracle(power: i32, slots: usize, prefix: Vec<i32>, lethal: &[i32], trample: bool, out: &mut BTreeSet<Vec<i32>>) {
+        if prefix.len() == slots {
+            if prefix.iter().sum::<i32>() == power && (!trample || *prefix.last().unwrap() == 0 || prefix.iter().zip(lethal).all(|(n, l)| n >= l)) { out.insert(prefix); }
+            return;
+        }
+        for n in 0..=power {
+            let mut next = prefix.clone(); next.push(n);
+            oracle(power, slots, next, lethal, trample, out);
+        }
+    }
+
+    #[test]
+    fn sequential_allocations_match_independent_integer_oracle() {
+        for blockers in 1..=3usize {
+            for code in 0..3usize.pow(blockers as u32) {
+                let lethal: Vec<i32> = (0..blockers).map(|i| ((code / 3usize.pow(i as u32)) % 3) as i32).collect();
+                for power in 0..=5 {
+                    for trample in [false, true] {
+                        let (mut got, mut expected) = (BTreeSet::new(), BTreeSet::new());
+                        sequential(power, &lethal, if trample { -1 } else { 0 }, if trample { -1 } else { 0 }, vec![], trample, &mut got);
+                        oracle(power, blockers + usize::from(trample), vec![], &lethal, trample, &mut expected);
+                        assert_eq!(got, expected, "power={power}, lethal={lethal:?}, trample={trample}");
+                    }
+                }
+            }
+        }
+    }
 }

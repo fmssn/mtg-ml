@@ -595,3 +595,7 @@ body.reviewing #revpanel{max-height:51%}
 #revbar .dqc i{font-style:normal;margin-left:4px}
 #revbar .dqc .ld{color:#94c9a0;margin-right:2px} #revbar .dqc .sp{color:#9ccfee}
 body.reviewing #hand .b.reduced{display:none}
+
+/* Hosted: the Access session expired (api() saw a 401 or a login redirect) */
+.signedout { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 1000; display: flex; gap: 12px; align-items: center;
+  padding: 10px 14px; border-radius: 8px; background: #3a1d1d; color: #fde8e8; border: 1px solid #a54848; box-shadow: 0 6px 24px rgba(0,0,0,.45); font-size: 14px; }

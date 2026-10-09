@@ -79,7 +79,15 @@ def _op_draw(g, item, op):
             if any(c.controller == q and c.name == op["each_controlling"] for c in g.battlefield):
                 g.draw(q, n)
         return
-    g.draw(item.controller, n)
+    who = op.get("who", "you")
+    if who == "you":
+        g.draw(item.controller, n)
+    elif who == "target_player":
+        target = g.target(item)
+        if target is not None:
+            g.draw(target[1], n)
+    else:
+        raise ValueError(f"draw: unknown who {who!r}")
 
 
 def _op_mill(g, item, op):
@@ -271,11 +279,15 @@ def _op_damage_each_opponent(g, item, op):
 
 
 def _op_damage_each_creature(g, item, op):
-    """n, or x = true for X; without: a keyword that protects; whose = opponent: only theirs."""
-    without = op.get("without")
+    """n, or x = true for X; without: a keyword that protects; except_subtype:
+    a creature type that is spared (changelings too: Fiery Cannonade's
+    Pirates); whose = opponent: only theirs."""
+    without, spared = op.get("without"), op.get("except_subtype")
     n = item.x if op.get("x") else op["n"]
     for c in list(g.battlefield):
         if not g.is_creature(c) or (without and g.has(c, without)):
+            continue
+        if spared and has_creature_type(c.face, spared):
             continue
         if op.get("whose") == "opponent" and c.controller == item.controller:
             continue
@@ -334,14 +346,17 @@ def _op_exile_graveyard(g, item, op):
 
 
 def search_filter(op):
-    """Library search predicate from an op's supertype / type / subtypes_any / colorless."""
+    """Library search predicate from an op's supertype / type / permanent / subtypes_any / colorless."""
     sup, typ, subs, colorless = op.get("supertype"), op.get("type"), op.get("subtypes_any"), op.get("colorless", False)
+    permanent = op.get("permanent", False)
 
     def pred(c) -> bool:
         f = c.face
         if sup and sup not in f.supertypes:
             return False
         if typ and typ not in f.types:
+            return False
+        if permanent and not f.is_permanent_card:
             return False
         if subs and not (f.subtypes & set(subs)):
             return False
@@ -469,8 +484,26 @@ def _op_surveil(g, item, op):
 
 
 def _op_look_top(g, item, op):
-    """Look at the top n, you may put a matching card into your hand (revealed), the rest on the bottom."""
-    yield from g.dig(item.controller, op["n"], search_filter(op), op["what"], item.name)
+    """Look at the top n, you may put a matching card into your hand (revealed),
+    the rest on the bottom (Ancient Stirrings). rest = "graveyard": the top n
+    are all revealed and the rest go to the graveyard (Malevolent Rumble)."""
+    if op.get("rest", "bottom") == "bottom":
+        yield from g.dig(item.controller, op["n"], search_filter(op), op["what"], item.name)
+        return
+    p = item.controller
+    pred = search_filter(op)
+    top = list(g.players[p].library[: op["n"]])
+    for c in top:
+        c.known_to = {0, 1}
+    g._log(f"p{p} reveals {[c.name for c in top]}")
+    options = [Option("Take nothing", ("dig", None), None)]
+    options += [Option(f"Take {c.name}", ("dig", c.name), c) for c in g._dedupe_by_name(c for c in top if pred(c))]
+    found = yield from g.ask(p, CHOOSE_CARD, f"{item.name}: put {op['what']} into your hand", options)
+    if found is not None:
+        g._move(found, "hand", known_to={0, 1})
+    for c in top:
+        if c is not found:
+            g._move(c, "graveyard")
 
 
 def _op_cascade(g, item, op):
@@ -877,6 +910,12 @@ def make_effect(ops: list[dict] | None):
                 f"unknown op {op['op']!r}: add it to OPS (mtg_ml/engine/cards.py) and to Op, parse_ops and Op::name"
                 " (native/src/cards.rs) and Eng::run_op (native/src/engine.rs); card_shape picks the name up by itself"
             )
+        if op["op"] == "draw" and op.get("who", "you") not in {"you", "target_player"}:
+            raise ValueError("draw: unknown who")
+        if op["op"] == "draw" and "who" in op and "each_controlling" in op:
+            raise ValueError("draw: who and each_controlling are mutually exclusive")
+        if op["op"] == "look_top" and (op.get("rest", "bottom") not in {"bottom", "graveyard"} or ("type" in op and op.get("permanent"))):
+            raise ValueError("look_top: rest is bottom or graveyard; type and permanent are mutually exclusive")
         if op["op"] == "custom" and op["fn"] not in CUSTOM:
             raise ValueError(f"unknown custom effect {op['fn']!r}")
         if op["op"] in ("optional_payment", "may_exile_from_graveyard"):
@@ -896,7 +935,7 @@ def _targets(kinds: list[str] | None) -> tuple[TargetSpec, ...]:
 # card_def / _ability / _trigger and parse_card; `_check_fields` says so.
 SHAPE_CARD_FIELDS = frozenset({
     "cost", "colors", "devoid", "cost_reduction", "additional_sac", "additional_discard", "flashback", "escape", "madness", "bestow",
-    "plot", "overload", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect",
+    "plot", "overload", "flashback_life", "flashback_cost", "alternative_cost", "ward", "enters_tapped", "etb_x_counters", "back", "targets", "effect",
     "modes", "overload_effect", "abilities", "triggers", "bargain", "collect_evidence", "equipped_power", "equipped_toughness",
     "omen", "enters_tapped_unless_forests", "additional_power",
     "equipped_keywords", "prototype", "station", "additional_choose_creature",
@@ -1072,6 +1111,8 @@ def card_shape(spec: dict, d: CardDef) -> tuple[str, ...]:
         t.append("e:station")
         t += [f"e:station:kw:{k}" for k in spec["station"].get("keywords", ())]
     t += [f"e:cost:{k}" for k in SHAPE_COST_KEYS if k in spec]
+    if spec.get("flashback_life"):
+        t.append("e:cost:flashback_life")
     if "flashback_cost" in spec:
         t += ["e:cost:flashback", "e:cost:sac_lands"]
     if "alternative_cost" in spec:
@@ -1149,6 +1190,7 @@ def card_def(spec: dict) -> CardDef:
         additional_sac=spec.get("additional_sac"),
         cost_reduction=COST_REDUCTIONS[cr] if cr else None,
         flashback=M(spec["flashback"]) if "flashback" in spec else FREE if "flashback_cost" in spec else None,
+        flashback_life=spec.get("flashback_life", 0),
         escape=M(spec["escape"]) if "escape" in spec else None,
         escape_exile=spec.get("escape_exile", 0),
         bestow=M(spec["bestow"]) if "bestow" in spec else None,

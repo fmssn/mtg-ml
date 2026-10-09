@@ -348,7 +348,14 @@ def test_opponent_deck_feature_from_set_3(engine):
     assert seen[("jund_blue", 0)] == seen[("jund_blue", 1)] == ()
     assert seen[("jund_madness", 0)] == ("opp:deck:red_madness",)
     assert seen[("blue_madness", 1)] == ("opp:deck:mono_blue_terror", "self:deck:red_madness")
-    assert len(set(seen.values())) == len(seen) - 1  # only jund_blue's two seats look alike (seat is a feature of its own)
+    # For non-default-deck mirrors both seats have the same archetype labels.
+    # Keep the exact collision set guarded, rather than weakening uniqueness.
+    groups = {}
+    for key, tokens in seen.items():
+        groups.setdefault(tokens, set()).add(key)
+    collisions = {frozenset(keys) for keys in groups.values() if len(keys) > 1}
+    assert collisions == {frozenset({(name, 0), (name, 1)}) for name in
+                          ("jund_blue", "madness_mirror", "affinity_mirror", "elves_mirror", "tron_mirror")}
 
 
 def test_blue_vs_red_bots_play_a_match(engine):

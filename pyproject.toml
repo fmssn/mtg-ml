@@ -6,8 +6,9 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pytest-xdist>=3"]
 rl = ["torch>=2.2", "numpy"]
+hosted = ["starlette>=0.40", "uvicorn>=0.30", "pyjwt[crypto]>=2.8", "httpx>=0.27"]  # the hosted play server (docs/hosting.md)
 review = ["anthropic"]  # only for `mtg_ml.review --backend claude`
 expert-media = ["yt-dlp>=2026.3", "pillow>=10", "numpy"]
 expert-asr = ["faster-whisper>=1.1"]

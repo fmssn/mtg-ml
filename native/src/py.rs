@@ -165,7 +165,7 @@ impl PyGame {
         let n = self.st().decision.as_ref().map_or(0, |d| d.options.len());
         let mut sims = vec![Vec::new(); n];
         let mut buf = String::with_capacity(48);
-        crate::sim::sim_previews(&mut self.g, player, |i, a| {
+        crate::sim::sim_previews(&mut self.g, player, features, |i, a| {
             use std::fmt::Write;
             buf.clear();
             let _ = buf.write_fmt(a);
@@ -197,7 +197,7 @@ impl PyGame {
 #[pymethods]
 impl PyGame {
     #[new]
-    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=100, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1, auto_mana=false, auto_pass=false, deck_names=(None, None)))]
+    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=100, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1, auto_mana=false, auto_pass=false, deck_names=(None, None), registered_main=None, registered_sideboards=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         decks: (Vec<String>, Vec<String>),
@@ -213,6 +213,8 @@ impl PyGame {
         auto_mana: bool,
         auto_pass: bool,
         deck_names: (Option<String>, Option<String>),
+        registered_main: Option<(Vec<String>, Vec<String>)>,
+        registered_sideboards: Option<(Vec<String>, Vec<String>)>,
     ) -> PyResult<Self> {
         if let Some(p) = starting_player {
             Self::pidx(p as usize)?;
@@ -220,7 +222,11 @@ impl PyGame {
         if !STEPS.contains(&start_step.as_str()) {
             return Err(PyValueError::new_err(format!("{start_step:?} is not in list")));
         }
+        let main = registered_main.unwrap_or_else(|| decks.clone());
+        let side = registered_sideboards.unwrap_or_default();
         let args = Args {
+            registered_main: [main.0, main.1],
+            registered_sideboards: [side.0, side.1],
             decks: [decks.0, decks.1],
             seed,
             starting_player,
@@ -678,6 +684,16 @@ impl PyGame {
 
     // -- views ---------------------------------------------------------------
 
+    /// `Game.witnessed(viewer)`: opponent card name -> established minimum copies.
+    fn witnessed<'py>(&self, py: Python<'py>, viewer: u8) -> PyResult<Bound<'py, PyDict>> {
+        Self::pidx(viewer as usize)?;
+        let d = PyDict::new_bound(py);
+        for (name, n) in self.st().witnessed_counts(viewer) {
+            d.set_item(name, n)?;
+        }
+        Ok(d)
+    }
+
     /// `view.observe(game, viewer)`.
     fn observe<'py>(&self, py: Python<'py>, viewer: u8) -> PyResult<Bound<'py, PyDict>> {
         Self::pidx(viewer as usize)?;
@@ -809,6 +825,18 @@ impl PyGame {
         Ok((o.0, ids.into_iter().enumerate().map(|(k, id)| (id, k)).collect()))
     }
 
+    fn damage_allocation(&self) -> Option<(u32, Vec<u32>, Vec<i32>, Vec<i32>, i32, i32, u8, i32)> {
+        self.st().damage_allocation.as_ref().map(|a| (a.attacker, a.blockers.clone(), a.lethal.clone(), a.assigned.clone(), a.recipient, a.remaining, a.defender, a.player_damage))
+    }
+
+    fn combat_subjects(&self) -> Vec<Vec<u32>> {
+        self.st().combat_subjects.clone()
+    }
+
+    fn payment_context(&self) -> Option<(i32, Vec<(String, i32)>)> {
+        self.st().paying.as_ref().map(|(rem, _, _)| (rem.generic, rem.colored.iter().map(|(c, n)| (color_str(*c).to_string(), *n)).collect()))
+    }
+
     /// `rl.features.featurize(game, player, state_dim, option_dim, features)`.
     #[pyo3(signature = (player, state_dim, option_dim, features = crate::features::FEATURES))]
     fn featurize(&mut self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
@@ -837,7 +865,7 @@ impl PyGame {
         fver(features)?;
         let mut v = crate::features::option_preview_strings(self.st(), player, i, features).ok_or_else(|| PyIndexError::new_err("no such option"))?;
         if features >= 6 {
-            crate::sim::sim_preview(&mut self.g, player, i, &mut |a| v.push(a.to_string())).map_err(Self::step_err)?;
+            crate::sim::sim_preview(&mut self.g, player, i, features, &mut |a| v.push(a.to_string())).map_err(Self::step_err)?;
         }
         Ok(v)
     }
@@ -850,7 +878,7 @@ impl PyGame {
         let n = self.decision()?.options.len();
         let mut out: Vec<Vec<String>> = (0..n).map(|i| crate::features::option_preview_strings(self.st(), player, i, features).unwrap_or_default()).collect();
         if features >= 6 {
-            crate::sim::sim_previews(&mut self.g, player, |i, a| out[i].push(a.to_string())).map_err(Self::step_err)?;
+            crate::sim::sim_previews(&mut self.g, player, features, |i, a| out[i].push(a.to_string())).map_err(Self::step_err)?;
         }
         Ok(out)
     }
@@ -1063,6 +1091,27 @@ fn mtg_ml_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(loaded_spec, m)?)?;
     m.add_function(wrap_pyfunction!(card_shapes, m)?)?;
     m.add_function(wrap_pyfunction!(spec_fields, m)?)?;
+    m.add_function(wrap_pyfunction!(build_sources, m)?)?;
     m.add("NativeRulesError", m.py().get_type_bound::<NativeRulesError>())?;
     Ok(())
+}
+
+/// Embedded build inputs let benchmark validation verify the installed binary,
+/// even when worktrees share a Cargo cache. Python hashes these exact bytes.
+#[pyfunction]
+fn build_sources() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("native/Cargo.toml", include_str!("../Cargo.toml")),
+        ("native/Cargo.lock", include_str!("../Cargo.lock")),
+        ("native/src/lib.rs", include_str!("lib.rs")),
+        ("native/src/cards.rs", include_str!("cards.rs")),
+        ("native/src/game.rs", include_str!("game.rs")),
+        ("native/src/engine.rs", include_str!("engine.rs")),
+        ("native/src/features.rs", include_str!("features.rs")),
+        ("native/src/mana.rs", include_str!("mana.rs")),
+        ("native/src/py.rs", include_str!("py.rs")),
+        ("native/src/rng.rs", include_str!("rng.rs")),
+        ("native/src/sim.rs", include_str!("sim.rs")),
+        ("native/src/state.rs", include_str!("state.rs")),
+    ]
 }

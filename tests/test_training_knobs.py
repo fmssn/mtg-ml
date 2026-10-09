@@ -7,6 +7,7 @@ import os
 import random
 from array import array
 from collections import Counter
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,8 +64,8 @@ def test_finish_clamps_values_before_the_deltas():
 
 
 def test_value_clamp_leaves_room_for_shaping():
-    out = _run(_traj([1.1, 0.5]), 1.0, gamma=1.0, lam=1.0, shaping=0.2)  # bound 1.2: nothing clamped
-    assert out.returns[1] == pytest.approx(1.0) and out.advantages[0] == pytest.approx(1.0 - 1.1)
+    out = _run(_traj([1.1, 0.5], potentials=[-0.5, 0.0]), 1.0, gamma=1.0, lam=1.0, shaping=0.2)
+    assert out.returns[1] == pytest.approx(1.0) and out.advantages[0] == pytest.approx(0.0)
 
 
 def test_per_turn_discount_between_decisions():
@@ -215,6 +216,7 @@ def _bare_trainer(*args):
     t.cfg = _cfg("unused", *args)
     t.rng, t.pool, t.pfsp, t.games_total, t.lr_origin = random.Random(0), [], {}, 0, 0
     t.matchups, t.spec_matchup = parse_matchups(t.cfg.matchup), {}
+    t.net = SimpleNamespace(features=t.cfg.features or FEATURES)
     return t
 
 
@@ -252,6 +254,17 @@ def test_bot_seat_jund_puts_the_learner_on_jund():
     assert {sp.seats for sp in t._train_specs(0)} == {(LEARNER, BOT), (BOT, LEARNER)}
 
 
+def test_set7_swaps_deck_seats_and_replays_the_same_rng_schedule():
+    t = _bare_trainer("--self-play-frac", "1", "--features", "7", "--games-per-iter", "256")
+    rng = t.rng.getstate()
+    specs = t._train_specs(0)
+    assert {sp.swap_seats for sp in specs} == {False, True}
+    t.rng.setstate(rng)
+    assert t._train_specs(0) == specs
+    t.net.features = 6
+    assert all(not sp.swap_seats for sp in t._train_specs(0))
+
+
 def test_pfsp_tracks_win_rates_and_prefers_opponents_that_win():
     t = _bare_trainer("--self-play-frac", "0", "--pool-recent-frac", "0", "--pool-sampling", "pfsp", "--games-per-iter", "4000", "--pfsp-ema", "0.5")
     t.pool = ["run/pool/iter_00000.pt", "run/pool/iter_00010.pt", "run/pool/iter_00020.pt"]
@@ -287,7 +300,7 @@ def test_init_starts_a_fresh_run_from_a_checkpoint(tmp_path, in_process):  # noq
     torch.manual_seed(3)
     net = PolicyNet(hidden=16)
     torch.save({"config": net.config, "model": net.state_dict()}, src)
-    t = Trainer(_cfg(tmp_path / "run", "--iterations", "1", "--init", str(src), "--value-bound", "tanh", *IN_PROCESS, *NO_EVAL))
+    t = Trainer(_cfg(tmp_path / "run", "--iterations", "1", "--init", str(src), "--value-bound", "tanh", "--shaping", "0", *IN_PROCESS, *NO_EVAL))
     assert t.net.config == {**net.config, "value_bound": "tanh"}  # and the source's feature set (1)
     assert all(torch.equal(a, b) for a, b in zip(t.net.state_dict().values(), net.state_dict().values()))
     t.train()
@@ -317,4 +330,3 @@ def test_resume_with_features_stamps_the_run(tmp_path, in_process):  # noqa: F81
     assert checkpoint_config(str(run / "latest.pt"))["features"] == 2
     t = Trainer(_cfg(run, "--iterations", "3", *IN_PROCESS, *NO_EVAL))  # without the flag: keeps the stamped version
     assert t.net.features == 2 and t.pool_features == {p: 2 for p in t.pool if "features" not in checkpoint_config(p)}
-
