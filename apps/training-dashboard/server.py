@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import threading
 import time
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -14,16 +15,19 @@ HERE = Path(__file__).resolve().parent
 
 
 class Monitor:
-    def __init__(self, host, script, campaign, cache, interval):
+    def __init__(self, host, script, campaign, cache, interval, source="ssh", python="python3"):
         self.host, self.script, self.campaign = host, script, campaign
+        self.source, self.python = source, python
         self.cache, self.interval = Path(cache), interval
         self.lock, self.stop = threading.Lock(), threading.Event()
         self.value = {'snapshot': None, 'error': None, 'last_attempt': None, 'refresh_seconds': interval}
 
     def poll(self):
-        command = '/home/taiga-support/mtg-ml-256-opt/code/e8662a5/.venv/bin/python ' + shlex.quote(self.script) + ' --campaign ' + shlex.quote(self.campaign)
+        command = [self.python, self.script, '--campaign', self.campaign]
+        if self.source == 'ssh':
+            command = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=5', self.host, shlex.join(command)]
         try:
-            result = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=5', self.host, command], capture_output=True, text=True, timeout=20, check=True)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=True)
             data = json.loads(result.stdout)
             if data.get('schema_version') != 1:
                 raise ValueError('Unsupported dashboard snapshot')
@@ -39,8 +43,9 @@ class Monitor:
 
     def run(self):
         while not self.stop.is_set():
+            started = time.monotonic()
             self.poll()
-            self.stop.wait(self.interval)
+            self.stop.wait(max(0, self.interval - (time.monotonic() - started)))
 
     def state(self):
         with self.lock:
@@ -51,9 +56,19 @@ def handler(monitor):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path in ('/', '/index.html'):
-                body, mime = (HERE / 'index.html').read_bytes(), 'text/html; charset=utf-8'
+                page = 'training.html' if (monitor.value.get('snapshot') or {}).get('mode') == 'training' else 'index.html'
+                body, mime = (HERE / page).read_bytes(), 'text/html; charset=utf-8'
             elif self.path == '/api/state':
                 body, mime = monitor.state(), 'application/json'
+            elif self.path in ('/morning-report.json', '/morning-report.md'):
+                path = Path(monitor.campaign) / self.path.removeprefix('/')
+                if monitor.source != 'local' or not path.is_file():
+                    self.send_error(404)
+                    return
+                body = path.read_bytes()
+                mime = 'application/json' if path.suffix == '.json' else 'text/plain; charset=utf-8'
+            elif self.path == '/healthz':
+                body, mime = json.dumps({'ok': True, 'last_attempt': monitor.value['last_attempt'], 'error': monitor.value['error']}).encode(), 'application/json'
             elif self.path == '/favicon.ico':
                 self.send_response(204)
                 self.end_headers()
@@ -75,16 +90,23 @@ def handler(monitor):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--host', default='h100-private')
-    ap.add_argument('--campaign', default='/home/taiga-support/mtg-ml-256-opt/campaigns/screens-20261008-dedicated')
-    ap.add_argument('--remote-script', default='/home/taiga-support/mtg-ml-256-opt/dashboard_snapshot.py')
+    ap.add_argument('--host')
+    ap.add_argument('--source', choices=('ssh', 'local'), default='ssh')
+    ap.add_argument('--python', default=None)
+    ap.add_argument('--campaign', required=True)
+    ap.add_argument('--remote-script')
     ap.add_argument('--port', type=int, default=8767)
     ap.add_argument('--interval', type=int, default=15)
     ap.add_argument('--cache', default='.context/training-dashboard/state.json')
     args = ap.parse_args()
     if args.interval < 5:
         ap.error('Refresh interval must be at least five seconds')
-    monitor = Monitor(args.host, args.remote_script, args.campaign, args.cache, args.interval)
+    if args.source == 'ssh' and not (args.host and args.remote_script):
+        ap.error('SSH mode requires --host and --remote-script')
+    script = str(HERE / 'snapshot.py') if args.source == 'local' else args.remote_script
+    interpreter = args.python or (sys.executable if args.source == 'local' else 'python3')
+    monitor = Monitor(args.host, script, args.campaign, args.cache, args.interval, args.source, interpreter)
+    monitor.poll()
     worker = threading.Thread(target=monitor.run, daemon=True)
     worker.start()
     server = ThreadingHTTPServer(('127.0.0.1', args.port), handler(monitor))

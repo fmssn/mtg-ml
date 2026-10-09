@@ -338,3 +338,53 @@ def test_two_gpu_updates_match_single_gpu_with_empty_shards(capture, precision):
             assert error.max() <= 0.01 * a.abs().max() + 1e-7, name
         else:
             assert torch.allclose(a, b, atol=1e-6), name
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA')
+def test_h256_set7_residency_crosses_64_policy_boundary(tmp_path):
+    """Real width-256 buffers survive full-capacity eviction and reused IDs."""
+    import os
+    torch.manual_seed(8)
+    net = PolicyNet(hidden=256, trunk='entity', value_net='shared', entity_attn=1, features=7)
+    first = tmp_path / 'initial.pt'
+    torch.save({'config': net.config, 'model': net.state_dict()}, first)
+    paths = [str(first)]
+    for k in range(65):
+        p = tmp_path / f'opponent{k}.pt'
+        os.link(first, p)
+        paths.append(str(p))
+    srv = _Server(ServerConfig(device='cuda', threads=1, resident_limit=64, policy_slots=64), 1)
+    cl = InferenceClient(0, None, None, srv.names, srv.layout)
+    learner = (paths[0], 1)
+    try:
+        srv.select_policies([learner, *((p, 0) for p in paths[1:64])])
+        address = srv.stack.tables['option_emb.weight'].data_ptr()
+        generation = int(srv.c[3])
+        srv.select_policies([learner, *((p, 0) for p in paths[2:65])])
+        assert srv.stack.capacity == 64 and len(srv.ids) == 64
+        assert srv.stack.tables['option_emb.weight'].data_ptr() == address
+        assert srv.c[3] > generation
+        with pytest.raises(ValueError, match='not selected'):
+            srv.register_key((paths[1], 0))
+        keys = [learner, (paths[64], 0)]
+        cl.generation = int(srv.c[3])
+        cl.ids = {k: srv.register_key(k) for k in keys}
+        crowded = _decision(73)
+        crowded = (crowded[0], array('i', [1]*512), array('i', range(1, 513)), crowded[3])
+        rows = [(k, i, 1 | GREEDY_FLAG, *crowded) for i, k in enumerate(keys)]
+        rows.sort(key=lambda r:r[0])
+        request = cl.submit(0, rows)
+        srv.process(srv.pending())
+        srv.drain()
+        actions, logps, values = cl.collect(request)
+        with torch.no_grad():
+            logits, expected, _ = net(_batch(torch, [crowded])[0])
+        for action, lp, value in zip(actions, logps, values):
+            assert action == logits.argmax(-1).item()
+            assert lp == pytest.approx(torch.log_softmax(logits,-1)[0,action].item(), abs=3e-5)
+            assert value == pytest.approx(expected.item(), abs=3e-5)
+    finally:
+        cl.close()
+        srv.close()

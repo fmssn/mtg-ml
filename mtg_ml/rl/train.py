@@ -187,6 +187,7 @@ class TrainConfig:
     eval_every: int = 10  # evaluate every this many iterations (0 = only by eval_every_games)
     eval_final: int = 0  # evaluate the final policy even when the stop is between regular evaluation points
     eval_every_games: int = 0  # also evaluate whenever the training games cross a multiple of this (e.g. 250000)
+    eval_extra_matchups: int = 1  # 0: only primary matchup in routine evaluation; matrix evaluation runs separately
     eval_process: int = 1  # 1: evaluate in a process of its own, never waiting for it; 0: on the training pool, blocking
     eval_workers: int = 0  # workers of the evaluation process (0: one per evaluation core, at most 8)
     eval_blocks: str = ",".join(EVAL_BLOCKS)  # opponents of the eval/<opponent>/<deck> games, among random, bot, pool0 ("" = none)
@@ -621,7 +622,7 @@ class Trainer:
         c = self.cfg
         return (e.policy, self.pool[0], e.version, n_jobs, c.eval_games, c.eval_bo3_matches, c.bench_games, c.bench_bo3_matches, c.max_turns, inference,
                 self.blocks, c.bench_greedy_games, self.ladder, c.ladder_games, self.ladder_ratings, bool(c.ladder_greedy), bool(c.auto_mana), bool(c.auto_pass),
-                self.matchups[0][0], self.exploit_seat, os.path.abspath(c.exploit) if c.exploit else "", self.pool_features, tuple(m for m, _ in self.matchups[1:]))
+                self.matchups[0][0], self.exploit_seat, os.path.abspath(c.exploit) if c.exploit else "", self.pool_features, tuple(m for m, _ in self.matchups[1:]) if c.eval_extra_matchups else ())
 
     def _request_eval(self) -> dict:
         """Evaluate the newest policy file. Inline (`--eval-process 0`): on the
