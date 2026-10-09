@@ -1,0 +1,13 @@
+{
+  "format": "EvidenceGame",
+  "version": 1,
+  "sources": [
+    {
+      "id": "synthetic-shaman-deathtouch-sweep",
+      "group_id": "synthetic-shaman-deathtouch-sweep",
+      "type": "synthetic_test"
+    }
+  ],
+  "records": [],
+  "metrics": {}
+}

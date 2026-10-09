@@ -1,0 +1,14 @@
+{
+  "format": "EvidenceGame",
+  "version": 1,
+  "sources": [
+    {
+      "id": "playtest-2026-10-09-flag4",
+      "group_id": "playtest-2026-10-09-flag4",
+      "type": "synthetic_test",
+      "note": "Variant of docs/playtest-reviews/2026-10-09.md flag 4 with a second, untapped creature."
+    }
+  ],
+  "records": [],
+  "metrics": {}
+}

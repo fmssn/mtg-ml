@@ -1,0 +1,13 @@
+{
+  "format": "EvidenceGame",
+  "version": 1,
+  "sources": [
+    {
+      "id": "synthetic-keep-red-open",
+      "group_id": "synthetic-keep-red-open",
+      "type": "synthetic_test"
+    }
+  ],
+  "records": [],
+  "metrics": {}
+}

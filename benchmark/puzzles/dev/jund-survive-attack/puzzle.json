@@ -1,0 +1,237 @@
+{
+  "format": "TacticalPuzzle",
+  "version": 1,
+  "id": "jund-survive-attack",
+  "deck": "jund_wildfire",
+  "category": "combat",
+  "template_id": "chump-versus-ward",
+  "source_group_id": "synthetic-chump-versus-ward",
+  "split": "dev",
+  "episode_mode": "reset",
+  "rationale": "Jund at 4 life faces an attacking Tolarian Terror. Cast Down cannot pay Terror's ward {2} with two Swamps, so only the Shaman chump block prevents lethal damage, and casting it would throw the removal away.",
+  "max_decisions": 64,
+  "claim": "success-against-declared-responses",
+  "objective": {
+    "all": [
+      {
+        "path": "self.life",
+        "op": "eq",
+        "value": 4
+      },
+      {
+        "object": "cast-down",
+        "zone": "graveyard",
+        "present": false
+      }
+    ]
+  },
+  "stop": {
+    "kind": "decision_boundary",
+    "turn": 10,
+    "step": "end",
+    "active": "opponent",
+    "require_empty_stack": true
+  },
+  "cases": [
+    {
+      "id": "basic-lands-library",
+      "hidden_completion": "libraries-of-basic-lands",
+      "response_policy": {
+        "id": "benchmark-blue@1",
+        "parameters_sha256": "f80cb31cad22feaa42a5d1488356151fa4ce4f36f9b02a27922212a156b4c68c"
+      },
+      "witnesses": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "declare_blocker",
+              "key": [
+                "block",
+                "Krark-Clan Shaman",
+                "Tolarian Terror"
+              ]
+            }
+          ],
+          "note": "Chump block with the Shaman.",
+          "learner_only": true
+        }
+      ],
+      "mistakes": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Cast Down",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "nonlegendary_creature",
+                "perm",
+                "opponent",
+                "Tolarian Terror"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Swamp",
+                "B"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Swamp",
+                "B"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "yes_no",
+              "key": [
+                "pay_optional",
+                "no"
+              ]
+            }
+          ],
+          "note": "Cast Down into ward without spare mana, then no block.",
+          "expect": "objective_failed"
+        },
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Cast Down",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "nonlegendary_creature",
+                "perm",
+                "opponent",
+                "Tolarian Terror"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Swamp",
+                "B"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Swamp",
+                "B"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "yes_no",
+              "key": [
+                "pay_optional",
+                "no"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "declare_blocker",
+              "key": [
+                "block",
+                "Krark-Clan Shaman",
+                "Tolarian Terror"
+              ]
+            }
+          ],
+          "note": "Waste Cast Down into ward, then chump block.",
+          "expect": "objective_failed"
+        },
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            }
+          ],
+          "note": "No block.",
+          "expect": "objective_failed"
+        }
+      ],
+      "scenario": {
+        "path": "scenario.json",
+        "sha256": "ed2554902fc03f04a73d8b233fbfc3b0c9f39013af576bd12cbc0452dac1ad5a"
+      },
+      "evidence": {
+        "path": "evidence.json",
+        "sha256": "a7e0172de5b4f2290e988b83ef3e51102bcdc4441413175653d0fff6e95408aa"
+      }
+    }
+  ],
+  "review": {
+    "status": "accepted",
+    "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+    "note": "At 4 life Cast Down plus ward {2} is unaffordable, so only the chump block survives; the Cast-Down-not-in-graveyard clause correctly rejects wasting the removal and then blocking."
+  }
+}

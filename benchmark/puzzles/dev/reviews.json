@@ -1,0 +1,48 @@
+{
+  "format": "PuzzleReviews",
+  "version": 1,
+  "reviews": {
+    "blue-counter-tapped-out": {
+      "content_sha256": "5576eeab8bb59facb598dbdca7b61b250cd0b104ca6bf85e67d39fc13c3bf9b7",
+      "status": "accepted",
+      "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+      "note": "Jund is tapped out so Force Spike is a hard counter; the public clause Counterspell-not-in-graveyard makes spending Counterspell fail, as does passing."
+    },
+    "blue-counter-untapped": {
+      "content_sha256": "cd94f58edcdcee4e15b152539cf48f1525e196b690000f25f086919c5bae1788",
+      "status": "accepted",
+      "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+      "note": "With a Swamp open the response bot pays Force Spike (traced), so only Counterspell stops Gixian Infiltrator; parity on both engines."
+    },
+    "blue-sleep-productive": {
+      "content_sha256": "7a7eb370ed8386c28571918ed99b5d27246f37e0df6adec43f5a902ccf10b676",
+      "status": "accepted",
+      "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+      "note": "Escaping Sleep onto the untapped Gixian Infiltrator prevents its 2-damage attack on Jund's turn; escaping onto the locked Shaman or passing takes the hit (traced). Weak discriminator: random learners succeed 3/4 when only a target choice remains."
+    },
+    "blue-sleep-redundant": {
+      "content_sha256": "ac2a1810b2f57abd59da13dc5108dc0a272bcdf8195552c8c675554a611791e6",
+      "status": "accepted",
+      "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+      "note": "The engine takes the larger skip-untap count (cards.py:142), as the rules do, so escaping onto the locked Shaman only spends mana and three graveyard cards and always fails the four-card graveyard objective. A pass learner succeeds, which is inherent to a don't-waste-it puzzle; shares a leakage group with blue-sleep-productive."
+    },
+    "jund-color-sequencing": {
+      "content_sha256": "1a8d5057d2d43e0c900e82fca1df8fc525b0eee0985f4185c5fa0b4488c957b2",
+      "status": "accepted",
+      "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+      "note": "Cast Down's generic must come from the Forest to keep red for the Shaman; both cast orders succeed and the Mountain payment fails."
+    },
+    "jund-shaman-toxin-sweep": {
+      "content_sha256": "6439356f017da5796da7b4c555858851427d9da02eb0f3914dd5c72c90da4cec",
+      "status": "accepted",
+      "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+      "note": "Toxin on Shaman then sacrificing the Clue sweeps all three ground creatures via deathtouch; Toxin on Serpent/Delver fails (traced) and Terror's ward counters it. Random learners 0/4, a strong discriminator."
+    },
+    "jund-survive-attack": {
+      "content_sha256": "20868babb163dc7a55d08435ec31d2a60c62edf8e667cd1bbe33c5b4733b72b6",
+      "status": "accepted",
+      "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+      "note": "At 4 life Cast Down plus ward {2} is unaffordable, so only the chump block survives; the Cast-Down-not-in-graveyard clause correctly rejects wasting the removal and then blocking."
+    }
+  }
+}
