@@ -49,7 +49,7 @@ case "$action" in
             tmux set-option -t "$session" history-limit 2000
             echo "started $session on $target"
         fi
-        for _ in 1 2 3 4 5 6 7 8 9 10; do curl -fsS "$target/healthz" >/dev/null 2>&1 && break; sleep 1; done
+        for _ in $(seq 40); do curl -fsS "$target/healthz" >/dev/null 2>&1 && break; sleep 1; done
         curl -fsS "$target/healthz" >/dev/null || { echo "server did not come up; see: tmux attach -t $session" >&2; exit 1; }
         rc=0; serve_state || rc=$?
         if [ "$rc" = 2 ]; then echo "tailscale https port $https is used by another entry; refusing to change it" >&2; exit 1; fi
