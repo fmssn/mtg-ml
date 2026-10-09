@@ -9,6 +9,7 @@ engines. Native setup exposes `turn`, `lands_played` and
 ```bash
 MTG_ENGINE=native python -m mtg_ml.play bench          # or --engine native on any play/train/evaluate command
 python -m mtg_ml.rl.train --engine native ...           # rollout workers use the Rust engine
+MTG_ENGINE=native python -m mtg_ml.rl.train ...         # the same; an explicit --engine python wins
 ```
 
 | single core, decisions/s | Python | Rust | speed-up |
@@ -64,7 +65,7 @@ taskset -c 48-63 ~/mtg-ml/.venv/bin/python -m maturin build --release -i ~/mtg-m
 | any code | `from mtg_ml.backend import game_class; Game = game_class()` (or `game_class("native")`) |
 | `agents.play_game`, `match.play_match`, `env.MTGEnv` | `engine=` argument |
 | `python -m mtg_ml.play ...` | `--engine python\|native` |
-| `python -m mtg_ml.rl.train` | `--engine native` (`TrainConfig.engine`); exported as `$MTG_ENGINE` to the spawned workers |
+| `python -m mtg_ml.rl.train` | `--engine python\|native` (`TrainConfig.engine`, default empty: `$MTG_ENGINE`, else python); the resolved engine is exported as `$MTG_ENGINE` to the spawned workers |
 | `python -m mtg_ml.rl.evaluate` | `--engine native` |
 | `rollout.Job` | `engine=` field (`None` = `$MTG_ENGINE`) |
 
@@ -82,6 +83,8 @@ native/src/
                combat) and the effect ops / custom effects              <- generator half of game.py, cards.py
   game.rs      driver: owns the state and the engine coroutine
   features.rs  featurize() and event-token hashes                      <- encode.py, rl/features.py
+  sim.rs       simulated option previews (`pv:sim:*`, feature set 6)    <- encode.py sim_previews
+  lib.rs       crate root: module list; py.rs only with the `python` feature
   py.rs        PyO3 bindings (module mtg_ml_native)
 mtg_ml/engine/native.py   NativeGame: the Game API on top of py.rs
 ```
@@ -157,7 +160,7 @@ On a mismatch the fuzzer prints the path to the first differing value (e.g. `.st
 
 Further guards:
 
-- Every rules, card, bot, view and fuzz test runs on both engines (`tests/conftest.py` parametrizes those modules; `@pytest.mark.python_only` exists for tests that need reference internals, none do today).
+- Every rules, card, bot, view and fuzz test runs on both engines (`tests/conftest.py` parametrizes those modules; `@pytest.mark.python_only` marks the tests that need reference internals; two in `tests/test_correctness_foundations.py` use it).
 - `tests/test_golden.py` pins 210 recorded games of the reference engine (`python -m mtg_ml.trace check`), so refactors of the Python engine (like moving the cards to `cards.toml`) are checked for exact behavioural equivalence before the port is compared against it.
 - `tests/test_card_spec.py` checks `cards.toml` against the oracle snapshot.
 
@@ -211,7 +214,7 @@ The engine has no dependencies, so PyPy runs it unchanged (`cards.toml` needs `t
 | h100-private, `python -m mtg_ml.play bench --games 2000` (warm-up included) | 8,971 | 20,063 | 2.2× |
 | laptop, `play bench --games 4000`, PyPy 3.10 before the cards.toml change | 11,689 | 30,016 | 2.6× |
 
-PyPy is a 2-3× quick win for the engine alone, but it is **not usable for training today**: rollout workers import torch (`mtg_ml/rl/rollout.py` runs the policy in-process), and torch does not run on PyPy. PyPy only becomes an option once inference moves to a central server and workers run just engine + featurize. Even then the Rust engine is 5-9× faster than PyPy on the same work, so PyPy is now mainly interesting for Python-heavy code that has no native path (the scripted bots: 2.0× on PyPy vs 2.1× from the Rust engine).
+PyPy is a 2-3× quick win for the engine alone, but it is **not used for training**: with local inference (the default) rollout workers import torch (`mtg_ml/rl/rollout.py` runs the policy in-process), and torch does not run on PyPy. The central inference server (`--inference server`, [inference-server.md](inference-server.md)) now exists and its workers do not import torch, so PyPy could host them, but nothing in the repo runs them on PyPy. The Rust engine is 5-9× faster than PyPy on the same work, so PyPy is now mainly interesting for Python-heavy code that has no native path (the scripted bots: 2.0× on PyPy vs 2.1× from the Rust engine).
 
 ## What limits training throughput now
 
