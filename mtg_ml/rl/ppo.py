@@ -56,6 +56,7 @@ class PPOConfig:
     max_grad_norm: float = 0.5
     target_kl: float | None = 0.03  # stop the epoch loop early past this
     capture: int = 2  # on CUDA: 1 every step a CUDA graph replay over padded minibatches, 2 also the forward and losses compiled by Inductor (~15% faster, ~10-30 s of compiling per process), 0 plain eager steps
+    precision: str = "fp32"  # selective BF16 dense/attention; optimizer and probability math stay FP32
 
 
 def make_optimizer(params, lr: float, device, tensor_lr: bool = False) -> torch.optim.Optimizer:
@@ -147,7 +148,12 @@ def _losses(net: PolicyNet, cfg: PPOConfig, b, lengths, width: int, a, olp, ad, 
     <1% option from a near-certain decision, which count as non-trivial;
     the rollout records only the taken option's log-prob, so this is the
     test it allows for free. Forced moves (one option) never count."""
-    logits, values, _ = net(b, lengths=lengths, max_options=width)
+    if cfg.precision not in ("fp32", "bf16"):
+        raise ValueError("precision must be fp32 or bf16")
+    device_type = ad.device.type
+    with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=cfg.precision == "bf16"):
+        logits, values, _ = net(b, lengths=lengths, max_options=width)
+    logits, values = logits.float(), values.float()
     logp_all = torch.log_softmax(logits, dim=-1)
     logp = logp_all.gather(1, a[:, None]).squeeze(1)
     ratio = (logp - olp).exp()
@@ -291,7 +297,7 @@ class _StepGraphs:
         state = tuple(t.data_ptr() for p in params for t in opt.state.get(p, {}).values() if torch.is_tensor(t))
         lr = lambda x: ("tensor", x.data_ptr(), x.device) if torch.is_tensor(x) else x  # noqa: E731
         groups = tuple((lr(g["lr"]), g["betas"], g["eps"], g["weight_decay"], g.get("amsgrad"), g.get("maximize")) for g in opt.param_groups)
-        return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm, cfg.capture)
+        return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm, cfg.capture, cfg.precision)
 
     def choose(self, counts: dict, extra: dict) -> dict:
         """The smallest captured shape these pieces fit, else a new one with
@@ -533,4 +539,3 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
 def _by_kind(stats: list[float]) -> torch.Tensor:
     """The per-kind sums of a statistics vector as a (kinds, KIND_STATS) tensor."""
     return torch.tensor(stats[len(STATS) :], dtype=torch.float64).view(len(KINDS), len(KIND_STATS))
-

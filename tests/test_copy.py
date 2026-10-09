@@ -56,7 +56,7 @@ def play(seed: int, matchup: str, copy_p: float, steps: int, max_decisions: int 
 
 @pytest.mark.parametrize("matchup", MATCHUPS)
 def test_copy_continues_like_replay(matchup):
-    for seed in range(4):
+    for seed in range(2):  # the slow variant below plays 20 more seeds
         play(seed, matchup, copy_p=0.1, steps=8)
 
 

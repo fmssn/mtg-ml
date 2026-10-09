@@ -38,6 +38,14 @@ def main(argv=None) -> None:
     ap.add_argument("--games", type=int, default=1024, help="games per round")
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--hidden", type=int, default=128)
+    ap.add_argument("--entity-attn", type=int, default=0)
+    ap.add_argument("--features", type=int, default=0)
+    ap.add_argument("--init", help="inherit checkpoint architecture and weights; optionally add attention")
+    ap.add_argument("--matchup", default="jund_blue")
+    ap.add_argument("--postboard-frac", type=float, default=0.5)
+    ap.add_argument("--resident-limit", type=int, default=0)
+    ap.add_argument("--legacy-attention", action="store_true")
+    ap.add_argument("--warmup-rounds", type=int, default=1)
     ap.add_argument("--memory", default="gru")
     ap.add_argument("--trunk", default="mlp", choices=("mlp", "transformer", "entity"))
     ap.add_argument("--value-net", default="shared", choices=("shared", "separate"))
@@ -55,12 +63,19 @@ def main(argv=None) -> None:
     ap.add_argument("--groups", type=int, default=2, help="requests in flight per worker")
     ap.add_argument("--dry-run", action="store_true", help="server returns random options without running the network (pipeline overhead only)")
     args = ap.parse_args(argv)
+    if min(args.rounds, args.warmup_rounds, args.games, args.workers, args.pool) < 1:
+        ap.error("rounds, warmup-rounds, games, workers and pool must be positive")
+    if args.split and args.resident_limit:
+        ap.error("bounded residency requires the shared-queue path (omit --split)")
+    if args.run and (args.init or args.entity_attn or args.features):
+        ap.error("--run uses its recorded architecture; use --init to add attention or override features")
 
     import torch
 
     from mtg_ml.backend import ENV_VAR, engine_name
     from mtg_ml.rl.inference import InferenceServer, ServerConfig, default_device
-    from mtg_ml.rl.model import PolicyNet
+    from mtg_ml.rl.model import PolicyNet, load_partial
+    from mtg_ml.match import parse_matchups
     from mtg_ml.rl.rollout import LEARNER, GameSpec, Job, Result, create_pool, run_job, run_specs, split_games
 
     os.environ[ENV_VAR] = engine_name(args.engine)
@@ -75,7 +90,13 @@ def main(argv=None) -> None:
         paths = []
         for k in range(1 + args.pool):
             torch.manual_seed(k)
-            net = PolicyNet(hidden=args.hidden, memory=args.memory, trunk=args.trunk, value_net=args.value_net)
+            kw = torch.load(args.init, map_location="cpu", weights_only=False)["config"] if args.init else dict(hidden=args.hidden, memory=args.memory, trunk=args.trunk, value_net=args.value_net)
+            kw = {**kw, "entity_attn": args.entity_attn or kw.get("entity_attn", 0)}
+            if args.features:
+                kw["features"] = args.features
+            net = PolicyNet(**kw)
+            if args.init:
+                load_partial(net, torch.load(args.init, map_location="cpu", weights_only=False)["model"])
             paths.append(os.path.join(tmp, f"p{k}.pt"))
             torch.save({"config": net.config, "model": net.state_dict()}, paths[-1])
         learner, pool = paths[0], paths[1:]
@@ -85,18 +106,20 @@ def main(argv=None) -> None:
         per_server = [cpus(x) for x in args.server_cpus.split(";")] if args.server_cpus and ";" in args.server_cpus else None
         cfg = ServerConfig(
             device=args.device or default_device(), max_rows=args.max_rows, cpus=None if per_server else cpus(args.server_cpus),
-            dry_run=args.dry_run, graphs=not args.no_graphs, groups=max(4, args.groups), compile=not args.no_compile, streams=args.streams,
+            dry_run=args.dry_run, graphs=not args.no_graphs, groups=max(4, args.groups), compile=not args.no_compile, streams=args.streams, resident_limit=args.resident_limit, stacked_attention=not args.legacy_attention,
         )  # fmt: skip
         server = InferenceServer(args.workers, cfg, worker_cpus=cpus(args.worker_cpus), devices=devices, server_cpus=per_server)
     procs = create_pool(args.workers, args.inference, server, cpus(args.worker_cpus))
     try:
         rates = []
-        for r in range(args.rounds + 1):
+        matchups = parse_matchups(args.matchup)
+        for r in range(args.rounds + args.warmup_rounds):
             specs, rng = [], random.Random(r)
             for g in range(args.games):
                 opp = pool[-1] if rng.random() < 0.5 else rng.choice(pool)
                 seats = (LEARNER, LEARNER) if g % 2 == 0 else ((LEARNER, opp) if rng.random() < 0.5 else (opp, LEARNER))
-                specs.append(GameSpec(seed=r * 1_000_000 + g, seats=seats, match_game=1 + (rng.random() < 0.5)))
+                matchup = rng.choices([m for m, _ in matchups], [w for _, w in matchups])[0]
+                specs.append(GameSpec(seed=r * 1_000_000 + g, seats=seats, match_game=1 + (rng.random() < args.postboard_frac), matchup=matchup))
             job = Job([], learner, r + 1, record=True, inference=args.inference, groups=args.groups)  # a new learner version every round
             t = time.perf_counter()
             if args.split:
@@ -108,7 +131,7 @@ def main(argv=None) -> None:
                 res = run_specs(procs, specs, job, args.workers, args.inflight)
             dt = time.perf_counter() - t
             n = sum(gm[4] for gm in res.games)
-            if r == 0:
+            if r < args.warmup_rounds:
                 print(f"warm-up: {n / dt:,.0f} decisions/s", flush=True)
                 if server is not None:
                     st0 = server.stats()  # counters from here on: the measured rounds only

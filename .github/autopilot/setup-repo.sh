@@ -9,7 +9,8 @@ gh api -X PATCH "repos/$repo" \
   -F allow_auto_merge=true -F allow_update_branch=true \
   -F allow_squash_merge=true -F delete_branch_on_merge=true > /dev/null
 
-# Default branch: CI's three jobs must pass on an up-to-date branch before anything merges.
+# Default branch: CI's three checks must pass before anything merges. Not strict (no
+# up-to-date requirement), so a merge does not force CI to re-run on every open PR.
 gh api -X POST "repos/$repo/rulesets" --input - > /dev/null <<JSON
 {
   "name": "autopilot: CI gates merges",
@@ -23,7 +24,7 @@ gh api -X POST "repos/$repo/rulesets" --input - > /dev/null <<JSON
       "require_code_owner_review": false, "require_last_push_approval": false,
       "required_review_thread_resolution": false}},
     {"type": "required_status_checks", "parameters": {
-      "strict_required_status_checks_policy": true,
+      "strict_required_status_checks_policy": false,
       "required_status_checks": [
         {"context": "lint", "integration_id": 15368},
         {"context": "python", "integration_id": 15368},

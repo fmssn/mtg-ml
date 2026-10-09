@@ -1820,6 +1820,8 @@ class Game:
             return False
         if d.additional_discard and len(self.players[p].hand) - (card.zone == "hand") < 1:
             return False
+        if mode == "flashback" and self.players[p].life < d.flashback_life:
+            return False
         if mode == "phyrexian" and self.players[p].life < d.phyrexian_life:
             return False
         if mode == "alternative" and d.alternative_reveal and any(c.face.is_type("Land") for c in self.players[p].hand if c is not card):
@@ -1895,9 +1897,10 @@ class Game:
         yield from self._choose_targets(p, item)
         cost = base.with_x(item.x).reduced(reduction)
         yield from self._pay_mana(p, RemainingCost.of(cost), add_sac, what=card.name)
-        if mode == "phyrexian":
-            self.players[p].life -= d.phyrexian_life
-            self._log(f"p{p} pays {d.phyrexian_life} life for {card.name}")
+        life_cost = d.phyrexian_life if mode == "phyrexian" else d.flashback_life if mode == "flashback" else 0
+        if life_cost:
+            self.players[p].life -= life_cost
+            self._log(f"p{p} pays {life_cost} life for {card.name}")
         if add_sac:
             mv = yield from self._choose_sacrifice(p, add_sac, card.name)
             if d.additional_sac:

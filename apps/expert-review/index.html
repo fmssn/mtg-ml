@@ -10,7 +10,16 @@ body{font:16px system-ui;margin:0;background:#101820;color:#e8edf2}header{paddin
 <main>
 <div class="bar"><label>Evidence file <input id="file" type="file" accept=".json"></label><label>Reviewer <input id="reviewer" placeholder="Your name"></label><label>Show <select id="filter"><option>pending</option><option>all</option><option>accepted</option><option>rejected</option></select></label><button id="download" disabled>Download reviewed evidence</button><button id="patch" disabled>Download review patch</button></div>
 <p class="muted">Raw extraction is never automatically approved. Commentary remains separate from factual state and observed actions. Media references are shown as paths and timestamps; open the source recording to verify them.</p>
-<div id="summary"></div><div id="error" class="error" role="alert"></div><section id="records"></section>
+<div id="summary"></div><div id="error" class="error" role="alert"></div>
+<article><h2>Reconstruction</h2><div class="bar">
+<label>Timeline <input id="timeline-file" type="file" accept=".json"></label>
+<label>Game <select id="game"><option value="">All games</option></select></label>
+<label>Checkpoint <select id="checkpoint"><option value="">Choose a checkpoint</option></select></label>
+<label>Knowledge <select id="knowledge"><option value="as_of">Available at checkpoint</option><option value="retrospective">Retrospective replay assumptions</option></select></label>
+<label>Source recording <input id="media-file" type="file" accept="video/*"></label>
+<button id="download-spec" disabled>Download reconstruction spec</button></div>
+<video id="media" controls style="max-width:100%;display:none"></video><div id="reconstruction"></div></article>
+<section id="records"></section>
 </main>
 <script>
 'use strict';
@@ -35,5 +44,21 @@ $('filter').onchange=render;
 function download(obj,name){const url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)+'\n'],{type:'application/json'}));const a=element('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 $('download').onclick=()=>download(data,'reviewed-evidence.json');
 $('patch').onclick=()=>download(data.records.filter(r=>changed.has(r.id)).map(r=>({id:r.id,value:r.value,refs:r.refs,visibility:r.visibility,available_at:r.available_at,review:r.review,...(r.classification?{classification:r.classification}:{})})),'review-patch.json');
+let timeline=null,mediaUrl=null;
+function sourceRefs(parent,refs){for(const ref of refs||[]){const button=element('button',`${ref.source_id} · ${ref.start}s · ${ref.locator}`,parent);button.onclick=()=>{if($('media').src){const source=(data?.sources||timeline?.sources||[]).find(s=>s.id===ref.source_id);$('media').currentTime=Math.max(0,ref.start-(source?.media_offset||0));}};}}
+function reconstruction(){if(!timeline)return;const parent=$('reconstruction');parent.replaceChildren();const selected=$('game').value;const cps=timeline.checkpoints.filter(c=>!selected||c.game_id===selected);const old=$('checkpoint').value;$('checkpoint').replaceChildren();const first=element('option','Choose a checkpoint',$('checkpoint'));first.value='';for(const cp of cps){const o=element('option',`${cp.id} · ${cp.time}s`,$('checkpoint'));o.value=cp.id;}$('checkpoint').value=cps.some(c=>c.id===old)?old:'';
+ const cp=cps.find(c=>c.id===$('checkpoint').value);if(cp){element('h3',cp.id,parent);element('pre',JSON.stringify(cp.state,null,2),parent);sourceRefs(parent,cp.refs);}
+ const rows=timeline.events.filter(e=>(!selected||e.game_id===selected)&&(!cp||$('knowledge').value==='retrospective'||e.available_at<=cp.time));
+ for(const e of rows){const article=element('article',undefined,parent);element('p',`${e.id} · ${e.status} · ${e.text}`,article);sourceRefs(article,e.audit_refs||e.refs);
+  if(e.duplicate_candidate||e.duplicate_of)element('p',`Occurrence link: ${e.duplicate_of||e.duplicate_candidate}`,article);
+  const label=element('label','Correction (ReconstructionSpec override JSON)',article);const edit=element('textarea',undefined,label);edit.value=JSON.stringify(timeline.spec.overrides?.[e.id]||{},null,2);
+  const save=element('button','Save correction',article);save.onclick=()=>{try{const patch=JSON.parse(edit.value);if(!patch||Array.isArray(patch)||typeof patch!=='object')throw Error('Expected an override object.');if(patch.review?.status==='accepted'&&(!patch.review.reviewer||!patch.review.note))throw Error('Accepted corrections require reviewer and rationale.');timeline.spec.overrides??={};timeline.spec.overrides[e.id]=patch;$('error').textContent='';}catch(err){$('error').textContent=err.message;}};}
+ if($('knowledge').value==='retrospective')for(const w of timeline.windows.filter(w=>!selected||w.game_id===selected)){const article=element('article',undefined,parent);element('h3',`${w.id} · ${w.status}`,article);element('pre',JSON.stringify({reason:w.reason,attempts:w.attempts,paths:w.paths.map(p=>({completion:p.completion,checkpoint_agreement:p.checkpoint_agreement,view:p.view,trace:p.trace}))},null,2),article);}
+ for(const issue of timeline.issues.filter(i=>(!selected||i.game_id===selected)&&(!cp||$('knowledge').value==='retrospective'||(i.refs?.length&&i.refs.every(r=>r.end<=cp.time))))){element('pre',JSON.stringify(issue,null,2),parent);}
+}
+$('timeline-file').onchange=async()=>{try{const parsed=JSON.parse(await $('timeline-file').files[0].text());if(parsed.format!=='ReconstructionTimeline'||parsed.version!==1||!Array.isArray(parsed.events)||!parsed.spec)throw Error('Expected ReconstructionTimeline v1.');timeline=parsed;$('game').replaceChildren();const all=element('option','All games',$('game'));all.value='';for(const g of timeline.games){const option=element('option',g.id,$('game'));option.value=g.id;}$('download-spec').disabled=false;$('error').textContent='';reconstruction();}catch(e){$('error').textContent=e.message;}};
+for(const id of ['game','checkpoint','knowledge'])$(id).onchange=reconstruction;
+$('download-spec').onclick=()=>download(timeline.spec,'reconstruction.spec.json');
+$('media-file').onchange=()=>{if(mediaUrl)URL.revokeObjectURL(mediaUrl);mediaUrl=URL.createObjectURL($('media-file').files[0]);$('media').src=mediaUrl;$('media').style.display='block';};
 </script>
 </html>
