@@ -81,7 +81,7 @@ KINDS = {"priority", "choose_x", "target", "pay_mana", "sacrifice", "exile_from_
 def card_ref(g, c, viewer, choice=False):
     if c is None:
         return None
-    known = choice or c.zone in {"battlefield", "graveyard", "exile"} or (c.zone == "hand" and (c.owner == viewer or viewer in c.known_to)) or viewer in c.known_to
+    known = choice or c.zone in {"battlefield", "graveyard", "exile", "stack"} or (c.zone == "hand" and (c.owner == viewer or viewer in c.known_to)) or viewer in c.known_to
     require(known, "action.card", "hidden card reference")
     # Unknown library order is never attached to an object reference.
     return {"name": c.name, "zone": c.zone, "oid": c.oid if c.zone == "battlefield" else None,
@@ -118,7 +118,11 @@ def stack_view(g, viewer):
     """
     def ref(r):
         tag, value = r
-        return (tag, ("self" if value == viewer else "opponent") if tag == "player" else value)
+        if tag == "player":
+            return {"player": "self" if value == viewer else "opponent"}
+        if tag == "stack":
+            return {"sid": value}
+        return {"oid": value}
 
     out = []
     for it in g.stack:
@@ -129,9 +133,13 @@ def stack_view(g, viewer):
             "name": c.name, "oid": c.oid, "controller": "self" if c.controller == viewer else "opponent",
             "keywords": sorted(g.keywords(c)), "power": g.power(c), "toughness": g.toughness(c),
         }
-        out.append({"sid": it.sid, "kind": it.kind, "controller": "self" if it.controller == viewer else "opponent",
-                    "source": src, "targets": [ref(r) for r in it.targets], "x": it.x, "method": it.method,
-                    "data": {k: it.data[k] for k in ("sid", "spell_sid", "source_oid", "amount") if k in it.data}})
+        entry = {"sid": it.sid, "name": it.name, "kind": it.kind,
+                 "controller": "self" if it.controller == viewer else "opponent",
+                 "source": src, "targets": [ref(r) for r in it.targets], "x": it.x, "method": it.method,
+                 "card": card_ref(g, it.card, viewer) if it.kind == "spell" else None}
+        if it.kind == "trigger" and it.name.endswith(": ward"):
+            entry["ward"] = {"sid": it.data["sid"], "amount": it.data["amount"]}
+        out.append(entry)
     return out
 
 
@@ -249,6 +257,9 @@ def inputs(g, viewer, own_deck):
         # for Delver/scry appear only in the permitted known-library view.
         actions.append(LegalAction(i, d.kind, freeze(key), o.label, freeze(data)))
     cards = {name: _rules(c.face, c.is_token) for name, c in permitted.items()}
+    for item in g.stack:
+        if item.kind == "spell":
+            cards[item.card.name] = _rules(item.card.face)
     # Own registered cards are known rules, without conveying remaining order.
     from ..engine.cards import CARDS
     for name in own_deck:

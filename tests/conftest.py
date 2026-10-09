@@ -13,7 +13,7 @@ import pytest
 
 from mtg_ml.backend import ENV_VAR, native_available
 
-ENGINE_MODULES = {"test_benchmark_engine", "test_benchmark_jund", "test_correctness_foundations", "test_set7_rl", "test_action_decomposition", "test_audit", "test_cards_blue", "test_cards_jund", "test_cards_red", "test_rules", "test_sideboard", "test_view_env", "test_bots", "test_fuzz", "test_copy", "test_sim_previews", "test_expert_scenarios", "test_expert_reconstruction"}
+ENGINE_MODULES = {"test_benchmark_engine", "test_benchmark_jund", "test_benchmark_blue", "test_correctness_foundations", "test_set7_rl", "test_action_decomposition", "test_audit", "test_cards_blue", "test_cards_jund", "test_cards_red", "test_rules", "test_sideboard", "test_view_env", "test_bots", "test_fuzz", "test_copy", "test_sim_previews", "test_expert_scenarios", "test_expert_reconstruction"}
 
 
 def pytest_configure(config):

@@ -42,6 +42,11 @@ class UnsupportedDecision(ValueError):
     pass
 
 
+def has_target(item, kind, value):
+    """Match a structured stack reference without relying on mapping equality."""
+    return any(ref.get(kind) == value for ref in item["targets"])
+
+
 class Position:
     def __init__(self, view):
         self.view, self.s, self.rules = view, view.state, view.cards
@@ -124,7 +129,7 @@ class Position:
         else:
             v = S["other"]
         # A threatened permanent is cheap to cash in; a required blocker isn't.
-        if any(it["controller"] == "opponent" and ("perm", c["oid"]) in it["targets"] for it in self.stack):
+        if any(it["controller"] == "opponent" and has_target(it, "oid", c["oid"]) for it in self.stack):
             v = min(v, S["threatened"])
         return v - self.growth(c)
 
@@ -153,13 +158,13 @@ class Position:
 
     def pending_damage(self, oid):
         return sum(1 for it in self.stack if it["source"] and it["source"]["name"] == "Makeshift Munitions"
-                   and it["controller"] == "self" and ("perm", oid) in it["targets"])
+                   and it["controller"] == "self" and has_target(it, "oid", oid))
 
     def removal_value(self, c, payment=None):
         if c["controller"] != "opponent" or "indestructible" in c["keywords"]:
             return NEG
         if any(it["controller"] == "self" and it["source"] and it["source"]["name"] == "Cast Down"
-               and ("perm", c["oid"]) in it["targets"] for it in self.stack):
+               and has_target(it, "oid", c["oid"]) for it in self.stack):
             return NEG
         ward = self.rules[c["name"]]["ward"]
         if not self.payable((payment or ManaCost()).plus(ManaCost(ward))):
@@ -354,7 +359,7 @@ class BenchmarkJundBot:
             if not fodder:
                 return NEG
             loss = p.sacrifice_cost(fodder[0])
-            threatened = any(it["controller"] == "opponent" and ("perm", fodder[0]["oid"]) in it["targets"] for it in p.stack)
+            threatened = any(it["controller"] == "opponent" and has_target(it, "oid", fodder[0]["oid"]) for it in p.stack)
             if threatened:
                 return P["save_fodder"] - loss
             if loss > T["cheap_fodder"] or not (p.end or p.main):
@@ -411,7 +416,7 @@ class BenchmarkJundBot:
         c = p.by_id.get(ref["oid"])
         if name == "Krark-Clan Shaman":
             # A Toxin still on the stack must resolve before using its keywords.
-            if any(it["source"] and it["source"]["name"] == "Toxin Analysis" and ("perm", c["oid"]) in it["targets"] for it in p.stack):
+            if any(it["source"] and it["source"]["name"] == "Toxin Analysis" and has_target(it, "oid", c["oid"]) for it in p.stack):
                 return NEG
             v, n = p.sweep(c)
             return P["sweep"] + v if n and v > 0 else NEG
@@ -419,7 +424,7 @@ class BenchmarkJundBot:
             fodder = p.fodder(payment=cost("{1}"))
             cheap = [c for c in fodder if p.sacrifice_cost(c) <= T["cheap_fodder"]]
             budget = p.munitions_budget()
-            pending = sum(it["source"] and it["source"]["name"] == name and ("player", "opponent") in it["targets"] for it in p.stack)
+            pending = sum(it["source"] and it["source"]["name"] == name and has_target(it, "player", "opponent") for it in p.stack)
             if budget and 0 < p.opp["life"] - pending <= budget:
                 return C["lethal"]
             targets = [t for t in p.threats if combat.dies(t, 1 + p.pending_damage(t["oid"])) and not combat.dies(t, p.pending_damage(t["oid"]))
@@ -444,7 +449,7 @@ class BenchmarkJundBot:
 
     def face_lethal(self, p):
         pending = sum(it["source"] and it["source"]["name"] == "Makeshift Munitions" and
-                      ("player", "opponent") in it["targets"] for it in p.stack)
+                      has_target(it, "player", "opponent") for it in p.stack)
         return 0 < p.opp["life"] - pending <= p.munitions_budget()
 
     def choose_target(self, p, actions):
@@ -565,7 +570,7 @@ class BenchmarkJundBot:
                 out.append(float((ans == "top") == keep))
             elif tag == "deem":
                 targets = p.top["targets"] if p.top else ()
-                c = next((p.by_id.get(r[1]) for r in targets if r[0] == "perm"), None)
+                c = next((p.by_id.get(r["oid"]) for r in targets if "oid" in r), None)
                 keep = c is not None and p.card_value(c["name"]) >= 2
                 out.append(float((ans == "second") == keep))
             else:
