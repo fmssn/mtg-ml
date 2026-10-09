@@ -9,6 +9,8 @@ Arms (all feature set 7/8, h256, seed 8, r7 lr075 settings unless stated):
   A  r8-lr075-continue  resume the r7 lr075 run dir; lr anneal continues
   B  r8-fs8-belief      fresh, feature set 8 + belief head (needs match rollouts)
   C  r8-jund-blue-ft    --init from the r7 lr075 final policy, jund_blue only
+  D  r8-jund-blue-ft-s2 replication of C with seed 9
+  E  r8-jund-mirror-ft  like C on --matchup jund_mirror
 
 Run from the deployed checkout's venv:
   python tools/r8_campaign.py prepare --root ROOT --code CODE --arms A --ladder-src DIR ...
@@ -32,7 +34,7 @@ import overnight_campaign as oc  # noqa: E402
 PARENT_RUN = "20261008-r7-fs7-h256-lr075"
 SKIP_COPY = ("train.log", "train.log.1", "train.log.2", "train.log.3", "process.json", "supervisor.lock", "evaluation.lock")
 # arm -> (host layout slot: GPU buses (learner, server), CPU offset)
-ARMS = {"A": "r8-lr075-continue", "B": "r8-fs8-belief", "C": "r8-jund-blue-ft"}
+ARMS = {"A": "r8-lr075-continue", "B": "r8-fs8-belief", "C": "r8-jund-blue-ft", "D": "r8-jund-blue-ft-s2", "E": "r8-jund-mirror-ft"}
 RUNG_RATINGS = {488: 0.0, 1464: 33.3, 2440: 50.8, 3904: 78.8}
 
 
@@ -75,10 +77,14 @@ def flags(arm: str, run: Path, root: Path, rungs: dict, offset: int, parent: str
     }
     if arm == "B":  # the only differences from r7 lr075: set 8 + belief head, which requires whole-match rollouts with varied lists
         f.update({"features": 8, "belief": 1, "match-rollouts": 1, "variants": "train"})
-    if arm == "C":
+    if arm in ("C", "D", "E"):
         for k in ("features", "entity-attn", "hidden", "trunk", "value-net", "memory"):
             del f[k]  # architecture comes from --init
         f.update({"init": parent, "matchup": "jund_blue", "lr-anneal-games": 6000000, "total-games": 6000000})
+        if arm == "D":
+            f["seed"] = 9
+        if arm == "E":
+            f["matchup"] = "jund_mirror"
     if smoke:
         f.update({"iterations": smoke_iters, "total-games": 0, "eval-every-games": 0, "bench-games": 8,
                   "bench-greedy-games": 8, "ladder-games": 8, "checkpoint-every": 2})
@@ -114,7 +120,7 @@ def prepare(args):
         else:
             run.mkdir()
             smoke_iters = 6 if args.smoke else None
-        parent = args.parent_policy if arm == "C" else None
+        parent = args.parent_policy if arm in ("C", "D", "E") else None
         f = flags(arm, run, root, rungs, offset, parent, smoke_iters)
         command = [str(code / ".venv/bin/python"), "-m", "mtg_ml.rl.train"] + [p for k, v in f.items() for p in ("--" + k, str(v))]
         env = dict(CUDA_VISIBLE_DEVICES=f"{gpu[b0]},{gpu[b1]}", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1",
@@ -124,9 +130,9 @@ def prepare(args):
             name=name, arm=name, mode="training", run=str(run), code=str(code), code_ref=source, command=command,
             environment=env, gpus=env["CUDA_VISIBLE_DEVICES"].split(","),
             cpus=[offset, offset + 1, offset + 2, *range(offset + 4, offset + 32)],
-            eval_cpus=list(range(offset + 4, offset + 8)), seed=8, features=f.get("features", 7),
+            eval_cpus=list(range(offset + 4, offset + 8)), seed=f["seed"], features=f.get("features", 7),
             target_games=int(f["total-games"]) or 51200, warmup=5, initial_tensor_sha256="n/a",
-            parent=(PARENT_RUN if arm in "AC" else None), created_at=time.time(), smoke=args.smoke,
+            parent=(PARENT_RUN if arm in ("A", "C", "D", "E") else None), created_at=time.time(), smoke=args.smoke,
             buses=[b0, b1]))
     oc.atomic(root / "campaign.json", entries)
     print(root / "campaign.json")
