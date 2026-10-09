@@ -85,6 +85,7 @@ def flags(arm: str, run: Path, root: Path, rungs: dict, offset: int, parent: str
             f["seed"] = 9
         if arm == "E":
             f["matchup"] = "jund_mirror"
+            f["ppo-capture"] = 0  # mirror games are long: the CUDA-graph captures filled the 80 GB learner GPU (OOM at iteration 41 with capture 2)
     if smoke:
         f.update({"iterations": smoke_iters, "total-games": 0, "eval-every-games": 0, "bench-games": 8,
                   "bench-greedy-games": 8, "ladder-games": 8, "checkpoint-every": 2})
