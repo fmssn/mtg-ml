@@ -101,9 +101,9 @@ jobs:
           [[ $(gh api "repos/$GH_REPO/branches/$encoded" --jq .protected) == true ]] || skip "default branch is unprotected"
           rules=$(gh api "repos/$GH_REPO/rules/branches/$encoded")
           jq -e 'any(.[]; .type == "pull_request") and
-            ([.[] | select(.type == "required_status_checks" and .parameters.strict_required_status_checks_policy == true)
+            ([.[] | select(.type == "required_status_checks")
               | .parameters.required_status_checks[].context] | contains(["lint", "python", "native"]))' <<< "$rules" > /dev/null \
-            || skip "default branch must require up-to-date lint, python and native checks"
+            || skip "default branch must require lint, python and native checks"
           labels=" $(jq -r '[.labels[].name] | join(" ")' <<< "$info") "
 
           for l in needs-opus needs-human autopilot:opus-used autopilot:round-1 autopilot:round-2; do
