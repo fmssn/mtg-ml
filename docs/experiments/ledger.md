@@ -21,7 +21,7 @@ Score of the checkpoint, sampled / greedy:
 - The standing matchup (learner Jund vs Blue) is hard. Neither r7 arm reaches 50%; r4-control gets 64% with privileged inputs.
 - r4-control loses the Jund mirror to the Jund specialist (33–36%). It was trained on Jund vs Blue only. The r7 arms, trained on six decks including mirrors, win both mirrors.
 - lr075 beats lr150 in every cell, by 5–11 points. This matches the morning report (L1 −14 vs −38).
-- r7's greedy play is 4–14 points above its sampled play (entropy ~0.35). r4-control's gap is ≤3.
+- r7's greedy play is 4–14 points above its sampled play (entropy ~0.35). r4-control's gap is at most 3.4.
 - Sampled and greedy scores for r4-control coincide in some cells. Only 313 of 2,400 games were identical, so this is chance, not a mode bug.
 
 ## 20261008-h256-attention-scaling · implementation and completed throughput screens
