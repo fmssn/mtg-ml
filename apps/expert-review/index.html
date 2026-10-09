@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTGO evidence review</title>
+<style>
+body{font:16px system-ui;margin:0;background:#101820;color:#e8edf2}header{padding:24px;background:#172632}main{max-width:1100px;margin:24px auto;padding:0 20px}button,input,select,textarea{font:inherit;border:1px solid #617587;border-radius:5px;padding:8px;background:#20313f;color:inherit}button{cursor:pointer}button:hover{background:#345066}textarea{width:95%;min-height:100px;font:14px ui-monospace,monospace}article{background:#172632;margin:16px 0;padding:18px;border-radius:8px}.bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.pending{border-left:4px solid #e3b75a}.accepted{border-left:4px solid #63c8a3}.rejected{border-left:4px solid #d97a81}.muted{color:#a6b5c3}.error{color:#ffa4a4}label{display:block;margin-top:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere}#summary{margin:16px 0}a{color:#8fc7fa}h1{margin:0 0 8px}
+</style>
+<header><h1>MTGO evidence review</h1><div class="muted">Compare each observation with its source, correct it, and record your reasoning.</div></header>
+<main>
+<div class="bar"><label>Evidence file <input id="file" type="file" accept=".json"></label><label>Reviewer <input id="reviewer" placeholder="Your name"></label><label>Show <select id="filter"><option>pending</option><option>all</option><option>accepted</option><option>rejected</option></select></label><button id="download" disabled>Download reviewed evidence</button><button id="patch" disabled>Download review patch</button></div>
+<p class="muted">Raw extraction is never automatically approved. Commentary remains separate from factual state and observed actions. Media references are shown as paths and timestamps; open the source recording to verify them.</p>
+<div id="summary"></div><div id="error" class="error" role="alert"></div>
+<article><h2>Reconstruction</h2><div class="bar">
+<label>Timeline <input id="timeline-file" type="file" accept=".json"></label>
+<label>Game <select id="game"><option value="">All games</option></select></label>
+<label>Checkpoint <select id="checkpoint"><option value="">Choose a checkpoint</option></select></label>
+<label>Knowledge <select id="knowledge"><option value="as_of">Available at checkpoint</option><option value="retrospective">Retrospective replay assumptions</option></select></label>
+<label>Source recording <input id="media-file" type="file" accept="video/*"></label>
+<button id="download-spec" disabled>Download reconstruction spec</button></div>
+<video id="media" controls style="max-width:100%;display:none"></video><div id="reconstruction"></div></article>
+<section id="records"></section>
+</main>
+<script>
+'use strict';
+let data=null;const changed=new Set();const $=id=>document.getElementById(id);
+function element(tag,text,parent){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(parent)parent.append(el);return el;}
+function updateSummary(){const counts={pending:0,accepted:0,rejected:0};for(const r of data.records)counts[r.review.status]++;$('summary').textContent=`${data.records.length} records · ${counts.pending} pending · ${counts.accepted} accepted · ${counts.rejected} rejected`}
+function render(){if(!data)return;updateSummary();$('records').replaceChildren();for(const r of data.records){if($('filter').value!=='all'&&r.review.status!==$('filter').value)continue;
+ const article=element('article',undefined,$('records'));article.className=r.review.status;
+ element('h3',`${r.id} · ${r.kind}`,article);element('pre',JSON.stringify(r.refs,null,2),article);
+ const valueLabel=element('label','Observation (JSON)',article);const value=element('textarea',undefined,valueLabel);value.value=JSON.stringify(r.value,null,2);value.setAttribute('aria-label',`Observation ${r.id}`);
+ const timing=element('label','Available to the player at (original video seconds)',article);const time=element('input',undefined,timing);time.type='number';time.step='any';time.value=r.available_at;
+ const visLabel=element('label','Visibility',article);const vis=element('select',undefined,visLabel);for(const v of ['public','self','opponent_private','belief','hindsight','unknown'])element('option',v,vis);vis.value=r.visibility;
+ let classification=null;if(r.kind==='commentary'){const l=element('label','Meaning',article);classification=element('select',undefined,l);for(const v of ['observed_action','proposed_line','rejected_alternative','opponent_prediction','retrospective_correction','other'])element('option',v,classification);classification.value=r.classification||'other';}
+ const rationale=element('label','Review rationale',article);const note=element('input',undefined,rationale);note.style.width='95%';note.value=r.review.note||'';
+ if(r.uncertainty)element('p',`Uncertainty: ${r.uncertainty}`,article);
+ if(r.alignment_candidates?.length)element('pre',`Candidate links (unverified):\n${JSON.stringify(r.alignment_candidates,null,2)}`,article);
+ const buttons=element('div',undefined,article);buttons.className='bar';buttons.style.marginTop='12px';
+ for(const status of ['accepted','rejected','pending']){const btn=element('button',status==='accepted'?'Accept':status==='rejected'?'Reject':'Keep pending',buttons);btn.onclick=()=>{try{const reviewer=$('reviewer').value.trim();if(status==='accepted'&&(!reviewer||!note.value.trim()))throw Error('Accepting an observation requires your name and a rationale.');const parsed=JSON.parse(value.value);const available=Number(time.value);if(!Number.isFinite(available)||available<0)throw Error('Invalid availability timestamp.');r.value=parsed;r.available_at=available;r.visibility=vis.value;if(classification)r.classification=classification.value;r.review={status,reviewer,note:note.value.trim()};changed.add(r.id);$('error').textContent='';render();}catch(e){$('error').textContent=e.message;}};}
+ }}
+$('file').onchange=async()=>{try{const parsed=JSON.parse(await $('file').files[0].text());if(parsed.format!=='EvidenceGame'||parsed.version!==1||!Array.isArray(parsed.records)||!Array.isArray(parsed.sources))throw Error('Expected an EvidenceGame v1 file.');if(parsed.records.some(r=>!r.id||!['pending','accepted','rejected'].includes(r.review?.status)))throw Error('Malformed evidence records.');data=parsed;changed.clear();$('error').textContent='';$('download').disabled=$('patch').disabled=false;render();}catch(e){$('error').textContent=e.message;}};
+$('filter').onchange=render;
+function download(obj,name){const url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)+'\n'],{type:'application/json'}));const a=element('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+$('download').onclick=()=>download(data,'reviewed-evidence.json');
+$('patch').onclick=()=>download(data.records.filter(r=>changed.has(r.id)).map(r=>({id:r.id,value:r.value,refs:r.refs,visibility:r.visibility,available_at:r.available_at,review:r.review,...(r.classification?{classification:r.classification}:{})})),'review-patch.json');
+let timeline=null,mediaUrl=null;
+function sourceRefs(parent,refs){for(const ref of refs||[]){const button=element('button',`${ref.source_id} · ${ref.start}s · ${ref.locator}`,parent);button.onclick=()=>{if($('media').src){const source=(data?.sources||timeline?.sources||[]).find(s=>s.id===ref.source_id);$('media').currentTime=Math.max(0,ref.start-(source?.media_offset||0));}};}}
+function reconstruction(){if(!timeline)return;const parent=$('reconstruction');parent.replaceChildren();const selected=$('game').value;const cps=timeline.checkpoints.filter(c=>!selected||c.game_id===selected);const old=$('checkpoint').value;$('checkpoint').replaceChildren();const first=element('option','Choose a checkpoint',$('checkpoint'));first.value='';for(const cp of cps){const o=element('option',`${cp.id} · ${cp.time}s`,$('checkpoint'));o.value=cp.id;}$('checkpoint').value=cps.some(c=>c.id===old)?old:'';
+ const cp=cps.find(c=>c.id===$('checkpoint').value);if(cp){element('h3',cp.id,parent);element('pre',JSON.stringify(cp.state,null,2),parent);sourceRefs(parent,cp.refs);}
+ const rows=timeline.events.filter(e=>(!selected||e.game_id===selected)&&(!cp||$('knowledge').value==='retrospective'||e.available_at<=cp.time));
+ for(const e of rows){const article=element('article',undefined,parent);element('p',`${e.id} · ${e.status} · ${e.text}`,article);sourceRefs(article,e.audit_refs||e.refs);
+  if(e.duplicate_candidate||e.duplicate_of)element('p',`Occurrence link: ${e.duplicate_of||e.duplicate_candidate}`,article);
+  const label=element('label','Correction (ReconstructionSpec override JSON)',article);const edit=element('textarea',undefined,label);edit.value=JSON.stringify(timeline.spec.overrides?.[e.id]||{},null,2);
+  const save=element('button','Save correction',article);save.onclick=()=>{try{const patch=JSON.parse(edit.value);if(!patch||Array.isArray(patch)||typeof patch!=='object')throw Error('Expected an override object.');if(patch.review?.status==='accepted'&&(!patch.review.reviewer||!patch.review.note))throw Error('Accepted corrections require reviewer and rationale.');timeline.spec.overrides??={};timeline.spec.overrides[e.id]=patch;$('error').textContent='';}catch(err){$('error').textContent=err.message;}};}
+ if($('knowledge').value==='retrospective')for(const w of timeline.windows.filter(w=>!selected||w.game_id===selected)){const article=element('article',undefined,parent);element('h3',`${w.id} · ${w.status}`,article);element('pre',JSON.stringify({reason:w.reason,attempts:w.attempts,paths:w.paths.map(p=>({completion:p.completion,checkpoint_agreement:p.checkpoint_agreement,view:p.view,trace:p.trace}))},null,2),article);}
+ for(const issue of timeline.issues.filter(i=>(!selected||i.game_id===selected)&&(!cp||$('knowledge').value==='retrospective'||(i.refs?.length&&i.refs.every(r=>r.end<=cp.time))))){element('pre',JSON.stringify(issue,null,2),parent);}
+}
+$('timeline-file').onchange=async()=>{try{const parsed=JSON.parse(await $('timeline-file').files[0].text());if(parsed.format!=='ReconstructionTimeline'||parsed.version!==1||!Array.isArray(parsed.events)||!parsed.spec)throw Error('Expected ReconstructionTimeline v1.');timeline=parsed;$('game').replaceChildren();const all=element('option','All games',$('game'));all.value='';for(const g of timeline.games){const option=element('option',g.id,$('game'));option.value=g.id;}$('download-spec').disabled=false;$('error').textContent='';reconstruction();}catch(e){$('error').textContent=e.message;}};
+for(const id of ['game','checkpoint','knowledge'])$(id).onchange=reconstruction;
+$('download-spec').onclick=()=>download(timeline.spec,'reconstruction.spec.json');
+$('media-file').onchange=()=>{if(mediaUrl)URL.revokeObjectURL(mediaUrl);mediaUrl=URL.createObjectURL($('media-file').files[0]);$('media').src=mediaUrl;$('media').style.display='block';};
+</script>
+</html>

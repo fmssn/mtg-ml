@@ -14,7 +14,7 @@ from mtg_ml.engine.view import determinize
 from mtg_ml.match import matchup_decks
 from mtg_ml.engine.decks import DECKS, expand
 
-MATCHUPS = ("jund_blue", "jund_madness", "blue_madness")
+MATCHUPS = ("jund_blue", "jund_madness", "blue_madness", "jund_elves", "blue_elves", "madness_elves")
 
 
 def decks(matchup: str):
@@ -56,7 +56,7 @@ def play(seed: int, matchup: str, copy_p: float, steps: int, max_decisions: int 
 
 @pytest.mark.parametrize("matchup", MATCHUPS)
 def test_copy_continues_like_replay(matchup):
-    for seed in range(4):
+    for seed in range(2):  # the slow variant below plays 20 more seeds
         play(seed, matchup, copy_p=0.1, steps=8)
 
 

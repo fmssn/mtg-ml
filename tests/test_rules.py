@@ -169,6 +169,21 @@ def test_trample_requires_lethal_to_blockers_first():
     assert g.players[1].life == 17
 
 
+def test_damage_division_past_the_cap_is_sequential_and_exact():
+    g = scenario(p0={"battlefield": [("Nyxborn Hydra", {"counters": 20})]}, p1={"battlefield": ["Delver of Secrets"] * 7}, step="declare_attackers")
+    attack(g, "Nyxborn Hydra")
+    pass_priority(g, 2)
+    for _ in range(7):
+        choose(g, "blocks Nyxborn Hydra")
+    pass_priority(g, 2)
+    assert g.decision.kind == O.ASSIGN_DAMAGE_AMOUNT
+    assert [o.value for o in g.legal_options()] == list(range(14))
+    choose(g, "13 to player")
+    while g.decision.kind == O.ASSIGN_DAMAGE_AMOUNT:
+        choose(g, "1 to Delver of Secrets")
+    assert g.players[1].life == 7 and not any(c.name == "Delver of Secrets" for c in g.battlefield)
+
+
 def test_blocked_creature_whose_blocker_left_deals_no_damage():
     g = scenario(p0={"battlefield": ["Gixian Infiltrator"]}, p1={"battlefield": ["Delver of Secrets"]}, step="declare_attackers")
     attack(g, "Gixian Infiltrator")

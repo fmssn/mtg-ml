@@ -153,6 +153,9 @@ def test_split_minibatches_equal_collate(data, device, seed):
                 assert b.ent_width >= direct.ent_width
                 continue
             want = getattr(ref if f.name in SHARED else direct, f.name)
+            if want is None:  # belief evidence: not collated here (tests/test_belief.py)
+                assert getattr(b, f.name) is None, f.name
+                continue
             assert torch.equal(getattr(b, f.name).cpu(), want), f.name
 
 

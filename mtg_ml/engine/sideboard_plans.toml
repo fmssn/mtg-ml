@@ -1,0 +1,285 @@
+# Sideboard plans: what each deck boards in and out for games 2 and 3 of a
+# match, by opponent. One [[plan]] per ordered (deck, opponent) pair; every
+# pair of decks in decks.DECKS needs one in each direction.
+#
+#   deck, opponent   keys of decks.DECKS
+#   why              one line: what the swap is for
+#   in               cards from decks.SIDEBOARDS[deck] -> maindeck
+#   out              maindeck cards -> sideboard (same total as `in`)
+#
+# Counts are relative to the registered maindeck, never to a previous game's
+# deck. mtg_ml/engine/sideboard.py validates every row at import (counts
+# available, 60 / 15, at most 4 copies). The scripted PlanMatrixPolicy
+# (mtg_ml/match.py) plays exactly this table; docs/sideboarding.md explains
+# how a learned policy replaces it.
+
+# Plans among the first three decks, 2026-10-07: from card knowledge and the
+# Q3 2026 matchup data of Pauper-Research (reports/2026-Q3/combined/
+# matchups.csv, the row deck's match win rate): Jund v Blue 46% (61
+# matches), Jund v Red 31% (86), Blue v Red 65% (100).
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "mono_blue_terror"
+why = "Duress and Red Elemental Blast fight counters and card draw, Faerie Macabre and the fourth Nihil Spellbomb shrink Terror's and Serpent's discount, Terminate is extra removal; lifegain, Wildfire against basics and the slow Hydra out."
+in = { "Duress" = 3, "Red Elemental Blast" = 2, "Faerie Macabre" = 1, "Nihil Spellbomb" = 1, "Terminate" = 1 }
+out = { "Lembas" = 2, "Cleansing Wildfire" = 3, "Makeshift Munitions" = 1, "Nyxborn Hydra" = 1, "Toxin Analysis" = 1 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "jund_wildfire"
+why = "Annul counters Jund's many artifacts (Familiar, Wellspring, Spellbomb, Lembas) and the Hydra, Hydroblast its red cards; Force Spike and the sorcery-speed removal out."
+in = { "Annul" = 4, "Hydroblast" = 2 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Deem Inferior" = 1 }
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "red_madness"
+why = "Life and board against burn: Weather the Storm, Breath Weapon sweeps the x/1s and x/2s, Terminate; Wildfire does nothing against basic Mountains, the Hydra and Insight are slow."
+in = { "Weather the Storm" = 3, "Breath Weapon" = 2, "Terminate" = 1 }
+out = { "Cleansing Wildfire" = 4, "Nyxborn Hydra" = 1, "Eviscerator's Insight" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "jund_wildfire"
+why = "End the Festivities and Cast into the Fire clear Spawn, Shaman, Infiltrator and Familiar (or exile an artifact), Searing Blaze kills Chrysalis; the weakest threats and slow card draw out."
+in = { "End the Festivities" = 2, "Cast into the Fire" = 2, "Searing Blaze" = 2 }
+out = { "Voldaren Epicure" = 2, "Highway Robbery" = 2, "Guttersnipe" = 1, "Sneaky Snacker" = 1 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "red_madness"
+why = "Hydroblast and Blue Elemental Blast counter burn and kill red creatures, Gut Shot kills the x/1s for free; Force Spike, the slow removal and a Ponder out."
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 3, "Gut Shot" = 2 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Deem Inferior" = 3, "Ponder" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "mono_blue_terror"
+why = "Pyroblast and Red Elemental Blast answer every blue card, Relic of Progenitus starves Terror and Serpent; the slow card draw and Epicure out."
+in = { "Pyroblast" = 4, "Red Elemental Blast" = 2, "Relic of Progenitus" = 2 }
+out = { "Highway Robbery" = 4, "Grab the Prize" = 2, "Voldaren Epicure" = 2 }
+
+# Grixis Affinity (docs/grixis-affinity.md). Its rows against Elves and Tron
+# are in those decks' sections.
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "jund_wildfire"
+why = "Hydroblast for Krark-Clan Shaman and Wildfire, the edict for Chrysalis and Familiar, a fourth Shaman; Black Mage's Rod (its Hero dies to every Shaman activation) and Cam go out."
+in = { "Hydroblast" = 2, "Extract a Confession" = 2, "Krark-Clan Shaman" = 1 }
+out = { "Black Mage's Rod" = 2, "Sewer-veillance Cam" = 1, "Makeshift Munitions" = 1, "Toxin Analysis" = 1 }
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "grixis_affinity"
+why = "Artifact hate: Troublemaker Ouphe for the threats and Spellbombs, Breath Weapon sweeps the 2-toughness creatures, Red Elemental Blast for Thoughtcast and the blue creatures, Terminate for a big Enforcer or Monitor; the slow value cards and the Hydra go out."
+in = { "Troublemaker Ouphe" = 2, "Breath Weapon" = 2, "Red Elemental Blast" = 2, "Terminate" = 1 }
+out = { "Lembas" = 2, "Gixian Infiltrator" = 2, "Eviscerator's Insight" = 2, "Nyxborn Hydra" = 1 }
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "mono_blue_terror"
+why = "Pyroblast fights Counterspell and kills Tolarian Terror; Toxin Analysis, Munitions and Cam go out."
+in = { "Pyroblast" = 4 }
+out = { "Toxin Analysis" = 2, "Makeshift Munitions" = 1, "Sewer-veillance Cam" = 1 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "grixis_affinity"
+why = "Annul for the artifact threats, Envelop for Thoughtcast, Gut Shot for Familiar, Shaman and Kenku; Force Spike, Sleep, Plunder and two Ponders go out."
+in = { "Annul" = 4, "Envelop" = 1, "Gut Shot" = 3 }
+out = { "Force Spike" = 3, "Sleep of the Dead" = 2, "Plunder the Trollshaws" = 1, "Ponder" = 2 }
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "red_madness"
+why = "Hydroblast and Blue Elemental Blast answer burn and the red creatures, a fourth Shaman sweeps the x/1s; Black Mage's Rod (a 2/1 Hero dies to every burn spell), the Spellbombs (Red barely uses its graveyard) and Cam go out."
+in = { "Hydroblast" = 4, "Blue Elemental Blast" = 1, "Krark-Clan Shaman" = 1 }
+out = { "Black Mage's Rod" = 2, "Nihil Spellbomb" = 3, "Sewer-veillance Cam" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "grixis_affinity"
+why = "End the Festivities sweeps the x/1s, Cast into the Fire exiles an artifact threat or pings two, Pyroblast hits the blue cards; the slow card draw goes out."
+in = { "End the Festivities" = 2, "Cast into the Fire" = 2, "Pyroblast" = 2 }
+out = { "Highway Robbery" = 2, "Grab the Prize" = 2, "Sneaky Snacker" = 2 }
+
+# Elves (docs/elves.md). Faerie Macabre is never cast here (no black mana):
+# it is a free graveyard-hate discard.
+
+[[plan]]
+deck = "elves"
+opponent = "jund_wildfire"
+why = "Krark-Clan Shaman sweeps the x/1 mana Elves: Vitu-Ghazi Inspector (1/3 reach) survives it, Deglamer shuffles a Bridge or Wellspring away."
+in = { "Vitu-Ghazi Inspector" = 3, "Deglamer" = 1 }
+out = { "Elvish Mystic" = 2, "Fyndhorn Elves" = 1, "Sagu Wildling" = 1 }
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "elves"
+why = "Breath Weapon sweeps the x/1 and x/2 Elves, Terminate kills any of them; Cleansing Wildfire on a basic Forest only cycles."
+in = { "Breath Weapon" = 2, "Terminate" = 1 }
+out = { "Cleansing Wildfire" = 3 }
+
+[[plan]]
+deck = "elves"
+opponent = "mono_blue_terror"
+why = "Faerie Macabre shrinks Terror and Serpent and stops Sleep of the Dead's escape, Emergence kills Delver; no targets for Masked Vandal."
+in = { "Faerie Macabre" = 3, "Monstrous Emergence" = 1 }
+out = { "Masked Vandal" = 4 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "elves"
+why = "Gut Shot kills a mana Elf for free, Envelop counters Lead the Stampede, Winding Way or Land Grant; Force Spike (Elves have mana to spare) and a Deem Inferior go out."
+in = { "Gut Shot" = 3, "Envelop" = 1 }
+out = { "Force Spike" = 3, "Deem Inferior" = 1 }
+
+[[plan]]
+deck = "elves"
+opponent = "red_madness"
+why = "Life and toughness against burn (Paladin and Inspector gain life); the x/1 mana Elves and Vandals (Red has only Blood) go out."
+in = { "Spinewoods Paladin" = 4, "Vitu-Ghazi Inspector" = 3 }
+out = { "Masked Vandal" = 4, "Elvish Mystic" = 2, "Fyndhorn Elves" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "elves"
+why = "End the Festivities sweeps a board of x/1s, Cast into the Fire kills two of them, Searing Blaze a bigger one; the slow card draw goes out."
+in = { "End the Festivities" = 2, "Cast into the Fire" = 2, "Searing Blaze" = 2 }
+out = { "Highway Robbery" = 4, "Grab the Prize" = 2 }
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "elves"
+why = "A fourth Krark-Clan Shaman sweeps the x/1 mana elves; the slow Cam goes out (an edict is poor against a wide board)."
+in = { "Krark-Clan Shaman" = 1 }
+out = { "Sewer-veillance Cam" = 1 }
+
+[[plan]]
+deck = "elves"
+opponent = "grixis_affinity"
+why = "Deglamer kills an artifact creature or a Bridge, Spinewoods Paladin gains life against Galvanic Blast; the slow Sagu Wildlings and Lead the Stampede go out."
+in = { "Deglamer" = 1, "Spinewoods Paladin" = 4 }
+out = { "Sagu Wildling" = 2, "Lead the Stampede" = 3 }
+
+# Tron (docs/tron.md).
+
+[[plan]]
+deck = "tron"
+opponent = "jund_wildfire"
+why = "Breath Weapon sweeps Spawn, Krark-Clan Shaman and the Familiars; Call Damage Control rebuys lands lost to Cleansing Wildfire; Whispersilk Cloak keeps a seven-drop safe from Cast Down; the slow card draw goes out."
+in = { "Breath Weapon" = 3, "Call Damage Control" = 2, "Whispersilk Cloak" = 1 }
+out = { "Candy Trail" = 2, "Unfathomable Truths" = 2, "Bonder's Ornament" = 1, "Boulderbranch Golem" = 1 }
+
+[[plan]]
+deck = "jund_wildfire"
+opponent = "tron"
+why = "Duress takes Stirrings, Map, Crop Rotation and Truths; the incidental artifacts go out."
+in = { "Duress" = 2 }
+out = { "Makeshift Munitions" = 1, "Lembas" = 1 }
+
+[[plan]]
+deck = "tron"
+opponent = "mono_blue_terror"
+why = "Breath Weapon kills Delver at instant speed, Scour from Existence answers Terror and Serpent, Whispersilk Cloak protects a threat from Deem Inferior; the life gain (Candy Trail, the Golem, Bramble Wurm) matters little against Blue."
+in = { "Breath Weapon" = 2, "Scour from Existence" = 2, "Whispersilk Cloak" = 1 }
+out = { "Candy Trail" = 2, "Boulderbranch Golem" = 2, "Bramble Wurm" = 1 }
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "tron"
+why = "Annul counters Map, Candy Trail, Barrels, Ornament and the artifact threats, Envelop Crop Rotation, Stirrings and Truths; Sleep of the Dead, Force Spike and Plunder do little against seven-drops."
+in = { "Annul" = 4, "Envelop" = 1 }
+out = { "Sleep of the Dead" = 2, "Force Spike" = 2, "Plunder the Trollshaws" = 1 }
+
+[[plan]]
+deck = "tron"
+opponent = "red_madness"
+why = "Breath Weapon sweeps the small creatures, Kaervek's Torch kills one at instant speed, Pulse of Murasa gains 6; the slowest cards go out."
+in = { "Breath Weapon" = 3, "Kaervek's Torch" = 1, "Pulse of Murasa" = 1 }
+out = { "Unfathomable Truths" = 2, "Maelstrom Colossus" = 2, "Bonder's Ornament" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "tron"
+why = "Cast into the Fire exiles an Expedition Map, Candy Trail or Barrels before they assemble Tron; Voldaren Epicure's ping does nothing to seven-drops."
+in = { "Cast into the Fire" = 2 }
+out = { "Voldaren Epicure" = 2 }
+
+[[plan]]
+deck = "tron"
+opponent = "grixis_affinity"
+why = "Breath Weapon kills Refurbished Familiar, Krark-Clan Shaman and Kenku Artificer, Kaervek's Torch a Myr Enforcer; Candy Trail is too slow."
+in = { "Breath Weapon" = 2, "Kaervek's Torch" = 1 }
+out = { "Candy Trail" = 2, "Haunted Fengraf" = 1 }
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "tron"
+why = "A race: the edict answers a lone Golem or Colossus, Envelop counters a sorcery-speed answer; Krark-Clan Shaman cannot touch Tron's big creatures."
+in = { "Extract a Confession" = 2, "Envelop" = 1 }
+out = { "Krark-Clan Shaman" = 3 }
+
+[[plan]]
+deck = "tron"
+opponent = "elves"
+why = "Breath Weapon wipes the mana elves, Priest of Titania and Timberwatch Elf; Monstrous Emergence kills Avenging Hunter or a Hydra; the slow card draw goes out."
+in = { "Breath Weapon" = 2, "Monstrous Emergence" = 2 }
+out = { "Unfathomable Truths" = 2, "Candy Trail" = 2 }
+
+[[plan]]
+deck = "elves"
+opponent = "tron"
+why = "A race: Spinewoods Paladin adds a 5/4 trampler, Deglamer answers Bonder's Ornament or a Golem; the slower card selection goes out."
+in = { "Spinewoods Paladin" = 2, "Deglamer" = 1 }
+out = { "Winding Way" = 1, "Lead the Stampede" = 2 }
+
+# The Delver mirror (2026-10-08, from card knowledge; for the play UI's Delver
+# against the model's Delver). Only the matchup blue_mirror uses this row, and
+# training sees it only when a --matchup list names blue_mirror.
+
+[[plan]]
+deck = "mono_blue_terror"
+opponent = "mono_blue_terror"
+why = "Mirror: Gut Shot kills Delver before it flips, Envelop counters Lorien Revealed, Ponder, Mental Note and Sleep of the Dead; the tap-down and two Force Spike (weak once both sides hold up Counterspell) go out."
+in = { "Gut Shot" = 3, "Envelop" = 1 }
+out = { "Sleep of the Dead" = 2, "Force Spike" = 2 }
+
+# Full-matrix overnight campaign, 2026-10-08. Fixed tactical starting plans;
+# card counts validated, strength not yet measured. Main registrations unchanged.
+[[plan]]
+deck = "jund_wildfire"
+opponent = "jund_wildfire"
+why = "Ouphe exiles artifacts and Terminate answers a large threat; trim the fragile Infiltrators and slow Hydra."
+in = { "Troublemaker Ouphe" = 2, "Terminate" = 1 }
+out = { "Gixian Infiltrator" = 2, "Nyxborn Hydra" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "red_madness"
+why = "Cheap removal fights the opposing damage engines and small creatures; trim slow card selection."
+in = { "End the Festivities" = 2, "Cast into the Fire" = 2, "Searing Blaze" = 2 }
+out = { "Highway Robbery" = 4, "Grab the Prize" = 2 }
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "grixis_affinity"
+why = "Hydroblast fights Shaman and Blast; Extract answers threats. Trim fragile Rod tokens, Cam and one Toxin."
+in = { "Hydroblast" = 2, "Extract a Confession" = 2 }
+out = { "Black Mage's Rod" = 2, "Sewer-veillance Cam" = 1, "Toxin Analysis" = 1 }
+
+[[plan]]
+deck = "elves"
+opponent = "elves"
+why = "Emergence removes Priest, Timberwatch or Hunter; trim Vandals whose enchantment targets are narrower."
+in = { "Monstrous Emergence" = 4 }
+out = { "Masked Vandal" = 4 }
+
+[[plan]]
+deck = "tron"
+opponent = "tron"
+why = "Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
+in = { "Scour from Existence" = 2, "Whispersilk Cloak" = 1 }
+out = { "Candy Trail" = 2, "Boulderbranch Golem" = 1 }

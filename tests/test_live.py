@@ -124,10 +124,19 @@ def test_bad_requests_are_refused(manager):
         manager.choose("nope", {"frame": 0, "index": 0})
 
 
-def test_oldest_game_makes_room(manager):
+def test_only_idle_games_make_room(manager):
+    """A full server never drops a game being played: it refuses the new one;
+    an idle (or finished) game makes room."""
+    from mtg_ml.live import ACTIVE_SECONDS, LiveError
+
     manager.max_games = 2
-    ids = [manager.new({"model": "tiny/model", "seed": s})["live"]["id"] for s in range(3)]
-    assert sorted(manager.games) == sorted(ids[1:])
+    ids = [manager.new({"model": "tiny/model", "seed": s})["live"]["id"] for s in range(2)]
+    with pytest.raises(LiveError, match="full"):
+        manager.new({"model": "tiny/model", "seed": 2})
+    assert sorted(manager.games) == sorted(ids)
+    manager.games[ids[0]].touched -= ACTIVE_SECONDS + 1  # left alone for a while
+    third = manager.new({"model": "tiny/model", "seed": 2})["live"]["id"]
+    assert sorted(manager.games) == sorted([ids[1], third])
 
 
 @pytest.mark.parametrize("engine", ["python", "native"])
@@ -144,8 +153,11 @@ def test_http_endpoints(manager, tmp_path, engine):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
 
+    token = {}
+
     def call(path, body=None):
-        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(), method="GET" if body is None else "POST")
+        headers = {"X-Game-Token": token["t"]} if token else {}
+        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(), headers=headers, method="GET" if body is None else "POST")
         try:
             with urllib.request.urlopen(req) as r:
                 return r.status, json.loads(r.read())
@@ -157,6 +169,7 @@ def test_http_endpoints(manager, tmp_path, engine):
         code, view = call("/api/live/new", {"model": "tiny/model", "seed": 2})
         assert code == 200
         gid = view["live"]["id"]
+        token["t"] = view["live"]["token"]  # every request about the game needs its token
         code, again = call(f"/api/live/{gid}?since=0")
         assert code == 200 and again["frames"] == view["frames"]
         frame = len(view["frames"]) - 1

@@ -16,6 +16,12 @@ pub fn bit(c: u8) -> u8 {
     }
 }
 
+/// `{R/P}`: a phyrexian symbol of a colour.
+fn is_phyrexian(sym: &str) -> bool {
+    let b = sym.as_bytes();
+    b.len() == 3 && &sym[1..] == "/P" && MANA_TYPES[..5].contains(&b[0])
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ManaCost {
     pub generic: i32,
@@ -45,7 +51,8 @@ impl ManaCost {
                 generic += sym.parse::<i32>().unwrap();
             } else if sym == "X" {
                 x += 1;
-            } else if sym.len() == 1 && MANA_TYPES.contains(&sym.as_bytes()[0]) {
+            } else if (sym.len() == 1 && MANA_TYPES.contains(&sym.as_bytes()[0])) || is_phyrexian(sym) {
+                // Phyrexian mana counts as its colour here; paying 2 life is the cast mode "phyrexian".
                 let c = sym.as_bytes()[0];
                 match colored.iter_mut().find(|(k, _)| *k == c) {
                     Some(e) => e.1 += 1,
@@ -58,6 +65,38 @@ impl ManaCost {
         }
         colored.sort();
         Ok(ManaCost { generic, colored, x })
+    }
+
+    /// The phyrexian symbols of a cost text ({R/P} -> {R}), as a cost.
+    pub fn phyrexian(text: Option<&str>) -> ManaCost {
+        let mut colored: Vec<(u8, i32)> = vec![];
+        let mut rest = text.unwrap_or("");
+        while let Some(start) = rest.find('{') {
+            let Some(len) = rest[start..].find('}') else { break };
+            let sym = &rest[start + 1..start + len];
+            if is_phyrexian(sym) {
+                let c = sym.as_bytes()[0];
+                match colored.iter_mut().find(|(k, _)| *k == c) {
+                    Some(e) => e.1 += 1,
+                    None => colored.push((c, 1)),
+                }
+            }
+            rest = &rest[start + len + 1..];
+        }
+        colored.sort();
+        ManaCost { generic: 0, colored, x: 0 }
+    }
+
+    /// This cost without `other`'s coloured symbols.
+    pub fn minus_colored(&self, other: &ManaCost) -> ManaCost {
+        let mut colored = self.colored.clone();
+        for (k, n) in &other.colored {
+            if let Some(e) = colored.iter_mut().find(|(c, _)| c == k) {
+                e.1 -= n;
+            }
+        }
+        colored.retain(|(_, n)| *n > 0);
+        ManaCost { generic: self.generic, colored, x: self.x }
     }
 
     pub fn mana_value(&self) -> i32 {
@@ -148,10 +187,27 @@ impl Remaining {
 /// Can `rem` be paid with `units` (each a bitmask of the mana types that unit
 /// can be)? Kuhn's augmenting-path matching of coloured symbols to units.
 pub fn can_pay(rem: &Remaining, units: &[u8]) -> bool {
+    can_pay_wild(rem, units, 0)
+}
+
+/// mana.py `can_pay(..., wild)`: up to `wild` coloured (WUBRG) symbols may
+/// go unmatched (mana filters pay them as generic); {C} symbols come first
+/// and must all be matched.
+pub fn can_pay_wild(rem: &Remaining, units: &[u8], wild: i32) -> bool {
     let mut symbols: Vec<u8> = Vec::with_capacity(8);
     for (c, n) in &rem.colored {
-        for _ in 0..*n {
-            symbols.push(bit(*c));
+        if *c == b'C' {
+            for _ in 0..*n {
+                symbols.push(bit(*c));
+            }
+        }
+    }
+    let n_c = symbols.len();
+    for (c, n) in &rem.colored {
+        if *c != b'C' {
+            for _ in 0..*n {
+                symbols.push(bit(*c));
+            }
         }
     }
     if (units.len() as i32) < symbols.len() as i32 + rem.generic {
@@ -174,10 +230,17 @@ pub fn can_pay(rem: &Remaining, units: &[u8]) -> bool {
         false
     }
     let mut seen = vec![false; units.len()];
+    let mut unmatched = 0;
     for si in 0..symbols.len() {
         seen.iter_mut().for_each(|s| *s = false);
         if !augment(si, &symbols, units, &mut seen, &mut match_unit) {
-            return false;
+            if si < n_c {
+                return false;
+            }
+            unmatched += 1;
+            if unmatched > wild {
+                return false;
+            }
         }
     }
     true

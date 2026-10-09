@@ -3,8 +3,8 @@
 `meta["review"]` adds to the replay format (mtg_ml.replay): the exact game
 constructor arguments and agent specs (so `verify` can rebuild and fork the
 game at any decision), the decklists, each model's training state and a plain
-description of the training reward, and the faults seeded into the game, if
-any (`faults`).
+description of the training reward, each model's structured configuration
+(`policy_configs`), and the faults seeded into the game, if any (`faults`).
 """
 
 from __future__ import annotations
@@ -21,10 +21,10 @@ REWARD = (
 )
 
 
-def policy_info(spec: str) -> str | None:
-    """One line on a model checkpoint's training state, from the file itself."""
+def _policy_metadata(spec: str) -> tuple[str | None, dict | None]:
+    """Human description and structured config from the same checkpoint read."""
     if not spec.startswith("model:"):
-        return None
+        return None, None
     import torch
 
     path = spec[len("model:"):]
@@ -35,10 +35,15 @@ def policy_info(spec: str) -> str | None:
         parts.append(f"iteration {ck['iteration']} of its run")
     if "games_total" in ck:
         parts.append(f"{ck['games_total']:,} training games in total")
-    arch = ", ".join(f"{k} {cfg[k]}" for k in ("trunk", "hidden", "memory", "features") if k in cfg)
+    arch = ", ".join(f"{k} {cfg[k]}" for k in ("trunk", "hidden", "memory", "features", "entity_attn", "value_net") if k in cfg)
     if arch:
         parts.append(arch)
-    return "; ".join(parts)
+    return "; ".join(parts), cfg
+
+
+def policy_info(spec: str) -> str | None:
+    """One line on a model checkpoint's training state, from the file itself."""
+    return _policy_metadata(spec)[0]
 
 
 def record_game(
@@ -63,13 +68,15 @@ def record_game(
         agents = [wrap(i, a) for i, a in enumerate(agents)]
     names = [_agent_name(k) for k in specs]
     rep = record(agents, seed=seed, engine=engine, names=names, matchup=matchup, match_game=match_game, starting_player=starting_player)
+    policies = [_policy_metadata(k) for k in specs]
     rep["meta"]["review"] = {
         "specs": list(specs),
         "greedy": greedy,
         "matchup": matchup,
         "game": {"seed": seed, "match_game": match_game, "starting_player": starting_player, "engine": engine},
         "decklists": [list(d) for d in match_decks(match_game, matchup)],
-        "policies": [policy_info(k) for k in specs],
+        "policies": [description for description, _ in policies],
+        "policy_configs": [config for _, config in policies],
         "reward": reward if any(k.startswith("model:") for k in specs) else None,
         "faults": [],
     }
