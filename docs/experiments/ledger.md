@@ -2,6 +2,31 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## 20261009-specialist-benchmark · checkpoints vs the Jund and Blue specialists (evaluation only)
+
+- **Question**: how do the current r7 arms and the old best model score against the new specialists `benchmark-jund@1` (#66) and `benchmark-blue@1` (#65)?
+- **Checkpoints**: r7 lr075 and lr150 at the shared frozen `evaluation-checkpoints/iter_03660` (~7.2M games, fs7, h256, fair contract) from h100-private2, and again at the final policies after the run was stopped (lr075 `v04079`, 8.35M games; lr150 `v04412`, 9.04M games; archived as `20261008-r7-fs7-h256-{lr075,lr150}/policy.pt`). 20261007-r4-control `policy.pt` (fs3) from h100-private. fs3 inputs disclose the opponent archetype (contract `legacy_archetype_disclosed`), so its numbers are **diagnostic**; r4-control trained on Jund vs Blue only, where that label carries little information. SHA-256 values are in `ledger.jsonl`.
+- **Code / protocol**: `tools/benchmark_checkpoint.py` @ 86efb15, native engine. 100 four-game blocks per cell and mode (both seats × both starts on one deal, stream `benchmark-v1/dev`), so n = 400 per cell and mode with Wilson 95% CI about ±0.05. Legacy-bot cells are included as a reference. They are **not** the ledger benchmark, which always seats Jund first. Run on h100-private (60 CPU workers, ~2 min per checkpoint for 4,800 games), 0 errors. Rows: `h100-private:~/mtg-ml-bench-specialists/runs/`.
+
+Score of the checkpoint, sampled / greedy:
+
+| checkpoint | Jund vs Blue spec. | Blue vs Jund spec. | Jund vs Jund spec. | Blue vs Blue spec. | Jund vs legacy Blue | Blue vs legacy Jund |
+|---|---|---|---|---|---|---|
+| r4-control (fs3, diagnostic) | **64.0 / 65.5** | **85.3 / 87.0** | 32.8 / 36.2 | 48.7 / 48.7 | 74.3 / 74.3 | 93.0 / 93.0 |
+| r7 lr075 iter 3660 | 40.7 / 49.7 | 70.8 / 74.3 | 55.5 / 66.2 | 59.0 / 66.2 | 53.2 / 67.5 | 83.3 / 90.5 |
+| r7 lr150 iter 3660 | 34.5 / 44.5 | 60.5 / 65.0 | 49.0 / 57.0 | 50.5 / 61.0 | 45.5 / 56.2 | 74.5 / 81.0 |
+| r7 lr075 final (8.35M) | 46.3 / 49.0 | 68.8 / 75.7 | 57.8 / 68.5 | 57.8 / 67.0 | 55.5 / 70.8 | 84.3 / 88.5 |
+| r7 lr150 final (9.04M) | 38.0 / 47.7 | 62.5 / 70.8 | 51.5 / 61.5 | 52.5 / 63.5 | 50.2 / 54.2 | 79.0 / 83.3 |
+
+**Findings**
+- Both specialists are clearly stronger than the legacy bots. Each checkpoint scores 8–18 points less against the specialist than against the legacy bot of the same deck.
+- The standing matchup (learner Jund vs Blue) is hard. Neither r7 arm reaches 50%; r4-control gets 64%: it spent all 17.6M training games on this matchup, against roughly 0.4M for r7 (jund_blue is 2 of 36 matchup weights).
+- r4-control loses the Jund mirror to the Jund specialist (33–36%). It was trained on Jund vs Blue only. The r7 arms, trained on six decks including mirrors, win both mirrors.
+- lr075 beats lr150 in every cell, by 5–11 points at iter 3660 and by 1–17 points at the final policies. This matches the head-to-head (lr075 54.8% at matched games, see `20261008-r7-fs7-h256`).
+- From iter 3660 to the final policies (1.1–1.8M more games) r7 moved by about +1 point (lr075) and +3 points (lr150) on average, inside the ±5 point intervals. Neither final arm reaches 50% as Jund against the Blue specialist.
+- r7's greedy play is 4–14 points above its sampled play (entropy ~0.35). r4-control's gap is at most 3.4.
+- Sampled and greedy scores for r4-control coincide in some cells. Only 313 of 2,400 games were identical, so this is chance, not a mode bug.
+
 ## 20261008-h256-attention-scaling · implementation and completed throughput screens
 
 - **Parent:** r6-h256 `pool/iter_02440.pt`, 4,997,120 games, source code
