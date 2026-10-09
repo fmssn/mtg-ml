@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "description": "Pauper-Research Q3 2026 combined matchup results for our six decks, for the trust test.",
+  "source": {
+    "repo": "git@github.com:fmssn/Pauper-Research.git",
+    "commit": "592796a3f7879883da9af47eff1438948aeed161",
+    "path": "reports/2026-Q3/combined/matchups.csv",
+    "date_start": "2026-07-01",
+    "date_end": "2026-09-30",
+    "scope": "combined (CardsRealm paper, MTGO, MTGmelee paper); non-mirror matches"
+  },
+  "interval": {
+    "method": "wilson, z=1.959963984540054, successes=wins (draws as half), trials=n",
+    "confidence": 0.95
+  },
+  "min_matches": 30,
+  "decks": [
+    "jund_wildfire",
+    "mono_blue_terror",
+    "red_madness",
+    "grixis_affinity",
+    "elves",
+    "tron"
+  ],
+  "archetypes": {
+    "jund_wildfire": "Jund Midrange",
+    "mono_blue_terror": "Mono Blue Terror",
+    "red_madness": "Red Madness",
+    "grixis_affinity": "Grixis Affinity",
+    "elves": "Elves",
+    "tron": "Tron"
+  },
+  "orientation": "pairings keyed 'a|b' in deck order; wins/win_rate are from a's perspective",
+  "notes": [
+    "The source does not separate draws: wins are match points with draws as half, so draws is unknown and losses = n - wins.",
+    "Our jund_wildfire list is mapped to the source archetype 'Jund Midrange'; the source has no 'Jund Wildfire' label, so the mapping is a judgment call and that deck's row carries the most mapping uncertainty.",
+    "The source reports no mirror matches for these archetypes; mirrors are marked missing.",
+    "Pairings with n below min_matches are flagged thin, not dropped."
+  ],
+  "pairings": {
+    "jund_wildfire|jund_wildfire": {
+      "n": 0,
+      "thin": true,
+      "missing": true
+    },
+    "jund_wildfire|mono_blue_terror": {
+      "wins": 28.0,
+      "losses": 33.0,
+      "n": 61,
+      "win_rate": 0.45901639344262296,
+      "ci_low": 0.3401293229385576,
+      "ci_high": 0.5827595186924353,
+      "thin": false
+    },
+    "jund_wildfire|red_madness": {
+      "wins": 27.0,
+      "losses": 59.0,
+      "n": 86,
+      "win_rate": 0.313953488372093,
+      "ci_low": 0.22561297202636443,
+      "ci_high": 0.418204031614842,
+      "thin": false
+    },
+    "jund_wildfire|grixis_affinity": {
+      "wins": 63.5,
+      "losses": 38.5,
+      "n": 102,
+      "win_rate": 0.6225490196078431,
+      "ci_low": 0.5256440481782185,
+      "ci_high": 0.7105582895309817,
+      "thin": false
+    },
+    "jund_wildfire|elves": {
+      "wins": 25.0,
+      "losses": 31.0,
+      "n": 56,
+      "win_rate": 0.44642857142857145,
+      "ci_low": 0.3238672125478337,
+      "ci_high": 0.5758678521006054,
+      "thin": false
+    },
+    "jund_wildfire|tron": {
+      "wins": 20.0,
+      "losses": 18.0,
+      "n": 38,
+      "win_rate": 0.5263157894736842,
+      "ci_low": 0.3725897138449667,
+      "ci_high": 0.6752097667747392,
+      "thin": false
+    },
+    "mono_blue_terror|mono_blue_terror": {
+      "n": 0,
+      "thin": true,
+      "missing": true
+    },
+    "mono_blue_terror|red_madness": {
+      "wins": 65.0,
+      "losses": 35.0,
+      "n": 100,
+      "win_rate": 0.65,
+      "ci_low": 0.5525444329688796,
+      "ci_high": 0.7363575175690247,
+      "thin": false
+    },
+    "mono_blue_terror|grixis_affinity": {
+      "wins": 52.0,
+      "losses": 51.0,
+      "n": 103,
+      "win_rate": 0.5048543689320388,
+      "ci_low": 0.4098754392292435,
+      "ci_high": 0.5994842233122258,
+      "thin": false
+    },
+    "mono_blue_terror|elves": {
+      "wins": 21.0,
+      "losses": 27.0,
+      "n": 48,
+      "win_rate": 0.4375,
+      "ci_low": 0.30701269040654244,
+      "ci_high": 0.5772498258017222,
+      "thin": false
+    },
+    "mono_blue_terror|tron": {
+      "wins": 34.0,
+      "losses": 21.0,
+      "n": 55,
+      "win_rate": 0.6181818181818182,
+      "ci_low": 0.4860922023248993,
+      "ci_high": 0.7348404574110621,
+      "thin": false
+    },
+    "red_madness|red_madness": {
+      "n": 0,
+      "thin": true,
+      "missing": true
+    },
+    "red_madness|grixis_affinity": {
+      "wins": 67.0,
+      "losses": 111.0,
+      "n": 178,
+      "win_rate": 0.37640449438202245,
+      "ci_low": 0.3085496116357967,
+      "ci_high": 0.4494813660886699,
+      "thin": false
+    },
+    "red_madness|elves": {
+      "wins": 51.0,
+      "losses": 20.0,
+      "n": 71,
+      "win_rate": 0.7183098591549296,
+      "ci_low": 0.6045798293119349,
+      "ci_high": 0.8096290929682961,
+      "thin": false
+    },
+    "red_madness|tron": {
+      "wins": 49.0,
+      "losses": 41.0,
+      "n": 90,
+      "win_rate": 0.5444444444444444,
+      "ci_low": 0.44184633569208204,
+      "ci_high": 0.6434038309244221,
+      "thin": false
+    },
+    "grixis_affinity|grixis_affinity": {
+      "n": 0,
+      "thin": true,
+      "missing": true
+    },
+    "grixis_affinity|elves": {
+      "wins": 34.0,
+      "losses": 46.0,
+      "n": 80,
+      "win_rate": 0.425,
+      "ci_low": 0.3225656178960177,
+      "ci_high": 0.5343071015343113,
+      "thin": false
+    },
+    "grixis_affinity|tron": {
+      "wins": 29.0,
+      "losses": 52.0,
+      "n": 81,
+      "win_rate": 0.35802469135802467,
+      "ci_low": 0.26223674449626305,
+      "ci_high": 0.466669378527756,
+      "thin": false
+    },
+    "elves|elves": {
+      "n": 0,
+      "thin": true,
+      "missing": true
+    },
+    "elves|tron": {
+      "wins": 21.0,
+      "losses": 6.0,
+      "n": 27,
+      "win_rate": 0.7777777777777778,
+      "ci_low": 0.5924307113336742,
+      "ci_high": 0.8939276054763996,
+      "thin": true
+    },
+    "tron|tron": {
+      "n": 0,
+      "thin": true,
+      "missing": true
+    }
+  }
+}

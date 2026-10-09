@@ -167,6 +167,27 @@ worse than people do, and every card conclusion about that deck would carry that
 samples are small (±17 points at 30 matches), so the test catches bias and gross errors, not exact
 values.
 
+### Trust-test reference data
+
+`data/reference/pauper_research_q3_2026_matchups.json` holds Pauper-Research's Q3 2026 (2026-07-01
+to 2026-09-30) combined matchup results for our six decks. Regenerate it with
+`python -m mtg_ml.benchmark.reference build --source <Pauper-Research checkout>`; the file records the
+source commit and the loader (`mtg_ml.benchmark.reference.load`) validates it, including that every
+interval is the 95% Wilson interval of wins over n. Caveats:
+
+- **Sample sizes.** 15 non-mirror pairings, 27 to 178 matches each (median about 80). Elves vs Tron
+  (27) is flagged `thin`; the other 14 pairings are above the 30-match line but still carry
+  intervals of ±7 to ±15 points. Mirrors are absent in the source and are marked `missing`.
+- **Archetype mapping.** Names match exactly for five decks. Our `jund_wildfire` maps to the source's
+  "Jund Midrange", because the source has no "Jund Wildfire" label; other Jund labels (Graveyard,
+  Garden, Ramp) have far fewer matches. Treat Jund's row as the least certain mapping.
+- **Draws.** The source counts a draw as half a win and does not report them separately, so `wins` are
+  match points and `draws` is not available.
+- **Population.** Matches come mostly from paper events on Melee and CardsRealm (Italian and Brazilian
+  locals) with sideboarding; MTGO contributes few matches. Players are not a fixed skill level and
+  lists differ from our builds, so a gap on one pairing is weak evidence; the per-deck bias check
+  across pairings is the meaningful test.
+
 ### Card-choice protocol
 
 Variant decks differ from the base list by a few cards. For each variant:
