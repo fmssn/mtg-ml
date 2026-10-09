@@ -24,7 +24,7 @@ def blocks_for(reference, shift=0.0, noise=0.0, n=40):
 
 
 def cell(score, lo, hi):
-    return {"score": score, "ci95": [lo, hi], "games": 100}
+    return {"score": score, "ci95": [lo, hi], "n": 100}
 
 
 def test_classify_rule_is_inclusive_point_estimate():
@@ -36,7 +36,7 @@ def test_classify_rule_is_inclusive_point_estimate():
 
 def test_thin_pairings_are_reported_but_not_counted():
     reference = fake_reference(thin={"elves|tron"})
-    cells = {k: {"score": 0.5, "ci95": [0.45, 0.55], "games": 8} for k, _, _ in trust.pairings()}
+    cells = {k: {"score": 0.5, "ci95": [0.45, 0.55], "n": 8} for k, _, _ in trust.pairings()}
     cells["elves|tron"]["score"] = 0.99
     rows = trust.compare_pairings(cells, reference)
     assert len(rows) == 15
@@ -114,14 +114,30 @@ def test_schedule_covers_matrix_with_paired_deals():
     assert all(s.deck_ids[s.learner_seat] == "jund_wildfire" and s.deck_ids[1 - s.learner_seat] == "tron" for s in block)
 
 
+def test_match_is_best_of_three_with_postboard_decks_and_loser_on_the_play():
+    spec = trust.episodes(trust.manifest(1, ["greedy"], [("jund_wildfire|tron", "jund_wildfire", "tron")]))[0]
+    row = trust.play_match(spec, trust.RandomLearner(), trust.RandomLearner(), "python")
+    assert row["status"] == "completed", row["reason"]
+    games = row["games"]
+    assert 2 <= len(games) <= 3
+    wins = [sum(g["winner"] == s for g in games) for s in (0, 1)]
+    assert (max(wins) == 2 or len(games) == 3) and row["winner"] in (None, 0, 1)
+    assert row["winner"] == (None if wins[0] == wins[1] else int(wins[1] > wins[0]))
+    for prev, nxt in zip(games, games[1:]):
+        assert nxt["start"] == (prev["start"] if prev["winner"] is None else 1 - prev["winner"])
+
+
 @pytest.mark.slow
 def test_random_agent_end_to_end_schema(tmp_path):
     out = tmp_path / "out"
-    trust.main(["--agent", "random", "--contract", "diagnostic", "--games", "4", "--modes", "greedy", "--primary-mode", "greedy",
+    trust.main(["--agent", "random", "--contract", "diagnostic", "--matches", "4", "--modes", "greedy", "--primary-mode", "greedy",
                 "--engine", "python", "--workers", "1", "--replicates", "20", "--out", str(out)])
     result = read_json(out / "trust.json")
     assert result["format"] == "TrustTestResult" and result["schema_version"] == 1
-    assert len(result["code_revision"]) == 40 and result["engine"] == "python" and result["parameters"]["games"] == 4
+    assert len(result["code_revision"]) == 40 and result["engine"] == "python"
+    assert result["parameters"]["matches"] == 4 and result["parameters"]["format"] == "bo3"
+    assert result["parameters"]["threshold_status"] == "uncalibrated starting values"
+    assert all(len(r["games"]) >= 2 for r in result["game_rows"]["selfplay"])
     greedy = result["modes"]["greedy"]
     assert len(greedy["pairings"]) == 15 and set(greedy["decks"]) == set(ref.DECK_ORDER)
     assert greedy["checks"]["exploitability"]["passed"] is None and greedy["checks"]["overall"]["passed"] is None
