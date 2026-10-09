@@ -188,6 +188,41 @@ interval is the 95% Wilson interval of wins over n. Caveats:
   lists differ from our builds, so a gap on one pairing is weak evidence; the per-deck bias check
   across pairings is the meaningful test.
 
+### Running the trust test
+
+```bash
+.venv/bin/python -m mtg_ml.benchmark.trust runs/r7/final.pt \
+    --pool ckpts/r7-it200.pt ckpts/r7-it400.pt --games 400 --workers 48 --out runs/trust/r7
+```
+
+`mtg_ml.benchmark.trust` plays the checkpoint against itself in the 15 non-mirror pairings of the six
+decks (native engine by default), sampled and greedy, on paired deals: each block is one deal played
+in four slots (both seats, both starts), the seed stream is `trust-v1`, and every pairing sees the same
+block count. `--games` is rounded up to whole four-game blocks. Each pool checkpoint then plays the
+final model in all 30 ordered matchups (`--exploit-games`, default 200 per matchup and mode). It
+writes `trust.json` (format `TrustTestResult` v1: checkpoint SHA and features, code revision, card spec
+and reference file hashes, engine, parameters, every game row, per-mode comparisons and the three
+check results) and `trust.md` (the short summary). The exit code follows `--primary-mode` (default
+sampled): 0 only if all three checks pass; a run without `--pool` cannot pass. Statistics reuse
+`mtg_ml.benchmark.stats` (block bootstrap, one shared index list per replicate). Sets below 7 need
+`--contract diagnostic`. `--agent random` is a smoke test.
+
+| check | rule | flag (default) |
+|---|---|---|
+| per pairing | model win rate (game one, draws half) is `inside` when its point estimate lies in the reference 95% Wilson interval (bounds inclusive), else `above`/`below`; the report also says whether the model's own interval overlaps the reference's. Thin and missing reference pairings are shown but not counted. Pass: the inside fraction of counted pairings is at least | `--min-inside 0.70` |
+| per deck | bias = mean of (model - reference) over the deck's non-thin pairings. Its 95% interval adds the model's block-bootstrap variance and the reference's binomial variance (normal approximation). A deck is flagged when the interval excludes 0 by more than the margin (lower bound above +margin, or upper bound below -margin). Pass: no flagged deck and every deck computable | `--bias-margin 0.02` |
+| exploitability | per ordered matchup, the best pool member's win rate and interval; clearly exploitable when the interval's lower bound exceeds 0.5 plus the margin. Pass: none | `--exploit-margin 0.02` |
+
+Also `--replicates 2000` (bootstrap), `--modes sampled,greedy`, `--workers`, `--engine`.
+
+Caveats. The model plays game one without sideboarding, while the reference is match points from mostly
+best-of-three, so the comparison is approximate until sideboarded matches are played; the thresholds
+are starting values, not calibrated. The 30 exploitability cells times the pool size are many
+comparisons, so the lower-bound rule is deliberately one-sided and conservative. Run time scales with
+games: about 2 CPU-seconds per game on an M-series Mac with a small untrained net (measured), so
+400 games per pairing and both modes (12,000 games) is about 10 minutes on 48 cores, plus about 10
+minutes per pool member at the default 200 games per matchup.
+
 ### Card-choice protocol
 
 Variant decks differ from the base list by a few cards. For each variant:
