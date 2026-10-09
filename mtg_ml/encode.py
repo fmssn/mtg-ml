@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 import zlib
 
-from .engine.cards import op_names
+from .engine.cards import has_creature_type, op_names
 from .engine.view import PLOTTED, observe
 
 DEFAULT_DIM = 1 << 16
@@ -506,9 +506,11 @@ def _kills_preview(game, player: int, ops, source) -> list[str]:
     for op in ops:
         if op["op"] != "damage_each_creature" or op.get("x"):
             continue
-        without = op.get("without")
+        without, spared = op.get("without"), op.get("except_subtype")
         for c in game.battlefield:
             if op.get("whose") == "opponent" and c.controller == player:
+                continue
+            if spared and has_creature_type(c.face, spared):
                 continue
             if game.is_creature(c) and not (without and game.has(c, without)):
                 dmg[c.oid] = dmg.get(c.oid, 0) + op["n"]

@@ -1447,3 +1447,41 @@ colors = "U"
 power = 1
 toughness = 1
 keywords = ["flying"]
+
+# Real-list cards not yet in a fixed decklist: Spell Pierce (Mono Blue Terror),
+# Prophetic Prism and Malevolent Rumble (Tron), Fiery Cannonade (Tron's 15).
+[[card]]
+name = "Spell Pierce"
+cost = "{U}"
+types = "Instant"
+text = "Counter target noncreature spell unless its controller pays {2}."
+targets = ["noncreature_spell"]
+effect = [{ op = "counter_target_unless_paid", cost = "{2}" }]
+
+# Like Barrels of Blasting Jelly, the any-colour ability is a filter: it is
+# offered while paying a cost.
+[[card]]
+name = "Prophetic Prism"
+cost = "{2}"
+types = "Artifact"
+text = "When this artifact enters, draw a card. {1}, {T}: Add one mana of any color."
+triggers = [{ name = "draw a card", event = "etb", effect = [{ op = "draw", n = 1 }] }]
+abilities = [{ name = "add one mana of any color", cost = "{1}", tap = true, mana = ["W", "U", "B", "R", "G"] }]
+
+[[card]]
+name = "Malevolent Rumble"
+cost = "{1}{G}"
+types = "Sorcery"
+text = "Reveal the top four cards of your library. You may put a permanent card from among them into your hand. Put the rest into your graveyard. Create a 0/1 colorless Eldrazi Spawn creature token with \"Sacrifice this token: Add {C}.\""
+effect = [
+    { op = "look_top", n = 4, permanent = true, rest = "graveyard", what = "a permanent card" },
+    { op = "create_token", token = "Eldrazi Spawn", n = 1 },
+]
+
+# Changelings (Masked Vandal) are Pirates.
+[[card]]
+name = "Fiery Cannonade"
+cost = "{2}{R}"
+types = "Instant"
+text = "Fiery Cannonade deals 2 damage to each non-Pirate creature."
+effect = [{ op = "damage_each_creature", n = 2, except_subtype = "Pirate" }]

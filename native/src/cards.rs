@@ -78,9 +78,10 @@ pub enum TK {
     ArtifactOrEnchantmentYouDontControl,
     SorcerySpell,
     ArtifactOrEnchantment,
+    NoncreatureSpell,
 }
 
-const TK_NAMES: [(&str, TK); 27] = [
+const TK_NAMES: [(&str, TK); 28] = [
     ("creature", TK::Creature),
     ("nonlegendary_creature", TK::NonlegendaryCreature),
     ("nonartifact_creature", TK::NonartifactCreature),
@@ -108,6 +109,7 @@ const TK_NAMES: [(&str, TK); 27] = [
     ("artifact_or_enchantment_you_dont_control", TK::ArtifactOrEnchantmentYouDontControl),
     ("sorcery_spell", TK::SorcerySpell),
     ("artifact_or_enchantment", TK::ArtifactOrEnchantment),
+    ("noncreature_spell", TK::NoncreatureSpell),
 ];
 
 impl TK {
@@ -250,7 +252,8 @@ pub enum Op {
     DamageTargetFrom { index: usize, chosen_power: bool },
     DamageEachOpponent { n: i32, if_discarded_nonland: bool },
     /// x: the amount is the item's X (n unused); opponent_only: whose = "opponent".
-    DamageEachCreature { n: i32, x: bool, without: u32, opponent_only: bool },
+    /// except_subtype: a creature type that is spared, changelings included (Fiery Cannonade).
+    DamageEachCreature { n: i32, x: bool, without: u32, opponent_only: bool, except_subtype: Option<String> },
     Discard { n: i32 },
     ReturnToBattlefield { tapped: bool },
     ExileGraveyard,
@@ -263,7 +266,8 @@ pub enum Op {
     Scry { n: i32 },
     Surveil,
     /// Look at the top n, may take a matching card (Ancient Stirrings).
-    LookTop { filter: SearchFilter, n: i32, what: String },
+    /// rest_graveyard: all n are revealed and the rest go to the graveyard (Malevolent Rumble).
+    LookTop { filter: SearchFilter, n: i32, what: String, rest_graveyard: bool },
     Cascade,
     Station,
     ReturnRandomFromGraveyard { types: u16 },
@@ -792,7 +796,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "scry" | "discard" | "exile_from_graveyards" | "damage_target_controller" | "surveil" => &["op", "n"],
             "damage_target" => &["op", "n", "index", "n_landfall", "n_metalcraft"],
             "damage_target_from" => &["op", "from", "index"],
-            "look_top" => &["op", "n", "colorless", "type", "what"],
+            "look_top" => &["op", "n", "colorless", "type", "permanent", "rest", "what"],
             "return_random_from_graveyard" => &["op", "type"],
             "return_cards_from_graveyards" => &["op", "types", "n", "each_type", "whose"],
             "damage_each_opponent" => &["op", "n", "if_discarded_nonland"],
@@ -800,7 +804,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "destroy_target" => &["op", "if_color", "mv_is_x"],
             "return_to_battlefield" => &["op", "tapped"],
             "lose_life" => &["op", "who", "n"],
-            "damage_each_creature" => &["op", "n", "without", "x", "whose"],
+            "damage_each_creature" => &["op", "n", "without", "x", "whose", "except_subtype"],
             "search_library" => &["op", "supertype", "type", "subtypes_any", "dest", "tapped", "reveal", "what"],
             "optional_payment" => &["op", "cost", "prompt", "then"],
             "custom" => &["op", "fn"],
@@ -896,6 +900,7 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
                         Some("opponent") => true,
                         Some(w) => return Err(format!("damage_each_creature: unknown whose {w:?}")),
                     },
+                    except_subtype: get_str(t, "except_subtype")?.map(|s| s.to_string()),
                 }
             }
             "discard" => Op::Discard { n: n()? },
@@ -976,15 +981,23 @@ fn parse_ops(v: Option<&Value>, db: &CardDb, tokens: &HashMap<String, DefId>) ->
             "look_top" => Op::LookTop {
                 filter: SearchFilter {
                     supertype: None,
-                    types: match get_str(t, "type")? {
-                        Some(s) => type_bit(s)?,
-                        None => 0,
+                    // `permanent`: any permanent type (the mask matches any of its bits).
+                    types: match (get_str(t, "type")?, get_bool(t, "permanent")?) {
+                        (Some(_), true) => return Err("look_top: type and permanent are mutually exclusive".into()),
+                        (Some(s), false) => type_bit(s)?,
+                        (None, true) => T_ARTIFACT | T_BATTLE | T_CREATURE | T_ENCHANTMENT | T_LAND | T_PLANESWALKER,
+                        (None, false) => 0,
                     },
                     subtypes_any: vec![],
                     colorless: get_bool(t, "colorless")?,
                 },
                 n: n()?,
                 what: req_str(t, "what")?.to_string(),
+                rest_graveyard: match get_str(t, "rest")? {
+                    None | Some("bottom") => false,
+                    Some("graveyard") => true,
+                    Some(r) => return Err(format!("look_top: unknown rest {r:?}")),
+                },
             },
             "cascade" => Op::Cascade,
             "station" => Op::Station,
