@@ -6,7 +6,7 @@ import pytest
 from helpers import choose, labels, pass_priority, scenario
 
 from mtg_ml.audit import FORMAT, audit_decision, canonical_view, is_blind_spot, main, option_signatures, rebuild, run, successor_views
-from mtg_ml.encode import FEATURE_VERSIONS
+from mtg_ml.encode import FEATURE_VERSIONS, FEATURES
 
 
 def _blocks_against_two_terrors():
@@ -69,7 +69,7 @@ def test_signatures_resolve_entity_pointers():
 def test_run_report_and_rebuild(tmp_path):
     rep = run(games=2, seed=10, agents="bot,bot")
     assert rep["format"] == FORMAT and rep["audited"] == rep["decisions"] > 0
-    assert set(rep["by_kind"]) and rep["meta"]["features"] == [max(FEATURE_VERSIONS)] * 2
+    assert set(rep["by_kind"]) and rep["meta"]["features"] == [FEATURES] * 2
     for ex in rep["examples"]:
         g = rebuild(ex)
         assert g.decision.kind == ex["kind"] and g.decision.player == ex["player"]

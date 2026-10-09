@@ -6,6 +6,8 @@ step the harness compares
 
 * the decision: player, kind, prompt, option labels and keys (in order);
 * `observe()` for both players and `state_features()` for both players;
+* `witnessed()` for both players (belief evidence), which must also never
+  decrease during a game;
 * `featurize()` for the deciding player in the latest feature set and in set 1
   (native fast path vs Python);
 * a dump of the full hidden state (libraries in order, `known_to`, object
@@ -46,14 +48,15 @@ def _card(c) -> tuple:
     return (
         c.uid, c.oid, c.name, c.defn.name, c.owner, c.controller, c.zone, c.is_token, c.transformed, c.tapped, c.damage,
         c.deathtouch_damage, c.counters, c.sick, c.attached_to, c.skip_untap,
-        [(sorted(t.keywords), t.power, t.toughness) for t in c.temp], sorted(c.known_to),
+        [(sorted(t.keywords), t.power, t.toughness) for t in c.temp], sorted(c.known_to), c.animated, sorted(c.granted), c.prototyped, c.charge,
+        c.mana_used_turn,
     )  # fmt: skip
 
 
 def _data(d: dict) -> list:
     out = []
     for k, v in sorted(d.items()):
-        out.append((k, _card(v) if k in ("card", "sacrificed") else v))
+        out.append((k, _card(v) if k in ("card", "sacrificed", "chosen") else v))
     return out
 
 
@@ -73,6 +76,7 @@ def dump_state(g) -> dict:
         "winner": g.winner,
         "end_reason": g.end_reason,
         "match_game": g.match_game,
+        "initiative": g.initiative,
         "players": [
             {
                 "life": p.life,
@@ -83,6 +87,7 @@ def dump_state(g) -> dict:
                 "pool": list(p.pool.items()),
                 "drew_from_empty": p.drew_from_empty,
                 "cards_drawn_this_turn": p.cards_drawn_this_turn,
+                "dungeon_room": p.dungeon_room,
             }
             for p in g.players
         ],
@@ -156,7 +161,7 @@ def snapshot(g, full: bool = True) -> dict:
     from .engine.view import observe
     from .rl.features import event_hashes, featurize
 
-    s = {"decision": decision_view(g), "observe0": observe(g, 0), "observe1": observe(g, 1)}
+    s = {"decision": decision_view(g), "observe0": observe(g, 0), "observe1": observe(g, 1), "witnessed0": g.witnessed(0), "witnessed1": g.witnessed(1)}
     if full:
         s["features0"] = state_features(g, 0)
         s["features1"] = state_features(g, 1)
@@ -227,10 +232,17 @@ def run_lockstep(sc: Scenario, script: list[int] | None = None, full_every: int 
         return div(0, f"construction failed: {e}")
     agents = make_agents(sc)
     n = 0
+    seen: list[dict[str, int]] = [{}, {}]
     while True:
         diff = _check(py, nat, full=full_every > 0 and n % full_every == 0)
         if diff:
             return div(n, diff)
+        for v in (0, 1):  # established copy counts only grow
+            w = py.witnessed(v)
+            lost = {k: (c, w.get(k, 0)) for k, c in seen[v].items() if w.get(k, 0) < c}
+            if lost:
+                return div(n, f"witnessed({v}) decreased: {lost}")
+            seen[v] = w
         if fork_every and n % fork_every == fork_every - 1 and not py.over:
             diff = _check_fork(py, nat, sc.seed * 31 + n)
             if diff:
@@ -269,9 +281,21 @@ def run_lockstep(sc: Scenario, script: list[int] | None = None, full_every: int 
 def _check_fork(py, nat, seed: int) -> str | None:
     from .engine.view import determinize
 
-    d = first_diff(snapshot(py.fork()), snapshot(nat.fork()))
+    a, b = py.fork(), nat.fork()  # copy(): a snapshot restore once each game has been copied
+    d = first_diff(snapshot(a), snapshot(b))
     if d:
         return "fork" + d
+    if not a.over:  # the copies keep playing identically
+        a.step(0)
+        b.step(0)
+        d = first_diff(snapshot(a), snapshot(b))
+        if d:
+            return "fork+step" + d
+    for name, g in (("python", py), ("native", nat)):  # copy() == replay, within each engine
+        c, r = g.copy(), g.fork(replay=True)
+        d = first_diff(snapshot(c), snapshot(r)) or first_diff(outcome(c), outcome(r))
+        if d:
+            return f"copy vs replay ({name}; 'python' = copy)" + d
     for viewer in (0, 1):
         a = determinize(py, viewer, random.Random(seed + viewer))
         b = determinize(nat, viewer, random.Random(seed + viewer))
@@ -385,7 +409,7 @@ def main(argv=None) -> None:
     )
     f.add_argument("--auto-mana", action="store_true", help="play with Game(auto_mana=True): colour-preserving auto payment")
     f.add_argument("--auto-pass", action="store_true", help="play with Game(auto_pass=True): collapse uneventful priority passes")
-    f.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue, jund_madness or blue_madness")
+    f.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue, jund_madness, blue_madness, jund_elves, blue_elves or madness_elves")
     r = sub.add_parser("repro", help="replay a saved divergence")
     r.add_argument("file")
     args = ap.parse_args(argv)

@@ -16,6 +16,8 @@ change when hidden cards are re-sampled (`view.determinize`).
 from __future__ import annotations
 
 import re
+from collections import deque
+from itertools import accumulate
 
 from ..engine.game import Game
 from ..engine.objects import Card, Decision, Option
@@ -35,7 +37,12 @@ class Bot:
 
     def act(self, g: Game) -> int:
         d = g.decision
+        if d.kind == "assign_damage_amount":
+            scores = self.damage_amount_scores(g)
+            return max(range(len(scores)), key=scores.__getitem__)
         handler = getattr(self, f"score_{d.kind}", None)
+        if d.kind == "target" and self.building(g, d) == "Undercity":
+            handler = self.score_room_target  # every deck can take the initiative by combat damage
         if handler is None:
             return 0
         best, best_i = NEG - 1, 0
@@ -134,7 +141,7 @@ class Bot:
     def _blockers_for(self, g: Game, attacker: Card) -> list[Card]:
         out = []
         for b in self.creatures(g, self.opp):
-            if b.tapped:
+            if b.tapped or g.has(attacker, "unblockable"):
                 continue
             if g.has(attacker, "flying") and not (g.has(b, "flying") or g.has(b, "reach")):
                 continue
@@ -210,6 +217,40 @@ class Bot:
             s += split[-1]
         return s
 
+    def damage_amount_scores(self, g: Game) -> list[float]:
+        """Exact suffix DP under the existing full-split kill/value/trample score."""
+        a = g.damage_allocation
+        weights = [10 + self.creature_value(g, g.perm(b)) for b in a.blockers]
+        start = 0 if a.recipient == -1 else a.recipient + 1
+        # dp[r]: best score assigning exactly r to the remaining blockers.
+        dp = [0.0] + [-float("inf")] * a.remaining
+        for i in reversed(range(start, len(a.blockers))):
+            lethal = a.lethal[i]
+            prefix = list(accumulate(dp, max))
+            window = deque()
+            next_dp = []
+            for r in range(a.remaining + 1):
+                # Killing: assign at least lethal; the suffix uses <= r-lethal.
+                kill = prefix[r - lethal] + weights[i] if r >= lethal else -float("inf")
+                # Not killing: suffix uses r-lethal+1 .. r. Sliding max makes
+                # each blocker O(power), rather than enumerating all amounts.
+                while window and dp[window[-1]] <= dp[r]:
+                    window.pop()
+                window.append(r)
+                while window and window[0] <= r - lethal:
+                    window.popleft()
+                spare = dp[window[0]] if window and a.player_damage <= 0 else -float("inf")
+                next_dp.append(max(kill, spare))
+            dp = next_dp
+        scores = []
+        for option in g.legal_options():
+            n = option.value
+            if a.recipient == -1:
+                scores.append(sum(weights) + n if n > 0 else dp[a.remaining])
+            else:
+                scores.append((weights[a.recipient] if n >= a.lethal[a.recipient] else 0.0) + dp[a.remaining - n])
+        return scores
+
     # -- costs and choices (shared) -----------------------------------------
 
     def source_cost(self, g: Game, card: Card, color: str) -> float:
@@ -236,15 +277,37 @@ class Bot:
         return 2.0
 
     def score_sacrifice(self, g: Game, d: Decision, o: Option) -> float:
+        if isinstance(o.value, tuple):  # ("source", card, colour): tap it for mana first, the mana floats
+            return -self.sac_cost(g, o.value[1]) + 0.01
         return -self.sac_cost(g, o.value)
 
     def score_exile_from_graveyard(self, g: Game, d: Decision, o: Option) -> float:
+        if o.key[0] == "exile_any_gy":
+            return self.exile_any_value(g, o)
         c = o.value
+        if c is None:  # "Exile nothing" (an optional exile)
+            return 0.5
         if c.face.is_type("Land"):
             return 3.0
         if c.face.is_type("Instant") or c.face.is_type("Sorcery"):
             return 1.0
         return 2.0
+
+    def exile_any_value(self, g: Game, o: Option) -> float:
+        """Faerie Macabre: exile up to two cards from any graveyard. Stop
+        (0.5) unless the card feeds the opponent: spells (Terror, Serpent,
+        Guttersnipe-style discounts) and cards castable from the graveyard."""
+        c = o.value
+        if c is None:
+            return 0.5
+        if c.owner == self.p:
+            return NEG
+        f = c.face
+        if f.flashback is not None or f.escape is not None or any(t.event == "third_draw" for t in f.triggers):
+            return 4.0
+        if f.is_type("Instant") or f.is_type("Sorcery"):
+            return 3.0
+        return 0.2
 
     def score_choose_x(self, g: Game, d: Decision, o: Option) -> float:
         return o.value
@@ -257,6 +320,9 @@ class Bot:
         name = o.key[1]
         if verb == "search":
             return NEG if name is None else self.search_value(g, name)
+        if verb == "put":  # Throne of the Dead Three: the biggest creature
+            f = g.cards_db[name]
+            return (f.power or 0) * 1.5 + (f.toughness or 0) * 0.5
         # discard / put back: get rid of the least valuable card
         return -self.card_value(g, name)
 
@@ -280,6 +346,10 @@ class Bot:
         return 0.0
 
     def score_order(self, g: Game, d: Decision, o: Option) -> float:
+        if o.key[0] == "scry":  # scry N: good cards on top (best first), the rest to the bottom
+            k = o.key.index("bottom")
+            tops, bottoms = o.key[2:k], o.key[k + 1 :]
+            return sum(self.card_value(g, n) * w for n, w in zip(tops, (3, 2, 1))) + sum(2 - self.card_value(g, n) for n in bottoms)
         names = o.key[1:]
         return sum(self.card_value(g, n) * w for n, w in zip(names, (3, 2, 1)))
 
@@ -293,6 +363,16 @@ class Bot:
 
     def score_target(self, g: Game, d: Decision, o: Option) -> float:
         return 0.0
+
+    def score_room_target(self, g: Game, d: Decision, o: Option) -> float:
+        """Undercity rooms: Trap! at the opponent, Forge's counters on our best creature."""
+        v = o.value
+        if v[0] == "player":
+            return 1.0 if v[1] == self.opp else NEG
+        c = self.ref_card(g, o)
+        if c is None:
+            return 0.0
+        return self.creature_value(g, c) * (1 if c.controller == self.p else -1)
 
     def score_mulligan(self, g: Game, d: Decision, o: Option) -> float:
         keep = self.keep_hand(g, 7 - g.mulligans_taken[self.p])

@@ -16,6 +16,9 @@ from .base import NEG, Bot
 # Tunable judgment calls.
 KEEP_LANDS = {7: (2, 4), 6: (2, 4)}  # land counts to keep; 1 land is fine with 2+ cantrips
 COUNTER_MIN_VALUE = 2.5  # spell value worth a Counterspell
+BLAST_MIN_VALUE = 1.0  # a red spell worth a Blue Elemental Blast / Hydroblast (any but the cheapest)
+ANNUL_MIN_VALUE = 1.0  # an artifact / enchantment spell worth an Annul (a sorcery worth an Envelop)
+GUT_SHOT_MIN_LIFE = 8  # pay 2 life for Gut Shot only above this
 FORCE_SPIKE_MIN_VALUE = 1.5
 HOLD_UP_COUNTER = True  # on our turn keep UU open for Jund's turn when we have a threat out
 
@@ -51,6 +54,10 @@ class BlueBot(Bot):
             "Counterspell": 5,
             "Dispel": 3,
             "Blue Elemental Blast": 3,
+            "Hydroblast": 3,
+            "Annul": 3,
+            "Envelop": 2.5,
+            "Gut Shot": 2.5,
             "Steel Sabotage": 3,
             "Tolarian Terror": 4.5,
             "Cryptic Serpent": 4,
@@ -136,6 +143,18 @@ class BlueBot(Bot):
             it = self.counter_target(g)
             jund_mana = self.mana_available(g, self.opp)
             return 35.0 if it is not None and jund_mana == 0 and self.spell_value(g, it) >= FORCE_SPIKE_MIN_VALUE else NEG
+        if n == "Annul":
+            it = self.counter_target(g, lambda x: x.card.face.is_type("Artifact") or x.card.face.is_type("Enchantment"))
+            return 36.0 if it is not None and self.spell_value(g, it) >= ANNUL_MIN_VALUE else NEG
+        if n == "Envelop":
+            it = self.counter_target(g, lambda x: x.card.face.is_type("Sorcery"))
+            return 36.0 if it is not None and self.spell_value(g, it) >= ANNUL_MIN_VALUE else NEG
+        if n == "Gut Shot":
+            if mode == "phyrexian" and self.me(g).life < GUT_SHOT_MIN_LIFE:
+                return NEG
+            if g.players[self.opp].life <= 1:
+                return 45.0
+            return 16.0 if self.gut_shot_targets(g) else NEG
         if g.stack:
             return NEG  # cantrips do not go in response
         holding = HOLD_UP_COUNTER and any(c.name == "Counterspell" for c in self.hand(g)) and self.threats_out(g)
@@ -169,11 +188,14 @@ class BlueBot(Bot):
             return NEG
         return NEG
 
+    def gut_shot_targets(self, g: Game) -> list[Card]:
+        return [c for c in self.creatures(g, self.opp) if g.toughness(c) - c.damage <= 1 and self.creature_value(g, c) >= 1.5]
+
     def modal_score(self, g: Game, card: Card, mode: str) -> float:
-        if card.name == "Blue Elemental Blast":
+        if card.name in ("Blue Elemental Blast", "Hydroblast"):
             if mode == "counter":
                 it = self.counter_target(g, lambda x: "R" in x.card.face.colors)
-                return 37.0 if it is not None and self.spell_value(g, it) >= 1.5 else NEG
+                return 37.0 if it is not None and self.spell_value(g, it) >= BLAST_MIN_VALUE else NEG
             reds = [c for c in g.battlefield if c.controller == self.opp and "R" in c.face.colors]
             if not reds or g.stack:
                 return NEG
@@ -216,13 +238,23 @@ class BlueBot(Bot):
         spell = self.building(g, d)
         c = self.ref_card(g, o)
         v = o.value
-        if spell in ("Counterspell", "Force Spike", "Dispel", "Blue Elemental Blast", "Steel Sabotage"):
+        if spell in ("Counterspell", "Force Spike", "Dispel", "Blue Elemental Blast", "Hydroblast", "Steel Sabotage", "Annul", "Envelop"):
             it = self.ref_spell(g, o)
             if it is not None:
+                if spell == "Hydroblast" and "R" not in it.card.face.colors:
+                    return NEG
                 return self.spell_value(g, it) + (0 if not self._already_countered(g, it) else -50)
             if c is not None and c.controller == self.opp:  # Blast destroying a red permanent
+                if spell == "Hydroblast" and "R" not in c.face.colors:
+                    return NEG
                 return self.creature_value(g, c) if g.is_creature(c) else 2.0
             return NEG
+        if spell == "Gut Shot":
+            if v == ("player", self.opp):
+                return 50.0 if g.players[self.opp].life <= 1 else 0.0
+            if c is None or c.controller == self.p:
+                return NEG
+            return self.creature_value(g, c) if g.toughness(c) - c.damage <= 1 else -5.0
         if spell in ("Thought Scour", "Mental Note"):
             return 1.0 if v == ("player", self.p) else 0.0  # mill ourselves: Terror fuel
         if spell == "Deem Inferior":
@@ -243,6 +275,8 @@ class BlueBot(Bot):
         return super().score_choose_mode(g, d, o)
 
     def score_exile_from_graveyard(self, g: Game, d: Decision, o: Option) -> float:
+        if o.key[0] == "exile_any_gy":
+            return self.exile_any_value(g, o)
         # Escape: keep instants/sorceries for Terror and Serpent discounts.
         c = o.value
         if c.face.is_type("Land"):

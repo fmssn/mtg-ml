@@ -46,6 +46,12 @@ fn known_list(k: u8) -> Vec<u8> {
     (0..2).filter(|p| k & (1 << p) != 0).collect()
 }
 
+/// A player's Undercity room by name.
+fn room_name(room: Option<usize>) -> Option<&'static str> {
+    let d = db();
+    room.map(|r| d.def(d.undercity.unwrap()).triggers[r].name.as_str())
+}
+
 fn card_tuple(py: Python<'_>, c: &Card) -> PyObject {
     let d = db();
     let temp: Vec<PyObject> = c.temp.iter().map(|t| (d.keyword_list(t.keywords), t.power, t.toughness).into_py(py)).collect();
@@ -68,6 +74,11 @@ fn card_tuple(py: Python<'_>, c: &Card) -> PyObject {
         c.skip_untap.into_py(py),
         temp.into_py(py),
         known_list(c.known_to).into_py(py),
+        c.animated.into_py(py),
+        d.keyword_list(c.granted).into_py(py),
+        c.prototyped.into_py(py),
+        c.charge.into_py(py),
+        c.mana_used_turn.into_py(py),
     ];
     PyTuple::new_bound(py, fields).into_py(py)
 }
@@ -101,6 +112,21 @@ fn data_list(py: Python<'_>, st: &State, d: &Data) -> PyObject {
     if let Some(n) = d.storm {
         v.push(("storm", n.into_py(py)));
     }
+    if let Some(n) = d.sacrificed_mv {
+        v.push(("sacrificed_mv", n.into_py(py)));
+    }
+    if let Some(o) = d.chosen_oid {
+        v.push(("chosen_oid", o.into_py(py)));
+    }
+    if let Some(n) = d.power {
+        v.push(("power", n.into_py(py)));
+    }
+    if let Some(c) = &d.chosen {
+        v.push(("chosen", card_tuple(py, c)));
+    }
+    if let Some(n) = d.tapped_power {
+        v.push(("tapped_power", n.into_py(py)));
+    }
     v.sort_by(|a, b| a.0.cmp(b.0));
     v.into_py(py)
 }
@@ -120,12 +146,33 @@ impl PyGame {
     fn st(&self) -> &State {
         self.g.state()
     }
+    /// Every edit outside `step()` goes through here: it also drops the
+    /// copy snapshot, which no longer leads to the edited state.
     fn mutate(&mut self) -> &mut State {
         self.version += 1;
-        self.g.state_mut()
+        let st = self.g.state_mut();
+        st.state_edited();
+        st
     }
     fn card(&self, c: CIdx) -> PyResult<&Card> {
         self.st().cards.get(c as usize).ok_or_else(|| PyIndexError::new_err("bad card index"))
+    }
+    /// Set 6: each option's simulated previews, hashed (None before set 6).
+    fn sim_hashes(&mut self, player: u8, option_dim: u32, features: u8) -> PyResult<Option<Vec<Vec<u32>>>> {
+        if features < 6 || self.st().decision.is_none() {
+            return Ok(None);
+        }
+        let n = self.st().decision.as_ref().map_or(0, |d| d.options.len());
+        let mut sims = vec![Vec::new(); n];
+        let mut buf = String::with_capacity(48);
+        crate::sim::sim_previews(&mut self.g, player, features, |i, a| {
+            use std::fmt::Write;
+            buf.clear();
+            let _ = buf.write_fmt(a);
+            sims[i].push(crc32fast::hash(buf.as_bytes()) % option_dim);
+        })
+        .map_err(Self::step_err)?;
+        Ok(Some(sims))
     }
     fn step_err(e: StepError) -> PyErr {
         match e {
@@ -150,7 +197,7 @@ impl PyGame {
 #[pymethods]
 impl PyGame {
     #[new]
-    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=100, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1, auto_mana=false, auto_pass=false, deck_names=(None, None)))]
+    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=100, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1, auto_mana=false, auto_pass=false, deck_names=(None, None), registered_main=None, registered_sideboards=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         decks: (Vec<String>, Vec<String>),
@@ -166,6 +213,8 @@ impl PyGame {
         auto_mana: bool,
         auto_pass: bool,
         deck_names: (Option<String>, Option<String>),
+        registered_main: Option<(Vec<String>, Vec<String>)>,
+        registered_sideboards: Option<(Vec<String>, Vec<String>)>,
     ) -> PyResult<Self> {
         if let Some(p) = starting_player {
             Self::pidx(p as usize)?;
@@ -173,7 +222,11 @@ impl PyGame {
         if !STEPS.contains(&start_step.as_str()) {
             return Err(PyValueError::new_err(format!("{start_step:?} is not in list")));
         }
+        let main = registered_main.unwrap_or_else(|| decks.clone());
+        let side = registered_sideboards.unwrap_or_default();
         let args = Args {
+            registered_main: [main.0, main.1],
+            registered_sideboards: [side.0, side.1],
             decks: [decks.0, decks.1],
             seed,
             starting_player,
@@ -211,6 +264,38 @@ impl PyGame {
         Ok(())
     }
 
+    /// `Game.copy` from the latest step-start snapshot; None when there is
+    /// none (the caller replays instead, see `NativeGame.copy`).
+    fn copy(&mut self) -> PyResult<Option<PyGame>> {
+        Ok(self.g.copy().map_err(Self::step_err)?.map(|g| PyGame { g, version: 0 }))
+    }
+
+    /// Whether to take a snapshot at every step start (`Game._snapshots`).
+    fn set_snapshots(&mut self, on: bool) {
+        self.g.state_mut().snapshots = on;
+    }
+
+    /// Use `other`'s latest snapshot: it replayed this game's actions and is
+    /// in the same state. Ignored when this game was edited outside `step()`.
+    fn adopt_snapshot(&mut self, other: PyRef<'_, PyGame>) {
+        let snap = other.st().snap.clone();
+        let st = self.g.state_mut();
+        if !st.edited {
+            st.snap = snap;
+        }
+    }
+
+    /// `Game._edited`: edited outside `step()` since the latest snapshot.
+    #[getter]
+    fn edited(&self) -> bool {
+        self.st().edited
+    }
+
+    #[getter]
+    fn has_snapshot(&self) -> bool {
+        self.st().snap.is_some()
+    }
+
     // -- scalar state --------------------------------------------------------
 
     #[getter]
@@ -233,6 +318,10 @@ impl PyGame {
     fn turn(&self) -> i32 {
         self.st().turn
     }
+    #[setter]
+    fn set_turn(&mut self, v: i32) {
+        self.mutate().turn = v;
+    }
     #[getter]
     fn step_name(&self) -> &str {
         self.st().step_name
@@ -247,6 +336,34 @@ impl PyGame {
         self.mutate().active = v;
         Ok(())
     }
+    /// The player with the initiative (Undercity), or None.
+    #[getter]
+    fn initiative(&self) -> Option<u8> {
+        self.st().initiative
+    }
+    #[setter]
+    fn set_initiative(&mut self, v: Option<u8>) -> PyResult<()> {
+        if let Some(p) = v {
+            Self::pidx(p as usize)?;
+        }
+        self.mutate().initiative = v;
+        Ok(())
+    }
+    /// Scenario setups: put player `p`'s venture marker in a room (None: no dungeon).
+    #[pyo3(signature = (p, room))]
+    fn set_dungeon_room(&mut self, p: usize, room: Option<&str>) -> PyResult<()> {
+        let p = Self::pidx(p)?;
+        let idx = match room {
+            None => None,
+            Some(r) => {
+                let d = db();
+                let u = d.def(d.undercity.ok_or_else(|| PyValueError::new_err("no Undercity"))?);
+                Some(u.triggers.iter().position(|t| t.name == r).ok_or_else(|| PyValueError::new_err(format!("unknown room {r:?}")))?)
+            }
+        };
+        self.mutate().players[p].dungeon_room = idx;
+        Ok(())
+    }
     #[getter]
     fn starting_player(&self) -> u8 {
         self.st().starting_player
@@ -254,6 +371,18 @@ impl PyGame {
     #[getter]
     fn lands_played(&self) -> i32 {
         self.st().lands_played
+    }
+    #[setter]
+    fn set_lands_played(&mut self, v: i32) {
+        self.mutate().lands_played = v;
+    }
+    #[getter]
+    fn spells_cast_this_turn(&self) -> i32 {
+        self.st().spells_cast_this_turn
+    }
+    #[setter]
+    fn set_spells_cast_this_turn(&mut self, v: i32) {
+        self.mutate().spells_cast_this_turn = v;
     }
     #[getter]
     fn match_game(&self) -> i32 {
@@ -299,7 +428,7 @@ impl PyGame {
     fn player(&self, py: Python<'_>, p: usize) -> PyResult<PyObject> {
         let pl = &self.st().players[Self::pidx(p)?];
         let pool = pl.pool.iter().map(|(c, n)| (color_str(*c), *n)).collect::<Vec<_>>();
-        Ok((pl.life, pl.library.clone(), pl.hand.clone(), pl.graveyard.clone(), pl.exile.clone(), pool, pl.drew_from_empty, pl.cards_drawn_this_turn, pl.landfall_turn).into_py(py))
+        Ok((pl.life, pl.library.clone(), pl.hand.clone(), pl.graveyard.clone(), pl.exile.clone(), pool, pl.drew_from_empty, pl.cards_drawn_this_turn, pl.landfall_turn, room_name(pl.dungeon_room)).into_py(py))
     }
 
     fn life(&self, p: usize) -> PyResult<i32> {
@@ -324,7 +453,7 @@ impl PyGame {
 
     /// (uid, oid, name, defn name, owner, controller, zone, is_token,
     /// transformed, tapped, damage, deathtouch_damage, counters, sick,
-    /// attached_to, skip_untap, temp, known_to)
+    /// attached_to, skip_untap, temp, known_to, animated, granted)
     fn card_info(&self, py: Python<'_>, c: CIdx) -> PyResult<PyObject> {
         Ok(card_tuple(py, self.card(c)?))
     }
@@ -393,6 +522,10 @@ impl PyGame {
             Val::Order(v) => PyTuple::new_bound(py, v.iter().map(|&c| card(c))).into_py(py),
             Val::Top => "top".into_py(py),
             Val::Bottom => "bottom".into_py(py),
+            Val::Name(n) => n.into_py(py),
+            Val::Filter(c, col) => ("filter", card(*c), color_str(*col)).into_py(py),
+            Val::Scry(top, bottom) => (PyTuple::new_bound(py, top.iter().map(|&c| card(c))), PyTuple::new_bound(py, bottom.iter().map(|&c| card(c)))).into_py(py),
+            Val::Typed(t, c) => (*t, card(*c)).into_py(py),
         })
     }
 
@@ -483,6 +616,7 @@ impl PyGame {
             "damage" => card.damage = value.extract()?,
             "counters" => card.counters = value.extract()?,
             "skip_untap" => card.skip_untap = value.extract()?,
+            "charge" => card.charge = value.extract()?,
             "attached_to" => card.attached_to = value.extract()?,
             "controller" => card.controller = Self::pidx(value.extract::<usize>()?)? as u8,
             _ => return Err(PyValueError::new_err(format!("card field {field:?} is not settable"))),
@@ -550,6 +684,16 @@ impl PyGame {
 
     // -- views ---------------------------------------------------------------
 
+    /// `Game.witnessed(viewer)`: opponent card name -> established minimum copies.
+    fn witnessed<'py>(&self, py: Python<'py>, viewer: u8) -> PyResult<Bound<'py, PyDict>> {
+        Self::pidx(viewer as usize)?;
+        let d = PyDict::new_bound(py);
+        for (name, n) in self.st().witnessed_counts(viewer) {
+            d.set_item(name, n)?;
+        }
+        Ok(d)
+    }
+
     /// `view.observe(game, viewer)`.
     fn observe<'py>(&self, py: Python<'py>, viewer: u8) -> PyResult<Bound<'py, PyDict>> {
         Self::pidx(viewer as usize)?;
@@ -584,6 +728,9 @@ impl PyGame {
         s.set_item("pool", pool(me)?)?;
         s.set_item("cards_drawn_this_turn", me.cards_drawn_this_turn)?;
         s.set_item("mulligans", st.mulligans_taken[viewer as usize])?;
+        if let Some(r) = room_name(me.dungeon_room) {
+            s.set_item("dungeon_room", r)?;
+        }
         o.set_item("self", s)?;
         let t = PyDict::new_bound(py);
         t.set_item("life", them.life)?;
@@ -595,6 +742,9 @@ impl PyGame {
         t.set_item("exile", exiled(&them.exile))?;
         t.set_item("pool", pool(them)?)?;
         t.set_item("mulligans", st.mulligans_taken[opp as usize])?;
+        if let Some(r) = room_name(them.dungeon_room) {
+            t.set_item("dungeon_room", r)?;
+        }
         o.set_item("opponent", t)?;
         o.set_item("lands_played", if st.active == viewer { Some(st.lands_played) } else { None })?;
         let bf = PyList::empty_bound(py);
@@ -635,6 +785,10 @@ impl PyGame {
             stack.append(d)?;
         }
         o.set_item("stack", stack)?;
+        // view.py: initiative keys only once someone took it.
+        if let Some(i) = st.initiative {
+            o.set_item("initiative", rel(i, viewer))?;
+        }
         match &st.decision {
             Some(d) if d.player == viewer => {
                 let dd = PyDict::new_bound(py);
@@ -671,29 +825,62 @@ impl PyGame {
         Ok((o.0, ids.into_iter().enumerate().map(|(k, id)| (id, k)).collect()))
     }
 
+    fn damage_allocation(&self) -> Option<(u32, Vec<u32>, Vec<i32>, Vec<i32>, i32, i32, u8, i32)> {
+        self.st().damage_allocation.as_ref().map(|a| (a.attacker, a.blockers.clone(), a.lethal.clone(), a.assigned.clone(), a.recipient, a.remaining, a.defender, a.player_damage))
+    }
+
+    fn combat_subjects(&self) -> Vec<Vec<u32>> {
+        self.st().combat_subjects.clone()
+    }
+
+    fn payment_context(&self) -> Option<(i32, Vec<(String, i32)>)> {
+        self.st().paying.as_ref().map(|(rem, _, _)| (rem.generic, rem.colored.iter().map(|(c, n)| (color_str(*c).to_string(), *n)).collect()))
+    }
+
     /// `rl.features.featurize(game, player, state_dim, option_dim, features)`.
     #[pyo3(signature = (player, state_dim, option_dim, features = crate::features::FEATURES))]
-    fn featurize(&self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
+    fn featurize(&mut self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<Vec<u32>>)> {
         Self::pidx(player as usize)?;
-        crate::features::featurize(self.st(), player, state_dim, option_dim, fver(features)?).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
+        let features = fver(features)?;
+        let sims = self.sim_hashes(player, option_dim, features)?;
+        crate::features::featurize(self.st(), player, state_dim, option_dim, features, sims.as_deref()).ok_or_else(|| NativeRulesError::new_err("no decision pending"))
     }
 
     /// `featurize` with the options flattened: (state, option lengths, all
     /// option tokens). Cheaper to pack into requests and samples.
     #[pyo3(signature = (player, state_dim, option_dim, features = crate::features::FEATURES))]
-    fn featurize_flat(&self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<u32>, Vec<u32>)> {
+    fn featurize_flat(&mut self, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Vec<u32>, Vec<u32>, Vec<u32>)> {
         Self::pidx(player as usize)?;
-        let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim, fver(features)?).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
+        let features = fver(features)?;
+        let sims = self.sim_hashes(player, option_dim, features)?;
+        let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim, features, sims.as_deref()).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
         let lens = opts.iter().map(|o| o.len() as u32).collect();
         Ok((state, lens, opts.concat()))
     }
 
     /// `encode.option_preview(game, player, i, features)`.
     #[pyo3(signature = (player, i, features = crate::features::FEATURES))]
-    fn option_preview(&self, player: u8, i: usize, features: u8) -> PyResult<Vec<String>> {
+    fn option_preview(&mut self, player: u8, i: usize, features: u8) -> PyResult<Vec<String>> {
         Self::pidx(player as usize)?;
         fver(features)?;
-        crate::features::option_preview_strings(self.st(), player, i, features).ok_or_else(|| PyIndexError::new_err("no such option"))
+        let mut v = crate::features::option_preview_strings(self.st(), player, i, features).ok_or_else(|| PyIndexError::new_err("no such option"))?;
+        if features >= 6 {
+            crate::sim::sim_preview(&mut self.g, player, i, features, &mut |a| v.push(a.to_string())).map_err(Self::step_err)?;
+        }
+        Ok(v)
+    }
+
+    /// `encode.option_previews(game, player, features)`: every option's previews.
+    #[pyo3(signature = (player, features = crate::features::FEATURES))]
+    fn option_previews(&mut self, player: u8, features: u8) -> PyResult<Vec<Vec<String>>> {
+        Self::pidx(player as usize)?;
+        fver(features)?;
+        let n = self.decision()?.options.len();
+        let mut out: Vec<Vec<String>> = (0..n).map(|i| crate::features::option_preview_strings(self.st(), player, i, features).unwrap_or_default()).collect();
+        if features >= 6 {
+            crate::sim::sim_previews(&mut self.g, player, features, |i, a| out[i].push(a.to_string())).map_err(Self::step_err)?;
+        }
+        Ok(out)
     }
 
     /// Hashed `event_tokens` of option i for (decider, opponent).
@@ -717,6 +904,7 @@ impl PyGame {
         d.set_item("winner", st.winner)?;
         d.set_item("end_reason", st.end_reason)?;
         d.set_item("match_game", st.match_game)?;
+        d.set_item("initiative", st.initiative)?;
         let players = PyList::empty_bound(py);
         for p in &st.players {
             let pd = PyDict::new_bound(py);
@@ -728,6 +916,7 @@ impl PyGame {
             pd.set_item("pool", p.pool.iter().map(|(c, n)| (color_str(*c), *n)).collect::<Vec<_>>())?;
             pd.set_item("drew_from_empty", p.drew_from_empty)?;
             pd.set_item("cards_drawn_this_turn", p.cards_drawn_this_turn)?;
+            pd.set_item("dungeon_room", room_name(p.dungeon_room))?;
             players.append(pd)?;
         }
         d.set_item("players", players)?;
@@ -832,10 +1021,16 @@ card_get! {
     attached_to: Option<u32> => |c: &Card| c.attached_to;
     skip_untap: i32 => |c: &Card| c.skip_untap;
     plotted_turn: i32 => |c: &Card| c.plotted_turn;
+    animated: Option<(i32, i32)> => |c: &Card| c.animated;
+    _granted: Vec<&'static str> => |c: &Card| db().keyword_list(c.granted);
+    prototyped: bool => |c: &Card| c.prototyped;
+    charge: i32 => |c: &Card| c.charge;
+    mana_used_turn: i32 => |c: &Card| c.mana_used_turn;
     _known: Vec<u8> => |c: &Card| known_list(c.known_to);
     _temp: Vec<(Vec<&'static str>, i32, i32)> => |c: &Card| c.temp.iter().map(|t| (db().keyword_list(t.keywords), t.power, t.toughness)).collect::<Vec<_>>();
     @set set_tapped = "tapped", set_transformed = "transformed", set_sick = "sick", set_deathtouch_damage = "deathtouch_damage",
-    set_damage = "damage", set_counters = "counters", set_skip_untap = "skip_untap", set_attached_to = "attached_to", set_controller = "controller"
+    set_damage = "damage", set_counters = "counters", set_skip_untap = "skip_untap", set_attached_to = "attached_to", set_controller = "controller",
+    set_charge = "charge"
 }
 
 fn ref_exists(st: &State, r: Ref) -> bool {
@@ -868,12 +1063,55 @@ fn loaded_spec() -> String {
     db().spec_text.clone()
 }
 
+/// {name: cards.py `card_shape`} for every card, face and token (tests).
+#[pyfunction]
+fn card_shapes() -> std::collections::HashMap<String, Vec<String>> {
+    // Dungeons (cards.py DUNGEONS) are no cards, faces or tokens.
+    db().defs.iter().filter(|d| Some(d.id) != db().undercity).map(|d| (d.name.clone(), d.shape.clone())).collect()
+}
+
+/// {level: (shape fields, non-shape fields)} of the card spec (tests).
+#[pyfunction]
+fn spec_fields() -> std::collections::HashMap<&'static str, (Vec<&'static str>, Vec<&'static str>)> {
+    use crate::cards::*;
+    [
+        ("card", (SHAPE_CARD_FIELDS.to_vec(), NON_SHAPE_CARD_FIELDS.to_vec())),
+        ("ability", (SHAPE_ABILITY_FIELDS.to_vec(), NON_SHAPE_ABILITY_FIELDS.to_vec())),
+        ("trigger", (SHAPE_TRIGGER_FIELDS.to_vec(), NON_SHAPE_TRIGGER_FIELDS.to_vec())),
+    ]
+    .into_iter()
+    .collect()
+}
+
 #[pymodule]
 fn mtg_ml_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGame>()?;
     m.add_class::<CardView>()?;
     m.add_function(wrap_pyfunction!(load_cards, m)?)?;
     m.add_function(wrap_pyfunction!(loaded_spec, m)?)?;
+    m.add_function(wrap_pyfunction!(card_shapes, m)?)?;
+    m.add_function(wrap_pyfunction!(spec_fields, m)?)?;
+    m.add_function(wrap_pyfunction!(build_sources, m)?)?;
     m.add("NativeRulesError", m.py().get_type_bound::<NativeRulesError>())?;
     Ok(())
+}
+
+/// Embedded build inputs let benchmark validation verify the installed binary,
+/// even when worktrees share a Cargo cache. Python hashes these exact bytes.
+#[pyfunction]
+fn build_sources() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("native/Cargo.toml", include_str!("../Cargo.toml")),
+        ("native/Cargo.lock", include_str!("../Cargo.lock")),
+        ("native/src/lib.rs", include_str!("lib.rs")),
+        ("native/src/cards.rs", include_str!("cards.rs")),
+        ("native/src/game.rs", include_str!("game.rs")),
+        ("native/src/engine.rs", include_str!("engine.rs")),
+        ("native/src/features.rs", include_str!("features.rs")),
+        ("native/src/mana.rs", include_str!("mana.rs")),
+        ("native/src/py.rs", include_str!("py.rs")),
+        ("native/src/rng.rs", include_str!("rng.rs")),
+        ("native/src/sim.rs", include_str!("sim.rs")),
+        ("native/src/state.rs", include_str!("state.rs")),
+    ]
 }

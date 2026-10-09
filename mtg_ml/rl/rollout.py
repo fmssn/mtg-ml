@@ -54,7 +54,7 @@ from operator import itemgetter
 from ..agents import RandomAgent
 from ..bots import make_bot
 from ..backend import game_class
-from ..encode import check_features
+from ..encode import BELIEF_FEATURES, check_features
 from ..engine import Game
 from ..engine.objects import (
     ASSIGN_DAMAGE,
@@ -73,7 +73,8 @@ from ..engine.objects import (
     TARGET,
     YES_NO,
 )
-from ..match import DEFAULT_MATCHUP, game_args, matchup_decks
+from ..knowledge import MatchKnowledge
+from ..match import DEFAULT_MATCHUP, first_starting_player, game_args, game_seed, matchup_decks, next_starting_player
 from .features import encode_event_hashes, event_hashes, featurize_flat
 from .samples import FIELDS, PackedSamples
 
@@ -86,7 +87,7 @@ MAX_MATCHUPS = 1024  # claim counters a pool shares (run_specs)
 # Decision kinds as recorded per decision (`Result.kinds`, small ints); id 0
 # is any kind not listed. The PPO statistics break entropy and KL down by them.
 KINDS = ("other", PRIORITY, PAY_MANA, TARGET, DECLARE_ATTACKER, DECLARE_BLOCKER, YES_NO, CHOOSE_CARD, CHOOSE_X, SACRIFICE,
-         EXILE_FROM_GY, ORDER, ORDER_TRIGGERS, ASSIGN_DAMAGE, CHOOSE_MODE, MULLIGAN)  # fmt: skip
+         EXILE_FROM_GY, ORDER, ORDER_TRIGGERS, ASSIGN_DAMAGE, CHOOSE_MODE, MULLIGAN, "assign_damage_amount")  # fmt: skip
 KIND_ID = {k: i for i, k in enumerate(KINDS)}
 
 _DECKS: dict[tuple, dict] = {}
@@ -95,12 +96,54 @@ _CLAIM = None  # the pool's shared next-spec index per matchup (multiprocessing 
 _PROFILE = None
 
 
-def _game_args(match_game: int = 1, matchup: str = DEFAULT_MATCHUP) -> dict:
-    """Decks (maindecks for game 1, sideboarded for games 2 and 3) and deck names, as Game arguments."""
-    key = (min(match_game, 2), matchup)
+def _game_args(match_game: int = 1, matchup: str = DEFAULT_MATCHUP, variants: tuple[str, str] | None = None) -> dict:
+    """Decks (maindecks for game 1, sideboarded for games 2 and 3) and deck
+    names, as Game arguments. `variants`: each canonical position's
+    registered 75 (`engine.variants`) instead of the stock lists; games 2
+    and 3 apply that variant's plan against the opponent's archetype, which
+    changes the partition, never the 75."""
+    key = (min(match_game, 2), matchup, variants)
     if key not in _DECKS:
-        _DECKS[key] = game_args(key[0], matchup)
+        _DECKS[key] = game_args(key[0], matchup) if variants is None else _variant_args(key[0], matchup, variants)
     return {**_DECKS[key], "match_game": match_game}
+
+
+def _variant_args(game_no: int, matchup: str, variants: tuple[str, str]) -> dict:
+    from ..engine.decks import expand
+    from ..engine.variants import VARIANTS, plan_for_variant
+    from ..match import deck_names
+
+    archetypes = matchup_decks(matchup)
+    vs = tuple(VARIANTS[v] for v in variants)
+    for s, v in enumerate(vs):
+        if v.archetype != archetypes[s]:
+            raise ValueError(f"variant {v.id!r} is {v.archetype}, but {matchup} seats {archetypes[s]} at position {s}")
+    if game_no == 1:
+        decks = tuple(expand(v.main) for v in vs)
+    else:
+        decks = tuple(expand(plan_for_variant(v, archetypes[1 - s]).apply()) for s, v in enumerate(vs))
+    return {"decks": decks, "deck_names": deck_names(matchup),
+            "registered_main": tuple(expand(v.main) for v in vs),
+            "registered_sideboards": tuple(expand(v.sideboard) for v in vs)}
+
+
+def registered_lists(matchup: str, variants: tuple[str, str] | None, position: int) -> tuple[str, dict[str, int]]:
+    """(archetype, registered 75 as card counts) of a canonical position:
+    the belief head's training target, never one of its inputs."""
+    archetype = matchup_decks(matchup)[position]
+    if variants is None:
+        from ..engine.decks import DECKS, SIDEBOARDS
+
+        main, side = DECKS[archetype], SIDEBOARDS[archetype]
+    else:
+        from ..engine.variants import VARIANTS
+
+        v = VARIANTS[variants[position]]
+        main, side = v.main, v.sideboard
+    out = dict(main)
+    for name, n in side.items():
+        out[name] = out.get(name, 0) + n
+    return archetype, out
 
 
 def load_net(path: str):
@@ -181,6 +224,27 @@ def policy_features(path: str, version: int = 0) -> int:
     return _FEATURES[key]
 
 
+_BELIEFS: dict[tuple, object] = {}
+
+
+def policy_belief(path: str, version: int = 0):
+    """The `BeliefSpec` of a feature-set-8 checkpoint (config `belief`), or
+    None for a policy without a belief head; cached like `policy_features`."""
+    key = (path, version)
+    if key not in _BELIEFS:
+        if version:
+            for k in [k for k in _BELIEFS if k[1]]:
+                del _BELIEFS[k]
+        cfg = checkpoint_config(path).get("belief")
+        if cfg:
+            from .belief import BeliefSpec
+
+            _BELIEFS[key] = BeliefSpec.from_config(cfg)
+        else:
+            _BELIEFS[key] = None
+    return _BELIEFS[key]
+
+
 def load_policy(path: str, version: int = 0):
     """`load_net`, cached per process. Frozen checkpoints (version 0) stay
     cached; a learner version replaces every other learner version, whatever
@@ -223,7 +287,41 @@ class GameSpec:
     seats: tuple[str, str]  # policy spec per seat
     starting_player: int | None = None
     match_game: int = 1  # 1 = maindecks, 2/3 = after sideboarding
-    matchup: str = DEFAULT_MATCHUP  # match.MATCHUPS: the deck in each seat
+    matchup: str = DEFAULT_MATCHUP  # canonical deck positions, independent of physical seats
+    swap_seats: bool = False
+    # True: the spec is a whole best-of-three match from game 1 (`seed` is the
+    # match seed, game n plays with `match.game_seed(seed, n)`), with fixed
+    # registrations, policies and seat mapping, each player's witnessed
+    # opponent cards carried into the next game (`MatchKnowledge`).
+    bo3: bool = False
+    # each canonical position's registered 75 (`engine.variants` ids); None: the stock lists
+    variants: tuple[str, str] | None = None
+    # each canonical position's knowledge from earlier games of its match
+    # (`MatchKnowledge.to_dict`), for a single game scheduled from outside;
+    # None: a fresh match
+    knowledge: tuple[dict | None, dict | None] = (None, None)
+
+    @property
+    def physical_seats(self) -> tuple[str, str]:
+        return self.seats[::-1] if self.swap_seats else self.seats
+
+    def canonical(self, physical: int) -> int:
+        return 1 - physical if self.swap_seats else physical
+
+    def game_args(self, match_game: int | None = None, starting_player: int | None = -1) -> dict:
+        """Game keyword arguments of game `match_game` (default: the spec's)
+        starting with canonical `starting_player` (default: the spec's)."""
+        args = _game_args(self.match_game if match_game is None else match_game, self.matchup, self.variants)
+        if self.swap_seats:
+            for name in ("decks", "registered_main", "registered_sideboards"):
+                args[name] = args[name][::-1]
+            # Legacy policies still need labels relative to their physical seats.
+            from ..match import DECK_NAMES
+            decks = matchup_decks(self.matchup)[::-1]
+            args["deck_names"] = tuple(d if d != DECK_NAMES[s] else None for s, d in enumerate(decks))
+        start = self.starting_player if starting_player == -1 else starting_player
+        args["starting_player"] = 1 - start if self.swap_seats and start is not None else start
+        return args
 
 
 @dataclass
@@ -235,8 +333,8 @@ class Job:
     gamma: float = 0.995
     lam: float = 0.95
     shaping: float = 0.0
-    # GAE bootstraps from values clamped to +-(value_clamp + |shaping|), the
-    # range of the returns (0 = off). An unbounded value head drifts past +-1.
+    # GAE clamps unshaped value to +-value_clamp, then shifts by -shaping * phi.
+    # 0 disables clamping. Raw predictions remain available for logging.
     value_clamp: float = 1.0
     # > 0: discount per game turn instead of per decision: between consecutive
     # decisions gamma_turn ** (turns elapsed) (lam_turn likewise), so a line's
@@ -279,13 +377,22 @@ class Result:
 
     samples: PackedSamples = field(default_factory=PackedSamples)  # (state, opts, events), packed
     lengths: list = field(default_factory=list)
+    trajectory_ids: list = field(default_factory=list)  # (game seed, seat), for stable residency-wave merging
     actions: list = field(default_factory=list)
     logps: list = field(default_factory=list)
     advantages: list = field(default_factory=list)
     returns: list = field(default_factory=list)
     kinds: list = field(default_factory=list)  # decision kind per recorded decision (`KIND_ID`)
-    # per game: (seats, winner, end_reason, turns, decisions, seed)
+    # per game: (seats, winner, end_reason, turns, decisions, seed); the
+    # games of a best-of-three spec carry `match.game_seed(match seed, n)`
     games: list = field(default_factory=list)
+    # per best-of-three spec: (seats, match seed, matchup, ((canonical
+    # starting player, canonical winner, reason) per game), match winner)
+    matches: list = field(default_factory=list)
+    # per recorded trajectory (aligned with `lengths`) of a learner with a
+    # belief head: (archetype index, per-card copies of the opponent's
+    # registered 75), `BeliefSpec.target`. Training data only.
+    belief_targets: list = field(default_factory=list)
     # per job: (wall seconds, seconds waiting for inference, decisions)
     timing: list = field(default_factory=list)
 
@@ -320,13 +427,15 @@ def _finish(traj: Trajectory, outcome: float, job: Job, out: Result) -> None:
     rewards = [0.0] * n
     rewards[-1] = outcome
     if job.shaping:
+        if len(traj.potentials) != n:
+            raise ValueError("shaping needs the potential of every recorded decision")
         phis = traj.potentials + [0.0]  # terminal potential 0, so shaping telescopes to -phi(s0)
         for t in range(n):
             rewards[t] += job.shaping * (gam[t] * phis[t + 1] - phis[t])
     values = traj.values  # raw, as the network said them (traj.values stays untouched)
     if job.value_clamp > 0:
-        hi = job.value_clamp + abs(job.shaping)
-        values = [min(hi, max(-hi, v)) for v in values]
+        shifts = [job.shaping * phi for phi in traj.potentials] if job.shaping else [0.0] * n
+        values = [min(job.value_clamp - shift, max(-job.value_clamp - shift, v)) for v, shift in zip(values, shifts)]
     adv = [0.0] * n
     last = 0.0
     for t in reversed(range(n)):
@@ -356,16 +465,64 @@ class _Seat:
 
 class _Live:
     """A game in play: its spec, engine, slot (hidden-state rows 2 * slot + seat),
-    trajectories, seat memories and scripted agents."""
+    trajectories, seat memories and scripted agents. A best-of-three spec
+    keeps its `_Live` (and slot) for the whole match: `next_game` starts the
+    next game with fresh trajectories and seat memories (the recurrent state
+    restarts each game), and `knowledge` (per canonical position) carries
+    what each player witnessed of the other into it."""
 
-    __slots__ = ("spec", "game", "slot", "trajs", "seats", "agents")
+    __slots__ = ("spec", "game", "slot", "trajs", "seats", "agents", "game_no", "start", "results", "knowledge")
 
-    def __init__(self, spec: GameSpec, game: Game, slot: int):
-        self.spec, self.game, self.slot = spec, game, slot
+    def __init__(self, spec: GameSpec, slot: int, Game, kw: dict):
+        self.spec, self.slot = spec, slot
+        self.knowledge = [MatchKnowledge.from_dict(k) for k in spec.knowledge]
+        self.results: list = []  # (canonical starting player, canonical winner, reason) per finished game
+        self.game_no = spec.match_game
+        if spec.bo3:
+            if spec.match_game != 1:
+                raise ValueError("a best-of-three spec starts at game 1")
+            self.start = first_starting_player(spec.seed) if spec.starting_player is None else spec.starting_player
+        else:
+            self.start = spec.starting_player
+        self._new_game(Game, kw)
+
+    def _new_game(self, Game, kw: dict) -> None:
+        spec = self.spec
+        seed = game_seed(spec.seed, self.game_no) if spec.bo3 else spec.seed
+        self.game = Game(**spec.game_args(self.game_no, self.start), seed=seed, **kw)
         self.trajs = (Trajectory(), Trajectory())
         self.seats = (_Seat(), _Seat())
-        decks = matchup_decks(spec.matchup)
-        self.agents = tuple(RandomAgent(seed=spec.seed * 2 + s) if pol == RANDOM else make_bot(s, decks[s]) if pol == BOT else None for s, pol in enumerate(spec.seats))
+        decks = matchup_decks(spec.matchup)[::-1] if spec.swap_seats else matchup_decks(spec.matchup)
+        self.agents = tuple(RandomAgent(seed=seed * 2 + s) if pol == RANDOM else make_bot(s, decks[s]) if pol == BOT else None for s, pol in enumerate(spec.physical_seats))
+
+    @property
+    def seed(self) -> int:
+        return game_seed(self.spec.seed, self.game_no) if self.spec.bo3 else self.spec.seed
+
+    def next_game(self, Game, kw: dict) -> bool:
+        """After a finished game: fold each player's witnessed record into its
+        knowledge and start the match's next game. False when the match is over
+        (or the spec is a single game)."""
+        g, spec = self.game, self.spec
+        winner = None if g.winner is None else spec.canonical(g.winner)
+        self.results.append((self.start, winner, g.end_reason))
+        if not spec.bo3:
+            return False
+        wins = [sum(1 for _, w, _ in self.results if w == c) for c in (0, 1)]
+        if max(wins) >= 2 or len(self.results) >= 3:
+            return False
+        for p in (0, 1):
+            c = spec.canonical(p)
+            self.knowledge[c] = self.knowledge[c].with_game(g.witnessed(p))
+        self.game_no += 1
+        self.start = next_starting_player(self.start, winner)
+        self._new_game(Game, kw)
+        return True
+
+    @property
+    def match_winner(self) -> int | None:
+        wins = [sum(1 for _, w, _ in self.results if w == c) for c in (0, 1)]
+        return None if wins[0] == wins[1] else int(wins[1] > wins[0])
 
 
 def _step(g: Game, seats: tuple[_Seat, _Seat], a: int) -> None:
@@ -429,7 +586,13 @@ class _LocalEvaluator:
             for pol, run in itertools.groupby(items, key=itemgetter(0)):
                 run = list(run)
                 net = self.learner if pol == LEARNER else load_policy(pol)
-                batch, width = _batch(torch, [it[3] for it in run])
+                xs = [it[3] for it in run]
+                if len(xs[0]) > 4:  # set 8: belief evidence
+                    from .model import step_batch
+
+                    batch, width = step_batch(xs)
+                else:
+                    batch, width = _batch(torch, xs)
                 hidden = None
                 if net.memory != "none":
                     table = self.hidden.get(pol)
@@ -549,6 +712,8 @@ def _play(job: Job) -> Result:
     t_start = time.perf_counter()
     if job.greedy and job.record:
         raise ValueError("greedy games are for evaluation: PPO needs games of the sampling policy (record=False)")
+    if job.record and job.shaping and checkpoint_config(job.learner_path).get("value_bound") == "tanh":
+        raise ValueError("active shaping requires an unbounded value head")
     Game = game_class(job.engine)
     cap = job.inflight or len(job.games)
     if cap > MAX_LIVE:
@@ -567,20 +732,37 @@ def _play(job: Job) -> Result:
             return check_features(job.features[pol])
         return policy_features(job.learner_path, job.learner_version) if pol == LEARNER else policy_features(pol)
 
-    def start(i: int) -> _Live:
-        spec = job.games[i]
-        g = Game(**_game_args(spec.match_game, spec.matchup), seed=spec.seed, starting_player=spec.starting_player, max_turns=job.max_turns, auto_mana=job.auto_mana, auto_pass=job.auto_pass)
-        return _Live(spec, g, free.pop())
+    def belief(pol: str):
+        if features(pol) < BELIEF_FEATURES:
+            return None
+        return policy_belief(job.learner_path, job.learner_version) if pol == LEARNER else policy_belief(pol)
 
-    def finish(lv: _Live) -> None:
+    game_kw = {"max_turns": job.max_turns, "auto_mana": job.auto_mana, "auto_pass": job.auto_pass}
+
+    def start(i: int) -> _Live:
+        return _Live(job.games[i], free.pop(), Game, game_kw)
+
+    def finish(lv: _Live) -> bool:
+        """Record a finished game; True if its match goes on in `lv`."""
         g, spec = lv.game, lv.spec
-        out.games.append((spec.seats, g.winner, g.end_reason, g.turn, len(g.actions), spec.seed))
+        winner = 1 - g.winner if spec.swap_seats and g.winner is not None else g.winner
+        out.games.append((spec.seats, winner, g.end_reason, g.turn, len(g.actions), lv.seed))
         if job.record:
             for p in (0, 1):
-                if spec.seats[p] == LEARNER:
+                if spec.physical_seats[p] == LEARNER:
                     outcome = 0.0 if g.winner is None else (1.0 if g.winner == p else -1.0)
                     _finish(lv.trajs[p], outcome, job, out)
+                    if lv.trajs[p].actions:
+                        out.trajectory_ids.append((lv.seed, p))
+                        learner_belief = belief(LEARNER)
+                        if learner_belief is not None:
+                            out.belief_targets.append(learner_belief.target(*registered_lists(spec.matchup, spec.variants, 1 - spec.canonical(p))))
+        if lv.next_game(Game, game_kw):
+            return True
+        if spec.bo3:
+            out.matches.append((spec.seats, spec.seed, spec.matchup, tuple(lv.results), lv.match_winner))
         free.append(lv.slot)
+        return False
 
     def prepare(k: int) -> list:
         """Play scripted moves until each game of group k needs a policy (top
@@ -589,21 +771,27 @@ def _play(job: Job) -> Result:
         items, live, todo = [], [], groups[k]
         while True:
             for lv in todo:
-                g, seats = lv.game, lv.spec.seats
-                while not g.over:
-                    p = g.decision.player
-                    pol = seats[p]
-                    if pol not in SCRIPTED:
+                seats = lv.spec.physical_seats
+                while True:
+                    g = lv.game
+                    while not g.over:
+                        p = g.decision.player
+                        pol = seats[p]
+                        if pol not in SCRIPTED:
+                            break
+                        _step(g, lv.seats, lv.agents[p].act(g))
+                    if not g.over or not finish(lv):
                         break
-                    _step(g, lv.seats, lv.agents[p].act(g))
                 if g.over:
-                    finish(lv)
                     continue
                 live.append(lv)
                 seat = lv.seats[p]
                 state, o_len, o_flat = featurize_flat(g, p, features=features(pol))
                 # int32 arrays once: batching and recording then only copy memory
                 x = (array("i", state), array("i", o_len), array("i", o_flat), array("i", encode_event_hashes(seat.events)))
+                spec_b = belief(pol)
+                if spec_b is not None:  # set 8: the evidence the belief head reads, nothing else of the opponent
+                    x += (spec_b.evidence(lv.knowledge[lv.spec.canonical(p)], g.witnessed(p)),)
                 seat.events = []
                 pot = _potential(g, p) if job.record and pol == LEARNER else 0.0
                 items.append((pol, 2 * lv.slot + p, seat.fresh, x, lv, p, pot, g.turn))
@@ -690,7 +878,62 @@ def create_pool(workers: int, inference: str = "local", server=None, worker_cpus
     return pool
 
 
+def residency_waves(specs: list[GameSpec], capacity: int):
+    """Schedule already sampled games; capacity includes one learner slot.
+
+    Every game stays whole, and each wave finishes before slots are reused.
+    Sorting groups minimizes reloads without trimming the opponent pool.
+    """
+    if capacity < 1:
+        raise ValueError("resident capacity must be positive")
+    wave, policies = [], set()
+    for spec in sorted(specs, key=_matchup):
+        need = set(_matchup(spec))
+        if len(need) + 1 > capacity:
+            raise ValueError("one game's policies exceed resident capacity (including learner)")
+        if wave and len(policies | need) + 1 > capacity:
+            yield wave
+            wave, policies = [], set()
+        policies |= need
+        wave.append(spec)
+    if wave:
+        yield wave
+
+
 def run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int = 64) -> Result:
+    server = getattr(pool, "server", None)
+    if server is None or not server.cfg.resident_limit:
+        return _run_specs(pool, specs, job, workers, inflight)
+    merged = Result()
+    selection_s, waves = 0.0, 0
+    for wave in residency_waves(specs, server.cfg.resident_limit):
+        keys = {(job.learner_path, job.learner_version)} | {(p, 0) for spec in wave for p in _matchup(spec)}
+        t = time.monotonic()
+        server.select_policies(sorted(keys))
+        selection_s += time.monotonic() - t
+        waves += 1
+        res = _run_specs(pool, wave, job, workers, inflight)
+        for f in fields(Result):
+            getattr(merged, f.name).extend(getattr(res, f.name))
+    t_merge = time.monotonic()
+    if merged.trajectory_ids:
+        order = sorted(range(len(merged.lengths)), key=lambda i: merged.trajectory_ids[i])
+        starts = list(itertools.accumulate(merged.lengths, initial=0))
+        ranges = [(starts[i], starts[i + 1]) for i in order]
+        merged.samples = merged.samples.take_ranges(ranges)
+        for name in ("actions", "logps", "advantages", "returns", "kinds"):
+            src = getattr(merged, name)
+            setattr(merged, name, [v for lo, hi in ranges for v in src[lo:hi]])
+        merged.lengths = [merged.lengths[i] for i in order]
+        if merged.belief_targets:
+            merged.belief_targets = [merged.belief_targets[i] for i in order]
+        merged.trajectory_ids = [merged.trajectory_ids[i] for i in order]
+    merged.games.sort(key=lambda g: g[-1])
+    merged.residency = {"waves": waves, "selection_s": selection_s, "merge_s": time.monotonic() - t_merge}
+    return merged
+
+
+def _run_specs(pool, specs: list[GameSpec], job: Job, workers: int, inflight: int = 64) -> Result:
     """Play `specs` on `pool` (from `create_pool`) through a shared game queue
     and merge the results; `job` gives everything but the games. Each of the
     `workers` jobs gets every spec (2048 pickle to ~60 KB) and keeps up to

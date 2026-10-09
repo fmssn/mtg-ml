@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import zlib
 
-from ..encode import FEATURES, check_features, entity_features, option_object_ids, option_preview, state_features
+from ..encode import FEATURES, check_features, entity_features, option_object_ids, option_previews, state_features
 
 STATE_DIM = 1 << 16
 OPTION_DIM = 1 << 15
@@ -45,7 +45,8 @@ def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = O
         return game.featurize(player, state_dim, option_dim, features)
     d = game.decision
     feats = state_features(game, player, features)
-    feats.append(f"seat:{player}")
+    if features < 7:
+        feats.append(f"seat:{player}")
     feats.append(f"decision:{d.kind}")
     state = sorted({_h(f, state_dim) for f in feats})
     ents, index = entity_features(game, player, features)
@@ -53,8 +54,9 @@ def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = O
         state.append(state_dim)
         state.extend(sorted({_h(t, state_dim) for t in e}))
     opts = []
-    for i, o in enumerate(game.legal_options()):
-        toks = sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key) + option_preview(game, player, i, features)})
+    previews = option_previews(game, player, features)
+    for o, pv in zip(game.legal_options(), previews):
+        toks = sorted({_h(t, option_dim) for t in option_tokens(d.kind, o.key) + pv})
         toks += sorted({option_dim + index[i] for i in option_object_ids(o, game, d.kind, features) if i in index})
         opts.append(toks)
     return state, opts
@@ -86,6 +88,7 @@ PUBLIC_KINDS = frozenset(
         "declare_attacker",
         "declare_blocker",
         "assign_damage",
+        "assign_damage_amount",
         "mulligan",
     }
 )

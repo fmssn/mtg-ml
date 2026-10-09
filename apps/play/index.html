@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTG Play</title>
+<link rel="stylesheet" href="play.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <h1>MTG <span>Play</span></h1>
+    <div id="meta"></div>
+    <div class="sp"></div>
+    <button class="btn" id="bLog" title="The game log (L)">Log</button>
+    <button class="btn" id="bMute" title="Sound">🔊</button>
+    <button class="btn" id="bHelp" title="How to play (controls)">?</button>
+    <button class="btn" id="bMenu" title="Game menu" aria-haspopup="menu">☰ Menu</button>
+    <div id="menu" role="menu">
+      <button data-menu="new">New game</button>
+      <button data-menu="concede" id="bConcede">Concede</button>
+      <hr>
+      <button data-menu="flag-bot">⚑ Bot played wrong…</button>
+      <button data-menu="flag-bug">⚠ Bug: engine / UI…</button>
+      <hr>
+      <button data-menu="review" id="bReviewMenu">Review the finished game</button>
+      <button data-menu="decks">Decklists</button>
+      <button data-menu="settings" id="bSettings">Settings</button>
+      <a href="../" target="_blank" data-menu="viewer">Replay viewer</a>
+    </div>
+    <button class="btn" id="bNew" hidden>New game</button>
+  </header>
+
+  <main id="board">
+    <section class="side opp" id="side1">
+      <div class="plate" id="plate1"></div>
+      <div class="field" id="field1">
+        <div class="ohand" id="ohand"></div>
+        <div class="row back" id="lands1"></div>
+        <div class="row front" id="crea1"></div>
+      </div>
+    </section>
+
+    <section id="mid">
+      <div id="turn"></div>
+      <div id="rail"></div>
+      <div id="modehint"></div>
+    </section>
+
+    <section class="side me" id="side0">
+      <div class="plate" id="plate0"></div>
+      <div class="field" id="field0">
+        <div class="row front" id="crea0"></div>
+        <div class="row back" id="lands0"></div>
+      </div>
+    </section>
+
+    <section id="handzone"><div id="hand"></div></section>
+
+    <aside id="stack"></aside>
+    <div id="dock">
+      <div id="pill"></div>
+      <div id="prompt"></div>
+      <div id="choices"></div>
+      <div id="btns">
+        <button class="btn ghost" id="bAll" title="All options of this decision (O)">All options</button>
+        <div class="sp"></div>
+        <button id="primary" class="primary" disabled>Waiting…</button>
+      </div>
+    </div>
+    <div id="spot"></div>
+    <svg id="arrows"><defs>
+      <marker id="mRed" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0L10,5L0,10z" fill="#ef6767"/></marker>
+      <marker id="mBlue" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0L10,5L0,10z" fill="#8fc1ff"/></marker>
+      <marker id="mGold" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0L10,5L0,10z" fill="#f0c869"/></marker>
+      <marker id="mCyan" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0L10,5L0,10z" fill="#5fe1e8"/></marker>
+    </defs><g id="arrowg"></g></svg>
+    <div id="toast"></div>
+  </main>
+
+</div>
+<div id="hoverprev" aria-hidden="true"></div>
+<aside id="logdrawer" aria-label="Game log"><div class="lh"><b>Game log</b><span class="sp"></span><button class="btn small" id="bLogClose" title="Close (L)">Close</button></div><div id="log"></div></aside>
+
+<div id="pop"></div>
+<div id="overlay"></div>
+<div id="drawer"></div>
+<div id="modal"></div>
+<div id="ghost"></div>
+
+<script src="play.js"></script>
+</body>
+</html>

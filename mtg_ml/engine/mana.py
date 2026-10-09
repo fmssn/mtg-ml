@@ -1,8 +1,8 @@
 """Mana costs, mana pools and payment feasibility.
 
 A mana *unit* is one mana of one color ('W', 'U', 'B', 'R', 'G' or 'C' for
-colorless). Every mana source in the supported card pool produces exactly one
-unit per activation, which keeps feasibility checks a small bipartite matching.
+colorless). A source produces one unit per activation, or several of one
+colour (Urza's Tower with Tron); feasibility stays a small bipartite matching.
 """
 
 from __future__ import annotations
@@ -24,6 +24,9 @@ class ManaCost:
     colored: tuple[tuple[str, int], ...] = ()
     x: int = 0  # number of {X} symbols
 
+    def __deepcopy__(self, memo) -> "ManaCost":  # immutable: Game.copy shares it
+        return self
+
     @staticmethod
     def parse(text: str | None) -> "ManaCost":
         if not text:
@@ -38,9 +41,30 @@ class ManaCost:
                 x += 1
             elif sym in MANA_TYPES:
                 colored[sym] = colored.get(sym, 0) + 1
+            elif len(sym) == 3 and sym.endswith("/P") and sym[0] in COLORS:
+                # Phyrexian mana counts as its colour here (mana value, colour);
+                # paying 2 life instead is the cast mode "phyrexian".
+                colored[sym[0]] = colored.get(sym[0], 0) + 1
             else:
                 raise ValueError(f"unsupported mana symbol {{{sym}}} in {text!r}")
         return ManaCost(generic, tuple(sorted(colored.items())), x)
+
+    @staticmethod
+    def phyrexian(text: str | None) -> "ManaCost":
+        """The phyrexian symbols of a cost text ({R/P} -> {R}), as a cost."""
+        colored: dict[str, int] = {}
+        for sym in _SYMBOL.findall(text or ""):
+            if len(sym) == 3 and sym.endswith("/P"):
+                colored[sym[0]] = colored.get(sym[0], 0) + 1
+        return ManaCost(0, tuple(sorted(colored.items())))
+
+    def minus_colored(self, other: "ManaCost") -> "ManaCost":
+        """This cost without `other`'s coloured symbols (each must be present)."""
+        c = self.colored_dict()
+        for k, n in other.colored:
+            assert c.get(k, 0) >= n, (self, other)
+            c[k] -= n
+        return ManaCost(self.generic, tuple(sorted((k, n) for k, n in c.items() if n)), self.x)
 
     def colored_dict(self) -> dict[str, int]:
         return dict(self.colored)
@@ -115,15 +139,24 @@ class RemainingCost:
         return str(ManaCost(self.generic, tuple(sorted(self.colored.items()))))
 
 
-def can_pay(remaining: RemainingCost, units: list[tuple[str, ...]]) -> bool:
+def can_pay(remaining: RemainingCost, units: list[tuple[str, ...]], wild: int = 0) -> bool:
     """Can `remaining` be paid using `units`?
 
     `units` is a list of alternatives, one entry per available mana unit: a
     floating unit in the pool is ('U',), a dual land is ('B', 'R').
     Feasible iff every colored symbol can be matched to a distinct unit able to
     produce it and the total number of units covers all symbols.
+
+    `wild`: up to this many coloured (WUBRG) symbols may be paid as generic
+    instead. A mana filter ("{1}: add one mana of any color") turns one
+    coloured requirement into one generic requirement (its {1}), so with `k`
+    filters the cost is payable iff a maximum matching leaves at most `k`
+    coloured symbols unmatched (Kuhn's algorithm, {C} symbols first: they
+    must be matched, and augmenting never unmatches a symbol).
     """
-    symbols = [c for c, n in remaining.colored.items() for _ in range(n)]
+    symbols = [c for c, n in remaining.colored.items() if c == "C" for _ in range(n)]
+    n_c = len(symbols)
+    symbols += [c for c, n in remaining.colored.items() if c != "C" for _ in range(n)]
     if len(units) < len(symbols) + remaining.generic:
         return False
     if not symbols:
@@ -140,9 +173,14 @@ def can_pay(remaining: RemainingCost, units: list[tuple[str, ...]]) -> bool:
                     return True
         return False
 
+    unmatched = 0
     for si in range(len(symbols)):
         if not augment(si, [False] * len(units)):
-            return False
+            if si < n_c:
+                return False
+            unmatched += 1
+            if unmatched > wild:
+                return False
     return True
 
 

@@ -168,7 +168,10 @@ def test_padded_update_matches_the_eager_one(data, value_net, memory, epochs):
     assert stats[0]["updates"] == stats[1]["updates"] > 2
     for k in ("pg_loss", "v_loss", "entropy", "approx_kl", "clip_frac"):
         assert stats[0][k] == pytest.approx(stats[1][k], rel=1e-5, abs=1e-7), k
-    assert all(torch.allclose(p, q, atol=1e-6) for p, q in zip(*(n.parameters() for n in nets)))
+    # torch.allclose(p, q, atol=1e-5) per parameter, naming the worst ones when it fails. Float noise
+    # between the two paths grows through Adam's steps: up to 3e-6 on CI's Linux CPU torch (1e-7 on a Mac).
+    diff = {name: ((p - q).abs() - 1e-5 * q.abs()).max().item() for (name, p), q in zip(nets[0].named_parameters(), nets[1].parameters())}
+    assert max(diff.values()) <= 1e-5, sorted(diff.items(), key=lambda kv: -kv[1])[:5]
     before = _net(memory=memory, value_net=value_net, entity_attn=1)
     assert any(not torch.equal(p, q) for (n, p), q in zip(nets[0].named_parameters(), before.parameters()) if ATTN in n)  # attention trains
 
@@ -194,7 +197,7 @@ def test_checkpoint_round_trip(tmp_path, data):
     with torch.no_grad():
         (l0, v0, h0), (l1, v1, h1) = net(b), loaded(b)
     assert torch.equal(l0, l1) and torch.equal(v0, v1) and torch.equal(h0, h1)
-    assert not PolicyStack.supports(net.config) and PolicyStack.supports(_net().config)
+    assert PolicyStack.supports(net.config) and PolicyStack.supports(_net().config)
 
 
 def test_trainer_init_from_a_checkpoint_without_attention(tmp_path, data):
@@ -223,8 +226,7 @@ def test_flags():
 
 @pytest.mark.slow
 def test_server_serves_attention_policies(tmp_path):
-    """The inference server runs attention policies on its eager per-policy
-    path: rollouts replay exactly."""
+    """Attention uses the stacked path and recorded rollouts replay exactly."""
     from mtg_ml.rl.inference import InferenceServer, ServerConfig
     from mtg_ml.rl.rollout import split_games
 
@@ -239,7 +241,7 @@ def test_server_serves_attention_policies(tmp_path):
         stats = srv.stats()
     finally:
         srv.close()
-    assert stats["legacy"] > 0
+    assert stats["legacy"] == 0 and stats["rows"] > 0
     for r in results:
         with torch.no_grad():
             logits, values, _ = net(collate(r.samples), lengths=r.lengths)

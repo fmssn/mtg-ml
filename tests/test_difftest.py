@@ -39,6 +39,33 @@ def test_lockstep_without_auto_single():
         assert py.log == nat.log and (py.winner, py.end_reason) == (nat.winner, nat.end_reason)
 
 
+def test_large_damage_allocation_context_features_and_copies_match(monkeypatch):
+    from test_correctness_foundations import amount, combat
+
+    from mtg_ml.encode import entity_features
+    from mtg_ml.rl.features import featurize
+
+    games = []
+    for engine in ("python", "native"):
+        monkeypatch.setenv("MTG_ENGINE", engine)
+        games.append(combat(power=50, life=100))
+    py, nat = games
+    while py.damage_allocation is not None:
+        assert py.damage_allocation == nat.damage_allocation
+        assert first_diff(snapshot(py), snapshot(nat)) is None
+        assert entity_features(py, 0, 7) == entity_features(nat, 0, 7)
+        assert featurize(py, 0, features=7) == featurize(nat, 0, features=7)
+        for game in games:
+            clone = game.copy()
+            assert clone.damage_allocation == game.damage_allocation
+            assert first_diff(snapshot(game), snapshot(clone)) is None
+        a = py.damage_allocation
+        n = a.remaining if a.recipient == 10 else 2 if a.recipient == 0 else 0
+        for game in games:
+            amount(game, n)
+    assert first_diff(snapshot(py), snapshot(nat)) is None
+
+
 def test_harness_reports_divergence():
     sc = Scenario(seed=5, agents=("chaos", "bot"))
     py, nat = new_game(sc, "python"), new_game(Scenario(seed=6, agents=sc.agents), "native")
@@ -83,8 +110,8 @@ def test_search_bot_identical_on_both_engines():
     assert picks["python"] == picks["native"]
 
 
-# Set-4 strings that `test_entity_and_preview_strings_identical` must see at
-# least once, so the comparison covers every new code path.
+# Set-4 strings the games of `test_entity_and_preview_strings_identical` must
+# reach at least once (`test_preview_runs_cover_new_strings`), so the comparison covers every new code path.
 SET4_TOKENS = (
     "attacking_power>=",
     "unblocked_power>=",
@@ -117,36 +144,123 @@ SET4_TOKENS = (
     "pv:adds_missing_color",
     "pv:colors_left:",
 )
+# Set 6: simulated previews, the stop reasons (game_over: tests/test_sim_previews.py) and the common deltas.
+SET6_TOKENS = (
+    "pv:sim:skipped",
+    "pv:sim:stop:own_decision",
+    "pv:sim:stop:opponent_decision",
+    "pv:sim:stop:hidden_info",
+    "pv:sim:next:self:",
+    "pv:sim:next:opponent:",
+    "pv:sim:new_turn",
+    "pv:sim:step:",
+    "pv:sim:self:life-",
+    "pv:sim:opponent:life-",
+    "pv:sim:self:creatures_lost>=",
+    "pv:sim:opponent:creatures_lost>=",
+    "lost_power_tier:",
+    "pv:sim:self:perms_gained>=",
+    "pv:sim:self:tapped>=",
+    "pv:sim:opponent:untapped>=",
+    "pv:sim:self:hand-",
+    "pv:sim:self:graveyard+",
+    "pv:sim:self:exile+",
+    "pv:sim:stack+",
+    "pv:sim:stack-",
+    "pv:sim:mana_left>=",
+    "pv:sim:color:",
+    "pv:sim:gained:",
+    "pv:sim:lost:",
+    "pv:simp:skipped",
+    "pv:simp:stop:own_decision",
+    "pv:simp:stop:opponent_decision",
+    "pv:simp:stop:hidden_info",
+    "pv:simp:stack-",
+    "pv:simp:self:creatures_gained>=",
+)
 
 
-def test_entity_and_preview_strings_identical():
+def preview_runs() -> list[tuple[int, str]]:
+    """(seed, matchup) of the games behind the two tests below, over every matchup."""
+    from mtg_ml.match import EXPLICIT_ONLY, MATCHUPS
+
+    first = ("blue_madness", "jund_blue", "jund_madness")  # the token coverage below was found on these (15 games since the fidelity sideboards changed game 2)
+    later = sorted(set(MATCHUPS) - set(first) - EXPLICIT_ONLY)
+    runs = [(seed, first[seed % 3]) for seed in range(15)] + [(15 + i, later[i % len(later)]) for i in range(2 * len(later))]
+    runs += [(100 + i, m) for m in sorted(EXPLICIT_ONLY) for i in range(2)]  # appended, so the runs above are unchanged
+    return runs
+
+
+def play_preview_run(seed: int, matchup: str, engines: tuple[str, ...]):
+    """Yields the games at each decision, then steps them all with the same random choice."""
+    from mtg_ml.match import game_args
+
+    args = game_args(1 + seed // 3 % 2, matchup)
+    games = [game_class(e)(seed=seed, max_turns=30, **args) for e in engines]
+    r = random.Random(seed)
+    while not games[0].over:
+        yield games
+        a = r.randrange(len(games[0].legal_options()))
+        for g in games:
+            g.step(a)
+
+
+@pytest.mark.parametrize("chunk", range(4))  # a quarter of the games each, so xdist can spread them
+def test_entity_and_preview_strings_identical(chunk):
     """`featurize` hashes are compared in lockstep; this compares the strings
     behind them (state, entities, option previews) so a mismatch is
-    readable, in set 3 and the latest set, over all three matchups."""
-    from mtg_ml.encode import FEATURES, entity_features, option_preview, state_features
-    from mtg_ml.match import MATCHUPS, game_args
+    readable, in sets 3 and up, over every matchup. Entities of both
+    seats (set 5 adds the viewer's own hand), the ids options point at, and
+    the simulated previews of set 6 (`option_previews` too)."""
+    from mtg_ml.encode import FEATURE_VERSIONS, entity_features, option_object_ids, option_preview, option_previews, state_features
 
-    seen = set()
-    for seed in range(12):
-        matchup = sorted(MATCHUPS)[seed % 3]
-        args = game_args(1 + seed // 3 % 2, matchup)
-        py, nat = (game_class(e)(seed=seed, max_turns=30, **args) for e in ("python", "native"))
-        r = random.Random(seed)
-        while not py.over:
+    for seed, matchup in preview_runs()[chunk::4]:
+        for py, nat in play_preview_run(seed, matchup, ("python", "native")):
             p = py.decision.player
-            for f in (3, FEATURES):
+            for f in FEATURE_VERSIONS[2:]:
                 for v in (0, 1):
                     assert state_features(py, v, f) == state_features(nat, v, f)
-                assert entity_features(py, p, f) == entity_features(nat, p, f)
-                for i in range(len(py.legal_options())):
-                    assert option_preview(py, p, i, f) == option_preview(nat, p, i, f), py.legal_options()[i].label
+                    assert entity_features(py, v, f) == entity_features(nat, v, f), (v, f)
+                for i, (o, no) in enumerate(zip(py.legal_options(), nat.legal_options())):
+                    assert option_preview(py, p, i, f) == option_preview(nat, p, i, f), o.label
+                    assert option_object_ids(o, py, py.decision.kind, f) == option_object_ids(no, nat, nat.decision.kind, f), o.label
+                assert option_previews(py, p, f) == option_previews(nat, p, f) == [option_preview(py, p, i, f) for i in range(len(py.legal_options()))]
+
+
+def test_preview_runs_cover_new_strings():
+    """The games compared above reach every SET4/SET6 token. Python only: the
+    comparison above makes the native strings identical."""
+    from mtg_ml.encode import entity_features, option_preview, state_features
+
+    want, seen = set(SET4_TOKENS + SET6_TOKENS), set()
+    for seed, matchup in preview_runs():
+        for (py,) in play_preview_run(seed, matchup, ("python",)):
+            p = py.decision.player
             strings = state_features(py, p) + [t for e in entity_features(py, p)[0] for t in e]
             strings += [t for i in range(len(py.legal_options())) for t in option_preview(py, p, i)]
-            seen |= {k for k in SET4_TOKENS if any(k in t for t in strings)}
-            a = r.randrange(len(py.legal_options()))
-            py.step(a)
-            nat.step(a)
-    assert seen == set(SET4_TOKENS), sorted(set(SET4_TOKENS) - seen)
+            seen |= {k for k in want - seen if any(k in t for t in strings)}
+            if seen == want:
+                return
+    assert seen == want, sorted(want - seen)
+
+
+def test_spec_field_sets_identical():
+    """Both engines classify the same card-spec fields as shape / non-shape."""
+    import mtg_ml_native
+
+    from mtg_ml.engine import cards
+
+    want = {lvl: (getattr(cards, f"SHAPE_{lvl.upper()}_FIELDS"), getattr(cards, f"NON_SHAPE_{lvl.upper()}_FIELDS")) for lvl in ("card", "ability", "trigger")}
+    assert {k: (frozenset(a), frozenset(b)) for k, (a, b) in mtg_ml_native.spec_fields().items()} == want
+
+
+def test_card_shapes_identical():
+    """Both engines derive the same shape tokens from cards.toml (set 5)."""
+    import mtg_ml_native
+
+    from mtg_ml.engine.cards import CARDS, FACES, TOKENS
+
+    assert mtg_ml_native.card_shapes() == {name: list(d.shape) for reg in (CARDS, FACES, TOKENS) for name, d in reg.items()}
 
 
 def test_divergence_json_keeps_fork_every():
@@ -190,17 +304,26 @@ def test_identical_errors_in_both_engines_are_reported(monkeypatch):
 
     real = dt._new_pair
 
+    # Patched on the classes for these two games only: an instance attribute
+    # would be carried into the games' copies (set 6 simulates on copies),
+    # whose steps would then step the original.
+    targets = set()
+
     def pair(sc):
         games = real(sc)
         for g in games:
-            step = g.step
+            targets.add(id(g))
+            cls = type(g)
+            if "_unpatched_step" not in cls.__dict__:
+                step = cls.step
 
-            def boom(a, g=g, step=step):
-                if len(g.actions) >= 5:
-                    raise ValueError("reference bug")
-                return step(a)
+                def boom(self, a, step=step):
+                    if id(self) in targets and len(self.actions) >= 5:
+                        raise ValueError("reference bug")
+                    return step(self, a)
 
-            g.step = boom
+                monkeypatch.setattr(cls, "_unpatched_step", step, raising=False)
+                monkeypatch.setattr(cls, "step", boom)
         return games
 
     monkeypatch.setattr(dt, "_new_pair", pair)

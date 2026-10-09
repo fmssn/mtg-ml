@@ -24,15 +24,15 @@ import random
 
 import mtg_ml_native as _n
 
-from .cards import CARDS, FACES, SPEC_PATH, TOKENS
-from .game import RulesError
+from .cards import CARDS, DUNGEONS, FACES, SPEC_PATH, TOKENS, count_of
+from .game import Game, RulesError
 from .mana import ManaCost
-from .objects import FREE, TempEffect
+from .objects import FREE, DamageAllocation, TempEffect
 
 with open(SPEC_PATH, encoding="utf-8") as _f:
     _n.load_cards(_f.read())
 
-_ALL_DEFS = {**FACES, **TOKENS, **CARDS}
+_ALL_DEFS = {**FACES, **TOKENS, **CARDS, **DUNGEONS}  # dungeons: the source of room triggers on the stack
 
 
 class NativeCard(_n.CardView):
@@ -52,6 +52,10 @@ class NativeCard(_n.CardView):
         return set(self._known)
 
     @property
+    def granted(self) -> frozenset[str]:
+        return frozenset(self._granted)
+
+    @property
     def face(self):
         return _ALL_DEFS[self.name]
 
@@ -65,7 +69,8 @@ class NativeCard(_n.CardView):
 
 _SNAP_FIELDS = (
     "uid", "oid", "name", "_defn_name", "owner", "controller", "zone", "is_token", "transformed", "tapped", "damage",
-    "deathtouch_damage", "counters", "sick", "attached_to", "skip_untap", "_temp", "_known",
+    "deathtouch_damage", "counters", "sick", "attached_to", "skip_untap", "_temp", "_known", "animated", "_granted",
+    "prototyped", "charge", "mana_used_turn",
 )  # fmt: skip
 
 
@@ -81,6 +86,7 @@ class NativeSnapshot:
 
     temp = property(lambda self: [TempEffect(keywords=frozenset(k), power=p, toughness=t) for k, p, t in self._temp])
     known_to = property(lambda self: set(self._known))
+    granted = property(lambda self: frozenset(self._granted))
     face = property(lambda self: _ALL_DEFS[self.name])
     defn = property(lambda self: _ALL_DEFS[self._defn_name])
 
@@ -127,6 +133,15 @@ class NativePlayer:
     landfall_turn = property(lambda self: self._info[8])
 
     @property
+    def dungeon_room(self) -> str | None:
+        return self._info[9]
+
+    @dungeon_room.setter
+    def dungeon_room(self, room: str | None) -> None:
+        self._g._g.set_dungeon_room(self.idx, room)
+        self._info = self._g._g.player(self.idx)
+
+    @property
     def life(self) -> int:
         return self._info[0]
 
@@ -154,7 +169,7 @@ class NativeStackItem:
         self.targets = [tuple(t) for t in targets]
         self.card = None if card is None else g._card(card)
         self.source = None if src is None else NativeSnapshot(src)
-        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed") else v) for k, v in data}
+        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed", "chosen") else v) for k, v in data}
 
     def __repr__(self) -> str:
         return f"[{self.name} ({self.kind}) #{self.sid}]"
@@ -231,7 +246,7 @@ class NativePendingTrigger:
         self.controller, src, name, data = info
         self.source = NativeSnapshot(src)
         self.tdef = _TriggerName(name)
-        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed") else v) for k, v in data}
+        self.data = {k: (NativeSnapshot(v) if k in ("card", "sacrificed", "chosen") else v) for k, v in data}
 
 
 class _TriggerName:
@@ -284,7 +299,16 @@ class NativeGame:
         auto_mana: bool = False,
         auto_pass: bool = False,
         deck_names: tuple[str | None, str | None] | None = None,
+        registered_main: tuple | None = None,
+        registered_sideboards: tuple | None = None,
+        _snapshots: bool = False,
     ):
+        decks = tuple(tuple(d) for d in decks)
+        self._current_main = decks
+        self._registered_main = tuple(tuple(d) for d in registered_main) if registered_main is not None else decks
+        self._registered_sideboards = tuple(tuple(d) for d in registered_sideboards) if registered_sideboards is not None else ((), ())
+        if len(decks) != 2 or len(self.registered_main) != 2 or len(self.registered_sideboards) != 2:
+            raise ValueError("deck registration needs two seats")
         self._args = dict(
             decks=decks,
             seed=seed,
@@ -299,6 +323,8 @@ class NativeGame:
             auto_mana=auto_mana,
             auto_pass=auto_pass,
             deck_names=deck_names,
+            registered_main=self.registered_main,
+            registered_sideboards=self.registered_sideboards,
         )
         # Names of decks that are not the default for their seat (Game.deck_names).
         self.deck_names = tuple(deck_names) if deck_names else (None, None)
@@ -323,16 +349,48 @@ class NativeGame:
             auto_mana,
             auto_pass,
             self.deck_names,
+            self.registered_main,
+            self.registered_sideboards,
         )
         self._cache: dict = {}
         self._cache_version = -1
         self._proxies: dict[int, NativeCard] = {}
         if setup is not None:
             setup(self)
+        if _snapshots:
+            self._g.set_snapshots(True)
         try:
             self._g.start()
         except _n.NativeRulesError as e:
             raise RulesError(str(e)) from None
+
+    @property
+    def registered_main(self):
+        return self._registered_main
+
+    @property
+    def registered_sideboards(self):
+        return self._registered_sideboards
+
+    @property
+    def current_main(self):
+        return self._current_main
+
+    @property
+    def damage_allocation(self):
+        raw = self._g.damage_allocation()
+        if raw is None:
+            return None
+        return DamageAllocation(raw[0], tuple(raw[1]), tuple(raw[2]), tuple(raw[3]), *raw[4:])
+
+    @property
+    def combat_subjects(self):
+        return self._g.combat_subjects()
+
+    @property
+    def payment_context(self):
+        raw = self._g.payment_context()
+        return None if raw is None else {"generic": raw[0], "colored": dict(raw[1])}
 
     # -- caching -------------------------------------------------------------
 
@@ -390,8 +448,35 @@ class NativeGame:
         except _n.NativeRulesError as e:
             raise RulesError(str(e)) from None
 
-    def fork(self) -> "NativeGame":
-        g = NativeGame(**self._args)
+    def fork(self, replay: bool = False) -> "NativeGame":
+        """Exact copy (`copy()`); `replay=True` rebuilds it from the
+        constructor arguments and the action history (Game.fork)."""
+        if replay:
+            return self._replay()
+        return self.copy()
+
+    def copy(self) -> "NativeGame":
+        """Game.copy: a step-start snapshot restore plus the actions since;
+        the first copy replays the whole history and turns snapshots on."""
+        try:
+            inner = self._g.copy()
+        except _n.NativeRulesError as e:
+            raise RulesError(str(e)) from None
+        if inner is None:
+            g = self._replay(snapshots=True)
+            g._g.set_snapshots(False)
+            self._g.adopt_snapshot(g._g)
+            return g
+        g = object.__new__(NativeGame)
+        g.__dict__.update(self.__dict__)
+        g._g = inner
+        g._cache = {}
+        g._cache_version = -1
+        g._proxies = {}
+        return g
+
+    def _replay(self, snapshots: bool = False) -> "NativeGame":
+        g = NativeGame(**self._args, _snapshots=snapshots)
         try:
             g._g.replay(self._g.actions)
         except _n.NativeRulesError as e:
@@ -418,6 +503,10 @@ class NativeGame:
     def turn(self) -> int:
         return self._g.turn
 
+    @turn.setter
+    def turn(self, value: int) -> None:
+        self._g.turn = value
+
     @property
     def step_name(self) -> str:
         return self._g.step_name
@@ -431,12 +520,32 @@ class NativeGame:
         self._g.active = v
 
     @property
+    def initiative(self) -> int | None:
+        return self._g.initiative
+
+    @initiative.setter
+    def initiative(self, v: int | None) -> None:
+        self._g.initiative = v
+
+    @property
     def starting_player(self) -> int:
         return self._g.starting_player
 
     @property
     def lands_played(self) -> int:
         return self._g.lands_played
+
+    @lands_played.setter
+    def lands_played(self, value: int) -> None:
+        self._g.lands_played = value
+
+    @property
+    def spells_cast_this_turn(self) -> int:
+        return self._g.spells_cast_this_turn
+
+    @spells_cast_this_turn.setter
+    def spells_cast_this_turn(self, value: int) -> None:
+        self._g.spells_cast_this_turn = value
 
     @property
     def mulligans_taken(self) -> list[int]:
@@ -514,7 +623,7 @@ class NativeGame:
         return None
 
     def is_bestowed(self, c) -> bool:
-        return c.zone == "battlefield" and c.attached_to is not None
+        return c.zone == "battlefield" and c.attached_to is not None and c.face.bestow is not None
 
     # Live cards go to Rust; last-known-information snapshots (stack item and
     # trigger sources) are computed here from their stored characteristics,
@@ -527,14 +636,18 @@ class NativeGame:
         if c.__class__ is NativeCard:
             return set(self._g.types(c._idx))
         t = set(c.face.types)
+        if c.animated is not None:
+            t.add("Creature")
         if self.is_bestowed(c):
             t.discard("Creature")
+        if Game.is_stationed(c):
+            t.add("Creature")
         return t
 
     def is_creature(self, c) -> bool:
         if c.__class__ is NativeCard:
             return self._g.is_creature(c._idx)
-        return "Creature" in c.face.types and not self.is_bestowed(c)
+        return (("Creature" in c.face.types or c.animated is not None) and not self.is_bestowed(c)) or Game.is_stationed(c)
 
     def is_artifact(self, c) -> bool:
         return "Artifact" in c.face.types
@@ -545,22 +658,30 @@ class NativeGame:
     def power(self, c) -> int:
         if c.__class__ is NativeCard:
             return self._g.power(c._idx)
-        return (c.face.power or 0) + c.counters + sum(t.power for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        return (c.animated[0] if c.animated is not None else c.face.power or 0) + c.counters + sum(t.power for t in c.temp) + sum(a.counters if a.face.bestow is not None else a.face.equipped_power for a in self._auras_on(c))
 
     def toughness(self, c) -> int:
         if c.__class__ is NativeCard:
             return self._g.toughness(c._idx)
-        return (c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp) + sum(a.counters for a in self._auras_on(c))
+        return (c.animated[1] if c.animated is not None else c.face.toughness or 0) + c.counters + sum(t.toughness for t in c.temp) + sum(a.counters if a.face.bestow is not None else a.face.equipped_toughness for a in self._auras_on(c))
 
     def keywords(self, c) -> set[str]:
         if c.__class__ is NativeCard:
             return set(self._g.keywords(c._idx))
-        k = set(c.face.keywords)
+        k = set(c.face.keywords) | c.granted
+        if Game.is_stationed(c):
+            k |= c.face.station_keywords
         for t in c.temp:
             k |= t.keywords
-        if self._auras_on(c):
+        if any(a.face.bestow is not None for a in self._auras_on(c)):
             k |= {"reach", "trample"}
+        for a in self._auras_on(c):
+            if a.face.bestow is None:
+                k |= a.face.equipped_keywords
         return k
+
+    def targetable(self, c) -> bool:
+        return not self.has(c, "shroud")
 
     def has(self, c, kw: str) -> bool:
         if c.__class__ is NativeCard:
@@ -577,6 +698,9 @@ class NativeGame:
             if c.oid not in exclude:
                 out.append((c, c.face.abilities[ai]))
         return out
+
+    mana_ability = staticmethod(Game.mana_ability)
+    mana_amount = Game.mana_amount
 
     def sac_candidates(self, p: int, flt: str, exclude=frozenset()) -> list[NativeCard]:
         return [c for c in (self._card(i) for i in self._g.sac_candidates(p, flt)) if c.oid not in exclude]
@@ -595,9 +719,19 @@ class NativeGame:
             "madness": d.madness,
             "overload": d.overload,
             "plot": FREE if d.plot is not None else None,
-            "alternative": FREE if d.alternative_sac is not None else None,
+            "alternative": FREE if d.alternative_sac is not None or d.alternative_reveal else None,
+            "phyrexian": d.phyrexian_cost,
+            "bargain": d.cost if d.bargain else None,
+            "omen": card.defn.back.cost if card.defn.omen else None,
+            "evidence": d.cost if d.collect_evidence else None,
+            "prototype": card.defn.prototype,
+            "cascade": FREE,
         }
         return modes.get(mode)
+
+    def mana_units(self, ab) -> int:
+        """Game.mana_units: one, or one per Elf (Priest of Titania)."""
+        return count_of(self, ab.mana_amount) if isinstance(ab.mana_amount, str) else 1
 
     def _cost_reduction(self, p: int, card) -> int:
         return self._g.cost_reduction(p, self._idx(card))
@@ -606,6 +740,10 @@ class NativeGame:
         return self._g.lethal(self._idx(attacker), self._idx(blocker))
 
     # -- views -----------------------------------------------------------------
+
+    def witnessed(self, viewer: int) -> dict[str, int]:
+        """Game.witnessed: opponent card name -> established minimum copies."""
+        return self._g.witnessed(viewer)
 
     def observe(self, viewer: int) -> dict:
         return self._g.observe(viewer)
@@ -616,14 +754,28 @@ class NativeGame:
     def entity_features(self, viewer: int, features: int) -> tuple[list[list[str]], dict[int, int]]:
         return self._g.entity_features(viewer, features)
 
+    def _sim_ready(self, features: int) -> None:
+        """Feature set 6 simulates options on copies, which the engine makes
+        from a step-start snapshot: a game never copied gets one here
+        (`encode._sim_ready`; the first copy replays the game once)."""
+        if features >= 6 and not self._g.has_snapshot and not self._g.edited:
+            self.copy()
+
     def featurize(self, player: int, state_dim: int, option_dim: int, features: int):
+        self._sim_ready(features)
         return self._g.featurize(player, state_dim, option_dim, features)
 
     def featurize_flat(self, player: int, state_dim: int, option_dim: int, features: int):
+        self._sim_ready(features)
         return self._g.featurize_flat(player, state_dim, option_dim, features)
 
     def option_preview(self, player: int, index: int, features: int) -> list[str]:
+        self._sim_ready(features)
         return self._g.option_preview(player, index, features)
+
+    def option_previews(self, player: int, features: int) -> list[list[str]]:
+        self._sim_ready(features)
+        return self._g.option_previews(player, features)
 
     def event_hashes(self, index: int, option_dim: int):
         return self._g.event_hashes(index, option_dim)

@@ -7,7 +7,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from mtg_ml.engine import JUND_WILDFIRE, MONO_BLUE_TERROR, Game, expand  # noqa: E402
-from mtg_ml.rl.features import encode_events, event_tokens, featurize  # noqa: E402
+from mtg_ml.rl.features import STATE_DIM, encode_events, event_tokens, featurize  # noqa: E402
 from mtg_ml.rl.model import PolicyNet, collate, masked_entropy  # noqa: E402
 from mtg_ml.rl.ppo import PPOConfig, ppo_update  # noqa: E402
 from mtg_ml.rl.rollout import BOT, LEARNER, RANDOM, GameSpec, Job, run_job  # noqa: E402
@@ -28,7 +28,10 @@ def _positions(n=40, seed=0):
 def test_featurize_one_entry_per_legal_option():
     g = Game(DECKS, seed=3)
     state, opts = featurize(g, g.decision.player)
-    assert state == sorted(set(state))
+    glob = state[: state.index(STATE_DIM)]  # then one segment per entity: from set 5 on the decider's hand
+    assert glob == sorted(set(glob)) and state.count(STATE_DIM) == 7
+    legacy, _ = featurize(g, g.decision.player, features=6)
+    assert featurize(g, g.decision.player, features=4)[0] == legacy[: legacy.index(STATE_DIM)]  # legacy sets share the global bag here
     assert opts and all(opts)
     assert len(opts) == len(g.legal_options())
 
@@ -123,7 +126,9 @@ def test_trainer_stops_at_total_games(tmp_path):
     t = Trainer(cfg)
     t.train()
     assert t.iteration == 2 and t.games_total == 8
-    assert Trainer(cfg).games_total == 8  # restored from the checkpoint
+    restored = Trainer(cfg)
+    assert restored.games_total == 8
+    restored.train()  # already at the limit; close its newly started collector
 
 
 class _InProcess:
@@ -198,9 +203,9 @@ def test_feature_set_version_travels_with_the_model(tmp_path):
     assert checkpoint_config(new_path) == new.config and checkpoint_config(old_path) == old.config
     assert (policy_features(old_path), policy_features(new_path)) == (1, 2)
     assert load_net(new_path).features == 2 and load_net(old_path).features == 1
-    assert FEATURES == 4 and TrainConfig().features == 0  # 0: new runs train on the latest set (--init / resume: the source's)
+    assert FEATURES == 7 and TrainConfig().features == 0  # 0: new runs train on the latest set (--init / resume: the source's)
     with pytest.raises(ValueError):
-        PolicyNet(hidden=16, features=5)
+        PolicyNet(hidden=16, features=8)
 
 
 def test_each_seat_is_featurized_with_its_own_policys_version(tmp_path, monkeypatch):

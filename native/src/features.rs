@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 use crc32fast::Hasher;
 
-use crate::cards::{db, Op, SacFilter, TYPE_NAMES};
+use crate::cards::{db, type_names, CardDef, Op, SacFilter, TYPE_NAMES};
 use crate::mana::{bit, ManaCost, Remaining};
 use crate::state::*;
 
@@ -63,14 +63,19 @@ fn thermo<O: FeatureOut>(o: &mut O, name: &str, n: i64, steps: &[i64]) {
 /// encode.py `FEATURES` / `FEATURE_VERSIONS`: feature-set versions (1: up to
 /// 2026-10-06; 2: + readiness, known positions, skip_untap, stack targets, X,
 /// option previews; 3: + `opp:deck:`; 4: + combat relations, incoming
-/// damage, choose_x previews and pointer, mana colours).
-pub const FEATURES: u8 = 4;
+/// damage, choose_x previews and pointer, mana colours; 5: + card shapes,
+/// hand entities; 6: + simulated option previews, `sim.rs`; 7: hidden-list
+/// counts; 8: set 7's hashed features plus witnessed-card evidence for the
+/// belief head, which Python builds from `Game.witnessed`: the strings here
+/// are set 7's).
+pub const FEATURES: u8 = 7;
+pub const FEATURE_VERSIONS: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8];
 
 pub fn check_features(features: u8) -> Result<u8, String> {
-    if (1..=FEATURES).contains(&features) {
+    if FEATURE_VERSIONS.contains(&features) {
         Ok(features)
     } else {
-        Err(format!("unknown feature-set version {features} (known: 1..={FEATURES})"))
+        Err(format!("unknown feature-set version {features} (known: {FEATURE_VERSIONS:?})"))
     }
 }
 
@@ -81,11 +86,25 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
     direct!(o, "step:{}", st.step_name);
     direct!(o, "active:{}", rel(st.active, viewer));
     direct!(o, "postboard:{}", if st.match_game > 1 { "True" } else { "False" });
-    if let Some(deck) = st.args.deck_names[viewer as usize].as_ref().filter(|_| features >= 2) {
+    if let Some(deck) = st.args.deck_names[viewer as usize].as_ref().filter(|_| (2..7).contains(&features)) {
         direct!(o, "self:deck:{deck}");
     }
-    if let Some(deck) = st.args.deck_names[opp as usize].as_ref().filter(|_| features >= 3) {
+    if let Some(deck) = st.args.deck_names[opp as usize].as_ref().filter(|_| (3..7).contains(&features)) {
         direct!(o, "opp:deck:{deck}");
+    }
+    if features >= 7 {
+        for (zone, cards) in [("registered_main", &st.args.registered_main[viewer as usize]), ("registered_sideboard", &st.args.registered_sideboards[viewer as usize]), ("current_main", &st.args.decks[viewer as usize])] {
+            let mut counts = std::collections::BTreeMap::new();
+            for name in cards { *counts.entry(name).or_insert(0usize) += 1; }
+            for (name, count) in counts { for k in 1..=count { direct!(o, "self:list:{zone}:{name}#{k}"); } }
+        }
+        if let Some(a) = &st.damage_allocation {
+            direct!(o, "damage:recipient:{}", a.recipient);
+            direct!(o, "damage:remaining:{}", a.remaining);
+            direct!(o, "damage:player:{}", a.player_damage);
+            for (i, n) in a.assigned.iter().enumerate() { direct!(o, "damage:assigned:{i}:{n}"); }
+            for (i, n) in a.lethal.iter().enumerate() { direct!(o, "damage:lethal:{i}:{n}"); }
+        }
     }
     thermo(o, "turn", st.turn as i64, TURN_STEPS);
     if st.active == viewer {
@@ -197,6 +216,7 @@ fn ready(c: &Card, active: bool) -> bool {
 fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
     let d = db();
     let (fly, reach) = (d.kw("flying"), d.kw("reach"));
+    let unblockable = d.keyword_names.iter().position(|k| k == "unblockable").map_or(0, |i| 1u32 << i);
     // (controller, untapped, ready-if-its-controller-is-active, ready otherwise, power, keywords)
     let creatures: Vec<(u8, bool, bool, bool, i64, u32)> = st
         .battlefield
@@ -211,7 +231,7 @@ fn board_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
         let (mut ready_power, mut evasive) = (0i64, 0i64);
         for c in creatures.iter().filter(|c| c.0 == p && if active { c.2 } else { c.3 }) {
             ready_power += c.4;
-            let blockable = blockers.iter().any(|&b| c.5 & fly == 0 || b & (fly | reach) != 0);
+            let blockable = c.5 & unblockable == 0 && blockers.iter().any(|&b| c.5 & fly == 0 || b & (fly | reach) != 0);
             if !blockable {
                 evasive += c.4;
             }
@@ -263,7 +283,7 @@ fn combat_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
 }
 
 /// encode.py `_mana_colors`: bitmask of the colours (WUBRG) the card's mana ability makes.
-fn mana_colors(c: &Card) -> u8 {
+pub(crate) fn mana_colors(c: &Card) -> u8 {
     let colors = PREVIEW_COLORS.iter().fold(0u8, |m, &col| m | bit(col));
     c.face().abilities.iter().find_map(|a| a.mana.as_ref()).map_or(0, |v| v.iter().fold(0u8, |m, &col| m | bit(col)) & colors)
 }
@@ -318,7 +338,7 @@ fn colour_features<O: FeatureOut>(st: &State, viewer: u8, o: &mut O) {
 
 /// encode.py `ENT_STEPS` / `MAX_ENTITIES`.
 const ENT_STEPS: &[i64] = &[1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15];
-pub const MAX_ENTITIES: usize = 64;
+pub const MAX_ENTITIES: usize = 64; // legacy versions only; set 7 is ragged
 
 /// Receives entity features: `begin` opens the next entity.
 pub trait EntityOut {
@@ -370,12 +390,12 @@ fn combat_entity<E: EntityOut>(st: &State, c: &Card, o: &mut E) {
 }
 
 /// `encode.entity_features(game, viewer)`: permanents in battlefield order,
-/// then the stack from the top. Returns the object id of each entity.
+/// then the stack from the top, then (set 5) the viewer's hand. Returns the object id of each entity.
 pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, o: &mut E) -> Vec<u32> {
-    let v2 = features >= 2;
+    let (v2, v5) = (features >= 2, features >= 5);
     let mut ids = Vec::with_capacity(st.battlefield.len() + st.stack.len());
     for &ci in &st.battlefield {
-        if ids.len() == MAX_ENTITIES {
+        if features < 7 && ids.len() == MAX_ENTITIES {
             return ids;
         }
         let c = st.c(ci);
@@ -434,10 +454,23 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, 
             }
             combat_entity(st, c, o);
         }
+        if v5 {
+            shape(c.face(), o);
+        }
+        if let Some(a) = st.damage_allocation.as_ref().filter(|_| features >= 7) {
+            if c.oid == a.attacker { tok!(o, "e:damage:source"); }
+            if let Some(j) = a.blockers.iter().position(|&b| b == c.oid) {
+                tok!(o, "e:damage:slot:{j}");
+                tok!(o, "e:damage:assigned:{}", a.assigned[j]);
+                tok!(o, "e:damage:lethal:{}", a.lethal[j]);
+                if j as i32 == a.recipient { tok!(o, "e:damage:recipient"); }
+                if (j as i32) < a.recipient { tok!(o, "e:damage:committed"); }
+            }
+        }
         ids.push(c.oid);
     }
     for (i, it) in st.stack.iter().rev().enumerate() {
-        if ids.len() == MAX_ENTITIES {
+        if features < 7 && ids.len() == MAX_ENTITIES {
             break;
         }
         o.begin();
@@ -462,9 +495,74 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, 
             tok!(o, "e:targets:{kind}:{}", rel(who, viewer));
         }
         targeted_by(st, viewer, Ref::Stack(it.sid), o);
+        if v5 {
+            if it.kind == SKind::Spell {
+                shape(st.c(it.card.expect("spell has a card")).face(), o);
+            }
+            res_ops(it.effect.unwrap_or(&[]), o);
+        }
         ids.push(it.sid);
     }
+    if v5 {
+        hand_entities(st, viewer, features, o, &mut ids);
+    }
     ids
+}
+
+fn shape<E: EntityOut>(d: &CardDef, o: &mut E) {
+    for t in &d.shape {
+        tok!(o, "{t}");
+    }
+}
+
+/// encode.py `op_names(_ops(item.effect))` as `e:res:op:` tokens.
+fn res_ops<E: EntityOut>(ops: &[Op], o: &mut E) {
+    for op in ops {
+        if let Some(n) = op.name() {
+            tok!(o, "e:res:op:{n}");
+        }
+        if let Op::OptionalPayment { then, .. } = op {
+            res_ops(then, o);
+        }
+    }
+}
+
+/// encode.py `_hand_entities`: the viewer's own hand cards (set 5).
+fn hand_entities<E: EntityOut>(st: &State, viewer: u8, features: u8, o: &mut E, ids: &mut Vec<u32>) {
+    let mut castable: Vec<&str> = vec![];
+    if let Some(d) = st.decision.as_ref().filter(|d| d.player == viewer && d.kind == Kind::Priority) {
+        for opt in &d.options {
+            if let [KI::S("cast"), KI::S(name), KI::S("hand"), ..] = opt.key.as_slice() {
+                castable.push(name);
+            }
+        }
+    }
+    for &ci in &st.players[viewer as usize].hand {
+        if features < 7 && ids.len() == MAX_ENTITIES {
+            return;
+        }
+        let c = st.c(ci);
+        let f = c.face();
+        o.begin();
+        tok!(o, "e:zone:hand");
+        tok!(o, "e:name:{}", c.name());
+        tok!(o, "e:ctrl:self");
+        for t in type_names(f.types) {
+            tok!(o, "e:type:{t}");
+        }
+        for k in db().keyword_list(f.keywords) {
+            tok!(o, "e:kw:{k}");
+        }
+        if let (Some(p), Some(t)) = (f.power, f.toughness) {
+            ent_thermo(o, "e:power", p as i64);
+            ent_thermo(o, "e:toughness", t as i64);
+        }
+        shape(f, o);
+        if castable.contains(&c.name()) {
+            tok!(o, "e:castable");
+        }
+        ids.push(c.oid);
+    }
 }
 
 fn ref_exists(st: &State, r: Ref) -> bool {
@@ -509,8 +607,11 @@ pub fn option_object_ids(st: &State, o: &Opt, kind: Kind, features: u8) -> Vec<u
             i += 1;
         }
     }
-    if let Val::Activate(c, _) | Val::Mana(c, _) = o.value {
-        ids.push(st.c(c).oid);
+    match o.value {
+        Val::Activate(c, _) | Val::Mana(c, _) => ids.push(st.c(c).oid),
+        // Set 5: the hand card (other zones' cards are no entities).
+        Val::Cast(c, _, _) | Val::Land(c) | Val::Plot(c) if features >= 5 => ids.push(st.c(c).oid),
+        _ => {}
     }
     if features >= 4 && kind == Kind::ChooseX {
         if let Some(it) = st.stack.last() {
@@ -522,7 +623,7 @@ pub fn option_object_ids(st: &State, o: &Opt, kind: Kind, features: u8) -> Vec<u
 
 /// encode.py `MANA_LEFT_CAP` / `PREVIEW_COLORS`.
 const MANA_LEFT_CAP: i32 = 8;
-const PREVIEW_COLORS: [u8; 5] = [b'W', b'U', b'B', b'R', b'G'];
+pub(crate) const PREVIEW_COLORS: [u8; 5] = [b'W', b'U', b'B', b'R', b'G'];
 
 /// encode.py `_dies_to`: would `n` more damage destroy creature `c`?
 fn dies_to(st: &State, c: &Card, n: i32, deathtouch: bool) -> bool {
@@ -555,7 +656,7 @@ fn mana_preview(st: &State, player: u8, cost: &ManaCost, sac: Option<SacFilter>,
     out(format_args!("pv:mana_left_after:{}", (avail - cost.mana_value()).clamp(0, MANA_LEFT_CAP)));
     // Colours nothing can make are never left (skips the feasibility search).
     let mut makes = pl.pool.iter().filter(|(_, n)| *n > 0).fold(0u8, |m, (c, _)| m | bit(*c));
-    for &(ci, ai) in &sources {
+    for &(ci, ai) in sources.iter().chain(st.mana_filters(player, exclude).iter()) {
         makes |= st.c(ci).face().abilities[ai].mana.as_ref().map_or(0, |v| v.iter().fold(0, |m, c| m | bit(*c)));
     }
     for col in PREVIEW_COLORS {
@@ -569,10 +670,13 @@ fn mana_preview(st: &State, player: u8, cost: &ManaCost, sac: Option<SacFilter>,
 fn kills_preview(st: &State, player: u8, ops: Option<&[Op]>, source: &Card, out: &mut impl FnMut(std::fmt::Arguments)) {
     let mut dmg: Vec<(u32, i32)> = vec![];
     for op in ops.unwrap_or(&[]) {
-        if let Op::DamageEachCreature { n, x: false, without, opponent_only } = op {
+        if let Op::DamageEachCreature { n, x: false, without, opponent_only, except_subtype } = op {
             for &ci in &st.battlefield {
                 let c = st.c(ci);
                 if *opponent_only && c.controller == player {
+                    continue;
+                }
+                if except_subtype.as_deref().is_some_and(|s| c.face().has_creature_type(s)) {
                     continue;
                 }
                 if st.is_creature(c) && !(*without != 0 && st.keywords(c) & without != 0) {
@@ -666,7 +770,7 @@ fn target_preview(st: &State, player: u8, r: Ref, out: &mut impl FnMut(std::fmt:
     let landfall = st.players[item.controller as usize].landfall_turn == st.turn;
     for op in item.effect.unwrap_or(&[]) {
         // Only the op for the target being chosen.
-        if let Op::DamageTarget { n, index, n_landfall } = op {
+        if let Op::DamageTarget { n, index, n_landfall, .. } = op {
             if *index != item.targets.len() {
                 continue;
             }
@@ -1064,11 +1168,13 @@ pub fn option_token_hashes(kind: Kind, key: &Key, tag: &str, dim: u32, out: &mut
 }
 
 /// `rl.features.featurize(game, player, state_dim, option_dim, features)`.
-pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32, features: u8) -> Option<(Vec<u32>, Vec<Vec<u32>>)> {
+/// `sims`: each option's hashed simulated previews (set 6, `sim.rs`), which
+/// need the game, not only its state.
+pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32, features: u8, sims: Option<&[Vec<u32>]>) -> Option<(Vec<u32>, Vec<Vec<u32>>)> {
     let d = st.decision.as_ref()?;
     let mut s = HashOut { buf: String::with_capacity(64), out: Vec::with_capacity(200), dim: state_dim, counted: Vec::with_capacity(96) };
     state_features_into(st, player, features, &mut s);
-    direct!(s, "seat:{player}");
+    if features < 7 { direct!(s, "seat:{player}"); }
     direct!(s, "decision:{}", d.kind.name());
     let mut state = s.finish();
     state.sort_unstable();
@@ -1084,9 +1190,13 @@ pub fn featurize(st: &State, player: u8, state_dim: u32, option_dim: u32, featur
     let opts = d
         .options
         .iter()
-        .map(|o| {
+        .enumerate()
+        .map(|(i, o)| {
             let mut v = Vec::with_capacity(2 * o.key.len() + 3);
             option_token_hashes(d.kind, &o.key, "", option_dim, &mut v);
+            if let Some(s) = sims {
+                v.extend_from_slice(&s[i]);
+            }
             if features >= 2 {
                 option_preview(st, player, d.kind, o, features, &mut |a| {
                     pbuf.clear();
