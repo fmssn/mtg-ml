@@ -4,7 +4,7 @@ How to run the play-vs-model server (`python -m mtg_ml.hosted serve`) for a smal
 group of invited players on one Hetzner Cloud machine behind Cloudflare Access.
 
 > Status (2026-10-09): **live at https://play.mtg-ml.com behind Cloudflare Access.**
-> Stack `mtg-play-1` (Hetzner CAX21, fsn1) runs image `mtg-play:97fa6dc` with the
+> Stack `mtg-play-1` (Hetzner CAX21, fsn1) runs image `mtg-play:65353d6` with the
 > pinned checkpoints. Cloudflare: zone `mtg-ml.com`, Zero Trust team
 > `broken-mode-8274`, remotely managed tunnel `mtg-play-1`, Access app `mtg-play`
 > (One-time PIN only, 24 h session) with the reusable policy `mtg-play allowlist`.
