@@ -3,10 +3,13 @@
 How to run the play-vs-model server (`python -m mtg_ml.hosted serve`) for a small
 group of invited players on one Hetzner Cloud machine behind Cloudflare Access.
 
-> Status (2026-10-09): **server provisioned, not yet public.** Stack `mtg-play-1`
-> (Hetzner CAX21, fsn1) exists with its SSH key and firewall, bootstrapped, with
-> the pinned checkpoints installed. Cloudflare (domain, tunnel, Access) is not
-> set up yet, so the app is not reachable from outside.
+> Status (2026-10-09): **live at https://play.mtg-ml.com behind Cloudflare Access.**
+> Stack `mtg-play-1` (Hetzner CAX21, fsn1) runs image `mtg-play:97fa6dc` with the
+> pinned checkpoints. Cloudflare: zone `mtg-ml.com`, Zero Trust team
+> `broken-mode-8274`, remotely managed tunnel `mtg-play-1`, Access app `mtg-play`
+> (One-time PIN only, 24 h session) with the reusable policy `mtg-play allowlist`.
+> Adding a player means editing that policy *and* `MTG_ALLOWED_EMAILS`, then
+> `docker compose up -d`.
 
 ## Architecture
 
@@ -205,6 +208,15 @@ otherwise it falls back to `mtg-play:local`.
 4. Policy: action **Allow**, include **Emails** = the invited addresses. Put the
    same list in `MTG_ALLOWED_EMAILS`.
 5. `docker compose -f deploy/compose.yaml up -d` again after editing env files.
+
+The same steps work through the Cloudflare API: `POST /accounts/{id}/cfd_tunnel`
+(`config_src: cloudflare`), `PUT .../cfd_tunnel/{tunnel}/configurations` with the
+ingress rule plus a final `http_status:404`, a proxied CNAME
+`play` → `<tunnel>.cfargotunnel.com`, `POST /accounts/{id}/access/policies`, then
+`POST /accounts/{id}/access/apps` (`type: self_hosted`, `allowed_idps` = the OTP
+provider, `auto_redirect_to_identity: true`); its `aud` is `MTG_ACCESS_AUD`.
+Fetch the token with `GET .../cfd_tunnel/{tunnel}/token` and pipe it over SSH into
+`cloudflared.env`; never put it on a command line or in Git.
 
 ## 7. Verification
 
