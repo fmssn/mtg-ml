@@ -137,7 +137,8 @@ def main(argv=None):
                                       "recorded_information_contract": probe.recorded_information_contract,
                                       "contract": args.contract, "elapsed_seconds": time.monotonic() - started,
                                       "results": summarize(rows)})
-        write_json(args.out / "report.json", report)
+        write_json(args.out / "results" / f"{path.stem}.json", report["checkpoints"][-1])
+    write_json(args.out / "report.json", report)
     print(f"\n{'checkpoint':<28}{'mode':<9}" + "".join(f"{c:>16}" for c in cells))
     for ck in report["checkpoints"]:
         for mode, res in ck["results"].items():

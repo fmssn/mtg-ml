@@ -21,13 +21,17 @@ def test_cells_share_deals_and_cover_both_roles():
 def test_tiny_checkpoint_plays_every_cell(tmp_path):
     torch = pytest.importorskip("torch")
     from mtg_ml.rl.model import PolicyNet
-    net = PolicyNet(hidden=16, memory="gru", features=7)
-    path = tmp_path / "tiny.pt"
-    torch.save({"config": net.config, "model": net.state_dict()}, path)
-    assert main([str(path), "--blocks", "1", "--modes", "greedy", "--engine", "python",
+    paths = []
+    for name in ("a", "b"):
+        net = PolicyNet(hidden=16, memory="gru", features=7)
+        paths.append(tmp_path / f"{name}.pt")
+        torch.save({"config": net.config, "model": net.state_dict()}, paths[-1])
+    assert main([*map(str, paths), "--blocks", "1", "--modes", "greedy", "--engine", "python",
                  "--workers", "1", "--out", str(tmp_path / "out")]) == 0
     report = read_json(tmp_path / "out" / "report.json")
-    (ck,) = report["checkpoints"]
+    assert len(report["checkpoints"]) == 2
+    ck = report["checkpoints"][1]
+    assert read_json(tmp_path / "out" / "results" / "b.json") == ck
     assert ck["contract"] == FAIR and ck["features"] == 7
     assert set(ck["results"]["greedy"]) == set(CELLS)
     assert all(v["games"] == 4 and v["errors"] == 0 for v in ck["results"]["greedy"].values())
