@@ -417,10 +417,6 @@ impl PyGame {
         self.st().blocks.clone()
     }
     #[getter]
-    fn n_pending(&self) -> usize {
-        self.st().pending.len()
-    }
-    #[getter]
     fn broken(&self) -> Option<String> {
         self.g.broken.clone()
     }

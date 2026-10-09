@@ -38,7 +38,7 @@ python -m mtg_ml.review record --agents $M,$M --games 50 --seed 1000 --greedy --
 python -m mtg_ml.review review <dir>/*.json --backend prompt --focus setup
 ```
 
-`--focus setup` adds the "what the policy observes" sheet and the setup-first instruction. New recordings carry structured checkpoint configuration; the sheet selects the actual feature set (1–6), trunk, memory and attention layers for each model seat. Check it against the checkpoint before reviewing. Legacy recordings without configuration get a versioned reference marked unknown: resolve the actual configuration before confirming a gap. Keep `observation_sheet` in `mtg_ml/review/prompt.py` aligned with new feature versions. A wrong sheet makes reviewers report gaps already fixed, or miss new ones.
+`--focus setup` adds the "what the policy observes" sheet and the setup-first instruction. New recordings carry structured checkpoint configuration; the sheet selects the actual feature set (1–8), trunk, memory and attention layers for each model seat. Check it against the checkpoint before reviewing. Legacy recordings without configuration get a versioned reference marked unknown: resolve the actual configuration before confirming a gap. Keep `observation_sheet` in `mtg_ml/review/prompt.py` aligned with new feature versions. A wrong sheet makes reviewers report gaps already fixed, or miss new ones.
 
 ## 4. Run the workflow
 

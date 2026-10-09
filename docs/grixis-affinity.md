@@ -1,10 +1,11 @@
 # Grixis Affinity
 
-The fourth deck: Pauper Grixis Affinity (artifact lands and cheap artifacts
+One of the six decks: Pauper Grixis Affinity (artifact lands and cheap artifacts
 that make Myr Enforcer, Utrom Monitor, Refurbished Familiar and Thoughtcast
-free), with its full 15-card sideboard, in both engines. Matchups put Affinity
-in seat 1: `jund_affinity`, `blue_affinity`, `madness_affinity`
-(`match.MATCHUPS`).
+free), with its full 15-card sideboard, in both engines. Affinity has a matchup
+against each other deck (`match.MATCHUPS`): seat 1 in `jund_affinity`,
+`blue_affinity` and `madness_affinity`, seat 0 in `affinity_elves` and
+`affinity_tron`, and `affinity_mirror` (only where named).
 
 ## Decklist (`engine/decks.py`)
 
