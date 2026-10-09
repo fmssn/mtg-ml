@@ -185,6 +185,8 @@ def run_summary(run, reader, active, meta=None, now=None, campaign=None):
         status = 'finished'
     elif process.get('status') in ('failed', 'finished', 'complete', 'stopped'):
         status = process['status']
+        if status == 'failed' and process.get('exit_code') in (143, -15, 130, -2):
+            status = 'stopped'  # SIGTERM / SIGINT: a requested stop, not a crash
     elif not rows:
         status = 'queued'
     elif age is not None and age < 120:

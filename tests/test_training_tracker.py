@@ -124,3 +124,11 @@ def test_ledger_loading_normalizes_and_skips_bad_lines(tmp_path):
 def test_repo_ledger_loads():
     rows = tracker.load_ledger(Path(__file__).resolve().parents[1] / "docs" / "experiments" / "ledger.jsonl")
     assert rows and all(r["id"] for r in rows)
+
+
+def test_sigterm_exit_is_stopped_but_crash_is_failed(tmp_path):
+    for name, code, want in (("term", 143, "stopped"), ("oom", 137, "failed"), ("tb", 1, "failed")):
+        run = make_run(tmp_path / name, 3)
+        (run / "process.json").write_text(json.dumps({"status": "failed", "exit_code": code}))
+        state = tracker.build_state([str(run)], explicit=[str(run)], active={}, gpus=[])
+        assert state["runs"][0]["status"] == want
