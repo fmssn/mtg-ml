@@ -62,7 +62,7 @@ jobs:
           python-version: "3.11"
           activate-environment: true
           enable-cache: true
-      - run: uv pip install -e '.[dev]' numpy && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: uv pip install -e '.[dev,hosted]' numpy && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Installed wheel data smoke
         if: matrix.shard == 0
         run: python tools/check_wheel.py
