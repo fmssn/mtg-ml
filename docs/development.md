@@ -48,6 +48,33 @@ Conductor's Files to copy copies `.env*` by default. The current review key is i
 between workspaces. Claude's `.claude/launch.json` remains usable in Claude;
 Conductor uses the Make run commands above.
 
+## Running tests on h100-private
+
+Full suites, native builds and the differential fuzz saturate this Mac when
+several workspaces run them at once. The `-remote` targets run them on the
+training box instead:
+
+```bash
+make test-remote                              # full suite, minus gpu tests
+make test-fast-remote ARGS="tests/test_rl.py -k ppo"
+make difftest-remote
+```
+
+`scripts/remote-test.sh` pushes HEAD over ssh into `~/mtg-ml-tests/<workspace>/`
+(some tests read git history), overlays the working tree with uncommitted
+changes, and keeps a per-workspace venv (CPU torch, like CI) and native build
+there, reinstalling only when `pyproject.toml` or `native/` changes. Tests run
+with xdist under `nice` on CPUs 48-63 (`REMOTE_CPUS`, `REMOTE_JOBS`,
+`REMOTE_HOST` override), so training keeps priority. Reserve those cores
+through the tracker, as `h100-private:cpu:tests` (see
+[workspace coordination](workspace-coordination.md#reserve-shared-compute)).
+Focused tests on a file or two stay faster locally.
+
+Measured on h100-private (Xeon 8462Y+, 16 cores, 2026-10-09): `test-remote`
+11:46 (2134 tests; the tail is unmarked `test_copy.py` and `test_difftest.py`
+cases of 60-200 s each), `test-fast-remote` 4:48, `difftest-remote` 3:50.
+Sync and checks add about 6 s once the venv and native build exist.
+
 ## Shared instructions and review
 
 `CLAUDE.md` holds shared project rules. `AGENTS.md` directs Codex to those rules
