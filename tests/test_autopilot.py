@@ -270,9 +270,11 @@ def merge_policy(monkeypatch):
     return policy, responses
 
 
-@pytest.mark.parametrize("scenario", ["stack", "draft", "closed", "unprotected", "missing-check", "non-strict", "no-pr-rule", "retarget", "new-head"])
-def test_merge_policy_rejects_unsafe_targets(merge_policy, scenario):
+@pytest.mark.parametrize("strict", [True, False])
+@pytest.mark.parametrize("scenario", ["stack", "draft", "closed", "unprotected", "missing-check", "no-pr-rule", "retarget", "new-head"])
+def test_merge_policy_rejects_unsafe_targets(merge_policy, scenario, strict):
     policy, data = merge_policy
+    data["rules"][1]["parameters"]["strict_required_status_checks_policy"] = strict
     kwargs = {"expected_base": "main", "expected_head": "reviewed-sha"}
     if scenario == "stack":
         data["pr"]["baseRefName"] = "feature/parent"
@@ -284,8 +286,6 @@ def test_merge_policy_rejects_unsafe_targets(merge_policy, scenario):
         data["branch"]["protected"] = False
     elif scenario == "missing-check":
         data["rules"][1]["parameters"]["required_status_checks"].pop()
-    elif scenario == "non-strict":
-        data["rules"][1]["parameters"]["strict_required_status_checks_policy"] = False
     elif scenario == "no-pr-rule":
         data["rules"].pop(0)
     elif scenario == "retarget":
@@ -296,8 +296,10 @@ def test_merge_policy_rejects_unsafe_targets(merge_policy, scenario):
         policy.require_target(1, **kwargs)
 
 
-def test_merge_policy_accepts_protected_current_default(merge_policy):
-    policy, _ = merge_policy
+@pytest.mark.parametrize("strict", [True, False])
+def test_merge_policy_accepts_protected_current_default(merge_policy, strict):
+    policy, data = merge_policy
+    data["rules"][1]["parameters"]["strict_required_status_checks_policy"] = strict
     assert policy.require_target(1, expected_base="main", expected_head="reviewed-sha")["baseRefName"] == "main"
 
 
@@ -311,35 +313,47 @@ def test_policy_read_failure_is_closed(monkeypatch):
         policy.require_target(1)
 
 
-@pytest.mark.parametrize("scenario", ["allowed", "stack", "unprotected", "missing-check", "api-failure"])
-def test_workflow_gate_blocks_before_review(tmp_path, scenario):
+@pytest.mark.parametrize("strict", [True, False])
+@pytest.mark.parametrize("scenario", ["allowed", "stack", "draft", "closed", "foreign-author", "fork", "unprotected", "missing-check", "no-pr-rule", "api-failure"])
+def test_workflow_gate_blocks_before_review(tmp_path, scenario, strict):
     workflow = (AP.parent / "workflows/pr-autopilot.yml").read_text()
-    start = workflow.index('          gh pr merge "$pr" --disable-auto', workflow.index("# --auto is not a CI gate"))
+    start = workflow.index('          info=$(gh pr view "$pr" --json state,isDraft')
     end = workflow.index('          labels=', start)
     guard = "\n".join(line[10:] for line in workflow[start:end].splitlines())
     fake = tmp_path / "gh"
     fake.write_text(f"#!{sys.executable}\n" + """import json, os, sys
 args = sys.argv[1:]
 scenario = os.environ['SCENARIO']
-if args[0] == 'pr':
-    assert args == ['pr', 'merge', '1', '--disable-auto']
-    sys.exit(0)
 if scenario == 'api-failure':
     sys.exit(1)
+if args[0] == 'pr':
+    if args[1] == 'view':
+        print(json.dumps({
+            'state': 'CLOSED' if scenario == 'closed' else 'OPEN',
+            'isDraft': scenario == 'draft',
+            'baseRefName': 'parent' if scenario == 'stack' else 'main',
+            'author': {'login': 'other' if scenario == 'foreign-author' else 'owner'},
+            'headRepositoryOwner': {'login': 'other' if scenario == 'fork' else 'owner'},
+        }))
+        sys.exit(0)
+    assert args == ['pr', 'merge', '1', '--disable-auto']
+    sys.exit(0)
 if '/rules/' in args[1]:
     checks = ['lint', 'python'] + ([] if scenario == 'missing-check' else ['native'])
-    print(json.dumps([{'type':'pull_request'}, {'type':'required_status_checks', 'parameters': {
-        'strict_required_status_checks_policy':True, 'required_status_checks':[{'context':c} for c in checks]}}]))
+    rules = [] if scenario == 'no-pr-rule' else [{'type':'pull_request'}]
+    rules.append({'type':'required_status_checks', 'parameters': {
+        'strict_required_status_checks_policy':os.environ['STRICT'] == 'true',
+        'required_status_checks':[{'context':c} for c in checks]}})
+    print(json.dumps(rules))
 elif '/branches/' in args[1]:
     print('false' if scenario == 'unprotected' else 'true')
 else:
     print('main')
 """)
     fake.chmod(0o755)
-    info = json.dumps({"baseRefName": "parent" if scenario == "stack" else "main"})
     env = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ["PATH"], SCENARIO=scenario,
-               INFO=info, GH_REPO="o/r")
-    script = 'set -euo pipefail\npr=1\ninfo=$INFO\nskip() { echo "held: $1"; exit 0; }\n' + guard + '\necho allowed\n'
+               STRICT="true" if strict else "false", OWNER="owner", GH_REPO="o/r")
+    script = 'set -euo pipefail\npr=1\nskip() { echo "held: $1"; exit 0; }\n' + guard + '\necho allowed\n'
     result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
     assert ("allowed" in result.stdout) == (scenario == "allowed")
     assert (result.returncode != 0) == (scenario == "api-failure")
