@@ -1313,6 +1313,36 @@ impl Eng {
         Ok(())
     }
 
+    /// cards.py `_op_look_top` with rest = "graveyard": reveal the top n, maybe
+    /// take a matching card, the rest to the graveyard (Malevolent Rumble).
+    fn reveal_top_take(&mut self, p: u8, n: i32, filter: &SearchFilter, what: &str, name: &str) -> R<()> {
+        let st = self.s();
+        let top: Vec<CIdx> = st.players[p as usize].library.iter().take(n as usize).copied().collect();
+        for &c in &top {
+            st.cm(c).known_to = BOTH;
+        }
+        st.push_log_lazy(|s| format!("p{p} reveals [{}]", top.iter().map(|&c| py_repr_str(s.c(c).name())).collect::<Vec<_>>().join(", ")));
+        let mut options = vec![opt("Take nothing".into(), vec![s("dig"), KI::N], Val::None)];
+        for c in st.dedupe_by_name(top.iter().copied().filter(|&c| search_matches(filter, st.c(c)))) {
+            let nm = st.c(c).name();
+            options.push(opt(format!("Take {nm}"), vec![s("dig"), s(nm)], Val::Card(c)));
+        }
+        let found = match self.ask(p, Kind::ChooseCard, || format!("{name}: put {what} into your hand"), options)? {
+            Val::Card(c) => Some(c),
+            _ => None,
+        };
+        let st = self.s();
+        if let Some(c) = found {
+            st.move_card(c, Zone::Hand, None, Pos::Top, Some(BOTH), false);
+        }
+        for c in top {
+            if Some(c) != found {
+                st.mv(c, Zone::Graveyard);
+            }
+        }
+        Ok(())
+    }
+
     /// game.py `cascade` (702.85).
     fn cascade(&mut self, p: u8, mv: i32) -> R<()> {
         let mut exiled: Vec<CIdx> = vec![];
@@ -1834,13 +1864,16 @@ impl Eng {
                 let src = self.source_card(item);
                 self.s().deal_damage(&src, Ref::Player(1 - ctl), *n);
             }
-            Op::DamageEachCreature { n, x, without, opponent_only } => {
+            Op::DamageEachCreature { n, x, without, opponent_only, except_subtype } => {
                 let src = self.source_card(item);
                 let amount = if *x { item.x } else { *n };
                 let st = self.s();
                 for c in st.battlefield.clone() {
                     let card = st.c(c);
                     if !st.is_creature(card) || (*without != 0 && st.keywords(card) & without != 0) {
+                        continue;
+                    }
+                    if except_subtype.as_deref().is_some_and(|s| card.face().has_creature_type(s)) {
                         continue;
                     }
                     if *opponent_only && card.controller == ctl {
@@ -1921,9 +1954,13 @@ impl Eng {
             }
             Op::Scry { n } => self.scry(ctl, *n as usize)?,
             Op::Surveil => self.surveil(ctl)?,
-            Op::LookTop { filter, n, what } => {
+            Op::LookTop { filter, n, what, rest_graveyard } => {
                 let name = item.name.clone();
-                self.look_top(ctl, *n, filter, what, &name)?;
+                if *rest_graveyard {
+                    self.reveal_top_take(ctl, *n, filter, what, &name)?;
+                } else {
+                    self.look_top(ctl, *n, filter, what, &name)?;
+                }
             }
             Op::Cascade => {
                 let mv = self.source_card(item).face().mana_value();

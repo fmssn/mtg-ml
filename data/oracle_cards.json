@@ -1466,5 +1466,45 @@
   "toughness": "5",
   "keywords": [],
   "cmc": 4.0
+ },
+ {
+  "name": "Spell Pierce",
+  "mana_cost": "{U}",
+  "type_line": "Instant",
+  "oracle_text": "Counter target noncreature spell unless its controller pays {2}.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 1.0
+ },
+ {
+  "name": "Prophetic Prism",
+  "mana_cost": "{2}",
+  "type_line": "Artifact",
+  "oracle_text": "When this artifact enters, draw a card.\n{1}, {T}: Add one mana of any color.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Malevolent Rumble",
+  "mana_cost": "{1}{G}",
+  "type_line": "Sorcery",
+  "oracle_text": "Reveal the top four cards of your library. You may put a permanent card from among them into your hand. Put the rest into your graveyard. Create a 0/1 colorless Eldrazi Spawn creature token with \"Sacrifice this token: Add {C}.\"",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 2.0
+ },
+ {
+  "name": "Fiery Cannonade",
+  "mana_cost": "{2}{R}",
+  "type_line": "Instant",
+  "oracle_text": "Fiery Cannonade deals 2 damage to each non-Pirate creature.",
+  "power": null,
+  "toughness": null,
+  "keywords": [],
+  "cmc": 3.0
  }
 ]

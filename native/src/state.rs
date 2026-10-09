@@ -1600,6 +1600,8 @@ impl State {
             TK::SorcerySpell => d.is_type(T_SORCERY),
             TK::ArtifactSpell => d.is_type(T_ARTIFACT),
             TK::ArtifactOrEnchantmentSpell => d.is_type(T_ARTIFACT) || d.is_type(T_ENCHANTMENT),
+            // A bestowed spell is an Aura spell (702.103b).
+            TK::NoncreatureSpell => !d.is_type(T_CREATURE) || it.method == Method::Bestow,
             _ => false,
         }
     }
