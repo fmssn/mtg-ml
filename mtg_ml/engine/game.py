@@ -1398,6 +1398,8 @@ class Game:
             return d.is_type("Artifact")
         if k == "artifact_or_enchantment_spell":
             return d.is_type("Artifact") or d.is_type("Enchantment")
+        if k == "noncreature_spell":  # a bestowed spell is an Aura spell (702.103b)
+            return not d.is_type("Creature") or it.method == "bestow"
         return False
 
     def target_legal(self, item: StackItem, i: int) -> bool:

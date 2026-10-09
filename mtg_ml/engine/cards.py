@@ -279,11 +279,15 @@ def _op_damage_each_opponent(g, item, op):
 
 
 def _op_damage_each_creature(g, item, op):
-    """n, or x = true for X; without: a keyword that protects; whose = opponent: only theirs."""
-    without = op.get("without")
+    """n, or x = true for X; without: a keyword that protects; except_subtype:
+    a creature type that is spared (changelings too: Fiery Cannonade's
+    Pirates); whose = opponent: only theirs."""
+    without, spared = op.get("without"), op.get("except_subtype")
     n = item.x if op.get("x") else op["n"]
     for c in list(g.battlefield):
         if not g.is_creature(c) or (without and g.has(c, without)):
+            continue
+        if spared and has_creature_type(c.face, spared):
             continue
         if op.get("whose") == "opponent" and c.controller == item.controller:
             continue
@@ -342,14 +346,17 @@ def _op_exile_graveyard(g, item, op):
 
 
 def search_filter(op):
-    """Library search predicate from an op's supertype / type / subtypes_any / colorless."""
+    """Library search predicate from an op's supertype / type / permanent / subtypes_any / colorless."""
     sup, typ, subs, colorless = op.get("supertype"), op.get("type"), op.get("subtypes_any"), op.get("colorless", False)
+    permanent = op.get("permanent", False)
 
     def pred(c) -> bool:
         f = c.face
         if sup and sup not in f.supertypes:
             return False
         if typ and typ not in f.types:
+            return False
+        if permanent and not f.is_permanent_card:
             return False
         if subs and not (f.subtypes & set(subs)):
             return False
@@ -477,8 +484,26 @@ def _op_surveil(g, item, op):
 
 
 def _op_look_top(g, item, op):
-    """Look at the top n, you may put a matching card into your hand (revealed), the rest on the bottom."""
-    yield from g.dig(item.controller, op["n"], search_filter(op), op["what"], item.name)
+    """Look at the top n, you may put a matching card into your hand (revealed),
+    the rest on the bottom (Ancient Stirrings). rest = "graveyard": the top n
+    are all revealed and the rest go to the graveyard (Malevolent Rumble)."""
+    if op.get("rest", "bottom") == "bottom":
+        yield from g.dig(item.controller, op["n"], search_filter(op), op["what"], item.name)
+        return
+    p = item.controller
+    pred = search_filter(op)
+    top = list(g.players[p].library[: op["n"]])
+    for c in top:
+        c.known_to = {0, 1}
+    g._log(f"p{p} reveals {[c.name for c in top]}")
+    options = [Option("Take nothing", ("dig", None), None)]
+    options += [Option(f"Take {c.name}", ("dig", c.name), c) for c in g._dedupe_by_name(c for c in top if pred(c))]
+    found = yield from g.ask(p, CHOOSE_CARD, f"{item.name}: put {op['what']} into your hand", options)
+    if found is not None:
+        g._move(found, "hand", known_to={0, 1})
+    for c in top:
+        if c is not found:
+            g._move(c, "graveyard")
 
 
 def _op_cascade(g, item, op):
@@ -889,6 +914,8 @@ def make_effect(ops: list[dict] | None):
             raise ValueError("draw: unknown who")
         if op["op"] == "draw" and "who" in op and "each_controlling" in op:
             raise ValueError("draw: who and each_controlling are mutually exclusive")
+        if op["op"] == "look_top" and (op.get("rest", "bottom") not in {"bottom", "graveyard"} or ("type" in op and op.get("permanent"))):
+            raise ValueError("look_top: rest is bottom or graveyard; type and permanent are mutually exclusive")
         if op["op"] == "custom" and op["fn"] not in CUSTOM:
             raise ValueError(f"unknown custom effect {op['fn']!r}")
         if op["op"] in ("optional_payment", "may_exile_from_graveyard"):

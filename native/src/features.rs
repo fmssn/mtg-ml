@@ -670,10 +670,13 @@ fn mana_preview(st: &State, player: u8, cost: &ManaCost, sac: Option<SacFilter>,
 fn kills_preview(st: &State, player: u8, ops: Option<&[Op]>, source: &Card, out: &mut impl FnMut(std::fmt::Arguments)) {
     let mut dmg: Vec<(u32, i32)> = vec![];
     for op in ops.unwrap_or(&[]) {
-        if let Op::DamageEachCreature { n, x: false, without, opponent_only } = op {
+        if let Op::DamageEachCreature { n, x: false, without, opponent_only, except_subtype } = op {
             for &ci in &st.battlefield {
                 let c = st.c(ci);
                 if *opponent_only && c.controller == player {
+                    continue;
+                }
+                if except_subtype.as_deref().is_some_and(|s| c.face().has_creature_type(s)) {
                     continue;
                 }
                 if st.is_creature(c) && !(*without != 0 && st.keywords(c) & without != 0) {

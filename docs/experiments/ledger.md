@@ -2,10 +2,36 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## 20261009-specialist-benchmark · checkpoints vs the Jund and Blue specialists (evaluation only)
+
+- **Question**: how do the current r7 arms and the old best model score against the new specialists `benchmark-jund@1` (#66) and `benchmark-blue@1` (#65)?
+- **Checkpoints**: r7 lr075 and lr150 at the shared frozen `evaluation-checkpoints/iter_03660` (~7.2M games, fs7, h256, fair contract) from h100-private2, and again at the final policies after the run was stopped (lr075 `v04079`, 8.35M games; lr150 `v04412`, 9.04M games; archived as `20261008-r7-fs7-h256-{lr075,lr150}/policy.pt`). 20261007-r4-control `policy.pt` (fs3) from h100-private. fs3 inputs disclose the opponent archetype (contract `legacy_archetype_disclosed`), so its numbers are **diagnostic**; r4-control trained on Jund vs Blue only, where that label carries little information. SHA-256 values are in `ledger.jsonl`.
+- **Code / protocol**: `tools/benchmark_checkpoint.py` @ 86efb15, native engine. 100 four-game blocks per cell and mode (both seats × both starts on one deal, stream `benchmark-v1/dev`), so n = 400 per cell and mode with Wilson 95% CI about ±0.05. Legacy-bot cells are included as a reference. They are **not** the ledger benchmark, which always seats Jund first. Run on h100-private (60 CPU workers, ~2 min per checkpoint for 4,800 games), 0 errors. Rows: `h100-private:~/mtg-ml-bench-specialists/runs/`.
+
+Score of the checkpoint, sampled / greedy:
+
+| checkpoint | Jund vs Blue spec. | Blue vs Jund spec. | Jund vs Jund spec. | Blue vs Blue spec. | Jund vs legacy Blue | Blue vs legacy Jund |
+|---|---|---|---|---|---|---|
+| r4-control (fs3, diagnostic) | **64.0 / 65.5** | **85.3 / 87.0** | 32.8 / 36.2 | 48.7 / 48.7 | 74.3 / 74.3 | 93.0 / 93.0 |
+| r7 lr075 iter 3660 | 40.7 / 49.7 | 70.8 / 74.3 | 55.5 / 66.2 | 59.0 / 66.2 | 53.2 / 67.5 | 83.3 / 90.5 |
+| r7 lr150 iter 3660 | 34.5 / 44.5 | 60.5 / 65.0 | 49.0 / 57.0 | 50.5 / 61.0 | 45.5 / 56.2 | 74.5 / 81.0 |
+| r7 lr075 final (8.35M) | 46.3 / 49.0 | 68.8 / 75.7 | 57.8 / 68.5 | 57.8 / 67.0 | 55.5 / 70.8 | 84.3 / 88.5 |
+| r7 lr150 final (9.04M) | 38.0 / 47.7 | 62.5 / 70.8 | 51.5 / 61.5 | 52.5 / 63.5 | 50.2 / 54.2 | 79.0 / 83.3 |
+
+**Findings**
+- Both specialists are clearly stronger than the legacy bots. Each checkpoint scores 8–18 points less against the specialist than against the legacy bot of the same deck.
+- The standing matchup (learner Jund vs Blue) is hard. Neither r7 arm reaches 50%; r4-control gets 64%: it spent all 17.6M training games on this matchup, against roughly 0.4M for r7 (jund_blue is 2 of 36 matchup weights).
+- r4-control loses the Jund mirror to the Jund specialist (33–36%). It was trained on Jund vs Blue only. The r7 arms, trained on six decks including mirrors, win both mirrors.
+- lr075 beats lr150 in every cell, by 5–11 points at iter 3660 and by 1–17 points at the final policies. This matches the head-to-head (lr075 54.8% at matched games, see `20261008-r7-fs7-h256`).
+- From iter 3660 to the final policies (1.1–1.8M more games) r7 moved by about +1 point (lr075) and +3 points (lr150) on average, inside the ±5 point intervals. Neither final arm reaches 50% as Jund against the Blue specialist.
+- r7's greedy play is 4–14 points above its sampled play (entropy ~0.35). r4-control's gap is at most 3.4.
+- Sampled and greedy scores for r4-control coincide in some cells. Only 313 of 2,400 games were identical, so this is chance, not a mode bug.
+
 ## 20261008-r7-fs7-h256 · fresh full-matrix LR comparison
 
-- **Status:** running since 22:47 Berlin October 8 on `h100-private2`; target 20M games
-  per arm; 08:00 Berlin October 9 report, then healthy training continues.
+- **Status:** stopped by request at 09:32 Berlin October 9 after 10.7 h, before the
+  20M-game target: lr075 at 8,353,792 games (iteration 4079), lr150 at 9,035,776
+  (iteration 4412). Both trainers exited cleanly on SIGTERM (`exit_code` 143).
 - **Parent:** none. Both arms initialize with seed 8 and parameter hash
   `c9b2d973e06e1c1050566c274ecd608dc8ddaafd41b6a44fd774de907baa4847`.
 - **Code:** `4a32795fd4ad25e328fda69c210c08be0d40982d`, descendant of pinned
@@ -21,14 +47,34 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
   initial hashes, then resumed iteration 25 to 26 with the correct LR. Measured
   1.248M / 1.040M games/hour on this host. These early-run rates do not establish
   strength or predict performance after a large historical pool develops.
-- **Benchmark/L1:** production pending. Tiny smoke evaluations are engineering
-  checks, not strength estimates. Scripted bots and legacy L1 are diagnostic.
-- **Verdict:** inconclusive, one training seed. Compare immutable matched-game
-  checkpoints; joint seed-block bootstrap for head-to-head uncertainty.
+- **Results** (final policies; benchmark on 2,000 games, L1 from the last periodic
+  evaluation):
+
+  | arm | games | bench sampled | bench greedy | L1 Elo |
+  |---|---|---|---|---|
+  | lr075 | 8.35M | **56.0%** (53.9–58.2) | **65.2%** (63.1–67.3) | **5 ± 12** at 8.25M |
+  | lr150 | 9.04M | 46.9% (44.7–49.1) | 57.4% (55.2–59.5) | -24 ± 13 at 9.00M |
+
+  Head to head at matched games (shared snapshot `iter_04026`, 8.25M games, all 21
+  pairings, 400 games each, both seats): lr075 scores **54.8%** (paired seed-block
+  bootstrap 95% CI 53.9–55.7) and wins every pairing (lr150 41.7–48.2%).
+  L1 trajectory, lr075 / lr150: -134 / -150 at 0.25M, -60 / -77 at 1.25M,
+  -45 / -70 at 3.25M, -13 / -82 at 6.25M, 5 / -40 at 8.25M. Against the new
+  specialists see `20261009-specialist-benchmark` (#72): neither arm reaches 50% as
+  Jund against `benchmark-blue@1` (lr075 46.3 / 49.0%).
+- **Comparison:** lr075 is level with r6-h128 (fs6, h128, 15 pairings) at equal
+  games (r6-h128 at 8.0M: 54.8% / 63.0%, L1 -3), now on the fair feature set 7 and
+  with mirrors. Far below r4-control (L1 163), which trained on Jund vs Blue only.
+- **Verdict:** lr075 (7.5e-5 → 7.5e-6) is the better learning rate for h256 on the
+  full matrix: ahead on benchmark (+9 / +8 pts), L1 (+29) and head to head, at fewer
+  games. Training was healthy (entropy ~0.35, KL 0.017 vs 0.024, explained variance
+  0.85, ~0.76–0.79M games/hour). One seed; lr075 was still climbing when stopped.
+  Next parent candidate for fs7 full-matrix work: `20261008-r7-fs7-h256-lr075`.
 - **Operations:** [protocol and commands](r7-overnight.md). Dashboard runs on the
-  server, loopback only behind Tailscale Serve8443; ComfyUI443 retained. Local
-  append-only archives are automatic at completion; primary-host transfer remains
-  a follow-up after completion.
+  server, loopback only behind Tailscale Serve8443; ComfyUI443 retained. Archived
+  on h100-private as `20261008-r7-fs7-h256-lr075` and `-lr150` (final.pt,
+  policy.pt, 33 / 36 snapshots, metrics, logs, launch record, evals.txt). Run dirs
+  stay on h100-private2.
 - **Incident (23:33 Berlin):** lr075 died at iteration 358 with a CUDA OOM in
   PPO epoch packing (43 GiB reserved but free: fragmentation). Both arms now run
   with `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`; source unchanged.
@@ -145,6 +191,8 @@ Newest first. How to add an entry, and what the numbers mean: [README](README.md
 
 | id | change (vs parent) | games | bench sampled | bench greedy | L1 Elo | verdict |
 |---|---|---|---|---|---|---|
+| 20261008-r7-fs7-h256-lr075 | fresh h256 attention + GRU, feature set 7, full 36-cell matrix with mirrors, lr 7.5e-5 → 7.5e-6 | 8.35M (stopped) | 56.0% | 65.2% | 5 ± 12 at 8.25M | best fs7 full-matrix model; beats lr150 54.8% head to head; still climbing |
+| 20261008-r7-fs7-h256-lr150 | the same at lr 1.5e-4 → 1.5e-5 | 9.04M (stopped) | 46.9% | 57.4% | -24 ± 13 at 9.0M | reject: behind lr075 everywhere |
 | 20261008-r6-h128 | fresh h128 entity net, feature set 6, six decks (15 pairings, jund_blue ×2), real 15-card sideboards | 12.9M (stopped) | **66.8%**⁶ at 12M | 67.2%⁶ at 12M | **76 ± 12**⁶ at 12M | works: best six-deck model; still climbing |
 | 20261008-r6-h128-attn | the same + 1 entity self-attention layer | 2.4M (stopped) | 50.8%⁶ at 2M | 65.9%⁶ at 2M | -26 ± 13⁶ at 2M | promising per game (+9 pts, +52 Elo vs h128 at 2M), ~6x slower: fix speed first |
 | 20261008-r6-h256 | the same at h256, lr 1.5e-4 → 1.5e-5 | 7.3M (stopped) | 50.0%⁶ at 6M | 59.3%⁶ at 6M | -4 ± 12⁶ at 6M | inconclusive: behind h128 at equal games (54.5% / 8 at 6M) |
