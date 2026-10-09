@@ -342,21 +342,43 @@ def auto_pay_index(g, d) -> int:
     return best
 
 
-def tap_preview(g, index: int, seat: int, limit: int = 60) -> tuple[list[int], list[int]] | None:
+_PAY_PROMPT = re.compile(r"^Pay ((?:\{[^}]+\})+) for ")
+
+
+def tap_preview(g, index: int, seat: int, limit: int = 60, info: dict | None = None, vis: dict | None = None) -> tuple[list[int], list[int]] | None:
     """(tapped, sacrificed): the oids of `seat`'s permanents that taking
     priority option `index` and paying with `auto_pay_index` would tap, and
     those it would sacrifice (a Spawn for mana, an additional cost; other
     choices on the way take their first option). Runs on a copy; None if it
-    cannot be simulated."""
+    cannot be simulated.
+
+    With `info` (and `vis`, what the player sees) it also records what the
+    play client needs to collect a payment before sending the cast: `cost`
+    (the mana still to pay at the first pay step, e.g. "{1}{R}"), `targets`
+    (the refs of the first target decision before payment, when there is
+    one) and `before_pay` (the other decision kinds on the way, in order;
+    a choose_x means the cost depends on the player's X)."""
     try:
         before = {c.oid for c in g.battlefield if c.controller == seat and not c.tapped}
         mine = {c.oid for c in g.battlefield if c.controller == seat}
         c = g.copy()
         c.step(index)
+        paying = False
         for _ in range(limit):
             d = c.decision
             if d is None or d.player != seat or d.kind == "priority":
                 break
+            if info is not None and not paying:
+                if d.kind == "pay_mana":
+                    paying = True
+                    m = _PAY_PROMPT.match(d.prompt or "")
+                    if m:
+                        info["cost"] = m.group(1)
+                elif d.kind == "target" and "targets" not in info and vis is not None:
+                    info["targets"] = [option_ref(d.kind, o.label, o.key, o.value, vis) for o in d.options]
+                    info["target_prompt"] = d.prompt
+                else:
+                    info.setdefault("before_pay", []).append(d.kind)
             c.step(auto_pay_index(c, d) if d.kind == "pay_mana" else 0)
         after = {x.oid: x for x in c.battlefield}
         return sorted(o for o in before if o in after and after[o].tapped), sorted(o for o in mine if o not in after)
@@ -365,6 +387,56 @@ def tap_preview(g, index: int, seat: int, limit: int = 60) -> tuple[list[int], l
 
 
 PREVIEWED = frozenset({"cast", "activate", "plot"})
+
+
+# ---------------------------------------------------------------------------
+# The opponent's hidden choices, in words the player may read
+# ---------------------------------------------------------------------------
+
+_PUT_BACK = re.compile(r"^(?P<src>.+?): put a card from your hand on top of your library \((?P<i>\d+)/(?P<n>\d+)")
+_BOTTOM = re.compile(r"^Mulligan: put a card on the bottom of your library \((?P<i>\d+)/(?P<n>\d+)\)")
+_ORDER = re.compile(r"^(?P<src>.+?): put the cards back in any order")
+_SCRY = re.compile(r"^Scry (?P<n>\d+)")
+_WHERE = re.compile(r"^(?P<src>.+?): where does (?P<name>.+) go\?$")
+
+
+def hidden_summary(kind: str, prompt: str, label: str, value, n_options: int) -> dict:
+    """What the player may know about an opponent decision whose options are
+    hidden: never the identity of a card they cannot see, only counts and
+    where cards went (top, bottom, a chosen order). {"text", "source"?,
+    "step"?: (i, n)}; a generic text when the decision is not recognised."""
+    prompt = prompt or ""
+    if kind == "choose_card":
+        m = _PUT_BACK.match(prompt)
+        if m:
+            return {"text": "puts a card from hand back on top", "source": m["src"], "step": [int(m["i"]), int(m["n"])], "group": "put_back"}
+        m = _BOTTOM.match(prompt)
+        if m:
+            return {"text": "puts a card on the bottom", "source": "Mulligan", "step": [int(m["i"]), int(m["n"])], "group": "bottom"}
+        if prompt.startswith("Search your library"):
+            found = label.startswith("Find ") and label != "Find nothing"
+            return {"text": "searches the library and finds a card" if found else "searches the library and finds nothing"}
+        if prompt.startswith("Discard to hand size"):
+            return {"text": "discards down to hand size"}
+        if label.startswith("Discard "):
+            return {"text": "discards a card", "source": prompt.split(":")[0]}
+        if label.startswith("Neither"):
+            return {"text": label, "source": prompt.split(":")[0]}
+        if label.startswith("Sacrifice "):  # a permanent: public
+            return {"text": _OID.sub("", label).replace("#", ""), "source": prompt.split(":")[0]}
+    if kind == "order":
+        m = _ORDER.match(prompt)
+        n = len(value) if isinstance(value, (tuple, list)) else None
+        if m:
+            return {"text": f"puts {n} cards back on top in a chosen order" if n else "puts the cards back in a chosen order", "source": m["src"]}
+    if kind == "choose_mode":
+        m = _SCRY.match(prompt)
+        if m:
+            return {"text": "keeps a card on top" if value == "top" else "puts a card on the bottom", "source": f"Scry {m['n']}", "group": "scry"}
+        m = _WHERE.match(prompt)
+        if m and label.startswith("Put "):  # Deem Inferior: the owner places a public permanent
+            return {"text": label.replace("Put ", "puts ", 1), "source": m["src"]}
+    return {"text": f"makes a hidden choice ({kind.replace('_', ' ')})"}
 
 
 def add_tap_previews(g, refs: list[dict], seat: int, vis: dict, max_options: int = 16) -> None:
@@ -376,10 +448,12 @@ def add_tap_previews(g, refs: list[dict], seat: int, vis: dict, max_options: int
         if r["type"] not in PREVIEWED or done >= max_options:
             continue
         done += 1
-        res = tap_preview(g, i, seat)
+        info: dict = {}
+        res = tap_preview(g, i, seat, info=info, vis=vis)
         if res is not None:
             r["taps"] = [o for o in res[0] if o in vis["oid"]]
             if res[1]:
                 r["sacs"] = [o for o in res[1] if o in vis["oid"]]
+            r.update(info)
     if done:
         gc.collect()  # the copies hold reference cycles; native objects must die on this (the game's) thread

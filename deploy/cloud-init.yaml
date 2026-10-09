@@ -1,0 +1,81 @@
+#cloud-config
+# Bootstrap for the hosted play server: Ubuntu 24.04 on Hetzner Cloud
+# (tools/hetzner.py passes this as user data; docs/hosting.md). No secrets here:
+# env files, the tunnel token and checkpoints are copied in by the operator.
+#
+# Host firewall mirrors the Hetzner Cloud firewall: inbound SSH only. The app
+# publishes on 127.0.0.1 only, so Docker's iptables rules never open a public port.
+
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - sqlite3
+  - ufw
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/60-mtg-play.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      # Key-only SSH (the Hetzner firewall also limits port 22 to the admin CIDR).
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+      PermitEmptyPasswords no
+      X11Forwarding no
+      AllowAgentForwarding no
+      MaxAuthTries 3
+      LoginGraceTime 30
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root:root
+    permissions: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+  - path: /etc/apt/apt.conf.d/52mtg-play-unattended
+    owner: root:root
+    permissions: "0644"
+    content: |
+      // Security updates only (the default origins); reboot stays a manual step.
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Automatic-Reboot "false";
+  - path: /etc/docker/daemon.json
+    owner: root:root
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {"max-size": "10m", "max-file": "3"},
+        "live-restore": true,
+        "no-new-privileges": true
+      }
+
+runcmd:
+  # Docker Engine + compose plugin from Docker's apt repository.
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list'
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable --now docker
+  # Data directories: owned by the container user (uid 10001). Models are
+  # written by root and mounted read-only into the container.
+  - install -d -m 0755 -o root -g root /srv/mtg-play
+  - install -d -m 0755 -o root -g root /srv/mtg-play/models
+  - install -d -m 0750 -o 10001 -g 10001 /srv/mtg-play/state
+  - install -d -m 0750 -o 10001 -g 10001 /srv/mtg-play/replays
+  - install -d -m 0700 -o root -g root /srv/mtg-play/backups
+  - install -d -m 0700 -o root -g root /etc/mtg-play
+  # Host firewall: deny inbound except SSH (rate limited).
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw limit 22/tcp
+  - ufw --force enable
+  - systemctl enable --now unattended-upgrades
+  - systemctl restart ssh

@@ -123,6 +123,58 @@ jobs:
         working-directory: native
       - run: python -m mtg_ml.difftest fuzz --games 150 --start ${{ matrix.start }} --jobs 4 --matchup ${{ matrix.matchup }}
 
+  container:
+    # Hosted play image (deploy/Dockerfile, docs/hosting.md): build and smoke test.
+    # Informational: not part of the required `python`/`native` gates.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          push: false
+          tags: mtg-play:ci
+          build-args: GIT_REV=${{ github.sha }}
+          cache-from: type=gha,scope=mtg-play
+          cache-to: type=gha,scope=mtg-play,mode=max
+      - name: Smoke test
+        run: |
+          set -euxo pipefail
+          test "$(docker run --rm mtg-play:ci id -u)" = 10001
+          docker run --rm --read-only --tmpfs /tmp mtg-play:ci python -c "
+          import mtg_ml_native, torch, numpy, starlette, uvicorn, jwt
+          import mtg_ml.replay as r
+          assert r.VIEWER.is_file() and (r.PLAY_APP / 'index.html').is_file(), r.ROOT
+          assert not torch.cuda.is_available()
+          print('imports ok; torch', torch.__version__)
+          "
+          docker run --rm --read-only --tmpfs /tmp mtg-play:ci python -m mtg_ml.hosted --help
+          docker run --rm --read-only --tmpfs /tmp mtg-play:ci python -m mtg_ml.hosted check --help
+      - name: Start-up smoke (dev user, no opponents)
+        run: |
+          set -euxo pipefail
+          mkdir -p smoke/models smoke/state smoke/replays
+          sudo chown -R 10001:10001 smoke/state smoke/replays
+          printf 'player_decks = ["jund_wildfire"]\n' > smoke/play.toml
+          docker run -d --name smoke --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
+            -p 127.0.0.1:8080:8080 \
+            -v "$PWD/smoke/models:/models:ro" -v "$PWD/smoke/state:/data/state" -v "$PWD/smoke/replays:/data/replays" \
+            -v "$PWD/smoke/play.toml:/etc/play.toml:ro" -e MTG_HOSTED_PLAY_CONFIG=/etc/play.toml \
+            -e MTG_HOSTED_INSECURE_DEV_USER=ci@example.com mtg-play:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8080/healthz
+          ls -la smoke/state smoke/replays
+      - if: always()
+        run: docker logs smoke || true
+
   python:
     needs: [changes, python-tests]
     if: always()
