@@ -208,6 +208,18 @@ def test_feature_set_version_travels_with_the_model(tmp_path):
         PolicyNet(hidden=16, features=8)
 
 
+@pytest.mark.parametrize("env, flags, want", [("native", [], "native"), ("native", ["--engine", "python"], "python"), ("", [], "python"), ("", ["--engine", "native"], "native")])
+def test_trainer_engine_follows_env_unless_flagged(tmp_path, monkeypatch, env, flags, want):
+    """MTG_ENGINE picks the training engine; an explicit --engine wins, and the saved config records the resolved name."""
+    import os
+
+    monkeypatch.setenv("MTG_ENGINE", env)  # monkeypatch restores whatever Trainer sets afterwards
+    cfg = parse_args(["--run", str(tmp_path / "run"), "--hidden", "16", *flags])
+    assert cfg.engine == (flags[1] if flags else "")  # unflagged: unresolved until the Trainer starts
+    Trainer(cfg)
+    assert cfg.engine == want and os.environ["MTG_ENGINE"] == want
+
+
 def test_each_seat_is_featurized_with_its_own_policys_version(tmp_path, monkeypatch):
     """A learner on feature set 2 against a pool snapshot on set 1: every
     decision is featurized in the deciding seat's version, and what the

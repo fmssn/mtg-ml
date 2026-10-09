@@ -3,9 +3,14 @@
 What the trainer measures, and how to read it. Code: `mtg_ml/rl/evaluate.py` (games, Elo fits), `mtg_ml/rl/train.py` (`rollout_stats`, when evaluations run), `mtg_ml/rl/ppo.py` (update statistics).
 
 The [scripted bot and tactical puzzle benchmark plan](benchmark-plan.md) specifies
-a proposed Jund/Blue benchmark with two stronger scripted specialists, reviewed
-outcome puzzles and frozen evaluation contracts. Its interfaces and commands are
-not implemented yet; the metrics below describe the existing evaluator.
+a Jund/Blue benchmark with two stronger scripted specialists, reviewed outcome
+puzzles and frozen evaluation contracts. Partly delivered: the
+[foundation](benchmark-foundation.md), the [Blue](benchmark-blue.md) and
+[Jund](benchmark-jund.md) specialists and the
+[tactical puzzle runner](tactical-puzzles.md) (seven development puzzles) have
+merged. The paired `run`/`compare` commands, the full puzzle corpus and the
+frozen release are not implemented yet. The metrics below describe the trainer's
+own evaluator.
 
 ## Periodic evaluation
 

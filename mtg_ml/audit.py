@@ -41,7 +41,7 @@ from .agents import take
 from .backend import engine_name, game_class
 from .encode import FEATURE_VERSIONS, FEATURES, check_features, option_object_ids
 from .engine.view import observe
-from .match import DEFAULT_MATCHUP, game_args, matchup_decks
+from .match import DEFAULT_MATCHUP, MATCHUPS, game_args, matchup_decks
 from .rl.features import OPTION_DIM, STATE_DIM, featurize
 
 FORMAT = 1  # version of the JSON report
@@ -440,7 +440,7 @@ def summary(rep: dict, top: int = 10) -> str:
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="mtg_ml.audit", description=__doc__.split("\n\n")[1] if __doc__ else None)
-    ap.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue, jund_madness or blue_madness")
+    ap.add_argument("--matchup", default=DEFAULT_MATCHUP, help=f"match.MATCHUPS: {', '.join(MATCHUPS)} (seat 0 deck first; mirrors are used only where named)")
     ap.add_argument("--games", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--engine", default=None, help="python (reference) or native (Rust); default: $MTG_ENGINE, else python")

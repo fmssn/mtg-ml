@@ -49,7 +49,7 @@ from functools import wraps
 
 from ..backend import ENV_VAR, engine_name
 from ..encode import FEATURE_VERSIONS, information_contract
-from ..match import DEFAULT_MATCHUP, matchup_decks
+from ..match import DEFAULT_MATCHUP, MATCHUPS, matchup_decks
 from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, create_pool, play, policy_features
 
 EVAL_SEED = 10_000_000
@@ -398,7 +398,7 @@ def main(argv=None) -> None:
     ap.add_argument("--bo3", action="store_true", help="best-of-three matches with sideboarding")
     ap.add_argument("--jund", action="store_true", help="learner always plays Jund (seat 0); with 'bot' this is the benchmark")
     ap.add_argument("--seat", type=int, default=None, help="learner always plays this seat (0 or 1)")
-    ap.add_argument("--matchup", default=DEFAULT_MATCHUP, help="match.MATCHUPS: jund_blue, jund_madness, blue_madness, jund_elves, blue_elves or madness_elves")
+    ap.add_argument("--matchup", default=DEFAULT_MATCHUP, help=f"match.MATCHUPS: {', '.join(MATCHUPS)} (seat 0 deck first; mirrors are used only where named)")
     ap.add_argument("--greedy", action="store_true", help="networks take their most likely option instead of sampling (deterministic on paired seeds)")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--engine", default=None, help="python or native (default: $MTG_ENGINE, else python)")

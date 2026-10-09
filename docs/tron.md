@@ -1,10 +1,11 @@
 # Tron
 
-The fourth deck: Pauper Tron, the Q3 2026 green artifact-ramp build. It
+One of the six decks: Pauper Tron, the Q3 2026 green artifact-ramp build. It
 assembles Urza's Mine, Power-Plant and Tower (seven mana from three lands),
 digs for the missing piece with Expedition Map, Ancient Stirrings and Crop
-Rotation, and casts seven- and eight-drops. Matchups put it in seat 1:
-`jund_tron`, `blue_tron`, `madness_tron` (`match.MATCHUPS`).
+Rotation, and casts seven- and eight-drops. It sits in seat 1 of `jund_tron`,
+`blue_tron`, `madness_tron`, `affinity_tron` and `elves_tron`, and has
+`tron_mirror` (only where named) (`match.MATCHUPS`).
 
 ## Decklist (`engine/decks.py`)
 
@@ -40,7 +41,7 @@ build's 60 (if wanted instead): 4 Mine, 4 Power Plant, 4 Tower, 3 Forest, 1
 Bog, 1 Pylons, 1 Fengraf, 4 Map, 4 Stirrings, 3 Crop Rotation, 2 Barrels, 2
 Bonder's Ornament, 2 Prophetic Prism, 4 Candy Trail, 1 Truths, 2 Breath
 Weapon, 4 Wurm, 3 Ent, 3 Golem, 4 Kill-Ship, 4 Colossus (Prophetic Prism is
-not implemented).
+implemented in `cards.toml`, #75).
 
 The previous version of this deck (PR head 3f57415) cut the four Boulders to
 get from 64 to 60 and left Whispersilk Cloak out because the engine had no
