@@ -28,6 +28,7 @@ Use it when resuming work or planning experiments; it is not a live task board.
 | live work ownership and status | `/Users/fabsi/repos/mtg-ml-orchestration/progress.json` |
 | decisions and handoffs | `/Users/fabsi/repos/mtg-ml-orchestration/orchestration.md` |
 | progress updater | `/Users/fabsi/repos/mtg-ml-orchestration/progress.py` |
+| versioned updater and handoff protocol | `tools/progress.py` and `docs/workspace-coordination.md` |
 | real-list research checkout and extracted lists | `mtg-ml-orchestration/pauper-research/` and `q3_typical_lists.txt` |
 | review games, prompts, findings and policies | `/Users/fabsi/repos/mtg-ml-reviews/` |
 | legacy Claude project memory | `~/.claude/projects/-Users-fabsi-repos-mtg-ml/memory/` |
@@ -42,6 +43,13 @@ conversation state. Check current work ownership before editing an overlapping
 component. Verify merges, drafts and heads with GitHub; update the shared progress
 tracker when changing work you own. The Claude progress pane and published
 artifacts are UI-specific; the underlying JSON, notes and HTML remain readable.
+
+Run the updater's `reconcile --repo fmssn/mtg-ml` and `status` on start/resume.
+GitHub observations are distinct from task completion and have their own times;
+notes can predate a merge. Claim explicit writes, dependencies and handoff location
+under a workspace owner. Unclaimed legacy tasks need manual ownership checks.
+See [workspace coordination](workspace-coordination.md) for resource reservations
+and the active-plan check shared by Codex and Claude.
 
 ## Training resources
 

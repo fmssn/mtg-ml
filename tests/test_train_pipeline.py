@@ -8,6 +8,7 @@ process of its own, merged into the metrics rows when it ends.
 
 import gc
 import json
+import math
 import multiprocessing as mp
 import os
 import threading
@@ -30,7 +31,7 @@ from mtg_ml.rl.train import Trainer, parse_args  # noqa: E402
 TINY = ["--hidden", "16", "--games-per-iter", "4", "--workers", "2", "--max-turns", "6"]
 NO_EVAL = ["--eval-every", "0"]
 SMALL_EVAL = ["--eval-games", "4", "--eval-bo3-matches", "2", "--bench-games", "4", "--bench-greedy-games", "4", "--bench-bo3-matches", "2", "--eval-workers", "1"]
-TIMING = {"rollout_s", "update_s", "wait_s", "wall_s", "decisions_per_s", "eval_s", "eval_lag"}
+TIMING = {"rollout_s", "queue_s", "update_s", "ppo_s", "publish_s", "wait_s", "wall_s", "elapsed_s", "decisions_per_s", "eval_s", "eval_lag", "inference_stats", "residency"}
 IN_PROCESS = ["--collector", "thread", "--eval-process", "0"]
 
 
@@ -50,7 +51,7 @@ def _rows(run, name="metrics.jsonl") -> list[dict]:
     return [json.loads(line) for line in (run / name).read_text().splitlines()]
 
 
-@pytest.mark.parametrize("pipeline", [0, 1])
+@pytest.mark.parametrize("pipeline", [0, 1, 2])
 def test_smoke_and_resume(tmp_path, monkeypatch, pipeline):
     run = tmp_path / "run"
     cfg = _cfg(run, "--pipeline", str(pipeline), "--iterations", "4", "--snapshot-every", "2", "--eval-every", "2", *SMALL_EVAL)
@@ -70,7 +71,7 @@ def test_smoke_and_resume(tmp_path, monkeypatch, pipeline):
     rows = _rows(run)
     assert [r["iteration"] for r in rows] == [1, 2, 3, 4] and [r["games_total"] for r in rows] == [4, 8, 12, 16]
     assert all({"rollout_s", "update_s", "wait_s", "wall_s", "policy_lag"} <= r.keys() for r in rows)
-    assert [r["policy_lag"] for r in rows] == ([0, 1, 1, 1] if pipeline else [0, 0, 0, 0])
+    assert [r["policy_lag"] for r in rows] == ([0, 1, 2, 2] if pipeline == 2 else [0, 1, 1, 1] if pipeline else [0, 0, 0, 0])
     assert pipeline or all(r["wait_s"] == 0 for r in rows)
     # the evaluations, merged into the rows of the iterations they evaluated
     assert "eval/random/jund" in rows[1] and rows[3]["bench/jund_vs_bot_n"] == 4 and rows[1]["eval_lag"] >= 0
@@ -89,7 +90,7 @@ def test_smoke_and_resume(tmp_path, monkeypatch, pipeline):
     assert (t.iteration, t.games_total) == (4, 16)
     t.train()
     rows = _rows(run)
-    assert [(r["iteration"], r["games_total"], r["policy_lag"]) for r in rows[4:]] == [(5, 20, 0), (6, 24, int(pipeline))]
+    assert [(r["iteration"], r["games_total"], r["policy_lag"]) for r in rows[4:]] == [(5, 20, 0), (6, 24, int(bool(pipeline)))]
     assert sorted(p.name for p in (run / "policy").iterdir()) == ["v00004.pt", "v00005.pt", "v00006.pt"]
 
 
@@ -123,7 +124,43 @@ def test_failed_update_terminates_the_rollout_in_flight(tmp_path, monkeypatch):
     assert torch.load(tmp_path / "run" / "latest.pt", weights_only=False)["iteration"] == 0
 
 
-def test_shared_result_round_trip(tmp_path):
+def test_collector_serialization_failure_is_reported():
+    collector = collect.PoolProcess(1)
+    try:
+        pending = collector.call(lambda pool: None)
+        with pytest.raises(RuntimeError, match="submission failed"):
+            pending.wait()
+    finally:
+        collector.terminate()
+
+
+def test_a_collector_never_closed_stops_when_collected():
+    """A Trainer built but never trained leaves its collector unclosed; once
+    collected it must stop, or multiprocessing waits for it at exit."""
+    collector = collect.PoolProcess(1)
+    proc = collector.proc
+    del collector
+    gc.collect()
+    proc.join(60)
+    assert proc.exitcode == 0
+
+
+def test_abandoned_thread_call_cannot_block_the_exit():
+    """A call left running by `terminate` (a rollout whose pool was torn down
+    mid-`map`) must not keep the interpreter alive."""
+    stuck = threading.Event()
+    collector = PoolThread(ThreadPool(1))
+    collector.call(lambda pool: stuck.wait())
+    queued = collector.call(lambda pool: None)
+    collector.terminate()
+    assert collector._thread.daemon and collector._futures[queued.tag].cancelled()
+    stuck.set()
+    collector._thread.join(5)
+    assert not collector._thread.is_alive()
+
+
+@pytest.mark.parametrize("zero_returns", [False, True], ids=["rollout-returns", "zero-returns"])
+def test_shared_result_round_trip(tmp_path, zero_returns):
     """The merged result parked by the collector and mapped by the trainer
     trains exactly like the result itself."""
     net = PolicyNet(hidden=16)
@@ -131,6 +168,11 @@ def test_shared_result_round_trip(tmp_path):
     torch.save({"config": net.config, "model": net.state_dict()}, path)
     specs = [GameSpec(s, (LEARNER, LEARNER)) for s in range(3)] + [GameSpec(9, (LEARNER, RANDOM))]
     res = run_job(Job(specs, path, 1, shaping=0.1, max_turns=8))
+    if zero_returns:
+        # Short, reward-free rollouts can have zero return variance, making
+        # explained variance undefined. Exercise that case regardless of RNG.
+        res.returns = [0.0] * len(res.actions)
+        res.advantages = [0.0] * len(res.actions)
     got = SharedResult(res).attach()
     assert len(got.samples) == len(res.samples) and list(got.samples) == list(res.samples)
     assert list(got.actions) == res.actions and list(got.kinds) == res.kinds and got.lengths == res.lengths and got.games == res.games
@@ -141,6 +183,10 @@ def test_shared_result_round_trip(tmp_path):
         n.load_state_dict(net.state_dict())
         opt = torch.optim.Adam(n.parameters(), lr=1e-3)
         stats.append((ppo_update(n, opt, data, PPOConfig(epochs=2, minibatch=64), gen=torch.Generator().manual_seed(0)), n.state_dict()))
+    explained_var = [metrics.pop("explained_var") for metrics, _ in stats]
+    if zero_returns:
+        assert all(math.isnan(value) for value in explained_var)
+    assert explained_var[0] == explained_var[1] or all(math.isnan(value) for value in explained_var)
     assert stats[0][0] == stats[1][0]
     assert all(torch.equal(stats[0][1][k], stats[1][1][k]) for k in stats[0][1])
     release(got)
@@ -161,6 +207,19 @@ def test_cpu_layout(monkeypatch):
     lay = cpu_layout(8, avail=range(4))  # oversubscribed: workers unpinned
     assert lay.trainer and lay.workers == ()
     assert parse_cpus("32-34,40") == (32, 33, 34, 40) and collect.fmt_cpus((32, 33, 34, 40)) == "32-34,40"
+
+
+def test_training_layout_reserves_every_gpu_process(monkeypatch):
+    monkeypatch.setattr(train_mod, "available_cpus", lambda: tuple(range(16)))
+    cfg = train_mod.TrainConfig(workers=4, device="cuda:0", learner_devices="cuda:0,cuda:1", learner_cpus="0;1",
+                               inference="server", server_devices="cuda:2,cuda:3", server_cpus="2;3")
+    lay, lc, sc = train_mod.training_cpu_layout(cfg, False)
+    assert lc == ((0,), (1,)) and sc == ((2,), (3,))
+    assert lay.trainer == (0,) and lay.server == (2, 3)
+    assert not set(lay.workers) & {0, 1, 2, 3}
+    cfg.worker_cpus = "1,4-6"
+    with pytest.raises(ValueError, match="overlap"):
+        train_mod.training_cpu_layout(cfg, False)
 
 
 @pytest.fixture
@@ -235,7 +294,79 @@ def test_resume_replays_the_games_of_a_lost_rollout(tmp_path, in_process, monkey
     assert again.games == lost.games and len(lost.games) == 4
 
 
-@pytest.mark.parametrize("pipeline", [0, 1])
+def test_lag2_durable_checkpoint_pins_and_exact_pfsp_resume(tmp_path, in_process, monkeypatch):
+    run = tmp_path / "run"
+    cfg = _cfg(run, "--pipeline", "2", "--iterations", "6", "--checkpoint-every", "2", "--snapshot-every", "1",
+               "--pool-sampling", "pfsp", "--self-play-frac", "0", "--matchup", "jund_blue,jund_madness", *IN_PROCESS, *NO_EVAL)
+    real_save = train_mod._save
+
+    def fail_successor(obj, path):
+        if path.endswith("latest.pt") and obj["iteration"] == 4:
+            raise RuntimeError("checkpoint disk failure")
+        return real_save(obj, path)
+
+    monkeypatch.setattr(train_mod, "_save", fail_successor)
+    with pytest.raises(RuntimeError, match="checkpoint disk failure"):
+        Trainer(cfg).train()
+    ck = torch.load(run / "latest.pt", weights_only=False)
+    assert ck["iteration"] == 2
+    queued = ck["pending_rollouts"]
+    assert [d["it"] for d in queued] == [2, 3]
+    assert all(os.path.exists(d["job"].learner_path) for d in queued)
+    assert os.path.basename(queued[0]["job"].learner_path) == "v00000.pt"  # older than KEEP_POLICIES
+    before = [r for r in in_process if r.train]
+    monkeypatch.setattr(train_mod, "_save", real_save)
+    n = len(in_process)
+    Trainer(cfg).train()
+    replayed = [r for r in in_process[n:] if r.train]
+    assert [(r.policy, r.games) for r in replayed[:2]] == [(r.policy, r.games) for r in before[2:4]]
+    assert torch.load(run / "latest.pt", weights_only=False)["pending_rollouts"] == []
+
+
+def test_imported_opponents_survive_resume_and_snapshot_name_collisions(tmp_path, in_process):
+    imported = tmp_path / "frozen"
+    imported.mkdir()
+    net = PolicyNet(hidden=16)
+    for k in (1, 999):
+        torch.save({"config": net.config, "model": net.state_dict()}, imported / f"iter_{k:05d}.pt")
+    original = (imported / "iter_00001.pt").read_bytes()
+    run = tmp_path / "run"
+    cfg = _cfg(run, "--opponent-pool", str(imported), "--iterations", "2", "--snapshot-every", "1", *IN_PROCESS, *NO_EVAL)
+    Trainer(cfg).train()
+    assert (imported / "iter_00001.pt").read_bytes() == original
+    cfg.opponent_pool = ""  # resume restores the recorded external pool
+    cfg.iterations = 3
+    t = Trainer(cfg)
+    assert len(t.imported_pool) == 2 and len(t.pool) == 4
+    assert t._pool_name(str(imported / "iter_00001.pt")) != t._pool_name(str(run / "pool" / "iter_00001.pt"))
+    t.train()
+    assert (imported / "iter_00999.pt").exists()
+
+
+def test_duration_stop_preserves_pipeline1_prefetch_rng(tmp_path, in_process, monkeypatch):
+    run = tmp_path / "run"
+    cfg = _cfg(run, "--iterations", "3", *IN_PROCESS, *NO_EVAL)
+    update = train_mod.ppo_update
+
+    def stop_after_update(*args, **kwargs):
+        out = update(*args, **kwargs)
+        cfg.duration_seconds = 1e-12
+        return out
+
+    monkeypatch.setattr(train_mod, "ppo_update", stop_after_update)
+    Trainer(cfg).train()
+    lost = [r for r in in_process if r.train][-1]
+    ck = torch.load(run / "latest.pt", weights_only=False)
+    assert ck["iteration"] == 1
+    monkeypatch.setattr(train_mod, "ppo_update", update)
+    cfg.duration_seconds = 0
+    n = len(in_process)
+    Trainer(cfg).train()
+    replay = [r for r in in_process[n:] if r.train][0]
+    assert replay.games == lost.games
+
+
+@pytest.mark.parametrize("pipeline", [0, 1, 2])
 def test_checkpoint_every_and_resume_after_a_crash(tmp_path, in_process, monkeypatch, pipeline):
     """latest.pt only every --checkpoint-every iterations: a run killed in
     the update of iteration 5 restarts from iteration 4, drops the rows and

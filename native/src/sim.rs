@@ -36,7 +36,7 @@ const SIM_FLAGS: [&str; 6] = [
 fn forced_kind(k: Kind) -> bool {
     matches!(
         k,
-        Kind::Target | Kind::PayMana | Kind::Sacrifice | Kind::ExileFromGy | Kind::OrderTriggers | Kind::DeclareAttacker | Kind::DeclareBlocker | Kind::AssignDamage | Kind::ChooseX
+        Kind::Target | Kind::PayMana | Kind::Sacrifice | Kind::ExileFromGy | Kind::OrderTriggers | Kind::DeclareAttacker | Kind::DeclareBlocker | Kind::AssignDamage | Kind::AssignDamageAmount | Kind::ChooseX
     )
 }
 
@@ -351,9 +351,9 @@ fn delta(pre: &str, o: &Outcome, before: &Summary, player: u8, out: &mut impl Fn
 
 /// encode.py `sim_previews`: `emit(option index, token)` for every option of
 /// the current decision of `player`.
-pub fn sim_previews(g: &mut Game, player: u8, mut emit: impl FnMut(usize, Arguments)) -> Result<(), StepError> {
+pub fn sim_previews(g: &mut Game, player: u8, features: u8, mut emit: impl FnMut(usize, Arguments)) -> Result<(), StepError> {
     let n = g.state().decision.as_ref().map_or(0, |d| d.options.len());
-    if n > SIM_MAX_OPTIONS || !ready(g) {
+    if (features < 7 && n > SIM_MAX_OPTIONS) || !ready(g) {
         for i in 0..n {
             emit(i, format_args!("pv:sim:skipped"));
             emit(i, format_args!("pv:simp:skipped"));
@@ -368,9 +368,9 @@ pub fn sim_previews(g: &mut Game, player: u8, mut emit: impl FnMut(usize, Argume
 }
 
 /// encode.py `sim_preview`: the tokens of option `i` alone.
-pub fn sim_preview(g: &mut Game, player: u8, i: usize, out: &mut impl FnMut(Arguments)) -> Result<(), StepError> {
+pub fn sim_preview(g: &mut Game, player: u8, i: usize, features: u8, out: &mut impl FnMut(Arguments)) -> Result<(), StepError> {
     let n = g.state().decision.as_ref().map_or(0, |d| d.options.len());
-    if n > SIM_MAX_OPTIONS || !ready(g) {
+    if (features < 7 && n > SIM_MAX_OPTIONS) || !ready(g) {
         out(format_args!("pv:sim:skipped"));
         out(format_args!("pv:simp:skipped"));
         return Ok(());

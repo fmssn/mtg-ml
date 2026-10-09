@@ -8,11 +8,29 @@ Ready PRs are reviewed, fixed and merged without the developer. A cheap model fi
 |---|---|
 | PR marked ready, reopened, or the developer pushes to a ready PR | Round counter resets and any round still running on the PR is cancelled. DeepSeek reviews the diff, merges the base branch in, fixes what it finds, runs lint and the tests for what it changed, pushes once. Clean or fixed → auto-merge (squash) is enabled. |
 | CI fails on a ready PR | Same job with the failed log as context (`ci-fix`). |
-| Something lands on the default branch | Every ready PR is updated through GitHub's update-branch. A conflict starts the job in `conflict` mode. |
+| Something lands on the default branch (and a half-hourly sweep) | Every ready PR that now conflicts starts the job in `conflict` mode. Other PRs are left alone: no update-branch, so one merge does not re-run CI on every open PR. |
 | CI still fails after two DeepSeek rounds, guard trip, or a concrete blocker | Escalates to Opus once (`needs-opus`, `autopilot:opus-used`). Adding `needs-opus` by hand does the same. |
 | Review remains incomplete, an API fails, Opus can't settle it, changes tests or card data, or the PR fails again after Opus | `needs-human`, auto-merge off. The autopilot leaves the PR alone until the developer pushes. |
 
 Drafts, forks and PRs by anyone but the repo owner are ignored. Pushes by the autopilot itself don't start a review; CI judges them.
+
+## Stacked PRs
+
+Autopilot only handles ready PRs targeting the current protected default branch.
+Before starting a review it checks the live default branch and effective rules:
+PRs plus up-to-date `lint`, `python` and `native` checks must be required. Missing
+rules or failed API reads hold the run with auto-merge off. The trusted controller
+rechecks the live PR base, draft/open state and protection before pushing and
+before enabling auto-merge; its final check also matches the reviewed head.
+
+Keep a PR targeting another feature branch **draft**. Name its prerequisite PR
+in the description and handoff. After that prerequisite merges, the leaf's owner
+retargets to the default branch, reconciles the diff (especially after a squash),
+updates the handoff and reruns validation/CI. Only then request readiness under
+the normal user-confirmed workflow. Retargeting alone does not trigger review:
+use the draft-to-ready transition after validation. Do not mark the leaf ready
+to merge it into its parent's unprotected branch. The branch-update sweep handles
+default-branch PRs; stack maintenance remains with the workspace owner.
 
 ## Guard rails
 
@@ -20,12 +38,12 @@ Drafts, forks and PRs by anyone but the repo owner are ignored. Pushes by the au
 - Leftover conflict markers, failing `ruff check`, invalid results, missing file coverage or pending verification: nothing is pushed. Unfinished reviews and API failures disable auto-merge and receive `needs-human`; they do not automatically invoke Opus.
 - DeepSeek runs in `--bare` mode with explicit trusted project invariants, `deepseek-flash`, and `max` reasoning effort. Opus retains subscription OAuth and its normal CLI startup. The available tools remain Read, Glob, Grep, Edit, Write and Bash. Focused lint, pytest, read-only Git and the trusted native build helper are pre-approved. Permission rules also automatically allow some read-only shell commands; the prompt requires bounded file tools and plain verification commands. No full-suite/fuzz, training or background jobs. Each tool command is capped at five minutes.
 - DeepSeek gets 60 initial turns and a shared 15-minute budget. The initial phase reserves two minutes; a turn/time limit or malformed successful answer can resume the same session once for at most 10 turns with tools disabled. Finalization uses existing evidence and must report `incomplete` when review or verification remains. Opus retains 40 turns / 25 minutes for genuine blockers. API/auth failures never consume an automatic Opus review.
-- If the branch moved during a run only because the base was merged in (update-branch), the result is merged onto it and pushed instead of redoing the review. A developer push cancels the running round and starts a fresh one.
+- If the branch moved during a run only because the base was merged in (e.g. the developer pressed "Update branch"), the result is merged onto it and pushed instead of redoing the review. A developer push cancels the running round and starts a fresh one.
 - The model never commits or pushes: `finish.py` commits and pushes, as a GitHub App, so CI runs on autopilot pushes (pushes with `GITHUB_TOKEN` don't trigger workflows).
 - Scripts and prompts are read from the default branch, not from the PR. Context records exact head/base/merge-base commits, every changed file, declared generated-data exclusions, and full filtered and unfiltered diff artifacts. The embedded patch is explicitly marked when truncated; omitted hunks remain available locally.
 - Changes under `native/`, `mtg_ml/` or `tests/`, and native CI failures, get a cached native build before review. Build failures are supplied as context rather than aborting the model. After engine edits the reviewer rebuilds through `python <trusted-autopilot-path>/native.py` and runs focused tests on both engines. An unavailable build prevents a completed-review auto-merge.
 - Results include `reviewed_files` and `pending_checks`; old receipts without a v2 context manifest retain compatibility. Critical GitHub mutations fail loudly. Auto-merge is paused when a review starts and enabled only with a matching reviewed head.
-- Merges need `lint`, `python` and `native` green on an up-to-date branch (repo ruleset). The model never decides a merge.
+- Merges need `lint`, `python` and `native` green (repo ruleset). The branch need not be up to date with the base; CI on the default branch after each merge is the net for semantic conflicts between PRs. The model never decides a merge.
 - `ledger.jsonl` merges with `merge=union` ([`.gitattributes`](../.gitattributes)), so parallel ledger appends don't conflict.
 
 ## Models and keys

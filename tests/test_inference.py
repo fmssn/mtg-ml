@@ -169,16 +169,19 @@ STACKABLE = [("gru", "entity", "shared"), ("none", "entity", "separate"), ("gru"
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("memory,trunk,value_net", STACKABLE)
-def test_stacked_forward_matches_per_policy_forwards(memory, trunk, value_net, device):
+@pytest.mark.parametrize("entity_attn", [0, 2])
+def test_stacked_forward_matches_per_policy_forwards(memory, trunk, value_net, device, entity_attn):
     """One stacked forward over rows of three policies (sorted by policy, two
     padded rows) gives each row what its own PolicyNet gives in step mode:
     log-prob of the sampled option, value, new hidden state."""
+    if entity_attn and trunk != "entity":
+        pytest.skip("entity attention requires entity trunk")
     decs = _decisions()
     slots = [3, 0, 2]  # stack slots of the three nets (capacity 4, slot 1 empty)
     nets = []
     for k in range(3):
         torch.manual_seed(k)
-        net = PolicyNet(hidden=32, memory=memory, trunk=trunk, value_net=value_net, value_hidden=48).eval()
+        net = PolicyNet(hidden=32, memory=memory, trunk=trunk, value_net=value_net, value_hidden=48, entity_attn=entity_attn).eval()
         with torch.no_grad():
             for p in net.parameters():
                 p += 0.02 * torch.randn_like(p)  # non-zero value heads

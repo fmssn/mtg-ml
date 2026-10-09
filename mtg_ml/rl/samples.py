@@ -61,6 +61,21 @@ class PackedSamples:
         self.extend(other)
         return self
 
+    def take_ranges(self, ranges):
+        """Copy complete trajectory ranges without expanding token lists."""
+        from itertools import accumulate
+
+        starts = {f: list(accumulate(getattr(self, f), initial=0)) for f in ("s_len", "e_len", "n_opts", "o_len")}
+        out = PackedSamples()
+        for lo, hi in ranges:
+            for f in ("s_len", "e_len", "n_opts"):
+                getattr(out, f).extend(getattr(self, f)[lo:hi])
+            for f, length in (("s_idx", "s_len"), ("e_idx", "e_len"), ("o_len", "n_opts")):
+                getattr(out, f).extend(getattr(self, f)[starts[length][lo] : starts[length][hi]])
+            a, b = starts["n_opts"][lo], starts["n_opts"][hi]
+            out.o_idx.extend(self.o_idx[starts["o_len"][a] : starts["o_len"][b]])
+        return out
+
     # -- list-like access (tests, debugging) ---------------------------------
 
     def __len__(self) -> int:

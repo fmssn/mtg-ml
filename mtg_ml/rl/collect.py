@@ -29,8 +29,11 @@ import signal
 import sys
 import time
 import traceback
+import queue
+import threading
+import weakref
 from array import array
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
 from dataclasses import dataclass
 
 from .rollout import Result, create_pool
@@ -64,16 +67,21 @@ class SharedResult:
         self.name = shm.name
         shm.close()
         self.lengths, self.games, self.timing = res.lengths, res.games, res.timing
+        self.trajectory_ids = getattr(res, "trajectory_ids", [])
+        self.inference_stats = getattr(res, "inference_stats", {})
+        self.residency = getattr(res, "residency", {})
 
-    def attach(self) -> Result:
+    def attach(self, unlink: bool = True) -> Result:
         """The Result, its samples viewing the block. The block's name is
         unlinked at once (the mapping lives on until `release`), so a crash
         cannot leak it."""
         from multiprocessing import shared_memory
 
         shm = shared_memory.SharedMemory(name=self.name)
-        shm.unlink()
-        out = Result(lengths=self.lengths, games=self.games, timing=self.timing)
+        if unlink:
+            shm.unlink()
+        out = Result(lengths=self.lengths, games=self.games, timing=self.timing, trajectory_ids=self.trajectory_ids)
+        out.inference_stats, out.residency = self.inference_stats, self.residency
         out.samples = PackedSamples()
         pos, views = 0, []
         names = list(FIELDS) + [n for n, _ in _FLOATS]
@@ -141,7 +149,7 @@ def _serve(conn, workers: int, inference: str, server_cfg, worker_cpus, cpus, ni
                 server = InferenceServer(workers, server_cfg, worker_cpus)
             pool = create_pool(workers, inference, server, worker_cpus)
         except Exception as e:  # noqa: BLE001 - reported to the owner
-            conn.send(("err", None, _portable(e), time.monotonic()))
+            conn.send(("err", None, _portable(e), time.monotonic(), time.monotonic()))
             return
         while True:
             try:
@@ -152,13 +160,16 @@ def _serve(conn, workers: int, inference: str, server_cfg, worker_cpus, cpus, ni
                 clean = True
                 break
             tag, fn, args = msg
+            started = time.monotonic()
             try:
                 value = fn(pool, *args)
                 if isinstance(value, Result):
+                    if server is not None:
+                        value.inference_stats = server.stats()
                     value = SharedResult(value)
-                reply = ("ok", tag, value, time.monotonic())
+                reply = ("ok", tag, value, time.monotonic(), started)
             except Exception as e:  # noqa: BLE001 - re-raised by the owner
-                reply = ("err", tag, _portable(e), time.monotonic())
+                reply = ("err", tag, _portable(e), time.monotonic(), started)
             conn.send(reply)
     finally:
         if pool is not None:
@@ -190,6 +201,7 @@ class Pending:
     def __init__(self, owner, tag, t_submit: float):
         self.owner, self.tag, self.t_submit = owner, tag, t_submit
         self.t_ready = 0.0
+        self.t_start = 0.0
         self._value = None
         self._done = False
 
@@ -198,13 +210,25 @@ class Pending:
 
     def wait(self):
         if not self._done:
-            status, value, self.t_ready = self.owner._take(self.tag)
+            status, value, self.t_ready, self.t_start = self.owner._take(self.tag)
             if status == "err":
                 self._done = True
                 raise value
             self._value = value.attach() if isinstance(value, SharedResult) else value
             self._done = True
         return self._value
+
+
+def _write(conn, outgoing, errors) -> None:
+    """The submit thread of a `PoolProcess`: sends its calls, then None."""
+    try:
+        while True:
+            msg = outgoing.get()
+            conn.send(msg)
+            if msg is None:
+                return
+    except Exception as e:  # serialization failures must reach Pending.wait too
+        errors.append(e)
 
 
 class PoolProcess:
@@ -224,24 +248,40 @@ class PoolProcess:
         self.name = name
         self._tag = 0
         self._replies: dict = {}
+        self._writer_errors: list = []
+        self._outgoing = queue.Queue()
+        # the writer must not hold `self`: one never closed is still collected, and stops its process
+        self._writer = threading.Thread(target=_write, args=(self.conn, self._outgoing, self._writer_errors), name=f"{name}-submit", daemon=True)
+        self._writer.start()
+        weakref.finalize(self, self._outgoing.put, None)  # also at exit, before multiprocessing joins the process
 
     def call(self, fn, *args) -> Pending:
         self._tag += 1
-        self.conn.send((self._tag, fn, args))
+        self._outgoing.put((self._tag, fn, args))
         return Pending(self, self._tag, time.monotonic())
 
     def _pump(self) -> None:
+        while not self.conn.poll(0.1):
+            self._check_alive()
         try:
-            status, tag, value, t = self.conn.recv()
+            status, tag, value, t, started = self.conn.recv()
         except EOFError:
             raise RuntimeError(f"{self.name} process died (exit code {self.proc.exitcode})") from None
         if tag is None:  # the pool could not be built
             raise value
-        self._replies[tag] = (status, value, t)
+        self._replies[tag] = (status, value, t, started)
+
+    def _check_alive(self):
+        if self._writer_errors:
+            raise RuntimeError(f"{self.name} submission failed: {self._writer_errors[0]}") from self._writer_errors[0]
+        if not self.proc.is_alive():
+            raise RuntimeError(f"{self.name} process died (exit code {self.proc.exitcode})")
 
     def _ready(self, tag) -> bool:
         while tag not in self._replies and self.conn.poll():
             self._pump()
+        if tag not in self._replies:
+            self._check_alive()
         return tag in self._replies
 
     def _take(self, tag):
@@ -252,13 +292,35 @@ class PoolProcess:
     def close(self, timeout: float = 60) -> None:
         if self.proc.is_alive():
             try:
-                self.conn.send(None)
+                self._outgoing.put(None)
             except OSError:
                 pass
-            self.proc.join(timeout)
+            deadline = time.monotonic() + timeout
+            while self.proc.is_alive() and time.monotonic() < deadline:
+                if self.conn.poll(0.1):
+                    try:
+                        self._pump()
+                    except (RuntimeError, EOFError):
+                        break
+                self._discard_replies()
+            self.proc.join(0.1)
         if self.proc.is_alive():
             self.terminate()
         self.conn.close()
+        self._writer.join(1)
+
+    def _discard_replies(self):
+        from multiprocessing import shared_memory
+
+        for _, value, _, _ in self._replies.values():
+            if isinstance(value, SharedResult):
+                try:
+                    block = shared_memory.SharedMemory(name=value.name)
+                    block.unlink()
+                    block.close()
+                except FileNotFoundError:
+                    pass
+        self._replies.clear()
 
     def terminate(self) -> None:
         """Stop now, abandoning a call in flight; the process terminates its pool."""
@@ -268,6 +330,10 @@ class PoolProcess:
         if self.proc.is_alive():
             self.proc.kill()
             self.proc.join()
+        self._outgoing.put(None)
+        self._discard_replies()
+        self.conn.close()
+        self._writer.join(1)
 
 
 class PoolThread:
@@ -277,19 +343,27 @@ class PoolThread:
 
     def __init__(self, pool):
         self.pool = pool
-        self._exec = ThreadPoolExecutor(1, thread_name_prefix="rollout")
+        self._calls = queue.Queue()
+        self._thread = threading.Thread(target=self._serve, name="rollout", daemon=True)  # not a ThreadPoolExecutor: its threads are joined at exit
+        self._thread.start()
         self._tag = 0
         self._futures: dict = {}
 
-    def call(self, fn, *args) -> Pending:
-        def run():
+    def _serve(self):
+        while (item := self._calls.get()) is not None:
+            future, fn, args = item
+            if not future.set_running_or_notify_cancel():
+                continue
+            started = time.monotonic()
             try:
-                return ("ok", fn(self.pool, *args), time.monotonic())
+                future.set_result(("ok", fn(self.pool, *args), time.monotonic(), started))
             except BaseException as e:  # noqa: BLE001 - re-raised by wait()
-                return ("err", e, time.monotonic())
+                future.set_result(("err", e, time.monotonic(), started))
 
+    def call(self, fn, *args) -> Pending:
         self._tag += 1
-        self._futures[self._tag] = self._exec.submit(run)
+        self._futures[self._tag] = future = Future()
+        self._calls.put((future, fn, args))
         return Pending(self, self._tag, time.monotonic())
 
     def _ready(self, tag) -> bool:
@@ -299,13 +373,16 @@ class PoolThread:
         return self._futures.pop(tag).result()
 
     def close(self) -> None:
-        self._exec.shutdown(wait=True)
+        self._calls.put(None)
+        self._thread.join()
         self.pool.close()
         self.pool.join()
 
     def terminate(self) -> None:
         self.pool.terminate()
-        self._exec.shutdown(wait=False, cancel_futures=True)
+        for future in self._futures.values():
+            future.cancel()  # those not yet started
+        self._calls.put(None)
 
 
 # -- CPU layout ------------------------------------------------------------------

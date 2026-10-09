@@ -46,9 +46,9 @@ import math
 import os
 
 from ..backend import ENV_VAR, engine_name
-from ..encode import FEATURE_VERSIONS
+from ..encode import FEATURE_VERSIONS, information_contract
 from ..match import DEFAULT_MATCHUP, MatchResult, game_seed, matchup_decks
-from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, create_pool, play
+from .rollout import BOT, LEARNER, RANDOM, GameSpec, Job, create_pool, play, policy_features
 
 EVAL_SEED = 10_000_000
 ELO = 400 / math.log(10)  # Elo points per natural-log unit of odds
@@ -70,11 +70,16 @@ def _seats(seat: int, opponent: str) -> tuple[str, str]:
     return (LEARNER, opponent) if seat == 0 else (opponent, LEARNER)
 
 
-def paired_specs(opponent: str, games: int, seed: int = EVAL_SEED, jund_only: bool = False, seat: int | None = None, matchup: str = DEFAULT_MATCHUP) -> list[GameSpec]:
+def paired_specs(opponent: str, games: int, seed: int = EVAL_SEED, jund_only: bool = False, seat: int | None = None, matchup: str = DEFAULT_MATCHUP, balance_seats: bool = False) -> list[GameSpec]:
     """Each seed once per seat; with `seat` (`jund_only`: seat 0) the
     learner keeps that seat and each seed is played once per starting player."""
     seat = 0 if jund_only else seat
     specs = []
+    if balance_seats:
+        roles = (seat,) if seat is not None else (0, 1)
+        block = [(role, start, swap) for role in roles for start in (0, 1) for swap in (False, True)]
+        return [GameSpec(seed=seed + i // len(block), seats=_seats(role, opponent), starting_player=start, matchup=matchup, swap_seats=swap)
+                for i in range(games) for role, start, swap in (block[i % len(block)],)]
     for s in range(games // 2):
         if seat is not None:
             specs.append(GameSpec(seed=seed + s, seats=_seats(seat, opponent), starting_player=0, matchup=matchup))
@@ -100,9 +105,17 @@ def score(games: list, matchup: str = DEFAULT_MATCHUP) -> dict:
     return out
 
 
+def evaluation_features(path: str, features: dict | None = None, policy: str = LEARNER) -> int:
+    return features[policy] if features and policy in features else policy_features(path)
+
+
+def _balance_seats(path: str, opponent: str, features: dict | None) -> bool:
+    return evaluation_features(path, features) >= 7 or (opponent not in (BOT, RANDOM) and evaluation_features(opponent, features, opponent) >= 7)
+
+
 def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
                  seat: int | None = None, matchup: str = DEFAULT_MATCHUP, features: dict | None = None) -> dict:  # fmt: skip
-    specs = paired_specs(opponent, games, jund_only=jund_only, seat=seat, matchup=matchup)
+    specs = paired_specs(opponent, games, jund_only=jund_only, seat=seat, matchup=matchup, balance_seats=_balance_seats(learner_path, opponent, features))
     return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass, features=features or {}), n_jobs).games, matchup)
 
 
@@ -112,23 +125,30 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
     match per seed, the learner in that seat). Each round plays the next game
     of every unfinished match as one batch. Returns match scores like `score`."""
     seat = 0 if jund_only else seat
-    if seat is not None:
-        live = [(EVAL_SEED + s, _seats(seat, opponent), MatchResult()) for s in range(matches)]
+    if _balance_seats(learner_path, opponent, features):
+        roles = (seat,) if seat is not None else (0, 1)
+        block = [(role, start, swap) for role in roles for start in (0, 1) for swap in (False, True)]
+        live = [(EVAL_SEED + i, _seats(role, opponent), MatchResult(), swap, start)
+                for i in range(matches) for role, start, swap in (block[i % len(block)],)]
+    elif seat is not None:
+        live = [(EVAL_SEED + s, _seats(seat, opponent), MatchResult(), False, None) for s in range(matches)]
     else:
-        live = [(EVAL_SEED + s, seats, MatchResult()) for s in range(matches // 2) for seats in ((LEARNER, opponent), (opponent, LEARNER))]
+        live = [(EVAL_SEED + s, seats, MatchResult(), False, None) for s in range(matches // 2) for seats in ((LEARNER, opponent), (opponent, LEARNER))]
     while True:
         todo = {}
-        for seed, seats, res in live:
+        for seed, seats, res, swap, first_start in live:
             if not res.over:
                 n, start = res.next_game(seed)
-                todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n, matchup=matchup))
+                if n == 1 and first_start is not None:
+                    start = first_start
+                todo[(game_seed(seed, n), seats)] = (res, GameSpec(seed=game_seed(seed, n), seats=seats, starting_player=start, match_game=n, matchup=matchup, swap_seats=swap))
         if not todo:
             break
         job = Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass, features=features or {})
         for seats, winner, reason, _, _, seed in play(procs, [sp for _, sp in todo.values()], job, n_jobs).games:
             res, spec = todo[(seed, seats)]
             res.games.append((spec.starting_player, winner, reason))
-    return score([(seats, res.winner) for _, seats, res in live], matchup)
+    return score([(seats, res.winner) for _, seats, res, _, _ in live], matchup)
 
 
 def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy_games: int = 0, auto_mana: bool = False, auto_pass: bool = False,
@@ -170,7 +190,8 @@ def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, e
     `fn(pool, *args)`). `features`: `Job.features` overrides for pool
     snapshots. `extra_matchups` (a run training on a mix): the benchmark of
     each seat of each of them too, keys `bench/<matchup>/<deck>_vs_bot*`."""
-    out = {}
+    f = evaluation_features(policy, features)
+    out = {"features": f, "information_contract": information_contract(f)}
     opponents = {"random": RANDOM, "bot": BOT, "pool0": opponent or pool0}
     decks = [DECK_KEYS[d] for d in matchup_decks(matchup)]
     decks = decks if seat is None else [decks[seat]]
@@ -378,6 +399,8 @@ def main(argv=None) -> None:
         if args.opponent_features:
             over[args.opponent] = args.opponent_features
         res = fn(procs, args.checkpoint, args.opponent, args.games, args.workers, jund_only=args.jund, greedy=args.greedy, auto_mana=args.auto_mana, auto_pass=args.auto_pass, seat=args.seat, matchup=args.matchup, features=over)
+    f = evaluation_features(args.checkpoint, over)
+    print(f"features={f} information_contract={information_contract(f)}")
     for k, (s, ci, n) in res.items():
         print(f"{k:5s} {s:.3f}  95% CI {ci}  ({n} games)")
 

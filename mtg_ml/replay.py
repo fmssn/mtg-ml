@@ -168,8 +168,9 @@ def record(agents, seed: int = 0, decks=None, engine: str | None = None, names=(
     game `match_game` of `matchup` unless `decks` are given."""
     args = game_args(match_game, matchup)
     if decks is not None:
-        args["decks"] = decks
-    g = game_class(engine)(**args, seed=seed, log=True, **game_kw)
+        args.update(decks=decks, registered_main=decks, registered_sideboards=((), ()))
+    args.update(game_kw)
+    g = game_class(engine)(**args, seed=seed, log=True)
     info: dict = {}
     frames = []
     seen = 0

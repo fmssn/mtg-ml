@@ -732,10 +732,10 @@ impl Eng {
         let xv = st.stack[st.stack_pos(sid).unwrap()].x;
         let cost = base.with_x(xv).reduced(reduction);
         self.pay_mana(p, Remaining::of(&cost), add_sac, &[], cname)?;
-        if mode == Method::Phyrexian {
+        let life = if mode == Method::Phyrexian { d.phyrexian_life } else if mode == Method::Flashback { d.flashback_life } else { 0 };
+        if life != 0 {
             let st = self.s();
-            st.players[p as usize].life -= d.phyrexian_life;
-            let life = d.phyrexian_life;
+            st.players[p as usize].life -= life;
             st.push_log_lazy(|_| format!("p{p} pays {life} life for {cname}"));
         }
         if let Some(flt) = add_sac {
@@ -1428,12 +1428,15 @@ impl Eng {
         loop {
             let st = self.s();
             let mut options = vec![opt("Done declaring attackers".into(), vec![s("attack"), KI::N], Val::None)];
+            let mut subjects = vec![vec![]];
             for gi in 0..groups.len() {
                 if let Some(&c) = groups[gi].iter().find(|c| !chosen.contains(c)) {
                     let card = st.c(c);
                     options.push(opt(format!("Attack with {}#{}", card.name(), card.oid), vec![s("attack"), s(card.name())], Val::Group(gi)));
+                    subjects.push(vec![card.oid]);
                 }
             }
+            st.combat_subjects = subjects;
             match self.ask(p, Kind::DeclareAttacker, || "Declare attackers".to_string(), options)? {
                 Val::Group(gi) => {
                     let c = *groups[gi].iter().find(|c| !chosen.contains(c)).unwrap();
@@ -1473,6 +1476,7 @@ impl Eng {
             let later = &blockers[i + 1..];
             let attackers: Vec<CIdx> = st.attackers.iter().filter_map(|&a| st.perm(a)).filter(|&a| st.can_block(bc, st.c(a)) && st.menace_ok(a, later)).collect();
             let mut options = vec![opt(format!("{}#{} does not block", bc.name(), bc.oid), vec![s("block"), s(bc.name()), KI::N], Val::None)];
+            let mut subjects = vec![vec![bc.oid]];
             let refs = st.referenced_oids();
             let mut seen: Vec<EquivKey> = vec![];
             for a in attackers {
@@ -1483,8 +1487,10 @@ impl Eng {
                 seen.push(k);
                 let ac = st.c(a);
                 options.push(opt(format!("{}#{} blocks {}#{}", bc.name(), bc.oid, ac.name(), ac.oid), vec![s("block"), s(bc.name()), s(ac.name())], Val::Card(a)));
+                subjects.push(vec![bc.oid, ac.oid]);
             }
             let (bn, bo) = (bc.name(), bc.oid);
+            st.combat_subjects = subjects;
             if let Val::Card(a) = self.ask(d, Kind::DeclareBlocker, || format!("Block with {bn}#{bo}?"), options)? {
                 let st = self.s();
                 let aoid = st.c(a).oid;
@@ -1547,20 +1553,21 @@ impl Eng {
                 continue;
             }
             let lethal: Vec<i32> = blockers.iter().map(|&b| st.lethal(st.c(a), st.c(b))).collect();
-            let mut options = vec![];
-            for split in damage_splits(pw, &lethal, trample) {
-                let mut parts: Vec<String> = split.iter().zip(&blockers).map(|(s, &b)| format!("{s} to {}", st.c(b).repr())).collect();
-                if trample {
-                    parts.push(format!("{} to player", split.last().unwrap()));
+            let split = if let Some(splits) = damage_splits(pw, &lethal, trample) {
+                let mut options = vec![];
+                for split in splits {
+                    let mut parts: Vec<String> = split.iter().zip(&blockers).map(|(s, &b)| format!("{s} to {}", st.c(b).repr())).collect();
+                    if trample { parts.push(format!("{} to player", split.last().unwrap())); }
+                    let key = vec![s("damage"), KI::T(split.iter().map(|&v| v as i64).collect())];
+                    options.push(opt(parts.join(", "), key, Val::Split(split)));
                 }
-                let key = vec![s("damage"), KI::T(split.iter().map(|&v| v as i64).collect())];
-                options.push(opt(parts.join(", "), key, Val::Split(split)));
-            }
-            let (an, ao) = (st.c(a).name(), st.c(a).oid);
-            let active = st.active;
-            let split = match self.ask(active, Kind::AssignDamage, || format!("Assign {pw} damage from {an}#{ao}"), options)? {
-                Val::Split(v) => v,
-                _ => unreachable!(),
+                let (an, ao, active) = (st.c(a).name(), st.c(a).oid, st.active);
+                st.combat_subjects = options.iter().map(|_| std::iter::once(ao).chain(blockers.iter().map(|&b| st.c(b).oid)).collect()).collect();
+                match self.ask(active, Kind::AssignDamage, || format!("Assign {pw} damage from {an}#{ao}"), options)? {
+                    Val::Split(v) => v, _ => unreachable!(),
+                }
+            } else {
+                self.allocate_damage(a, &blockers, &lethal, pw, trample, defender)?
             };
             let st = self.s();
             for (sv, &b) in split.iter().zip(&blockers) {
@@ -1597,6 +1604,28 @@ impl Eng {
         Ok(())
     }
 
+    fn allocate_damage(&mut self, a: CIdx, blockers: &[CIdx], lethal: &[i32], pw: i32, trample: bool, defender: u8) -> R<Vec<i32>> {
+        let mut assigned = vec![0; blockers.len()];
+        let (mut remaining, mut player_damage) = (pw, if trample { -1 } else { 0 });
+        let recipients = (if trample { -1 } else { 0 })..blockers.len() as i32;
+        for recipient in recipients {
+            let st = self.s();
+            let (an, ao, active) = (st.c(a).name(), st.c(a).oid, st.active);
+            st.damage_allocation = Some(DamageAllocation { attacker: ao, blockers: blockers.iter().map(|&b| st.c(b).oid).collect(), lethal: lethal.to_vec(), assigned: assigned.clone(), recipient, remaining, defender, player_damage });
+            let name = if recipient == -1 { "player" } else { st.c(blockers[recipient as usize]).name() };
+            let target = if recipient == -1 { "player".to_string() } else { st.c(blockers[recipient as usize]).repr() };
+            let options = damage_amounts(remaining, lethal, recipient, player_damage).map(|n| {
+                opt(format!("{n} to {target} from {an}#{ao}"), vec![s("damage_amount"), s(an), s(name), KI::I(recipient as i64), KI::I(n as i64), KI::I(remaining as i64), KI::T(assigned.iter().map(|&v| v as i64).collect()), KI::I(player_damage as i64)], Val::Int(n))
+            }).collect();
+            let n = match self.ask(active, Kind::AssignDamageAmount, || format!("Assign damage from {an}#{ao} to {target} ({remaining} remaining)"), options)? { Val::Int(n) => n, _ => unreachable!() };
+            remaining -= n;
+            if recipient == -1 { player_damage = n; } else { assigned[recipient as usize] = n; }
+        }
+        self.s().damage_allocation = None;
+        if trample { assigned.push(player_damage); }
+        Ok(assigned)
+    }
+
     // ------------------------------------------------------------------
     // Effects
     // ------------------------------------------------------------------
@@ -1623,10 +1652,13 @@ impl Eng {
     fn run_op(&mut self, op: &'static Op, item: &StackItem) -> R<()> {
         let ctl = item.controller;
         match op {
-            Op::Draw { n, n_cast_from_graveyard, each_controlling } => {
+            Op::Draw { n, n_cast_from_graveyard, each_controlling, target_player } => {
                 let n = if item.cast_from == Zone::Graveyard { n_cast_from_graveyard.unwrap_or(*n) } else { *n };
                 let st = self.s();
                 match each_controlling {
+                    None if *target_player => {
+                        if let Some(Tgt::Player(p)) = st.target(item, 0) { st.draw(p as usize, n, true); }
+                    }
                     None => st.draw(ctl as usize, n, true),
                     Some(name) => {
                         for q in [ctl, 1 - ctl] {
@@ -2429,4 +2461,3 @@ fn permutations(items: &[CIdx]) -> Vec<Vec<CIdx>> {
     }
     out
 }
-
