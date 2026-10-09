@@ -63,6 +63,9 @@ jobs:
           activate-environment: true
           enable-cache: true
       - run: uv pip install -e '.[dev]' numpy && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Installed wheel data smoke
+        if: matrix.shard == 0
+        run: python tools/check_wheel.py
       - run: python -m pytest -q -n auto --durations=15 -m "not slow and not gpu"
 
   native-tests:
