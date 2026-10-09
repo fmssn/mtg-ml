@@ -1,5 +1,12 @@
 # Next actions after the overnight A/B run (2026-10-07)
 
+> Historical assessment from October 7, 2026. The findings, code references and
+> proposed experiments below describe that snapshot; several fixes and features
+> have since landed, while the search-distillation experiment remained unmerged.
+> This is not the current task list. Start with the [documentation index](README.md),
+> [shared context and live ownership](context.md), [current feature contracts](features.md)
+> and [benchmark delivery plan](benchmark-plan.md) before choosing new work.
+
 Source: the overnight A/B (entity h128, self-play + pool vs. + 10% bot games, ~8.3M games each, h100-private), a review of 6 sampled and 5 greedy model games, and four audits of the training setup (reward, exploration, opponents, representation). Items marked **confirmed** were checked in the code; the rest are hypotheses with a cheapest test each.
 
 ## Where we stand
