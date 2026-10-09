@@ -106,6 +106,17 @@ workspaces. Focused short tests and lint need no slot. Run heavy foreground jobs
   --resource local:heavy -- make test-fast
 ```
 
+Full suites and fuzzing can move off the Mac instead: `h100-private:cpu:tests`
+is the agreed name for CPUs 48-63 on the training box, used by the `-remote`
+Make targets ([development](development.md#running-tests-on-h100-private)):
+
+```bash
+.venv/bin/python tools/progress.py run example-fix --owner manila \
+  --resource h100-private:cpu:tests -- make test-remote
+```
+
+Training launches that need those cores reserve the same name.
+
 The wrapper fails promptly if busy, preserves the command exit status and releases
 after its process group stops, including failures and SIGINT/SIGTERM. Do not use
 it for daemonized/background jobs. After a hard kill, verify the recorded host/PID

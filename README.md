@@ -1,10 +1,10 @@
 # mtg-ml
 
-A rules engine and self-play environment for **Magic: The Gathering (Pauper)**, built so a reinforcement-learning agent can be trained on one fixed matchup:
+A rules engine and self-play environment for **Magic: The Gathering (Pauper)**, built so a reinforcement-learning agent can be trained on the Pauper meta: six decks (**Jund Wildfire**, **Mono Blue Terror**, **Red Madness**, **Grixis Affinity**, **Elves**, **Tron**) and 21 matchups (15 cross-deck, plus 6 mirrors that run only when named; `mtg_ml/match.py`).
 
-**Jund Wildfire** (player 0) vs. **Mono Blue Terror** (player 1). Games use the London mulligan. Matches are best of three, with real 15-card sideboards and a sideboarding decision before games 2 and 3. Every rule the cards need is implemented in full.
+**Jund Wildfire** (player 0) vs. **Mono Blue Terror** (player 1) is the *standing benchmark* that every model is measured on. Games use the London mulligan. Matches are best of three, with real 15-card sideboards and a sideboarding decision before games 2 and 3. Every rule the cards need is implemented in full.
 
-Background research and the roadmap: [`docs/research-mtg-pauper-rl.md`](docs/research-mtg-pauper-rl.md).
+Roadmap: [`docs/benchmark-plan.md`](docs/benchmark-plan.md) and [`docs/representation-plan.md`](docs/representation-plan.md); the index of every doc is [`docs/README.md`](docs/README.md). Background research: [`docs/research-mtg-pauper-rl.md`](docs/research-mtg-pauper-rl.md).
 
 ## Quickstart
 
@@ -27,7 +27,7 @@ python -m mtg_ml.replay serve --models runs/                 # ... and play agai
 
 # optional: the Rust engine, 13-22x faster, identical games (docs/native-engine.md)
 (cd native && maturin develop --release)
-python -m mtg_ml.play bench --games 2000 --engine native   # or MTG_ENGINE=native for everything
+python -m mtg_ml.play bench --games 2000 --engine native   # or MTG_ENGINE=native for play, training and evaluation
 ```
 
 ```python
@@ -76,12 +76,12 @@ Shuffling forgets library knowledge.
 
 ## Native engine
 
-`native/` is a Rust port of the engine (PyO3 / maturin, module `mtg_ml_native`) that plays exactly the same games as the Python engine: same seeds, same decision sequence, same options with the same labels and keys, same views and the same RNG stream. Python stays the reference; the native engine is an optional backend chosen with `--engine native`, `engine=` or `MTG_ENGINE=native` (`mtg_ml/backend.py`). Training uses it with `python -m mtg_ml.rl.train --engine native`.
+`native/` is a Rust port of the engine (PyO3 / maturin, module `mtg_ml_native`) that plays exactly the same games as the Python engine: same seeds, same decision sequence, same options with the same labels and keys, same views and the same RNG stream. Python stays the reference; the native engine is an optional backend chosen with `--engine native`, `engine=` or `MTG_ENGINE=native` (`mtg_ml/backend.py`). Training uses it with `python -m mtg_ml.rl.train --engine native` or `MTG_ENGINE=native` (an explicit `--engine python` wins).
 
 - **Speed** (one core of h100-private): 190k decisions/s engine-only (21.6x), 60k decisions/s for a rollout worker's CPU work of featurize + event tokens + step (12.6x); 3.95M decisions/s on 64 pinned cores.
 - **Correctness** is checked differentially: `mtg_ml/difftest.py` plays scenarios (random, chaos and bot agents, mulligans, games 1-3) in both engines in lockstep and compares every decision, view, feature vector and the full hidden state at every step; all rules, card, bot and fuzz tests also run on both engines.
 - **Cards** are one declarative spec, `mtg_ml/engine/cards.toml`, loaded by both engines. A card that only uses existing effect ops needs no code. How to add cards and decks: [`docs/adding-cards.md`](docs/adding-cards.md).
-- **PyPy** runs the Python engine 2-3x faster, but rollout workers import torch, so it only becomes usable once inference moves to a central server.
+- **PyPy** runs the Python engine 2-3x faster, but rollout workers with local inference import torch, which does not run on PyPy. The central inference server (`--inference server`) removes torch from the workers, but the Rust engine is faster than PyPy anyway, so training uses that.
 
 Architecture, determinism, the differential suite and all benchmarks: [`docs/native-engine.md`](docs/native-engine.md). Rollout throughput, packed samples and the central GPU inference server (`--inference server`): [`docs/inference-server.md`](docs/inference-server.md).
 
@@ -103,7 +103,7 @@ Bot vs bot, 200 matches each (2026-10-07, 8-core dev Mac, native engine; re-run 
 
 ## Scripted bots
 
-`mtg_ml/bots/` holds one heuristic bot per deck, used as a fixed baseline opponent. Each bot scores every legal option and takes the best one.
+`mtg_ml/bots/` holds one heuristic bot per deck (six, registered in `BOTS`) and a search bot, used as fixed baseline opponents. Each deck bot scores every legal option and takes the best one; the search bot (`bots/search.py`) plays each of its base bot's top options out to the end, with the scripted bots on both sides, and picks the best average result.
 
 - **Jund** (`jund.py`):
   - plays Bridges early, while entering tapped costs nothing;
@@ -117,6 +117,7 @@ Bot vs bot, 200 matches each (2026-10-07, 8-core dev Mac, native engine; re-run 
   - counters removal aimed at its threats, creatures and card draw, but never a spell that Terror's ward will counter anyway;
   - plays Force Spike when Jund is tapped out;
   - spends spare mana on card draw at Jund's end step.
+- **Red Madness** (`red.py`), **Grixis Affinity** (`affinity.py`), **Elves** (`elves.py`) and **Tron** (`tron.py`): one bot each, described in the deck docs [red-madness.md](docs/red-madness.md), [grixis-affinity.md](docs/grixis-affinity.md), [elves.md](docs/elves.md) and [tron.md](docs/tron.md).
 - **Shared** (`base.py`):
   - combat: attacks unless a blocker kills the attacker for free; blocks for free kills, good trades and chumps against lethal;
   - mana payment, sacrifice fodder and the remaining card choices.
@@ -147,7 +148,7 @@ python -m mtg_ml.rl.train --run runs/ppo1 --iterations 200   # rerun with a high
 python -m mtg_ml.rl.train --help                              # all hyperparameters
 ```
 
-- **Inputs** (`mtg_ml/rl/features.py`): the hashed state features from `encode.py`, plus seat and decision kind. Each legal option's key is expanded into hashed tokens: its elements and its prefixes.
+- **Inputs** (`mtg_ml/rl/features.py`): the hashed state features from `encode.py`, plus the decision kind (and the seat in feature sets below 7). Each legal option's key is expanded into hashed tokens: its elements and its prefixes.
 - **Network** (`mtg_ml/rl/model.py`): an EmbeddingBag + MLP state trunk and an option encoder. A scorer turns each (state, option) pair into one logit. Logits are padded per decision and masked to `-inf`, so the softmax covers exactly the legal options. A value head sits on the trunk.
 - **Memory** (`--memory gru`, the default): a GRU runs over each player's own decisions in a game. At every decision it reads the current state plus an event bag of what happened since that player's last decision: their own previous choice, and the opponent's public actions (casts, attacks, blocks, targets, payments). Opponent choices that could name hidden cards (`choose_card`, `order`, `choose_mode`) are passed only as their kind. This is also how a target or payment decision knows which spell it belongs to. PPO replays whole trajectories, so hidden states are never stale. `--memory none` swaps the GRU for an MLP over the same inputs, for ablations.
 - **Rollouts** (`mtg_ml/rl/rollout.py`): worker processes run many games in lockstep and batch inference per policy. Rewards are terminal ±1 (0 for a draw), plus optional potential-based life-difference shaping that is annealed to 0. Advantages use GAE.
@@ -159,7 +160,7 @@ Head-to-head matches between checkpoints, or against the random agent, use paire
 python -m mtg_ml.rl.evaluate runs/a/latest.pt runs/b/latest.pt --games 600
 ```
 
-On 7 workers a run does about 10k decisions/s (`--memory gru` takes about 60% longer per iteration than `none`, mostly in the update). Twenty iterations (about 4 minutes) take Jund from 18% to over 90% against the random agent. Blue already beats random about 98% of the time. Against the scripted bots the same agent scores only about 0.03 as Jund and 0.40 as Blue, so the bots are the benchmark to beat. The bot-vs-bot baselines are 0.33 and 0.67. `--bot-frac` mixes bot games into training.
+Early figures from the first training version (2026-10-05, before the entity encoder, the native engine and the six decks; machine not recorded; current numbers are in the [experiment ledger](docs/experiments/ledger.md) and [inference-server.md](docs/inference-server.md)): on 7 workers a run did about 10k decisions/s (`--memory gru` takes about 60% longer per iteration than `none`, mostly in the update). Twenty iterations (about 4 minutes) take Jund from 18% to over 90% against the random agent. Blue already beats random about 98% of the time. Against the scripted bots the same agent scores only about 0.03 as Jund and 0.40 as Blue, so the bots are the benchmark to beat. The bot-vs-bot baselines are 0.33 and 0.67. `--bot-frac` mixes bot games into training.
 
 ## Rules coverage
 
@@ -173,7 +174,8 @@ Implemented:
 - combat: summoning sickness, flying/reach, multiple blockers with the current free damage division, trample's lethal-first rule, deathtouch, lifelink;
 - cleanup discard to seven, damage and "until end of turn" effects wearing off;
 - alternative and additional costs: flashback (exiled afterwards), escape, bestow (including the illegal-target fallback to a creature), cycling and islandcycling, X costs, affinity, the other cost reductions, and sacrifice costs;
-- ward, transform, indestructible, tokens (Eldrazi Spawn, Clue, Map) and explore.
+- ward, transform, indestructible, tokens (Eldrazi Spawn, Clue, Map) and explore;
+- the mechanics the other four decks need: madness, storm, cascade, plot, prototype, overload, bargain, collect evidence, equipment, the initiative (Undercity) and station (how each is specified: [`docs/adding-cards.md`](docs/adding-cards.md), [`docs/red-madness.md`](docs/red-madness.md), [`docs/elves.md`](docs/elves.md), [`docs/tron.md`](docs/tron.md), [`docs/grixis-affinity.md`](docs/grixis-affinity.md)).
 
 Card list and oracle text: [`mtg_ml/engine/decks.py`](mtg_ml/engine/decks.py), [`mtg_ml/engine/cards.toml`](mtg_ml/engine/cards.toml), [`data/oracle_cards.json`](data/oracle_cards.json). The lists are from MTGGoldfish (fetched 2026-10-05).
 
@@ -192,23 +194,16 @@ Card list and oracle text: [`mtg_ml/engine/decks.py`](mtg_ml/engine/decks.py), [
 - `tests/test_card_spec.py` checks `cards.toml` against the oracle snapshot.
 - The rules, card, bot, view and fuzz tests run on both engines (`tests/conftest.py`); `tests/test_difftest.py` and `python -m mtg_ml.difftest fuzz --games 5000 --jobs 8` compare the engines in lockstep.
 
-Throughput on one CPU core of h100-private: about 8,800 decisions/s (Python engine), 190,000 decisions/s (native engine). `python tools/bench_engine.py --help` measures engine-only, agent, rollout and bot throughput, optionally on many pinned cores.
+Throughput on one CPU core of h100-private (measured 2026-10-05, see [docs/native-engine.md](docs/native-engine.md#benchmarks)): about 8,800 decisions/s (Python engine), 190,000 decisions/s (native engine). `python tools/bench_engine.py --help` measures engine-only, agent, rollout and bot throughput, optionally on many pinned cores.
 
 ## Layout
 
 ```
-mtg_ml/engine/   mana.py objects.py game.py cards.toml cards.py decks.py view.py native.py (NativeGame)
-mtg_ml/backend.py  engine switch (MTG_ENGINE)
-mtg_ml/trace.py    reproducible scenarios, golden digests
-mtg_ml/difftest.py differential testing of the two engines
-mtg_ml/encode.py hashed state features, action keys
-mtg_ml/env.py    two-player step/reset wrapper
-mtg_ml/agents.py random and human agents, game runner
-mtg_ml/match.py  best-of-three matches with sideboarding
-mtg_ml/play.py   CLI
-mtg_ml/bots/     base.py jund.py blue.py (scripted baseline bots)
-mtg_ml/rl/       features.py model.py rollout.py ppo.py train.py evaluate.py (masked PPO self-play)
-native/src/      rng.rs mana.rs cards.rs state.rs engine.rs game.rs features.rs py.rs (Rust port)
-tools/           audit_triggers.py bench_engine.py
-docs/            research-mtg-pauper-rl.md native-engine.md adding-cards.md
+mtg_ml/    the package: engine/ (rules, cards.toml, decks), bots/, rl/ (masked PPO), benchmark/, review/, hosted/, expert/, plus match.py, play.py, replay.py, trace.py, difftest.py
+native/    Rust port of the engine (pyo3 / maturin crate mtg_ml_native)
+apps/      play, expert-review and training-dashboard web clients
+tools/     benchmarks, audits and campaign scripts (not imported by the package)
+tests/     pytest suite (rules, cards, bots, fuzz, golden digests, difftest)
+docs/      reference docs, plans and research: start at docs/README.md
+data/      oracle card snapshot
 ```

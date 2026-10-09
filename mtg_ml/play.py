@@ -20,7 +20,7 @@ from .agents import HumanAgent, RandomAgent, play_game
 from .backend import engine_name
 from .bots import make_bot
 from .encode import FEATURE_VERSIONS
-from .match import matchup_decks, play_match
+from .match import MATCHUPS, matchup_decks, play_match
 
 
 def make_agent(kind: str, seat: int, seed: int, greedy: bool = False, deck: str | None = None, features: int = 0):
@@ -59,7 +59,7 @@ def main(argv=None) -> None:
     m.add_argument("--matches", type=int, default=100)
     m.add_argument("--agents", default="bot,bot", help="seat0,seat1 from: random, bot, search[:playouts]")
     m.add_argument("--log", action="store_true", help="print the game logs of the first match")
-    m.add_argument("--matchup", default="jund_blue", help="match.MATCHUPS: jund_blue, jund_madness, blue_madness, jund_elves, blue_elves or madness_elves")
+    m.add_argument("--matchup", default="jund_blue", help=f"match.MATCHUPS: {', '.join(MATCHUPS)} (seat 0 deck first; mirrors are used only where named)")
     for p in (w, h, b, m):
         p.add_argument("--engine", default=None, help="python (reference) or native (Rust); default: $MTG_ENGINE, else python")
         p.add_argument("--features", type=int, default=0, choices=FEATURE_VERSIONS, help="featurize model:<checkpoint> agents in this feature-set version instead of the one their config records (docs/features.md)")

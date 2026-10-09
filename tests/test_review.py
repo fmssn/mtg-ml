@@ -10,6 +10,7 @@ import re
 
 import pytest
 
+from mtg_ml.encode import FEATURE_VERSIONS
 from mtg_ml.review import faults as F
 from mtg_ml.review.prompt import CAUSES, observation_sheet, parse_findings, system_prompt
 from mtg_ml.review.record import record_game
@@ -109,13 +110,16 @@ def test_dotenv_reads_the_nearest_env_upwards(tmp_path, monkeypatch):
     assert _dotenv("FAKE_REVIEW_KEY") == "env"
 
 
-@pytest.mark.parametrize("features", range(1, 7))
+@pytest.mark.parametrize("features", FEATURE_VERSIONS)
 def test_observation_sheet_uses_checkpoint_version(features):
     sheet = observation_sheet({"features": features, "trunk": "entity", "entity_attn": 2, "memory": "none"})
     assert [int(v) for v in re.findall(r"^- Feature set (\d+):", sheet, re.M)] == list(range(1, features + 1))
+    assert ("capped at 64" in sheet) == (features < 7)
     assert "2 self-attention layers" in sheet
     assert "no recurrent memory" in sheet
-    assert ("pv:sim:*" in sheet) == (features == 6)
+    assert ("pv:sim:*" in sheet) == (features >= 6)
+    assert ("hidden-list information contract" in sheet.lower()) == (features >= 7)
+    assert ("witnessed opponent-card evidence" in sheet) == (features >= 8)
     assert ("which attacker a blocker blocks" in sheet) == (features >= 4)
     assert ("own hand cards are entities" in sheet) == (features >= 5)
 

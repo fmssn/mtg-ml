@@ -338,9 +338,6 @@ impl Player {
             _ => panic!("not a player zone: {z:?}"),
         }
     }
-    pub fn pool_get(&self, c: u8) -> i32 {
-        self.pool.iter().find(|(k, _)| *k == c).map(|e| e.1).unwrap_or(0)
-    }
     pub fn pool_add(&mut self, c: u8, n: i32) {
         match self.pool.iter_mut().find(|(k, _)| *k == c) {
             Some(e) => e.1 += n,
@@ -742,17 +739,6 @@ impl State {
         st.skip_first_draw = !args.has_setup;
         st.mulligan_phase = !args.has_setup && args.mulligans;
         Ok(st)
-    }
-
-    #[inline]
-    pub fn log_on(&self) -> bool {
-        self.logging
-    }
-
-    pub fn push_log(&mut self, msg: String) {
-        if self.logging {
-            self.log.push(msg);
-        }
     }
 
     pub fn new_id(&mut self) -> u32 {

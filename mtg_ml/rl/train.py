@@ -114,7 +114,7 @@ from dataclasses import asdict, dataclass, field, fields
 
 import torch
 
-from ..backend import ENV_VAR, engine_name
+from ..backend import ENGINES, ENV_VAR, engine_name
 from ..encode import BELIEF_FEATURES, FEATURES, FEATURE_VERSIONS, information_contract
 from ..match import game_seed, matchup_decks, parse_matchups
 from .collect import PoolProcess, PoolThread, cpu_layout, fmt_cpus, parse_cpus, release
@@ -214,7 +214,7 @@ class TrainConfig:
     device: str = "cpu"
     learner_devices: str = ""  # comma-separated devices; first matches --device, others are persistent replicas
     learner_cpus: str = ""  # semicolon-separated CPU lists, one per learner rank
-    engine: str = "python"  # rules engine for rollouts: python (reference) or native (Rust, mtg_ml_native)
+    engine: str = ""  # rules engine for rollouts: python (reference) or native (Rust, mtg_ml_native); "" = $MTG_ENGINE, else python (the saved config records the resolved name)
     inference: str = "local"  # policy inference: local (CPU torch in each worker) or server (one GPU process, rl/inference.py)
     server_device: str = ""  # device of the inference server ("" = --device, or cuda when --device is cpu and a GPU exists)
     server_devices: str = ""  # comma-separated inference devices; learner uses --device
@@ -267,7 +267,8 @@ class _Eval:
 class Trainer:
     def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
-        os.environ[ENV_VAR] = engine_name(cfg.engine)  # spawned processes inherit it
+        cfg.engine = engine_name(cfg.engine)  # "" -> $MTG_ENGINE or python; the saved config records the concrete engine
+        os.environ[ENV_VAR] = cfg.engine  # spawned processes inherit it
         for d in ("pool", "policy"):
             os.makedirs(os.path.join(cfg.run, d), exist_ok=True)
         self.latest = os.path.join(cfg.run, "latest.pt")
@@ -975,7 +976,7 @@ def _rate(games, seat: int) -> float:
     return sum(g[1] == seat for g in games) / len(games) if games else float("nan")
 
 
-CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "exploit_deck": tuple(DECK_KEYS.values()), "lr_schedule": ("linear", "cosine"), "value_bound": ("none", "tanh"), "features": (0, *FEATURE_VERSIONS)}
+CHOICES = {"bot_seat": ("both", "jund"), "pool_sampling": ("uniform", "pfsp"), "exploit_deck": tuple(DECK_KEYS.values()), "lr_schedule": ("linear", "cosine"), "value_bound": ("none", "tanh"), "features": (0, *FEATURE_VERSIONS), "engine": ("", *ENGINES)}
 
 
 def exploit_seat(cfg: TrainConfig) -> int | None:

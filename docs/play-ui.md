@@ -12,8 +12,8 @@ python -m mtg_ml.replay serve --models runs/ --max-games 20   # hold more games 
 
 A normal server offers exactly what `mtg_ml/play_config.toml` (or `--play-config FILE`) lists, and refuses any other request:
 
-- `player_decks`: the decks a player may pick. Today these are Jund Wildfire and Mono Blue Terror.
-- `opponents`: each has an `id`, a `label`, a `model` (a checkpoint under `--models`), the `deck` it plays and `greedy`. Today there is one: **Delver**, the r4-control model playing Mono Blue Terror.
+- `player_decks`: the decks a player may pick. Today these are all six: Jund Wildfire, Mono Blue Terror, Red Madness, Grixis Affinity, Elves and Tron.
+- `opponents`: each has an `id`, a `label`, a `model` (a checkpoint under `--models`), the `deck` it plays and `greedy`. Today there are seven: the r7 lr075 model (greedy) playing each of the six decks, and **Delver**, the legacy r4-control model (sampled) playing Mono Blue Terror.
 
 The new-game screen has two sections, **Your deck** and **Opponent**. An opponent shows only if the server has its checkpoint, and only for decks that have a matchup against it (`matchup_for`). The client sends `{deck, opponent}` and the server resolves the matchup and seat; model names, matchups, scenarios and the scripted bot are not accepted.
 
