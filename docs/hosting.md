@@ -219,13 +219,16 @@ SQLite online backup (consistent while the app runs) plus the replays:
 ts=$(date -u +%Y%m%dT%H%M%SZ)
 sqlite3 /srv/mtg-play/state/play.sqlite3 ".backup '/srv/mtg-play/backups/play-$ts.sqlite3'"
 tar -C /srv/mtg-play -czf /srv/mtg-play/backups/replays-$ts.tar.gz replays
+install -m 0600 /srv/mtg-play/state/token.key /srv/mtg-play/backups/token-$ts.key
 find /srv/mtg-play/backups -type f -mtime +14 -delete
 ```
 
 Run it daily from root's crontab and copy `/srv/mtg-play/backups` off the box
 (e.g. `rsync` to another machine, or a Hetzner Storage Box). Hetzner's own server
 backups (+20% of the server price) are an alternative, not configured by default.
-Checkpoints are not backed up here: their originals live in `~/mtg-ml-checkpoints`.
+`token.key` (created by the app next to the database) derives the game tokens
+players hold: without it, restored games cannot be opened again. Keep it with
+the database backups and treat it as a secret. Checkpoints are not backed up here: their originals live in `~/mtg-ml-checkpoints`.
 
 ## 9. Restore
 
@@ -233,6 +236,7 @@ Checkpoints are not backed up here: their originals live in `~/mtg-ml-checkpoint
 docker compose -f deploy/compose.yaml stop app
 install -o 10001 -g 10001 -m 0640 /srv/mtg-play/backups/play-<ts>.sqlite3 /srv/mtg-play/state/play.sqlite3
 rm -f /srv/mtg-play/state/play.sqlite3-wal /srv/mtg-play/state/play.sqlite3-shm
+install -o 10001 -g 10001 -m 0600 /srv/mtg-play/backups/token-<ts>.key /srv/mtg-play/state/token.key
 tar -C /srv/mtg-play -xzf /srv/mtg-play/backups/replays-<ts>.tar.gz && chown -R 10001:10001 /srv/mtg-play/replays
 docker compose -f deploy/compose.yaml up -d
 ```
@@ -246,9 +250,16 @@ cd /opt/mtg-ml && git fetch && git checkout <new-rev>
 export GIT_REV=$(git rev-parse HEAD) MTG_PLAY_IMAGE=mtg-play:$(git rev-parse --short HEAD)
 docker compose -f deploy/compose.yaml build app
 docker compose -f deploy/compose.yaml run --rm --no-deps app python -m mtg_ml.hosted check
-# back up first (section 8), then replace the container; games restore from SQLite
+# back up first (section 8), then replace the container
 docker compose -f deploy/compose.yaml up -d app
 ```
+
+A restart on the same release restores unfinished games from SQLite. A new
+release (`GIT_REV` changed), a changed checkpoint or engine ends unfinished
+games on purpose: the record stores choices as option indices, which another
+rules revision could read differently, so players see "Cannot resume" rather
+than a silently different game. Finished games stay reviewable. Deploy when
+nobody is mid-game: `sqlite3 /srv/mtg-play/state/play.sqlite3 "SELECT count(*) FROM games WHERE status='active'"`.
 
 New checkpoints: copy them in (section 3), update `play_config.toml` in the
 release, run `check`, then restart. Upgrade cloudflared by changing its pinned

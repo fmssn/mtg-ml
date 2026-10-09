@@ -59,10 +59,24 @@ The replay viewer (`/`) and its own live mode are unchanged. A finished game is 
 **Every request about one game needs its token.** That covers view, choose, concede, next, flag, survey and review. The game id alone is never enough, because ids appear in public issues.
 
 - The answer that starts a game (`new`, and `next` for the following game of the match) carries `live.token`. No other answer does.
-- The page keeps the token in localStorage under the game id, and sends it as `X-Game-Token` (`?token=` also works).
+- The page keeps the token in localStorage under the game id, and sends it only as the `X-Game-Token` header, never in a URL. The local server (`mtg_ml.replay serve`) still accepts `?token=`; the hosted server refuses it with 400.
 - A reload resumes the game, since the URL hash holds only the id. Another browser opened with the id gets nothing.
 - A request without the token, or with another game's token, is refused with 403. An unknown id gets 400.
 - The token never goes into issues or logs.
+
+### Hosted server (`python -m mtg_ml.hosted serve`)
+
+The same protocol behind Cloudflare Access ([hosting](hosting.md) for the deployment). What differs (`mtg_ml/hosted/`):
+
+- **Accounts.** Every request but `GET /healthz` needs a valid Access JWT (`Cf-Access-Jwt-Assertion`, or the `CF_Authorization` cookie) for an allowlisted email: RS256 against the team's certs, issuer, audience, expiry. A missing or invalid one gets 401, an email off the list 403; both answers carry `auth: true`, and the page shows a "sign-in expired, reload" banner (an Access login redirect seen by `fetch` counts too).
+- **Ownership.** Games, matches and replays belong to the account that started them. A game request needs the owner's account *and* the game token; another account gets the same 404 as an unknown id, even with a stolen token. `/api/replays` lists only the caller's replays and `/replays/<file>` serves only those; replay files nobody owns are not served.
+- **Seeds.** The server draws a private 63-bit seed per game and refuses a `seed` in `new`. `meta.seed`, the review, the rebuild command and the feedback choices appear only once the game is over. No dev scenarios, scripted bots or free model choice: `new` takes `{deck, opponent}` from the play offer.
+- **Limits.** POSTs need `Origin` equal to `MTG_HOSTED_PUBLIC_ORIGIN` (403), `Content-Type: application/json` (415) and at most 64 KiB, counted while reading (413). Two unfinished games per account (429), eight in all (503), a bounded request queue (503 "busy"), and a game idle for an hour expires (410).
+- **Restarts.** Every action is committed to `MTG_HOSTED_STATE/play.sqlite3` before it is answered: the game's settings, seed, checkpoint hash, code revision and engine, and every choice in order (the player's and the model's), the results, replays and feedback. After a restart a game is rebuilt from its seed and choices on the game thread; the model replays its own decisions (rebuilding its memory) and each must match the record. If the checkpoint, code revision or engine changed, or the replay diverges, the game is marked unrecoverable: requests get 409 with `unrecoverable: true` and the page says "Cannot resume". A finished game's review then falls back to its saved replay.
+- **Retries.** A repeated `choose` for a decision already taken with the same option returns the view again; a repeated `next` returns the same next game (and token); results, replay exports, flags and issue filing are keyed in the database, so a retry never duplicates them.
+- **Feedback.** Flags and surveys are saved with the game and its replay under the player's pseudonym. GitHub filing is off unless `MTG_HOSTED_GITHUB_FILING=1`; the report form then says the report is saved for the developers instead of published.
+
+Verified (2026-10-09) with Playwright against `python -m mtg_ml.hosted serve` (native engine, the pinned r7 lr075 and r4 checkpoints) and a local stand-in for the Access issuer, two accounts in isolated browser contexts: deck selection (six decks, seven opponents each), the paying step, reload and resume, a server restart mid-game then resume, flag, survey, post-game review, and the second account seeing neither the game (404 even with the first account's token) nor its replay. On an Apple M3 MacBook (16 GB): about 290 MiB RSS idle and 380 MiB peak with eight concurrent games; per-choice latency with one player p50 7 ms / p95 142 ms, and with eight players answering instantly (one game worker serializes them) p50 275 ms / p95 543 ms.
 
 The live server's frames keep the replay format, with two additions.
 
@@ -191,7 +205,7 @@ Nothing is paid automatically. Playing a spell or an ability with a mana cost (d
 
 After a game ends, the result card's **Review game** (or Menu → "Review the finished game") opens the game omnisciently on the same board, read-only. It answers the question "did the bot misplay, or was it flooded or screwed?".
 
-- **Server:** `GET /api/live/<id>/review?token=…` returns the omniscient replay: both hands, libraries, and the model's `policy` and `value` at each of its decisions. It is refused while the game runs, and like every game endpoint it needs the game's token (see Protocol).
+- **Server:** `GET /api/live/<id>/review` (token in the `X-Game-Token` header) returns the omniscient replay: both hands, libraries, and the model's `policy` and `value` at each of its decisions. It is refused while the game runs, and like every game endpoint it needs the game's token (see Protocol).
 - **Timeline:** a strip under the header with turn markers and a dot per bot decision. Orange dots are surprising picks (an option under 15 % that the sampling policy chose). A red or green ring marks a big value swing (|Δ| ≥ 0.35 by its next decision). Click the strip to jump. Keys: ←/→ step, Shift+←/→ a turn, [ ] the previous or next bot decision, Home/End, Esc leaves.
 - **Decision panel:** for each bot decision, its options ranked by probability (top five with bars, the chosen one marked), and its value before and after (the next decision's estimate, or the result at the end). Values are the network's own estimate of its return, −1 to +1, not a calibrated win probability. Your own decisions show what you chose.
 - **Draw quality:** a strip under the timeline, one cell per turn and player aligned with the turns (lands and spells drawn, the land drop; red for a missed drop or 5+ lands in hand; the tooltip has the rest), and the full table behind the Draw quality button or Q. For each player it shows:
@@ -202,7 +216,7 @@ After a game ends, the result card's **Review game** (or Menu → "Review the fi
   - mana spent (pay steps) against mana sources.
 
   Chips in the strip summarise it: "mulligan to N", "flooded (turn T: 5+ lands in hand)", "screwed (missed N land drops)" (an own turn with no land in hand and no land played, under five lands), and the lands and spells drawn in total.
-- **Reports from the review:** "Report: bot played wrong" (on a bot decision) and "Bug: engine / UI" (anywhere) open the same form. They post `{category, review_frame, token, …}`. Since the game is over, the issue holds everything:
+- **Reports from the review:** "Report: bot played wrong" (on a bot decision) and "Bug: engine / UI" (anywhere) open the same form. They post `{category, review_frame, …}` with the token in the header. Since the game is over, the issue holds everything:
   - the bot's hand and the full board;
   - its options with probabilities and its value;
   - the seed and the decision number;

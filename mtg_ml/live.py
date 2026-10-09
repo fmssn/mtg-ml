@@ -207,6 +207,9 @@ class LiveGame:
         self.log: list[str] = []
         self.engine_seen = 0  # engine log lines copied into self.log
         self.replay_file: str | None = None
+        # A hosted game keeps its seed (which, with the choices, gives away the
+        # bot's hand and library) to itself until the game is over.
+        self.hide_seed = False
         self._advance()
 
     def _sync_log(self) -> list[str]:
@@ -347,7 +350,7 @@ class LiveGame:
     def _meta(self) -> dict:
         g = self.g
         return {
-            "seed": self.seed,
+            "seed": None if self.hide_seed and not self.over else self.seed,
             "engine": engine_name(self.engine),
             "agents": self.names,
             "decks": [DECK_TITLES[d] for d in matchup_decks(self.matchup)],
@@ -564,15 +567,17 @@ class LiveManager:
     thread of its own. A move takes milliseconds, so one thread is plenty."""
 
     def __init__(self, models_dir: pathlib.Path | None, replay_dir: pathlib.Path, engine: str | None = None, max_games: int = MAX_GAMES, scripted: bool = False,
-                 config: dict | None = None, filer=None):
+                 config: dict | None = None, filer=None, pinned: dict[str, dict] | None = None):
         """`models_dir` None: no checkpoints (only the scripted bot, with `scripted`).
         `scripted`: a development server (serve --dev): every checkpoint and
         matchup, the scripted bots and the dev scenarios. `config`: the play
         offer (play_config.toml: player decks, opponents); None offers every
-        checkpoint and matchup. `filer`: files flags as GitHub issues (None: never)."""
+        checkpoint and matchup. `filer`: files flags as GitHub issues (None: never).
+        `pinned`: the offer's checkpoints, already validated (the hosted server
+        validates strictly itself)."""
         self.config, self.filer = config, filer
-        self.pinned: dict[str, dict] | None = None  # validated checkpoints (validate_offer); None: not checked
-        if config is not None and not scripted:
+        self.pinned: dict[str, dict] | None = pinned  # validated checkpoints (validate_offer); None: not checked
+        if config is not None and not scripted and pinned is None:
             self.pinned, problems = validate_offer(models_dir, config)
             for p in problems:
                 print(f"play offer: {p} (its opponents are left out)")
@@ -585,7 +590,7 @@ class LiveManager:
         self.worker = ThreadPoolExecutor(1, thread_name_prefix="live")
 
     def options(self) -> dict:
-        out = {"mode": "dev" if self.scripted else "play" if self.config is not None else "open"}
+        out = {"mode": "dev" if self.scripted else "play" if self.config is not None else "open", "filing": self.filer is not None and self.filer.available()}
         if self.config is not None and not self.scripted:
             offer = self._offer()
             out["player_decks"] = [{"deck": d, "title": DECK_TITLES[d], "opponents": [o["id"] for o in offer if matchup_for(d, o["deck"])]} for d in self.config.get("player_decks", [])]

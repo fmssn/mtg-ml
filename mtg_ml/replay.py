@@ -280,6 +280,8 @@ def make_server(directory: pathlib.Path, host: str = "127.0.0.1", port: int = 87
                     if len(parts) == 2 and parts[1] == "concede":
                         return self._json(live.concede(parts[0]))
                     if len(parts) == 2 and parts[1] == "flag":
+                        if token and not req.get("token"):  # the page sends it as the header only
+                            req["token"] = token
                         return self._json(live.flag(parts[0], req))
                     if len(parts) == 2 and parts[1] == "survey":
                         return self._json(live.survey(parts[0], req))
