@@ -15,7 +15,7 @@ from mtg_ml.match import matchup_decks
 from tests.test_live_proto import native_ok, play_out, prefer_plays
 
 DECKS6 = ["jund_wildfire", "mono_blue_terror", "red_madness", "grixis_affinity", "elves", "tron"]
-R7 = "r7-lr075/iter_04026"
+R7 = "r7-lr075/policy"
 
 
 def test_packaged_offer_pins_r7_on_every_deck_and_keeps_legacy_delver():
@@ -29,7 +29,7 @@ def test_packaged_offer_pins_r7_on_every_deck_and_keeps_legacy_delver():
         pin = cfg["models"][o["model"]]
         assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"]) and isinstance(pin["features"], int) and pin["source"]
         assert not o["model"].endswith("latest")
-    assert cfg["models"][R7]["features"] == 7 and cfg["models"][R7]["games"] == 8245248
+    assert cfg["models"][R7]["features"] == 7 and cfg["models"][R7]["games"] == 8353792
     assert len({o["id"] for o in cfg["opponents"]}) == len(cfg["opponents"])
 
 
@@ -51,7 +51,7 @@ def tiny7(tmp_path):
     from mtg_ml.rl.model import PolicyNet
 
     config = {"hidden": 16, "memory": "gru", "trunk": "entity", "features": 7}
-    path = tmp_path / "models" / "r7-lr075" / "iter_04026.pt"
+    path = tmp_path / "models" / f"{R7}.pt"
     path.parent.mkdir(parents=True)
     torch.save({"config": config, "model": PolicyNet(**config).state_dict()}, path)
     return tmp_path / "models"

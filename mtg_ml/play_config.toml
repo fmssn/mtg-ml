@@ -14,12 +14,12 @@
 
 player_decks = ["jund_wildfire", "mono_blue_terror", "red_madness", "grixis_affinity", "elves", "tron"]
 
-[models."r7-lr075/iter_04026"]
-sha256 = "1400629e0060c65a237f3455fd4b28a3becb82d5fbc8ce527104bc9db0cd335c"
+[models."r7-lr075/policy"]
+sha256 = "672aaa0c2764f853198c44a6fa7847469e01d9767952ea3fb8e9d84e068f636e"
 features = 7
-games = 8245248
-source = "h100-private:~/mtg-ml-checkpoints/20261008-r7-fs7-h256-lr075/snapshots/iter_04026.pt"
-evaluation = "r7 overnight campaign (PR #68): full 144-cell deck matrix and 21 head-to-head pairings at iter_04026; lr075 at 8.25M games sampled 0.563, greedy 0.662 vs the blue bot, L1 Elo 4.9"
+games = 8353792
+source = "h100-private:~/mtg-ml-checkpoints/20261008-r7-fs7-h256-lr075/policy.pt"
+evaluation = "final r7 lr075 policy (iteration 4079, run stopped); ledger 20261009-specialist-benchmark (PR #72): greedy Jund 70.8% vs legacy Blue, 49.0% vs the Blue specialist, Blue 75.7% vs the Jund specialist"
 trained_at = "4a32795"  # training code (PR #68 head)
 runtime = "b06fac4"  # first default-branch commit that plays feature set 7 (#63); later revisions keep it
 
@@ -33,48 +33,48 @@ evaluation = "round 4 control (docs/experiments/ledger.md); legacy, kept for its
 [[opponents]]
 id = "r7-jund"
 label = "r7 · Jund Wildfire"
-note = "r7 lr075 (8.2M self-play games, greedy) playing Jund Wildfire"
-model = "r7-lr075/iter_04026"
+note = "r7 lr075 final (8.35M self-play games, greedy) playing Jund Wildfire"
+model = "r7-lr075/policy"
 deck = "jund_wildfire"
 greedy = true
 
 [[opponents]]
 id = "r7-blue"
 label = "r7 · Mono Blue Terror"
-note = "r7 lr075 (8.2M self-play games, greedy) playing Mono Blue Terror"
-model = "r7-lr075/iter_04026"
+note = "r7 lr075 final (8.35M self-play games, greedy) playing Mono Blue Terror"
+model = "r7-lr075/policy"
 deck = "mono_blue_terror"
 greedy = true
 
 [[opponents]]
 id = "r7-madness"
 label = "r7 · Red Madness"
-note = "r7 lr075 (8.2M self-play games, greedy) playing Red Madness"
-model = "r7-lr075/iter_04026"
+note = "r7 lr075 final (8.35M self-play games, greedy) playing Red Madness"
+model = "r7-lr075/policy"
 deck = "red_madness"
 greedy = true
 
 [[opponents]]
 id = "r7-affinity"
 label = "r7 · Grixis Affinity"
-note = "r7 lr075 (8.2M self-play games, greedy) playing Grixis Affinity"
-model = "r7-lr075/iter_04026"
+note = "r7 lr075 final (8.35M self-play games, greedy) playing Grixis Affinity"
+model = "r7-lr075/policy"
 deck = "grixis_affinity"
 greedy = true
 
 [[opponents]]
 id = "r7-elves"
 label = "r7 · Elves"
-note = "r7 lr075 (8.2M self-play games, greedy) playing Elves"
-model = "r7-lr075/iter_04026"
+note = "r7 lr075 final (8.35M self-play games, greedy) playing Elves"
+model = "r7-lr075/policy"
 deck = "elves"
 greedy = true
 
 [[opponents]]
 id = "r7-tron"
 label = "r7 · Tron"
-note = "r7 lr075 (8.2M self-play games, greedy) playing Tron"
-model = "r7-lr075/iter_04026"
+note = "r7 lr075 final (8.35M self-play games, greedy) playing Tron"
+model = "r7-lr075/policy"
 deck = "tron"
 greedy = true
 
