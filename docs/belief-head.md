@@ -110,3 +110,22 @@ reports held-out archetype log loss (against the training prior), accuracy,
 calibration (ECE) and per-card count error, by game of the match, plus how
 distinguishing evidence moves the prediction. Claims of stronger play need a
 specialist gameplay evaluation (`docs/benchmark-plan.md`).
+
+### Smoke result (2026-10-09, Apple M3 Mac, native engine, code 0d96159)
+
+`python tools/belief_smoke.py --train-matches 300 --eval-matches 120 --workers 6 --steps 1500 --hidden 64 --engine native`:
+607 / 241 / 248 games (train / dev / test), 21,764 training decisions; an
+untrained set-8 learner against the scripted bots, `max_turns` 30. Belief
+loss 2.51 -> 0.15 (first / last 50 steps).
+
+| split | archetype log loss (train prior) | accuracy | ECE | count MAE per card |
+|---|---:|---:|---:|---:|
+| dev | 0.137 (1.756) | 0.946 | 0.009 | 0.128 |
+| test | 0.101 (1.802) | 0.953 | 0.009 | 0.127 |
+
+Game-1 decisions: accuracy 0.89 (dev) / 0.90 (test); games 2 and 3, with the
+earlier games' evidence: 0.996-1.0. Evidence of two Lightning Bolts and three
+Mountains moves the prediction to Red Madness, three Islands and a Counterspell
+to Mono Blue Terror, Urza's Tower and Expedition Map to Tron. Archetypes are
+easy to tell apart from a few cards; counts are the harder part. This says the
+head learns from witnessed evidence; it says nothing about play strength.
