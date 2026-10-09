@@ -1,0 +1,13 @@
+{
+  "format": "EvidenceGame",
+  "version": 1,
+  "sources": [
+    {
+      "id": "synthetic-counter-choice",
+      "group_id": "synthetic-counter-choice",
+      "type": "synthetic_test"
+    }
+  ],
+  "records": [],
+  "metrics": {}
+}

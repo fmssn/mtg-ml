@@ -1,0 +1,171 @@
+{
+  "format": "TacticalPuzzle",
+  "version": 1,
+  "id": "blue-counter-tapped-out",
+  "deck": "mono_blue_terror",
+  "category": "stack-interaction",
+  "template_id": "counter-choice",
+  "source_group_id": "synthetic-counter-choice",
+  "split": "dev",
+  "episode_mode": "reset",
+  "rationale": "Same choice with Jund tapped out: Force Spike is a hard counter here, so spending Counterspell wastes the stronger card. The objective requires the creature countered without Counterspell reaching the graveyard (a public fact).",
+  "max_decisions": 64,
+  "claim": "success-against-declared-responses",
+  "objective": {
+    "all": [
+      {
+        "object": "infiltrator",
+        "zone": "graveyard",
+        "present": true
+      },
+      {
+        "object": "counterspell",
+        "zone": "graveyard",
+        "present": false
+      }
+    ]
+  },
+  "stop": {
+    "kind": "decision_boundary",
+    "turn": 8,
+    "step": "end",
+    "active": "opponent",
+    "require_empty_stack": true
+  },
+  "cases": [
+    {
+      "id": "basic-lands-library",
+      "hidden_completion": "libraries-of-basic-lands",
+      "response_policy": {
+        "id": "benchmark-jund@1",
+        "parameters_sha256": "ae78cd031937091182d8be444c6f4bdd84c18e1ead382e1bca668fe7f1fe7f95"
+      },
+      "witnesses": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Force Spike",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "spell",
+                "spell",
+                "opponent",
+                "Gixian Infiltrator"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            }
+          ],
+          "note": "Force Spike: the opponent cannot pay.",
+          "learner_only": true
+        }
+      ],
+      "mistakes": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            }
+          ],
+          "note": "Let the creature resolve.",
+          "expect": "objective_failed"
+        },
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Counterspell",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "spell",
+                "spell",
+                "opponent",
+                "Gixian Infiltrator"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            }
+          ],
+          "note": "Spend Counterspell where Force Spike is a hard counter.",
+          "expect": "objective_failed"
+        }
+      ],
+      "scenario": {
+        "path": "scenario.json",
+        "sha256": "0c021bc61a91390cc08ca55506ca3fbf42794c1c0ec2caea68081da56b412430"
+      },
+      "evidence": {
+        "path": "evidence.json",
+        "sha256": "9343f94bb136bcddab35edba3efb7ac690d7f2eeedededd6394ac778a948d22c"
+      }
+    }
+  ],
+  "acceptable_first_actions": [
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "cast",
+        "Force Spike",
+        "hand",
+        "normal"
+      ]
+    }
+  ],
+  "review": {
+    "status": "accepted",
+    "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+    "note": "Jund is tapped out so Force Spike is a hard counter; the public clause Counterspell-not-in-graveyard makes spending Counterspell fail, as does passing."
+  }
+}

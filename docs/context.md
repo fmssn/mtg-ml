@@ -2,6 +2,8 @@
 
 This index carries the durable decisions from Claude sessions into other agents.
 Use it when resuming work or planning experiments; it is not a live task board.
+For reference guides, roadmaps and historical evidence, start with the
+[documentation index](README.md).
 
 ## Project rules and evidence
 
@@ -9,7 +11,10 @@ Use it when resuming work or planning experiments; it is not a live task board.
   workflow. Draft PRs stay draft until the user confirms readiness. The current
   GitHub autopilot supersedes older Copilot / `ccd_pr` Auto-fix notes.
 - `features.md`: authoritative feature-version behavior and checkpoint migration.
-  Sets 4, 5 and 6 are implemented; earlier handoffs describe historical work.
+  Feature set 7 is the default for new runs; feature set 8 is opt-in and adds
+  witnessed opponent-card evidence and best-of-three knowledge for the belief
+  head (see [belief-head.md](belief-head.md)). Existing checkpoints retain their
+  recorded feature version; earlier handoffs describe historical work.
 - `adding-cards.md` and deck docs: implement every card in faithful real typical
   builds. Do not drop a card because rules are missing or trim important cards
   mechanically; document any deviation from research lists.

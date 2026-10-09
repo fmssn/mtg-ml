@@ -8,5 +8,6 @@ from .schedule import EpisodeSpec, episodes, puzzle_plan, simulator_seed, actor_
 from .runner import play_episode, run_episodes
 from .results import build_result, load_result, write_result
 from .validation import validate
+from .tactics import attempt_case, run_puzzles, specialist_registry, summarize
 
 REGISTRY = AgentRegistry()

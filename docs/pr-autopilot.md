@@ -18,7 +18,9 @@ Drafts, forks and PRs by anyone but the repo owner are ignored. Pushes by the au
 
 Autopilot only handles ready PRs targeting the current protected default branch.
 Before starting a review it checks the live default branch and effective rules:
-PRs plus up-to-date `lint`, `python` and `native` checks must be required. Missing
+PRs plus `lint`, `python` and `native` checks must be required. Both strict and
+non-strict status-check policies are accepted; the repository intentionally uses
+non-strict checks to avoid rerunning every ready PR after each merge. Missing
 rules or failed API reads hold the run with auto-merge off. The trusted controller
 rechecks the live PR base, draft/open state and protection before pushing and
 before enabling auto-merge; its final check also matches the reviewed head.
