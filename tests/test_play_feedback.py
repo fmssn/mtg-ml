@@ -82,23 +82,25 @@ def test_database_snapshot_includes_wal_and_does_not_write(database, monkeypatch
     add_game(database, survey=json.dumps({"note": "before"}))
     original_connect = sqlite3.connect
     changed = False
+    statements = []
 
     def connect(database_uri, **kwargs):
         assert database_uri.endswith("?mode=ro") and kwargs["uri"] is True
         reader = original_connect(database_uri, **kwargs)
         def trace(sql):
             nonlocal changed
+            statements.append(sql)
             if sql.startswith("SELECT flag_id") and not changed:
                 changed = True
                 writer.execute("UPDATE games SET survey=?", (json.dumps({"note": "after"}),))
                 writer.execute("UPDATE flags SET entry=?", (json.dumps({"id": 1, "what": "new flag text"}),))
-            assert not sql.startswith(("INSERT", "UPDATE", "DELETE", "CREATE", "BEGIN IMMEDIATE"))
         reader.set_trace_callback(trace)
         return reader
 
     monkeypatch.setattr(feedback.sqlite3, "connect", connect)
     record = feedback.read_records(path)[0]
     assert changed
+    assert not any(sql.startswith(("INSERT", "UPDATE", "DELETE", "CREATE", "BEGIN IMMEDIATE")) for sql in statements)
     assert json.loads(record["survey"])["note"] == "before"
     assert json.loads(record["flags"][0]["entry"])["what"] == "Something happened"
     assert json.loads(writer.execute("SELECT survey FROM games").fetchone()[0])["note"] == "after"
