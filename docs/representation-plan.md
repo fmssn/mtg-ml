@@ -177,7 +177,7 @@ interval is the 95% Wilson interval of wins over n. Caveats:
 
 - **Sample sizes.** 15 non-mirror pairings, 27 to 178 matches each (median about 80). Elves vs Tron
   (27) is flagged `thin`; the other 14 pairings are above the 30-match line but still carry
-  intervals of ±10 to ±17 points. Mirrors are absent in the source and are marked `missing`.
+  intervals of ±7 to ±15 points. Mirrors are absent in the source and are marked `missing`.
 - **Archetype mapping.** Names match exactly for five decks. Our `jund_wildfire` maps to the source's
   "Jund Midrange", because the source has no "Jund Wildfire" label; other Jund labels (Graveyard,
   Garden, Ramp) have far fewer matches. Treat Jund's row as the least certain mapping.
