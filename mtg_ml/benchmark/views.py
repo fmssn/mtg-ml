@@ -81,7 +81,7 @@ KINDS = {"priority", "choose_x", "target", "pay_mana", "sacrifice", "exile_from_
 def card_ref(g, c, viewer, choice=False):
     if c is None:
         return None
-    known = choice or c.zone in {"battlefield", "graveyard", "exile"} or (c.zone == "hand" and (c.owner == viewer or viewer in c.known_to)) or viewer in c.known_to
+    known = choice or c.zone in {"battlefield", "graveyard", "exile", "stack"} or (c.zone == "hand" and (c.owner == viewer or viewer in c.known_to)) or viewer in c.known_to
     require(known, "action.card", "hidden card reference")
     # Unknown library order is never attached to an object reference.
     return {"name": c.name, "zone": c.zone, "oid": c.oid if c.zone == "battlefield" else None,
@@ -114,7 +114,27 @@ def inputs(g, viewer, own_deck):
     require(d is not None and d.player == viewer, "decision", "view requested for nondecider")
     require(d.kind in KINDS, "decision.kind", f"unsupported semantics {d.kind}")
     state = observe(g, viewer)
-    context = {}
+    # Stack targets in observe() are display strings. Specialists need actual
+    # references (duplicate spell names are common), never parsed labels. Only
+    # explicitly public data is translated; trigger.data may hold private cards.
+    def target_ref(ref):
+        tag, n = ref
+        if tag == "player":
+            return {"player": "self" if n == viewer else "opponent"}
+        if tag == "stack":
+            return {"sid": n}
+        return {"oid": n}
+
+    context = {"stack": []}
+    for item in g.stack:
+        entry = {"sid": item.sid, "name": item.name, "kind": item.kind,
+                 "controller": "self" if item.controller == viewer else "opponent",
+                 "targets": [target_ref(t) for t in item.targets], "method": item.method, "x": item.x,
+                 "card": card_ref(g, item.card, viewer) if item.kind == "spell" else None,
+                 "source": {"name": item.source.name, "oid": item.source.oid} if item.source is not None else None}
+        if item.kind == "trigger" and item.name.endswith(": ward"):
+            entry["ward"] = {"sid": item.data["sid"], "amount": item.data["amount"]}
+        context["stack"].append(entry)
     combat = g.combat_subjects if d.kind in {"declare_attacker", "declare_blocker", "assign_damage"} else None
     if combat is not None:
         require(len(combat) == len(d.options), "decision.subject", "missing structured combat subjects")
@@ -217,6 +237,9 @@ def inputs(g, viewer, own_deck):
         # for Delver/scry appear only in the permitted known-library view.
         actions.append(LegalAction(i, d.kind, freeze(key), o.label, freeze(data)))
     cards = {name: _rules(c.face, c.is_token) for name, c in permitted.items()}
+    for item in g.stack:
+        if item.kind == "spell":
+            cards[item.card.name] = _rules(item.card.face)
     # Own registered cards are known rules, without conveying remaining order.
     from ..engine.cards import CARDS
     for name in own_deck:
