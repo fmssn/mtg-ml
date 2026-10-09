@@ -3,10 +3,10 @@
 How to run the play-vs-model server (`python -m mtg_ml.hosted serve`) for a small
 group of invited players on one Hetzner Cloud machine behind Cloudflare Access.
 
-> Status (2026-10-09): **preparation only. Nothing has been created.** The
-> Hetzner project holds no servers, firewalls or SSH keys; no domain, tunnel or
-> Access application exists yet. Every step below that creates or changes a
-> resource is for the operator to run deliberately.
+> Status (2026-10-09): **server provisioned, not yet public.** Stack `mtg-play-1`
+> (Hetzner CAX21, fsn1) exists with its SSH key and firewall, bootstrapped, with
+> the pinned checkpoints installed. Cloudflare (domain, tunnel, Access) is not
+> set up yet, so the app is not reachable from outside.
 
 ## Architecture
 
@@ -17,7 +17,7 @@ player browser
 Cloudflare edge ── Access: email one-time PIN + allow policy (listed emails)
    │  Cf-Access-Jwt-Assertion header on every request
    ▼  (outbound tunnel, initiated from the server; no inbound port open)
-Hetzner CX33, fsn1, Ubuntu 24.04         Hetzner firewall: inbound TCP 22 from the admin CIDR only
+Hetzner CAX21 (arm64), fsn1, Ubuntu 24.04         Hetzner firewall: inbound TCP 22 from the admin CIDR only
 └─ Docker Compose (deploy/compose.yaml)
    ├─ cloudflared  ── tunnel run (TUNNEL_TOKEN) ──► http://app:8080
    └─ app          mtg-play image, uid 10001, read-only root fs, published on 127.0.0.1:8080 only
@@ -65,6 +65,11 @@ Read-only `hcloud server-type describe cx33` on 2026-10-09 (UTC):
 | price | EUR 8.49/month net (EUR 10.10 gross), EUR 0.0136/hour net; 20 TB traffic included |
 | primary IPv4 | billed separately (not in the server-type price) |
 | image | `ubuntu-24.04` (id 161547269), available |
+
+CX33 was sold out in fsn1, nbg1 and hel1 on 2026-10-09, so `mtg-play-1` runs on
+**CAX21** (Ampere arm64, 4 vCPU shared, 8 GB RAM, 80 GB disk, EUR 10.49/month net
+plus IPv4): `--server-type cax21`. The image builds natively on the box; nothing
+in the Dockerfile is x86-specific, but CI builds only the x86 image.
 
 Prices change; `tools/hetzner.py inspect` prints the current figures and `apply`
 rechecks them right before creating anything.
