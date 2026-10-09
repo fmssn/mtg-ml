@@ -1,4 +1,4 @@
-"""Result bookkeeping and exclusive writes; interval estimation comes later."""
+"""Result and comparison bookkeeping, exclusive writes, and aggregates verified against the raw rows."""
 
 from collections import Counter
 import platform
@@ -7,10 +7,13 @@ import math
 import os
 from pathlib import Path
 import copy
+import json
+import importlib.metadata
 
-from .artifacts import FAIR, DIAGNOSTIC, MODES, CELLS, header, integer, identifier, sha, require, load, reference, load_manifest
-from .jsonio import write_json
+from .artifacts import FAIR, DIAGNOSTIC, DECKS, MODES, CELLS, header, integer, identifier, sha, require, load, reference, load_manifest
+from .jsonio import canonical_bytes, write_json
 from .schedule import episodes, puzzle_plan
+from . import stats
 
 
 def game_identity(r):
@@ -39,20 +42,22 @@ def validate_result(d):
     for refname in ("manifest",):
         identifier(d[refname].get("path"), refname + ".path")
         sha(d[refname].get("sha256"), refname + ".sha256")
-    candidate = d["candidate"]
-    identifier(candidate.get("checkpoint"), "candidate.checkpoint")
-    sha(candidate.get("sha256"), "candidate.sha256")
-    integer(candidate.get("features"), "candidate.features")
-    require(candidate.get("information_contract") in {FAIR, DIAGNOSTIC}, "candidate.information_contract", "unsupported contract")
-    from ..encode import information_contract
-    actual = information_contract(candidate["features"])
-    require(candidate.get("recorded_information_contract") == actual, "candidate.recorded_information_contract", "encoder contract mismatch")
-    require(candidate["information_contract"] != FAIR or actual == "hidden_list", "candidate", "privileged features cannot enter fair result")
+    validate_candidate(d["candidate"])
     sha(d.get("code_revision"), "code_revision", True)
     require(d.get("engine") in {"python", "native"}, "engine", "unsupported engine")
     if d["engine"] == "native":
         sha(d.get("native_build_revision"), "native_build_revision", True)
     require(isinstance(d.get("runtime"), dict) and all(d["runtime"].get(k) for k in ("python", "platform", "machine")), "runtime", "runtime/hardware provenance required")
+    require(isinstance(d["runtime"].get("command"), list) and bool(d["runtime"]["command"]) and all(isinstance(a, str) for a in d["runtime"]["command"]), "runtime.command", "argv required")
+    require(isinstance(d["runtime"].get("dependencies"), dict), "runtime.dependencies", "dependency versions required")
+    require(d["engine"] != "native" or isinstance(d["runtime"].get("native_build"), dict), "runtime.native_build", "native build identity required")
+    b = d.get("bootstrap")
+    require(isinstance(b, dict) and set(b) == {"replicates", "confidence", "stream", "suite"}, "bootstrap", "recorded bootstrap settings required")
+    integer(b["replicates"], "bootstrap.replicates")
+    require(type(b["confidence"]) in (float, int) and 0 < b["confidence"] < 1, "bootstrap.confidence", "invalid confidence")
+    identifier(b["stream"], "bootstrap.stream")
+    identifier(b["suite"], "bootstrap.suite")
+    require(d.get("interval_method") == stats.INTERVAL_METHOD and d.get("statistics") == stats.CONSTANTS, "interval_method", "unsupported interval method or constants")
     require(d.get("panel") in {"full", "partial"}, "panel", "panel required")
     require(isinstance(d.get("settings"), dict), "settings", "settings required")
     require(isinstance(d.get("game_rows"), list) and isinstance(d.get("puzzle_rows"), list), "rows", "game/case rows required")
@@ -103,25 +108,76 @@ def validate_result(d):
     all_done = seen_games == expected_games and seen_puzzles == expected_puzzles and all(r["status"] == "completed" for r in d["game_rows"]) and all(r["status"] != "error" for r in d["puzzle_rows"])
     require(d["status"] != "complete" or all_done, "status", "technical errors or missing rows cannot be complete")
     require(set(d["aggregate"]) == set(d["modes"]), "aggregate", "mode mismatch")
-    for aggregate in d["aggregate"].values():
-        require(set(aggregate) == {"game_score", "puzzle_success", "ci95"} and all(v is None for v in aggregate.values()),
-                "aggregate", "primary scores and intervals are deferred; foundation fields must be null")
+    # Every reported score and interval is recomputed from the raw rows and must match exactly;
+    # an incomplete or invalid run reports nothing.
+    recomputed = json.loads(canonical_bytes(stats.aggregate(d)))
+    require(d["aggregate"] == recomputed, "aggregate", "reported scores/intervals do not match the raw rows")
+
+
+def validate_candidate(candidate):
+    """checkpoint (the default, for records without `kind`), agent or calibration oracle."""
+    require(isinstance(candidate, dict), "candidate", "object required")
+    kind = candidate.get("kind", "checkpoint")
+    require(candidate.get("information_contract") in {FAIR, DIAGNOSTIC}, "candidate.information_contract", "unsupported contract")
+    if kind == "checkpoint":
+        identifier(candidate.get("checkpoint"), "candidate.checkpoint")
+        sha(candidate.get("sha256"), "candidate.sha256")
+        integer(candidate.get("features"), "candidate.features")
+        from ..encode import information_contract
+        actual = information_contract(candidate["features"])
+        require(candidate.get("recorded_information_contract") == actual, "candidate.recorded_information_contract", "encoder contract mismatch")
+        require(candidate["information_contract"] != FAIR or actual == "hidden_list", "candidate", "privileged features cannot enter fair result")
+    elif kind == "agent":
+        for k in ("id", "deck"):
+            identifier(candidate.get(k), "candidate." + k)
+        require(candidate["deck"] in DECKS, "candidate.deck", "unknown deck")
+        sha(candidate.get("source_revision"), "candidate.source_revision", True)
+        integer(candidate.get("rules_revision"), "candidate.rules_revision")
+        sha(candidate.get("parameters_sha256"), "candidate.parameters_sha256")
+        require(candidate.get("agent_kind") in {"specialist", "legacy", "synthetic"}, "candidate.agent_kind", "unsupported agent kind")
+        require(candidate["agent_kind"] != "legacy" or candidate["information_contract"] == DIAGNOSTIC, "candidate", "legacy agents are diagnostic")
+    elif kind == "calibration":
+        identifier(candidate.get("id"), "candidate.id")
+        require(candidate["information_contract"] == DIAGNOSTIC, "candidate", "calibration oracles are diagnostic")
+    else:
+        require(False, "candidate.kind", "unsupported candidate kind")
+
+
+def bootstrap_settings(manifest):
+    d = manifest.data
+    return {"replicates": d["bootstrap"]["replicates"], "confidence": d["bootstrap"]["confidence"], "stream": d["stream"], "suite": d["id"]}
+
+
+def candidate_name(candidate):
+    kind = candidate.get("kind", "checkpoint")
+    return candidate["checkpoint"] if kind == "checkpoint" else candidate["id"]
+
+
+def dependencies():
+    out = {}
+    for name in ("torch", "numpy", "mtg_ml_native"):
+        try:
+            out[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            out[name] = None
+    return out
 
 
 def build_result(manifest, candidate, game_rows, puzzle_rows=(), *, engine="python", code_revision,
-                 native_build_revision=None, cells=None, modes=None, planned_puzzles=None, invalid=False, workers=1, runtime=None):
+                 native_build_revision=None, cells=None, modes=None, planned_puzzles=None, invalid=False, workers=1, runtime=None,
+                 command=None, native_build=None):
     """Derive planned cases; the later tactical runner supplies actual rows."""
     from dataclasses import asdict
-    from .jsonio import canonical_bytes
-    import json
     from ..encode import information_contract
     candidate = dict(candidate)
-    candidate.setdefault("recorded_information_contract", information_contract(candidate["features"]))
+    if candidate.get("kind", "checkpoint") == "checkpoint":
+        candidate.setdefault("recorded_information_contract", information_contract(candidate["features"]))
     integer(workers, "workers")
     runtime = {"python": sys.version, "platform": platform.platform(), "machine": platform.machine(), "hostname": platform.node(),
                "processor": platform.processor(), "cpu_count": os.cpu_count(), "workers": workers,
                "torch_threads": sys.modules["torch"].get_num_threads() if "torch" in sys.modules else None,
-               "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"), **(runtime or {})}
+               "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"), "command": list(sys.argv if command is None else command),
+               "dependencies": dependencies(), "native_build": native_build, **(runtime or {})}
     specs = episodes(manifest, cells, modes)
     expected_puzzles = puzzle_plan(manifest, cells, modes)
     require(planned_puzzles is None or list(planned_puzzles) == expected_puzzles, "planned_puzzles", "manifest plan mismatch")
@@ -157,7 +213,9 @@ def build_result(manifest, candidate, game_rows, puzzle_rows=(), *, engine="pyth
              panel="full" if {s.cell for s in specs} == set(CELLS) else "partial",
              status="invalid" if invalid else "complete" if done else "incomplete", counts=counts,
              planned_game_rows=planned, planned_puzzle_rows=list(planned_puzzles), game_rows=game_rows, puzzle_rows=puzzle_rows,
-             partial_cells=summaries, interval_method="unavailable-foundation", aggregate={m: {"game_score": None, "puzzle_success": None, "ci95": None} for m in modes})
+             partial_cells=summaries, interval_method=stats.INTERVAL_METHOD, statistics=stats.CONSTANTS,
+             bootstrap=bootstrap_settings(manifest))
+    d["aggregate"] = json.loads(canonical_bytes(stats.aggregate(d)))
     validate_result(d)
     return d
 
@@ -189,13 +247,90 @@ def write_result(path, data):
 
 
 def _validate_plan(data, manifest):
-    import json
     from dataclasses import asdict
-    from .jsonio import canonical_bytes
     specs = episodes(manifest, data["selected_cells"], data["modes"])
     planned = [{k: v for k, v in asdict(s).items() if k != "decks"} for s in specs]
     require(data["planned_game_rows"] == json.loads(canonical_bytes(planned)), "planned_game_rows", "manifest schedule mismatch")
     require(data["planned_puzzle_rows"] == puzzle_plan(manifest, data["selected_cells"], data["modes"]), "planned_puzzle_rows", "manifest cases mismatch")
     require(data["settings"] == manifest.data["engine_settings"], "settings", "manifest mismatch")
+    require(data["bootstrap"] == bootstrap_settings(manifest), "bootstrap", "manifest mismatch")
     full = set(data["selected_cells"]) == set(CELLS)
     require(data["panel"] == ("full" if full else "partial"), "panel", "selection mismatch")
+
+
+def _latency(data):
+    out = {}
+    for mode in data["modes"]:
+        values = sorted(v for r in data["game_rows"] if r["mode"] == mode for v in r.get("latency_seconds", []))
+        out[mode] = {"decisions": len(values),
+                     "median": (values[(len(values) - 1) // 2] + values[len(values) // 2]) / 2 if values else None,
+                     "p95": values[min(len(values) - 1, math.ceil(0.95 * len(values)) - 1)] if values else None}
+    return out
+
+
+def _machine(data):
+    r = data["runtime"]
+    return {k: r.get(k) for k in ("machine", "processor", "workers")}
+
+
+def comparison_body(baseline, candidate):
+    """Everything in a comparison that derives from the two results; refuses incompatible pairs."""
+    a, b = baseline.data, candidate.data
+    for name, d in (("baseline", a), ("candidate", b)):
+        require(d["status"] == "complete", name, "only complete results can be compared")
+    require(a["manifest"]["sha256"] == b["manifest"]["sha256"], "manifest", "different manifests")
+    for k in ("selected_cells", "modes", "engine", "code_revision", "native_build_revision", "panel", "settings", "bootstrap"):
+        require(a[k] == b[k], k, f"results differ in {k}")
+    if a["engine"] == "native":
+        require(a["runtime"]["native_build"]["source_sha256"] == b["runtime"]["native_build"]["source_sha256"], "native_build", "different native builds")
+    fair = a["candidate"]["information_contract"] == FAIR
+    require(fair == (b["candidate"]["information_contract"] == FAIR), "information_contract", "fair and diagnostic results cannot be compared")
+    return dict(engine=a["engine"], code_revision=a["code_revision"], native_build_revision=a["native_build_revision"], modes=a["modes"],
+                selected_cells=a["selected_cells"], panel=a["panel"], fair=fair, statistics=stats.CONSTANTS, interval_method=stats.INTERVAL_METHOD,
+                bootstrap=a["bootstrap"], results=json.loads(canonical_bytes(stats.compare(a, b))),
+                latency={"baseline": _latency(a), "candidate": _latency(b), "machines": {"baseline": _machine(a), "candidate": _machine(b)},
+                         "latency_comparable": _machine(a) == _machine(b)})
+
+
+def build_comparison(baseline, candidate, out):
+    out = Path(out).resolve()
+    d = dict(format="BenchmarkComparison", version=1, manifest={"sha256": baseline.data["manifest"]["sha256"], "id": baseline.data["bootstrap"]["suite"]},
+             **{name: {"path": os.path.relpath(art.path, out.parent), "sha256": art.sha256, "candidate": candidate_name(art.data["candidate"])}
+                for name, art in (("baseline", baseline), ("candidate", candidate))},
+             **comparison_body(baseline, candidate),
+             runtime={"python": sys.version, "platform": platform.platform(), "machine": platform.machine(), "command": list(sys.argv),
+                      "dependencies": dependencies()})
+    return json.loads(canonical_bytes(d))
+
+
+def validate_comparison(d):
+    header(d, "BenchmarkComparison")
+    for k in ("baseline", "candidate"):
+        identifier(d[k].get("path"), k + ".path")
+        sha(d[k].get("sha256"), k + ".sha256")
+    sha(d["manifest"].get("sha256"), "manifest.sha256")
+    require(set(d["results"]) == set(d["modes"]) and d["interval_method"] == stats.INTERVAL_METHOD and d["statistics"] == stats.CONSTANTS, "results", "mode/method mismatch")
+    for mode, entry in d["results"].items():
+        require(entry.get("claim") in {"stronger", "regression", "inconclusive", None}, "results.claim", "unsupported claim")
+    require(type(d["latency"]["latency_comparable"]) is bool, "latency", "comparability flag required")
+
+
+def load_comparison(path):
+    """Reloads both results (re-verifying their aggregates) and recomputes the whole comparison."""
+    artifact = load(path, validate_comparison)
+    results = {k: load_result(reference(artifact.path, artifact.data[k], k)) for k in ("baseline", "candidate")}
+    try:
+        body = json.loads(canonical_bytes(comparison_body(results["baseline"], results["candidate"])))
+    except (ValueError, KeyError, TypeError) as e:
+        raise ValueError(f"{artifact.path}: {e}") from e
+    stored = {k: artifact.data[k] for k in body}
+    if stored != body:
+        raise ValueError(f"{artifact.path}: comparison does not match its results ({[k for k in body if stored[k] != body[k]]})")
+    return artifact
+
+
+def write_comparison(path, data):
+    path = Path(path).resolve()
+    validate_comparison(data)
+    write_json(path, data)
+    return data
