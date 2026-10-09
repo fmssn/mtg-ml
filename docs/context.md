@@ -20,6 +20,9 @@ Use it when resuming work or planning experiments; it is not a live task board.
   Estimate verification and training compute, rather than human coding weeks.
 - `game-review.md`: distinguish verified setup flaws from strategy hypotheses;
   use the checkpoint's actual feature set and architecture.
+- `play-feedback.md`: retrieve hosted playtest flags and surveys with one
+  read-only SSH command, including unfinished games; preserve dated triage in
+  `playtest-reviews/`.
 
 ## External context on Fabsi's local Mac
 
