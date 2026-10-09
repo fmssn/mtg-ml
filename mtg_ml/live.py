@@ -35,7 +35,7 @@ from .backend import engine_name, game_class
 from .engine import DECKS, SIDEBOARDS, expand, plan_for, postboard
 from .match import MATCHUPS, game_args, matchup_decks
 from .live_issues import MAX_ISSUES_PER_GAME, FilingError
-from .live_proto import add_tap_previews, auto_pay_index, combat_and_life_lines, decision_cards, option_ref, option_refs, parse_events, status, visible_ids
+from .live_proto import add_tap_previews, auto_pay_index, hidden_summary, combat_and_life_lines, decision_cards, option_ref, option_refs, parse_events, status, visible_ids
 from .engine.cards import CARDS
 from .replay import DECK_TITLES, FORMAT, _card_info, snapshot, visible_events
 from .rl.features import PUBLIC_KINDS
@@ -74,6 +74,59 @@ def load_play_config(path: pathlib.Path | None = None) -> dict:
 
     with open(path or pathlib.Path(__file__).with_name("play_config.toml"), "rb") as f:
         return tomllib.load(f)
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def validate_offer(models_dir: pathlib.Path | None, config: dict, strict: bool = False) -> tuple[dict[str, dict], list[str]]:
+    """Check the offered opponents' checkpoints against their pins
+    (`[models."<name>"]` in the play config: sha256, features). Returns the
+    usable models (name -> pin, with the measured sha256) and the problems.
+    `strict` (a hosted server): every opponent's model must be pinned, present
+    and match, and must not be a trainer's moving `latest`; any problem fails.
+    Otherwise a missing checkpoint just leaves its opponents out, as before."""
+    from .rl.rollout import load_policy
+
+    pins, found = config.get("models", {}), ({} if models_dir is None else find_models(models_dir))
+    ok: dict[str, dict] = {}
+    problems: list[str] = []
+    for name in dict.fromkeys(o.get("model") for o in config.get("opponents", [])):
+        pin = pins.get(name)
+        if pathlib.PurePosixPath(str(name)).name == "latest":
+            problems.append(f"{name}: a trainer's latest.pt moves; pin a fixed snapshot")
+            continue
+        if name not in found:
+            if strict:
+                problems.append(f"{name}: no {name}.pt under {models_dir}")
+            continue
+        if pin is None:
+            if strict:
+                problems.append(f"{name}: not pinned in the play config ([models.\"{name}\"] with sha256 and features)")
+            else:
+                ok[name] = {}
+            continue
+        digest = sha256_file(found[name])
+        if digest != pin.get("sha256"):
+            problems.append(f"{name}: sha256 {digest} does not match the pinned {pin.get('sha256')}")
+            continue
+        try:
+            features = load_policy(str(found[name])).features
+        except Exception as e:  # a checkpoint this code cannot load
+            problems.append(f"{name}: cannot load: {e}")
+            continue
+        if features != pin.get("features"):
+            problems.append(f"{name}: feature set {features}, pinned {pin.get('features')}")
+            continue
+        ok[name] = {**pin, "sha256": digest}
+    return ok, problems
 
 
 def matchup_for(player_deck: str, opponent_deck: str) -> tuple[str, int] | None:
@@ -143,6 +196,7 @@ class LiveGame:
             game = game_class(engine)(**live_game_args(matchup, game_no, seat, plan), seed=seed, log=True, **({} if start is None else {"starting_player": start}))
         self.g = game
         self.seed = seed
+        self.token = secrets.token_urlsafe(16)  # the player's key to the post-game review
         self.full_info: dict = {}  # card data for the saved replay
         self.view_info: dict = {}  # card data the player has seen
         self.full_frames: list[dict] = []  # omniscient, one per decision (the saved replay)
@@ -153,6 +207,9 @@ class LiveGame:
         self.log: list[str] = []
         self.engine_seen = 0  # engine log lines copied into self.log
         self.replay_file: str | None = None
+        # A hosted game keeps its seed (which, with the choices, gives away the
+        # bot's hand and library) to itself until the game is over.
+        self.hide_seed = False
         self._advance()
 
     def _sync_log(self) -> list[str]:
@@ -202,7 +259,10 @@ class LiveGame:
                 o = d.options[choice]
                 shown, refs = [options[choice]], [option_ref(d.kind, o.label, o.key, o.value, visible_ids(state))]
             else:
-                shown, refs = [f"(hidden {d.kind.replace('_', ' ')})"], [{"type": "hidden"}]
+                # Only what the player may know: counts, top/bottom/order, never a hidden card.
+                o = d.options[choice]
+                summary = hidden_summary(d.kind, d.prompt, o.label, o.value, len(d.options))
+                shown, refs = [f"(hidden {d.kind.replace('_', ' ')})"], [{"type": "hidden", **summary}]
             self.view_to_full.append(len(self.full_frames) - 1)
             self._view_frame(state, {"player": d.player, "kind": d.kind, "prompt": "", "options": shown, "refs": refs, "chosen": 0})
             self._take(choice)
@@ -290,7 +350,7 @@ class LiveGame:
     def _meta(self) -> dict:
         g = self.g
         return {
-            "seed": self.seed,
+            "seed": None if self.hide_seed and not self.over else self.seed,
             "engine": engine_name(self.engine),
             "agents": self.names,
             "decks": [DECK_TITLES[d] for d in matchup_decks(self.matchup)],
@@ -311,7 +371,11 @@ class LiveGame:
         wins = [sum(1 for _, w in results if w == p) for p in (0, 1)]
         over = max(wins) >= 2 or len(results) >= 3
         last_loser = None if not results or results[-1][1] is None else 1 - results[-1][1]
-        return {"game_no": self.game_no, "results": results, "wins": wins, "over": over, "you_choose_play": last_loser == self.seat, "plan": self.plan}
+        out = {"game_no": self.game_no, "results": results, "wins": wins, "over": over, "you_choose_play": last_loser == self.seat, "plan": self.plan}
+        if self.game_no > 1:  # the bot's sideboarding: how many cards it swapped (public in a match), not which
+            mine, theirs = matchup_decks(self.matchup)[self.seat], matchup_decks(self.matchup)[1 - self.seat]
+            out["opp_swaps"] = plan_for(theirs, mine).swaps
+        return out
 
     # -- feedback (the hosted-play plan: flag + describe, a short survey)
     def flag(self, req: dict) -> dict:
@@ -325,6 +389,8 @@ class LiveGame:
         category = req.get("category")
         if category not in FLAG_CATEGORIES:
             raise LiveError("category must be 'bot' or 'bug'")
+        if req.get("review_frame") is not None:
+            return self._review_flag(category, req)
         frame = req.get("frame", len(self.frames) - 1)
         if not (isinstance(frame, int) and 0 <= frame < len(self.frames)):
             raise LiveError("no such frame")
@@ -368,6 +434,73 @@ class LiveGame:
         ])
         return {"entry": entry, "issue": {"category": category, "title": title, "body": body}, "over": self.over, "flags": self.flags}
 
+    def _review_flag(self, category: str, req: dict) -> dict:
+        """A flag from the post-game review: the game is over, so the issue
+        may hold everything (the bot's hand, its options with probabilities and
+        value, seed + choices and a command that rebuilds the game up to the
+        flagged decision)."""
+        from . import live_issues
+
+        if not self.over:
+            raise LiveError("the review opens when the game is over")
+        rf = req.get("review_frame")
+        if not (isinstance(rf, int) and 0 <= rf < len(self.full_frames)):
+            raise LiveError("no such frame")
+        fr = self.full_frames[rf]
+        d = fr["decision"]
+        bot = 1 - self.seat
+        if category == "bot" and (d is None or d["player"] != bot):
+            raise LiveError("pick one of the bot's decisions to flag")
+        what = str(req.get("what", "")).strip()[:200]
+        if not what:
+            raise LiveError("say in a few words what happened")
+        if len(self.flags) >= 50:
+            raise LiveError("too many flags in one game")
+        self._pseudonym(req)
+        state = fr["state"]
+        chosen = d["options"][d["chosen"]] if d is not None and d.get("chosen") is not None else None
+        entry = {"id": len(self.flags) + 1, "category": category, "frame": None, "replay_frame": rf, "from": "review",
+                 "action": chosen, "kind": d["kind"] if d else None, "turn": state["turn"], "step": state["step"], "what": what,
+                 "note": str(req.get("note", ""))[:2000], "at": time.strftime("%Y-%m-%d %H:%M:%S"), "issue": None}
+        self.flags.append(entry)
+        decks = [DECK_TITLES[x] for x in matchup_decks(self.matchup)]
+        when = f"turn {state['turn']}" if state["turn"] else "mulligan"
+        title = f"[{'bot-play' if category == 'bot' else 'bug'}] {decks[self.seat]} vs {decks[bot]}, {when} (review): {what.splitlines()[0][:80]}"
+        fb = self.feedback()
+        options = []
+        if d is not None:
+            pol = d.get("policy") or []
+            ranked = sorted(range(len(d["options"])), key=lambda i: -(pol[i] if i < len(pol) else 0))
+            for i in ranked[:10]:
+                p = f"{pol[i]:.3f}" if i < len(pol) else "-"
+                options.append(f"| {'**' if i == d.get('chosen') else ''}{d['options'][i]}{'**' if i == d.get('chosen') else ''} | {p} |")
+        rebuild = (f"python -m mtg_ml.live_issues rebuild --matchup {self.matchup} --seed {self.seed} --seat {self.seat} --game {self.game_no} --plan {self.plan}"
+                   + ("" if self.start_arg is None else f" --start {self.start_arg}") + f" --engine {engine_name(self.engine)}"
+                   + (f" --scenario {self.scenario}" if self.scenario else "") + f" --choices {','.join(str(c) for c in fb['choices'][:rf])}")
+        recent = [line for line in fr["events"] if not line.startswith("--")][-12:]
+        body = "\n".join([
+            f"**{FLAG_CATEGORIES[category]}**, flagged by **{self.pseudonym or 'anonymous'}** from the post-game review of the play UI.",
+            "",
+            f"> {what}",
+            *([">", *[f"> {line}" for line in entry["note"].splitlines()]] if entry["note"] else []),
+            "",
+            f"- game `{self.id}` (over: {'draw' if self.winner is None else ('the player' if self.winner == self.seat else 'the bot') + ' won'}, {self.end_reason}), game {self.game_no} of the match, turn {state['turn']}, step `{state['step']}`",
+            f"- {decks[self.seat]} (player, seat {self.seat}) vs {decks[bot]} played by `{self.model_name}` ({'greedy' if self.greedy else 'sampling'})",
+            f"- engine `{engine_name(self.engine)}`, code `{live_issues.code_commit()}`, seed `{self.seed}`, decision #{rf} of the omniscient replay `{self.replay_file}`",
+            *([f"- decision: {d['kind']} by {'the bot' if d['player'] == bot else 'the player'}: {d.get('prompt') or ''}", f"- value estimate (bot's view, -1..1): {d['value']}" if d.get("value") is not None else "- value: -"] if d else []),
+            "",
+            *(["### Options (policy)", "| option | probability |", "|---|---|", *options, ""] if options else []),
+            "### Board (everything)",
+            live_issues.board_text(state, self.seat, everything=True),
+            "",
+            "### Recent log",
+            "```", *recent, "```",
+            "",
+            "### Rebuild the game up to this decision",
+            "```", rebuild, "```",
+        ])
+        return {"entry": entry, "issue": {"category": category, "title": title, "body": body}, "over": True, "flags": self.flags, "revealed": True}
+
     def reveal_comment(self) -> str:
         """For issues filed during this game, once it is over: what rebuilds it."""
         fb = self.feedback()
@@ -389,6 +522,12 @@ class LiveGame:
         self._pseudonym(req)
         self.survey = {"strength": strength, "hardest": str(req.get("hardest", ""))[:1000], "note": str(req.get("note", ""))[:1000], "at": time.strftime("%Y-%m-%d %H:%M:%S")}
         return {"survey": self.survey}
+
+    def check_token(self, token) -> None:
+        if not token or not secrets.compare_digest(str(token), self.token):
+            err = LiveError("this game belongs to another player (or its key is missing)")
+            err.forbidden = True
+            raise err
 
     def _pseudonym(self, req: dict) -> None:
         name = str(req.get("pseudonym", "") or "").strip()[:40]
@@ -428,13 +567,20 @@ class LiveManager:
     thread of its own. A move takes milliseconds, so one thread is plenty."""
 
     def __init__(self, models_dir: pathlib.Path | None, replay_dir: pathlib.Path, engine: str | None = None, max_games: int = MAX_GAMES, scripted: bool = False,
-                 config: dict | None = None, filer=None):
+                 config: dict | None = None, filer=None, pinned: dict[str, dict] | None = None):
         """`models_dir` None: no checkpoints (only the scripted bot, with `scripted`).
         `scripted`: a development server (serve --dev): every checkpoint and
         matchup, the scripted bots and the dev scenarios. `config`: the play
         offer (play_config.toml: player decks, opponents); None offers every
-        checkpoint and matchup. `filer`: files flags as GitHub issues (None: never)."""
+        checkpoint and matchup. `filer`: files flags as GitHub issues (None: never).
+        `pinned`: the offer's checkpoints, already validated (the hosted server
+        validates strictly itself)."""
         self.config, self.filer = config, filer
+        self.pinned: dict[str, dict] | None = pinned  # validated checkpoints (validate_offer); None: not checked
+        if config is not None and not scripted and pinned is None:
+            self.pinned, problems = validate_offer(models_dir, config)
+            for p in problems:
+                print(f"play offer: {p} (its opponents are left out)")
         if models_dir is not None:
             import torch
 
@@ -444,7 +590,7 @@ class LiveManager:
         self.worker = ThreadPoolExecutor(1, thread_name_prefix="live")
 
     def options(self) -> dict:
-        out = {"mode": "dev" if self.scripted else "play" if self.config is not None else "open"}
+        out = {"mode": "dev" if self.scripted else "play" if self.config is not None else "open", "filing": self.filer is not None and self.filer.available()}
         if self.config is not None and not self.scripted:
             offer = self._offer()
             out["player_decks"] = [{"deck": d, "title": DECK_TITLES[d], "opponents": [o["id"] for o in offer if matchup_for(d, o["deck"])]} for d in self.config.get("player_decks", [])]
@@ -459,7 +605,7 @@ class LiveManager:
 
     def _offer(self) -> list[dict]:
         """The configured opponents whose checkpoint this server has."""
-        models = self._models()
+        models = self._models() if self.pinned is None else self.pinned
         return [o for o in self.config.get("opponents", []) if o.get("model") in models and o.get("deck") in DECK_TITLES]
 
     def _resolve(self, req: dict) -> dict:
@@ -503,6 +649,8 @@ class LiveManager:
 
     def _feedback(self, gid: str, what: str, req: dict) -> dict:
         game = self._get(gid)
+        if what == "flag" and req.get("review_frame") is not None:
+            game.check_token(req.get("token"))
         out = game.flag(req) if what == "flag" else game.set_survey(req)
         if game.replay_file:  # the game is over: the saved replay gets the new feedback
             self._write(game)
@@ -523,7 +671,7 @@ class LiveManager:
             try:
                 url = self.filer.create(issue["category"], issue["title"], issue["body"])
                 self._run(self._filed, gid, entry["id"], url)
-                if out["over"] and game:  # the game is already over: reveal right away
+                if out["over"] and game and not out.get("revealed"):  # the game is already over: reveal right away
                     self._reveal(self._run(game.reveal_comment), [url])
                 return {"flags": flags, "filed": True, "issue": url, "message": "Filed as a GitHub issue."}
             except FilingError as e:
@@ -641,7 +789,29 @@ class LiveManager:
             raise LiveError(f"cannot play {name}: {e}") from e
         self.games[gid] = game
         self._finish(game)
-        return game.view()
+        view = game.view()
+        view["live"]["token"] = game.token  # only here: later views (anyone with the id) never carry it
+        return view
+
+    def authorize(self, gid: str, token: str | None) -> None:
+        """Refuse unless `token` is the game's (the HTTP layer asks this before
+        every request about one game)."""
+        self._run(lambda: self._get(gid).check_token(token))
+
+    def review(self, gid: str, token: str | None) -> dict:
+        """The finished game, omniscient (both hands, the bot's policy and
+        value), for the player who played it: refused while it runs and
+        without the game's token (given only to the player, with the new game)."""
+        return self._run(self._review, gid, token)
+
+    def _review(self, gid: str, token: str | None) -> dict:
+        game = self._get(gid)
+        game.check_token(token)
+        if not game.over:
+            raise LiveError("the review opens when the game is over")
+        rep = game.replay()
+        rep["review"] = {"seat": game.seat, "bot": 1 - game.seat, "model": game.model_name, "greedy": game.greedy, "replay": game.replay_file}
+        return rep
 
     def _evict(self) -> None:
         """Drop expired games, then make room for one more by dropping idle or

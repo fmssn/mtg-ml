@@ -44,6 +44,8 @@ import argparse
 import json
 import math
 import os
+from contextlib import contextmanager
+from functools import wraps
 
 from ..backend import ENV_VAR, engine_name
 from ..encode import FEATURE_VERSIONS, information_contract
@@ -54,6 +56,31 @@ EVAL_SEED = 10_000_000
 ELO = 400 / math.log(10)  # Elo points per natural-log unit of odds
 EVAL_BLOCKS = ("random", "bot", "pool0")
 DECK_KEYS = {"jund_wildfire": "jund", "mono_blue_terror": "blue", "red_madness": "red", "grixis_affinity": "affinity", "elves": "elves", "tron": "tron"}  # metric names
+
+
+@contextmanager
+def evaluation_lock(path: str = ""):
+    """Cooperate with background matrix evaluation on the same reserved CPUs."""
+    path = path or os.environ.get("MTG_EVAL_LOCK", "")
+    if not path:
+        yield
+        return
+    import fcntl
+
+    with open(path, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def serialized_evaluation(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with evaluation_lock():
+            return fn(*args, **kwargs)
+    return wrapped
 
 
 def wilson(wins: float, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -98,7 +125,7 @@ def score(games: list, matchup: str = DEFAULT_MATCHUP) -> dict:
     for g in games:
         seat = 0 if g[0][0] == LEARNER else 1
         rows[keys[seat]].append(1.0 if g[1] == seat else 0.5 if g[1] is None else 0.0)
-    rows["all"] = rows[keys[0]] + rows[keys[1]]
+    rows["all"] = [x for xs in rows.values() for x in xs]
     for k, xs in rows.items():
         lo, hi = wilson(sum(xs), len(xs))
         out[k] = (sum(xs) / max(len(xs), 1), (round(lo, 3), round(hi, 3)), len(xs))
@@ -173,6 +200,7 @@ def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: in
     return out
 
 
+@serialized_evaluation
 def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, eval_games: int, eval_bo3_matches: int, bench_games: int, bench_bo3_matches: int,
                     max_turns: int = 100, inference: str = "local", blocks: tuple = EVAL_BLOCKS, bench_greedy_games: int = 0,
                     ladder: tuple = (), ladder_games: int = 200, ladder_ratings: str = "", ladder_greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
@@ -211,7 +239,7 @@ def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, e
             out[f"eval/bot_bo3/{deck}"], out[f"eval/bot_bo3/{deck}_ci"], _ = res[deck]
     out.update(benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference, bench_greedy_games, auto_mana, auto_pass, matchup, seat or 0))
     for m in extra_matchups:
-        for s in (0, 1):
+        for s in ((0,) if len(set(matchup_decks(m))) == 1 else (0, 1)):
             res = benchmark(procs, policy, bench_games, bench_bo3_matches, n_jobs, version, max_turns, inference, bench_greedy_games, auto_mana, auto_pass, m, s)
             out.update({f"bench/{m}/{k.split('/', 1)[1]}": v for k, v in res.items()})
     if ladder and ladder_games:

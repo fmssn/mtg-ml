@@ -1,0 +1,44 @@
+# Build context for deploy/Dockerfile. The Dockerfile copies only pyproject.toml,
+# native/, mtg_ml/, apps/, viz/ and data/; everything else stays out.
+.git
+.github
+.gitignore
+.context
+.conductor
+.agents
+.claude
+.env
+.env.*
+**/.env
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+*.egg-info
+**/node_modules
+**/.DS_Store
+
+# Build outputs and caches
+native/target
+target-wheels
+.cargo-target
+dist
+build
+
+# Training/eval artefacts and weights: never in the image
+runs
+replays
+checkpoints
+**/*.pt
+**/*.pth
+**/*.ckpt
+**/*.safetensors
+**/*.sqlite3
+difftest-failure.json
+
+# Not needed at runtime
+docs
+tests
+tools
+deploy/*.env

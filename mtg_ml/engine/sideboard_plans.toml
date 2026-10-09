@@ -246,3 +246,40 @@ opponent = "mono_blue_terror"
 why = "Mirror: Gut Shot kills Delver before it flips, Envelop counters Lorien Revealed, Ponder, Mental Note and Sleep of the Dead; the tap-down and two Force Spike (weak once both sides hold up Counterspell) go out."
 in = { "Gut Shot" = 3, "Envelop" = 1 }
 out = { "Sleep of the Dead" = 2, "Force Spike" = 2 }
+
+# Full-matrix overnight campaign, 2026-10-08. Fixed tactical starting plans;
+# card counts validated, strength not yet measured. Main registrations unchanged.
+[[plan]]
+deck = "jund_wildfire"
+opponent = "jund_wildfire"
+why = "Ouphe exiles artifacts and Terminate answers a large threat; trim the fragile Infiltrators and slow Hydra."
+in = { "Troublemaker Ouphe" = 2, "Terminate" = 1 }
+out = { "Gixian Infiltrator" = 2, "Nyxborn Hydra" = 1 }
+
+[[plan]]
+deck = "red_madness"
+opponent = "red_madness"
+why = "Cheap removal fights the opposing damage engines and small creatures; trim slow card selection."
+in = { "End the Festivities" = 2, "Cast into the Fire" = 2, "Searing Blaze" = 2 }
+out = { "Highway Robbery" = 4, "Grab the Prize" = 2 }
+
+[[plan]]
+deck = "grixis_affinity"
+opponent = "grixis_affinity"
+why = "Hydroblast fights Shaman and Blast; Extract answers threats. Trim fragile Rod tokens, Cam and one Toxin."
+in = { "Hydroblast" = 2, "Extract a Confession" = 2 }
+out = { "Black Mage's Rod" = 2, "Sewer-veillance Cam" = 1, "Toxin Analysis" = 1 }
+
+[[plan]]
+deck = "elves"
+opponent = "elves"
+why = "Emergence removes Priest, Timberwatch or Hunter; trim Vandals whose enchantment targets are narrower."
+in = { "Monstrous Emergence" = 4 }
+out = { "Masked Vandal" = 4 }
+
+[[plan]]
+deck = "tron"
+opponent = "tron"
+why = "Scour answers a Tron land or large permanent; Cloak helps a threat finish through blockers. Trim incidental life gain."
+in = { "Scour from Existence" = 2, "Whispersilk Cloak" = 1 }
+out = { "Candy Trail" = 2, "Boulderbranch Golem" = 1 }

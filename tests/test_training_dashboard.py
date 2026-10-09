@@ -93,3 +93,23 @@ def test_ssh_failure_preserves_last_snapshot_with_visible_error(tmp_path, monkey
     assert value['snapshot'] == observed
     assert 'timed out' in value['error']
     assert value['last_attempt'] > observed['observed_at']
+
+
+def test_fresh_training_snapshot_has_no_parent_and_retains_partial_matrix(tmp_path):
+    entries = campaign(tmp_path)
+    for e in entries:
+        e.update(mode='training', target_games=20000000, initial_tensor_sha256='initial', seed=8, features=7)
+        e.pop('parent')
+        e['command'] += ['--ppo-lr', '0.00015']
+    (tmp_path/'campaign.json').write_text(json.dumps(entries))
+    write_jsonl(Path(entries[0]['run'])/'metrics.jsonl', [dict(rows(1)[0], games_total=2048, lr=.00015)])
+    (tmp_path/'evaluation.json').write_text(json.dumps({'status':'running','cells':[],'h2h':[]}))
+    result = module.snapshot(tmp_path, active={entries[0]['run']:123}, supervisor=[], gpus=[])
+    assert result['mode'] == 'training'
+    assert result['arms'][0]['games'] == 2048
+    assert result['arms'][0]['target_games'] == 20000000
+    assert result['arms'][0]['status'] == 'running'
+    assert result['evaluation']['cells'] == []
+    (Path(entries[0]['run'])/'process.json').write_text(json.dumps({'status':'running'}))
+    result = module.snapshot(tmp_path, active={}, supervisor=[], gpus=[])
+    assert result['arms'][0]['status'] == 'interrupted'
