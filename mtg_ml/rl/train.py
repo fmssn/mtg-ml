@@ -552,7 +552,7 @@ class Trainer:
         job, specs = desc["job"], desc["specs"]
         self._pin(job.learner_path)
         if len(self.matchups) > 1:
-            self.spec_matchup.update({s.seed: s.matchup for s in specs})
+            self.spec_matchup.update({seed: s.matchup for s in specs for seed in ([game_seed(s.seed, n) for n in (1, 2, 3)] if s.bo3 else [s.seed])})
         pending = self.collector.call(play, specs, job, self.cfg.workers)
         return _Rollout(pending, job.shaping, desc["it"] - job.learner_version + 1, desc["rng"], descriptor=desc)
 
