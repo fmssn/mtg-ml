@@ -1,0 +1,250 @@
+{
+  "format": "TacticalPuzzle",
+  "version": 1,
+  "id": "blue-sleep-productive",
+  "deck": "mono_blue_terror",
+  "category": "combat",
+  "template_id": "sleep-second-target",
+  "source_group_id": "playtest-2026-10-09-flag4",
+  "split": "dev",
+  "episode_mode": "reset",
+  "rationale": "The Shaman is already locked, but Gixian Infiltrator is untapped and will attack an empty board. Escaping Sleep onto the Infiltrator prevents the damage; escaping onto the locked Shaman, or passing, takes it.",
+  "max_decisions": 64,
+  "claim": "success-against-declared-responses",
+  "objective": {
+    "all": [
+      {
+        "path": "self.life",
+        "op": "eq",
+        "value": 20
+      }
+    ]
+  },
+  "stop": {
+    "kind": "decision_boundary",
+    "turn": 10,
+    "step": "end",
+    "active": "opponent",
+    "require_empty_stack": true
+  },
+  "cases": [
+    {
+      "id": "basic-lands-library",
+      "hidden_completion": "libraries-of-basic-lands",
+      "response_policy": {
+        "id": "benchmark-jund@1",
+        "parameters_sha256": "ae78cd031937091182d8be444c6f4bdd84c18e1ead382e1bca668fe7f1fe7f95"
+      },
+      "witnesses": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Sleep of the Dead",
+                "graveyard",
+                "escape"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "creature",
+                "perm",
+                "opponent",
+                "Gixian Infiltrator"
+              ],
+              "objects": [
+                "infiltrator"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "exile_from_graveyard",
+              "key": [
+                "exile_gy",
+                "Brainstorm"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "exile_from_graveyard",
+              "key": [
+                "exile_gy",
+                "Ponder"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "exile_from_graveyard",
+              "key": [
+                "exile_gy",
+                "Thought Scour"
+              ]
+            }
+          ],
+          "note": "Escape Sleep onto the untapped attacker.",
+          "learner_only": true
+        }
+      ],
+      "mistakes": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Sleep of the Dead",
+                "graveyard",
+                "escape"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "creature",
+                "perm",
+                "opponent",
+                "Krark-Clan Shaman"
+              ],
+              "objects": [
+                "shaman"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Island",
+                "U"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "exile_from_graveyard",
+              "key": [
+                "exile_gy",
+                "Brainstorm"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "exile_from_graveyard",
+              "key": [
+                "exile_gy",
+                "Ponder"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "exile_from_graveyard",
+              "key": [
+                "exile_gy",
+                "Thought Scour"
+              ]
+            }
+          ],
+          "note": "Escape onto the already locked Shaman.",
+          "expect": "objective_failed"
+        },
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            }
+          ],
+          "note": "Pass and take the attack.",
+          "expect": "objective_failed"
+        }
+      ],
+      "scenario": {
+        "path": "scenario.json",
+        "sha256": "0f3dd5c030ba4e2bf0ff0a0801fa22fa3fcbae41612feb86656635145acc2f4c"
+      },
+      "evidence": {
+        "path": "evidence.json",
+        "sha256": "8bcbfa924d8107d01a0ea84e280c30d4ad3e829f52275fe0166d602002eae522"
+      }
+    }
+  ],
+  "acceptable_first_actions": [
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "cast",
+        "Sleep of the Dead",
+        "graveyard",
+        "escape"
+      ]
+    }
+  ],
+  "review": {
+    "status": "accepted",
+    "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+    "note": "Escaping Sleep onto the untapped Gixian Infiltrator prevents its 2-damage attack on Jund's turn; escaping onto the locked Shaman or passing takes the hit (traced). Weak discriminator: random learners succeed 3/4 when only a target choice remains."
+  }
+}

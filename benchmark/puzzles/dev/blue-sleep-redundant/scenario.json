@@ -1,0 +1,199 @@
+{
+  "format": "ExecutableScenario",
+  "version": 1,
+  "id": "blue-sleep-redundant",
+  "group_id": "playtest-2026-10-09-flag4",
+  "perspective": 0,
+  "decision_time": 0,
+  "episode_mode": "reset",
+  "initial": {
+    "active": 0,
+    "step": "main1",
+    "seed": 3,
+    "match_game": 1,
+    "turn": 9,
+    "lands_played": 0,
+    "spells_cast_this_turn": 0,
+    "players": [
+      {
+        "life": 20,
+        "drawn": 0,
+        "hand": [
+          "Sleep of the Dead",
+          "Island"
+        ],
+        "hand_count": 2,
+        "library": [
+          "Island",
+          "Island",
+          "Island",
+          "Island"
+        ],
+        "library_count": 4,
+        "graveyard": [
+          {
+            "name": "Brainstorm",
+            "id": "yard-brainstorm"
+          },
+          {
+            "name": "Ponder",
+            "id": "yard-ponder"
+          },
+          {
+            "name": "Thought Scour",
+            "id": "yard-scour"
+          },
+          {
+            "name": "Mental Note",
+            "id": "yard-note"
+          }
+        ],
+        "exile": [],
+        "battlefield": [
+          {
+            "name": "Island"
+          },
+          {
+            "name": "Island"
+          },
+          {
+            "name": "Island"
+          },
+          {
+            "name": "Island"
+          }
+        ]
+      },
+      {
+        "life": 20,
+        "drawn": 0,
+        "hand": [],
+        "hand_count": 0,
+        "library": [
+          "Swamp",
+          "Forest",
+          "Forest",
+          "Mountain"
+        ],
+        "library_count": 4,
+        "graveyard": [],
+        "exile": [],
+        "battlefield": [
+          {
+            "name": "Krark-Clan Shaman",
+            "id": "shaman",
+            "sick": false
+          },
+          {
+            "name": "Swamp"
+          },
+          {
+            "name": "Swamp"
+          }
+        ]
+      }
+    ]
+  },
+  "state_facts": {},
+  "synthetic_fields": {
+    "active": "Synthetic tactical position; every field is authored for this puzzle.",
+    "step": "Synthetic tactical position; every field is authored for this puzzle.",
+    "turn": "Synthetic tactical position; every field is authored for this puzzle.",
+    "lands_played": "Synthetic tactical position; every field is authored for this puzzle.",
+    "spells_cast_this_turn": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.0.life": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.0.drawn": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.0.hand": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.0.hand_count": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.0.library": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.0.library_count": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.0.graveyard": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.0.exile": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.0.battlefield": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.1.life": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.1.drawn": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.1.hand": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.1.hand_count": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.1.library": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.1.library_count": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.1.graveyard": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.1.exile": "Synthetic tactical position; every field is authored for this puzzle.",
+    "players.1.battlefield": "Synthetic tactical position; every field is authored for this puzzle."
+  },
+  "assumptions": [
+    "Entire position is synthetic.",
+    "Hidden libraries hold only basic lands, so draws before the boundary are blanks."
+  ],
+  "setup_actions": [
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "cast",
+        "Sleep of the Dead",
+        "hand",
+        "normal"
+      ]
+    },
+    {
+      "player": 0,
+      "kind": "target",
+      "key": [
+        "target",
+        "creature",
+        "perm",
+        "opponent",
+        "Krark-Clan Shaman"
+      ],
+      "objects": [
+        "shaman"
+      ]
+    },
+    {
+      "player": 0,
+      "kind": "pay_mana",
+      "key": [
+        "pay",
+        "source",
+        "Island",
+        "U"
+      ]
+    },
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "pass"
+      ]
+    },
+    {
+      "player": 1,
+      "kind": "priority",
+      "key": [
+        "pass"
+      ]
+    }
+  ],
+  "preferred": [
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "pass"
+      ]
+    },
+    {
+      "player": 0,
+      "kind": "priority",
+      "key": [
+        "play_land",
+        "Island"
+      ]
+    }
+  ],
+  "review": {
+    "status": "accepted",
+    "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+    "note": "The engine takes the larger skip-untap count (cards.py:142), as the rules do, so escaping onto the locked Shaman only spends mana and three graveyard cards and always fails the four-card graveyard objective. A pass learner succeeds, which is inherent to a don't-waste-it puzzle; shares a leakage group with blue-sleep-productive."
+  }
+}

@@ -1,4 +1,4 @@
-"""Artifact admission and reviewed witness checks, without agent attempts."""
+"""Artifact admission, reviewed witness checks and tactical line verification."""
 
 from pathlib import Path
 import subprocess
@@ -70,7 +70,9 @@ def objective(game, perspective, clauses, objects):
     return True
 
 
-def _verify_case(puzzle, case, decks, engines):
+def _verify_case(puzzle, case, decks, engines, registry=None):
+    from .tactics import history_free, validate_lines, verify_lines
+    validate_lines(case, "cases")
     scenario_path = reference(puzzle.path, case["scenario"], "cases.scenario")
     evidence_path = reference(puzzle.path, case["evidence"], "cases.evidence")
     scenario, evidence = read_json(scenario_path), read_json(evidence_path)
@@ -80,6 +82,9 @@ def _verify_case(puzzle, case, decks, engines):
         actions = [s["selector"] for s in scenario.get("demonstration", [])] or scenario.get("continuation", [])
         require(bool(actions), "cases.witnesses", "successful full-line witness required")
         witnesses = [{"actions": actions, "note": "Reviewed scenario continuation"}]
+    require(registry is not None or not any(w.get("learner_only") for w in witnesses), "cases.witnesses", "learner-only witnesses need the response policy")
+    # Learner-only lines play against the response policy in verify_lines below.
+    witnesses = [w for w in witnesses if not w.get("learner_only")]
     checked = []
     for witness in witnesses:
         actions = witness["actions"]
@@ -88,6 +93,7 @@ def _verify_case(puzzle, case, decks, engines):
         for engine in engines:
             g, objects = compile_scenario(scenario, evidence, engine)
             viewer = scenario["perspective"]
+            history_free(g, viewer)
             # Reset-mode setup has no fabricated recurrent history. Registration
             # is supplied separately to the scripted input builder.
             own = decks[puzzle.data["deck"]]["cards"]
@@ -117,8 +123,17 @@ def _verify_case(puzzle, case, decks, engines):
             traces.append({"initial": initial_view, "trace": trace, "finish": observe(g, viewer)})
         require(all(t == traces[0] for t in traces), "parity", "engine inputs/actions/events/outcomes diverged")
         checked.append({"actions": len(actions), "trace_sha256": digest(traces[0])})
-    return {"case": case["id"], "witnesses": checked, "initial_sha256": digest({"view": traces[0]["initial"],
-                                                                            "decision": traces[0]["trace"][0] | {"chosen": None, "events": []}})}
+    initial = []
+    for engine in engines:
+        g, _ = compile_scenario(scenario, evidence, engine)
+        history_free(g, scenario["perspective"])
+        view, legal = inputs(g, scenario["perspective"], decks[puzzle.data["deck"]]["cards"])
+        initial.append({"view": observe(g, scenario["perspective"]), "state": thaw(view.state), "actions": [thaw(a.key) for a in legal]})
+    require(all(i == initial[0] for i in initial), "parity", "engine initial inputs diverged")
+    report = {"case": case["id"], "witnesses": checked, "initial_sha256": digest(initial[0])}
+    if registry is not None:
+        report["tactics"] = verify_lines(puzzle, case, decks, registry, engines)
+    return report
 
 
 def validate(manifest_path, engines=("python", "native"), registry=None):
@@ -131,10 +146,12 @@ def validate(manifest_path, engines=("python", "native"), registry=None):
         check_freeze(manifest)
         if "native" in engines:
             report["native_build"] = native_build()
+        d = manifest.data
         if registry is None:
             from . import REGISTRY
-            registry = REGISTRY
-        d = manifest.data
+            from .tactics import SPECIALISTS, specialist_registry
+            # check_freeze proved this checkout matches the frozen revision.
+            registry = specialist_registry(d["freeze"]["code_revision"]) if {b["id"] for b in d["bots"]} <= set(SPECIALISTS) else REGISTRY
         for bot in d["bots"]:
             registry.verify(bot, d["information_contract"])
         bundle_path = reference(manifest.path, d["puzzles"], "puzzles")
@@ -166,11 +183,11 @@ def validate(manifest_path, engines=("python", "native"), registry=None):
             for case in puzzle.data["cases"]:
                 response = case["response_policy"]
                 require(response["id"] in bots and bots[response["id"]]["parameters_sha256"] == response["parameters_sha256"], "response_policy", "freeze mismatch")
-                cases.append(_verify_case(puzzle, case, d["decks"], engines))
+                cases.append(_verify_case(puzzle, case, d["decks"], engines, registry))
             require(len({c["initial_sha256"] for c in cases}) == 1, "puzzle.cases", "cases do not share initial player information")
             report["puzzles"].append({"id": puzzle.data["id"], "cases": cases})
         report["status"] = "complete"
-        report["scope"] = "foundation-validation; response-policy branch coverage and release corpus certification deferred"
+        report["scope"] = "witnesses, declared mistakes and response-policy smoke verified on each engine; forced solutions and release corpus certification deferred"
     except (ValueError, KeyError, TypeError, AttributeError, OSError, IndexError) as e:
         report["errors"].append(str(e))
     return report

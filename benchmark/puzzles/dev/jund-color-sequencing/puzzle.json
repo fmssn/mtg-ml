@@ -1,0 +1,257 @@
+{
+  "format": "TacticalPuzzle",
+  "version": 1,
+  "id": "jund-color-sequencing",
+  "deck": "jund_wildfire",
+  "category": "mana-sequencing",
+  "template_id": "keep-red-open",
+  "source_group_id": "synthetic-keep-red-open",
+  "split": "dev",
+  "episode_mode": "reset",
+  "rationale": "Swamp, Mountain and Forest pay for both Cast Down ({1}{B}) and Krark-Clan Shaman ({R}) only if Cast Down's generic mana comes from the Forest.",
+  "max_decisions": 64,
+  "claim": "success-against-declared-responses",
+  "objective": {
+    "all": [
+      {
+        "object": "delver",
+        "zone": "battlefield",
+        "present": false
+      },
+      {
+        "object": "shaman",
+        "zone": "battlefield",
+        "present": true
+      }
+    ]
+  },
+  "stop": {
+    "kind": "decision_boundary",
+    "turn": 8,
+    "step": "end",
+    "active": "self",
+    "require_empty_stack": true
+  },
+  "cases": [
+    {
+      "id": "basic-lands-library",
+      "hidden_completion": "libraries-of-basic-lands",
+      "response_policy": {
+        "id": "benchmark-blue@1",
+        "parameters_sha256": "f80cb31cad22feaa42a5d1488356151fa4ce4f36f9b02a27922212a156b4c68c"
+      },
+      "witnesses": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Cast Down",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "nonlegendary_creature",
+                "perm",
+                "opponent",
+                "Delver of Secrets"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Swamp",
+                "B"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Forest",
+                "G"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Krark-Clan Shaman",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Mountain",
+                "R"
+              ]
+            }
+          ],
+          "note": "Cast Down paid with Swamp and Forest, then the Shaman.",
+          "learner_only": true
+        },
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Krark-Clan Shaman",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Mountain",
+                "R"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "pass"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Cast Down",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "nonlegendary_creature",
+                "perm",
+                "opponent",
+                "Delver of Secrets"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Swamp",
+                "B"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Forest",
+                "G"
+              ]
+            }
+          ],
+          "note": "Shaman first, then Cast Down.",
+          "learner_only": true
+        }
+      ],
+      "mistakes": [
+        {
+          "actions": [
+            {
+              "player": 0,
+              "kind": "priority",
+              "key": [
+                "cast",
+                "Cast Down",
+                "hand",
+                "normal"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "target",
+              "key": [
+                "target",
+                "nonlegendary_creature",
+                "perm",
+                "opponent",
+                "Delver of Secrets"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Swamp",
+                "B"
+              ]
+            },
+            {
+              "player": 0,
+              "kind": "pay_mana",
+              "key": [
+                "pay",
+                "source",
+                "Mountain",
+                "R"
+              ]
+            }
+          ],
+          "note": "Cast Down's generic paid with the Mountain strands the Shaman.",
+          "expect": "objective_failed"
+        }
+      ],
+      "scenario": {
+        "path": "scenario.json",
+        "sha256": "24283fdfbe3b16a28aced2875ea851664cedd2b6c526672272c1a3ffc934a8ba"
+      },
+      "evidence": {
+        "path": "evidence.json",
+        "sha256": "719fb6087c6aeee66260b6fa14cdddb89a3952fe5b93fa60e2a9c78b1610a31b"
+      }
+    }
+  ],
+  "review": {
+    "status": "accepted",
+    "reviewer": "mtg-reviewer agent (Claude Opus 5.5), independent review 2026-10-09",
+    "note": "Cast Down's generic must come from the Forest to keep red for the Shaman; both cast orders succeed and the Mountain payment fails."
+  }
+}
