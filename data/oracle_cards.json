@@ -1444,5 +1444,27 @@
    "Equip"
   ],
   "cmc": 3.0
+ },
+ {
+  "name": "Deep Analysis",
+  "mana_cost": "{3}{U}",
+  "type_line": "Sorcery",
+  "oracle_text": "Target player draws two cards.\nFlashback\u2014{1}{U}, Pay 3 life. (You may cast this card from your graveyard for its flashback cost. Then exile it.)",
+  "power": null,
+  "toughness": null,
+  "keywords": [
+   "Flashback"
+  ],
+  "cmc": 4.0
+ },
+ {
+  "name": "Murmuring Mystic",
+  "mana_cost": "{3}{U}",
+  "type_line": "Creature \u2014 Human Wizard",
+  "oracle_text": "Whenever you cast an instant or sorcery spell, create a 1/1 blue Bird Illusion creature token with flying.",
+  "power": "1",
+  "toughness": "5",
+  "keywords": [],
+  "cmc": 4.0
  }
 ]

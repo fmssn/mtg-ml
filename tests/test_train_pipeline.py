@@ -133,6 +133,31 @@ def test_collector_serialization_failure_is_reported():
         collector.terminate()
 
 
+def test_a_collector_never_closed_stops_when_collected():
+    """A Trainer built but never trained leaves its collector unclosed; once
+    collected it must stop, or multiprocessing waits for it at exit."""
+    collector = collect.PoolProcess(1)
+    proc = collector.proc
+    del collector
+    gc.collect()
+    proc.join(60)
+    assert proc.exitcode == 0
+
+
+def test_abandoned_thread_call_cannot_block_the_exit():
+    """A call left running by `terminate` (a rollout whose pool was torn down
+    mid-`map`) must not keep the interpreter alive."""
+    stuck = threading.Event()
+    collector = PoolThread(ThreadPool(1))
+    collector.call(lambda pool: stuck.wait())
+    queued = collector.call(lambda pool: None)
+    collector.terminate()
+    assert collector._thread.daemon and collector._futures[queued.tag].cancelled()
+    stuck.set()
+    collector._thread.join(5)
+    assert not collector._thread.is_alive()
+
+
 def test_shared_result_round_trip(tmp_path):
     """The merged result parked by the collector and mapped by the trainer
     trains exactly like the result itself."""

@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pytest-xdist>=3"]
 rl = ["torch>=2.2", "numpy"]
 review = ["anthropic"]  # only for `mtg_ml.review --backend claude`
 expert-media = ["yt-dlp>=2026.3", "pillow>=10", "numpy"]

@@ -2,7 +2,6 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
-
 ## 20261008-r7-fs7-h256 · fresh full-matrix LR comparison
 
 - **Status:** running since 22:47 Berlin October 8 on `h100-private2`; target 20M games

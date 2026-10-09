@@ -383,6 +383,15 @@ class NativeGame:
             return None
         return DamageAllocation(raw[0], tuple(raw[1]), tuple(raw[2]), tuple(raw[3]), *raw[4:])
 
+    @property
+    def combat_subjects(self):
+        return self._g.combat_subjects()
+
+    @property
+    def payment_context(self):
+        raw = self._g.payment_context()
+        return None if raw is None else {"generic": raw[0], "colored": dict(raw[1])}
+
     # -- caching -------------------------------------------------------------
 
     def _cached(self, name, make):
