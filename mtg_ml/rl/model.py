@@ -585,6 +585,7 @@ class EntityEncoder(nn.Module):
                     e_pos = torch.arange(ents.shape[0], device=ents.device) - _excl(n_ent)[b.e_row] if e_pos is None else e_pos
                     width = int(n_ent.max()) if B else 0
                 ents = self.attn(ents, b.e_row, e_pos, B, width)
+            ents = ents.to(bags.dtype)
             return bags.index_select(0, b.g_bag).index_add(0, b.e_row, ents), ents, None
         idx, off = b.s_idx, b.s_off
         B, dev = off.shape[0], idx.device
@@ -607,6 +608,7 @@ class EntityEncoder(nn.Module):
         owner = torch.repeat_interleave(torch.arange(B, device=dev), n_ent)
         if self.attn is not None:
             ents = self.attn(ents, owner, torch.arange(E, device=dev) - base[owner], B, int(n_ent.max()) if B else 0)
+        ents = ents.to(g.dtype)
         return g.index_add(0, owner, ents), ents, base
 
 
@@ -671,6 +673,13 @@ class _Core(nn.Module):
     def _memory(self, x: torch.Tensor, hidden, lengths):
         if self.memory == "none":
             return self.mix(x), None
+        # Recurrent accumulation stays FP32 even when dense/attention work
+        # is autocast. In particular cuDNN's BF16 GRU support varies by shape.
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            dtype = self.gru.weight_ih_l0.dtype
+            return self._recurrent(x.to(dtype), None if hidden is None else hidden.to(dtype), lengths)
+
+    def _recurrent(self, x, hidden, lengths):
         if lengths is None:  # step mode
             h0 = torch.zeros(x.shape[0], self.hidden, device=x.device, dtype=x.dtype) if hidden is None else hidden
             out, hn = self.gru(x[:, None], h0[None])
@@ -834,7 +843,7 @@ class PolicyNet(nn.Module):
         if b.ot_idx is not None:  # pointers already split off (`structure`), no masks
             a = _bag(b, "ot", self.option_emb.weight, b.ot_idx, b.ot_off)
             if self.pointer is not None:
-                a = a.index_add(0, b.p_opt, self.pointer(self.policy_core.entities[0].index_select(0, b.p_ent)))
+                a = a.index_add(0, b.p_opt, self.pointer(self.policy_core.entities[0].index_select(0, b.p_ent)).to(a.dtype))
             return a
         ptr = b.o_idx >= self.option_dim
         idx, off = _keep(b.o_idx, b.o_off, ~ptr)
@@ -843,7 +852,7 @@ class PolicyNet(nn.Module):
             ents, base = self.policy_core.entities
             opt = torch.repeat_interleave(torch.arange(b.o_off.shape[0], device=a.device), _lengths(b.o_off, b.o_idx.shape[0]))[ptr]
             k = b.o_idx[ptr].long() - self.option_dim
-            a = a.index_add(0, opt, self.pointer(ents[base[b.o_row[opt]] + k]))
+            a = a.index_add(0, opt, self.pointer(ents[base[b.o_row[opt]] + k]).to(a.dtype))
         return a
 
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):

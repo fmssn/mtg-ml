@@ -64,7 +64,8 @@ if triton is not None:
         lo = tl.min(tl.where(valid, pol, 1 << 30))
         hi = tl.max(tl.where(valid, pol, -1))
         acc = tl.zeros((BM, BN), dtype=tl.float32)
-        for q in range(lo, hi + 1):
+        q = lo
+        while q <= hi:
             sel = valid & (pol == q)
             for k0 in range(0, K, BK):
                 kk = k0 + rk
@@ -74,6 +75,8 @@ if triton is not None:
             if HAS_BIAS:
                 bias = tl.load(Bias + q * N + rn, mask=rn < N, other=0.0)
                 acc += tl.where(sel[:, None], bias[None, :], 0.0)
+            # Stable residency slots can be sparse. Do not multiply for absent policies.
+            q = tl.min(tl.where(valid & (pol > q), pol, hi + 1))
         tl.store(Y + rm[:, None] * N + rn[None, :], acc, mask=valid[:, None] & (rn[None, :] < N))
 
 
@@ -154,7 +157,7 @@ class PolicyStack:
 
     def __init__(self, config: dict, capacity: int, device):
         if not PolicyStack.supports(config):
-            raise ValueError(f"config {config} is not stackable (trunks {STACKABLE_TRUNKS}, no entity attention)")
+            raise ValueError(f"config {config} is not stackable (trunks {STACKABLE_TRUNKS})")
         from .model import PolicyNet
 
         self.config = stack_config(config)
@@ -178,10 +181,7 @@ class PolicyStack:
 
     @staticmethod
     def supports(config: dict) -> bool:
-        """Entity self-attention needs a (rows, entities per row) layout whose
-        width the server's padded shapes do not carry yet: those policies
-        run on the server's eager per-policy path."""
-        return config.get("trunk") in STACKABLE_TRUNKS and not config.get("entity_attn")
+        return config.get("trunk") in STACKABLE_TRUNKS
 
     def load(self, slot: int, net) -> None:
         if stack_config(net.config) != self.config:
@@ -227,6 +227,7 @@ class StepInput:
     ot_opt: torch.Tensor  # (O_p,) option of each token
     ot_valid: torch.Tensor  # (O_p,) bool
     n_ent: int  # E_p: padded entity count (>= entities of the batch)
+    ent_width: int = 1  # host-known maximum entities per decision (a graph shape)
 
 
 def excl_cumsum(x: torch.Tensor) -> torch.Tensor:
@@ -270,6 +271,37 @@ def _bag_sum(idx, table, off, n_bags: int, mode: str = "sum"):
     return F.embedding_bag(idx, table, off, mode=mode)[:n_bags]
 
 
+def _attention(stack, c, ents, pol, st, rows, width):
+    """Policy-specific projections, one independent SDPA problem per decision.
+
+    Padding goes to a discarded extra slot. Width is supplied by the host,
+    so neither shape selection nor layout construction synchronizes CUDA.
+    """
+    from .model import ENTITY_ATTN_HEADS
+
+    D, H = stack.lin, ents.shape[1]
+    width = max(width, 1)
+    slot = torch.where(st["e_valid"], st["e_row"] * width + st["e_pos"], rows * width)
+    keep = torch.zeros(rows * width + 1, dtype=torch.bool, device=ents.device).index_fill(0, slot, True)[:-1].view(rows, width)
+    keep = (keep | (torch.arange(width, device=ents.device) == 0))[:, None, None, :]
+
+    def norm(x, name):
+        return F.layer_norm(x, (H,)) * D[f"{name}.weight"][pol] + D[f"{name}.bias"][pol]
+
+    def linear(x, name):
+        return grouped_linear(x, D[f"{name}.weight"], D[f"{name}.bias"], pol)
+
+    for k in range(stack.config.get("entity_attn", 0)):
+        p = f"{c}.state.attn.layers.{k}"
+        qkv = linear(norm(ents, f"{p}.norm1"), f"{p}.qkv")
+        q, key, v = qkv.new_zeros(rows * width + 1, 3 * H).index_copy(0, slot, qkv)[:-1].view(rows, width, 3, ENTITY_ATTN_HEADS, H // ENTITY_ATTN_HEADS).permute(2, 0, 3, 1, 4)
+        a = F.scaled_dot_product_attention(q, key, v, attn_mask=keep).transpose(1, 2).reshape(rows * width, H)
+        a = torch.cat([a, a.new_zeros(1, H)]).index_select(0, slot)
+        ents = ents + linear(a, f"{p}.out")
+        ents = ents + linear(torch.relu(linear(norm(ents, f"{p}.norm2"), f"{p}.ff.0")), f"{p}.ff.2")
+    return ents
+
+
 def _core(stack: PolicyStack, c: str, x: StepInput, st: dict, hidden: torch.Tensor | None):
     """One _Core (policy or value) on the batch: (c (R_p, H), new hidden or None)."""
     T, D = stack.tables, stack.lin
@@ -278,6 +310,8 @@ def _core(stack: PolicyStack, c: str, x: StepInput, st: dict, hidden: torch.Tens
         bags = _bag_sum(st["s_emb"], T[f"{c}.state.emb.weight"], st["bag_off"], st["n_bags"])
         e_pol = pol[st["e_row"]]
         ents = torch.relu(grouped_linear(torch.relu(bags.index_select(0, st["e_bag"])), D[f"{c}.state.ent.1.weight"], D[f"{c}.state.ent.1.bias"], e_pol))
+        if stack.config.get("entity_attn"):
+            ents = _attention(stack, c, ents, e_pol, st, pol.shape[0], x.ent_width)
         E_p = ents.shape[0]
         g = bags.index_select(0, st["g_bag"]) + _bag_sum(torch.arange(E_p, device=ents.device), ents, st["ent_off"], pol.shape[0])
     else:
@@ -322,8 +356,10 @@ def structure(stack: PolicyStack, x: StepInput) -> dict:
         bag = torch.where(csum > base_t, x.s_row + csum, x.s_row + base_t)
         st["bag_off"] = _bags(bag, x.s_len.sum(), R_p + E_p)
         st["n_bags"] = R_p + E_p
-        e_row, _ = segments(n_ent, E_p)
+        e_row, e_pos = segments(n_ent, E_p)
         st["e_row"] = e_row
+        st["e_pos"] = e_pos
+        st["e_valid"] = torch.arange(E_p, device=dev) < n_ent.sum()
         st["e_bag"] = e_row + torch.arange(E_p, device=dev) + 1
         st["g_bag"] = torch.arange(R_p, device=dev) + ent_base
         st["ent_off"] = _bags(e_row, n_ent.sum(), R_p)  # each row's entities, as bags over the entity vectors
@@ -435,6 +471,7 @@ def step_input(decisions: list, pols: list[int], gslots: list[int], fresh: list[
         o_len=t(o_len), o_row=o_row,
         ot_tok=ot_tok, ot_opt=ot_opt, ot_valid=torch.ones_like(ot_tok, dtype=torch.bool),
         n_ent=ents + 1 if n_ent is None else n_ent,
+        ent_width=max((list(d[0]).count(STATE_DIM) for d in decisions), default=1),
     )  # fmt: skip
 
 

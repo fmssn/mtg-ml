@@ -197,7 +197,7 @@ def test_checkpoint_round_trip(tmp_path, data):
     with torch.no_grad():
         (l0, v0, h0), (l1, v1, h1) = net(b), loaded(b)
     assert torch.equal(l0, l1) and torch.equal(v0, v1) and torch.equal(h0, h1)
-    assert not PolicyStack.supports(net.config) and PolicyStack.supports(_net().config)
+    assert PolicyStack.supports(net.config) and PolicyStack.supports(_net().config)
 
 
 def test_trainer_init_from_a_checkpoint_without_attention(tmp_path, data):
@@ -226,8 +226,7 @@ def test_flags():
 
 @pytest.mark.slow
 def test_server_serves_attention_policies(tmp_path):
-    """The inference server runs attention policies on its eager per-policy
-    path: rollouts replay exactly."""
+    """Attention uses the stacked path and recorded rollouts replay exactly."""
     from mtg_ml.rl.inference import InferenceServer, ServerConfig
     from mtg_ml.rl.rollout import split_games
 
@@ -242,7 +241,7 @@ def test_server_serves_attention_policies(tmp_path):
         stats = srv.stats()
     finally:
         srv.close()
-    assert stats["legacy"] > 0
+    assert stats["legacy"] == 0 and stats["rows"] > 0
     for r in results:
         with torch.no_grad():
             logits, values, _ = net(collate(r.samples), lengths=r.lengths)
