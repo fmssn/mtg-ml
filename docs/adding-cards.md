@@ -280,9 +280,11 @@ Ops run in order. "The target" is target 0 of the spell or ability, re-checked b
 
 1. Every card of the 75 through the card steps above.
 2. `mtg_ml/engine/decks.py`: the list and its 15-card sideboard (`DECKS`, `SIDEBOARDS`); `mtg_ml/engine/sideboard_plans.toml`: one plan row against each existing deck and one for each existing deck against it ([sideboarding.md](sideboarding.md)).
-3. Matchups are currently fixed to seat 0 = Jund Wildfire, seat 1 = Mono Blue Terror: `match.DECK_NAMES`, `bots.make_bot(seat)`, `agents.play_game`'s default decks and the RL deck conditioning (`seat:` feature) assume it. A third deck means generalizing those to (deck, seat) pairs first.
-4. A scripted bot for the deck (`mtg_ml/bots/<deck>.py`, subclass `Bot`) so there is a baseline opponent.
-5. Regenerate the golden digests on purpose (`python -m mtg_ml.trace record --games 210`), run the full test suite and a long differential fuzz (`--games 5000`).
+3. Matchups: add an entry per opponent to `match.MATCHUPS` (the deck in seat 0 and the deck in seat 1). `match.DECK_NAMES` is the usual deck of each seat (Jund Wildfire, Mono Blue Terror); `deck_names` adds a `self:deck:` state feature only where a seat plays another deck, so networks trained on `jund_blue` see exactly the inputs they were trained on. Mirrors (same deck twice) are in `EXPLICIT_ONLY`: they run only where a `--matchup` list or the play config names them. Training, benchmarks, `mtg_ml.play` and the trace tools take the matchup name, so they need no change. `agents.play_game` still defaults to Jund vs Blue; pass `decks=` (as `match.game_args` does).
+4. A scripted bot for the deck (`mtg_ml/bots/<deck>.py`, subclass `Bot`) so there is a baseline opponent, registered in `BOTS` in `mtg_ml/bots/__init__.py` (`make_bot(seat, deck)` looks it up).
+5. Metric names: add the deck to `DECK_KEYS` in `mtg_ml/rl/evaluate.py` (the short key used in per-deck win rates, e.g. `jund`, `blue`).
+6. The deck-variant manifest: add its archetype to `ARCHETYPES` in `tools/build_variants.py`, which freezes `mtg_ml/engine/variants.toml` from the research snapshot ([deck-variants.md](deck-variants.md)); the play config (`mtg_ml/play_config.toml`) lists the decks a hosted server offers.
+7. Regenerate the golden digests on purpose (`python -m mtg_ml.trace record --games 210`), run the full test suite and a long differential fuzz (`--games 5000`).
 
 ## Bots and the feature vocabulary
 

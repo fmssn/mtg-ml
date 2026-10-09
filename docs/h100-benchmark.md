@@ -1,5 +1,7 @@
 # Training on `h100-private`: benchmark and plan (2026-10-05)
 
+> Historical (2026-10-05): the box setup, GPU assignments and plan below are the state of that day; later work (the Rust engine, the inference server, the r7 campaign) superseded them. See the [documentation index](README.md) for current guides.
+
 ## Machine
 
 64 cores of Intel Xeon Platinum 8462Y+, 2 TB RAM and 8× H100 80GB. The box is shared: ComfyUI runs on GPUs 2 and 3, and another GPU has 78 GB in use. Pin runs to free GPUs with `CUDA_VISIBLE_DEVICES`.

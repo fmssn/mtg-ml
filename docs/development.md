@@ -24,9 +24,8 @@ when there is no workspace `.venv`.
 ## Conductor run commands
 
 `.conductor/settings.toml` defines setup, replay, live play and tests. Local
-Conductor reads shared settings from the remote default branch, so the new
-configuration takes effect in the app after merge. For this unmerged workspace,
-run the Make commands in its terminal; no machine-wide settings change is needed.
+Conductor reads shared settings from the remote default branch; no
+machine-wide settings change is needed.
 
 | command | behavior |
 |---|---|

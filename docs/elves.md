@@ -1,9 +1,10 @@
 # Elves
 
-The fourth deck: Pauper Elves (mana Elves, Priest of Titania, Timberwatch
+One of the six decks: Pauper Elves (mana Elves, Priest of Titania, Timberwatch
 Elf pumps, Avenging Hunter's initiative), with its 15-card sideboard, in
-both engines. Elves sits in seat 1 of three matchups (`match.MATCHUPS`):
-`jund_elves`, `blue_elves`, `madness_elves`.
+both engines. Elves has a matchup against each other deck (`match.MATCHUPS`):
+seat 1 in `jund_elves`, `blue_elves`, `madness_elves` and `affinity_elves`,
+seat 0 in `elves_tron`, and `elves_mirror` (only where named).
 
 ## Decklist (`engine/decks.py`)
 

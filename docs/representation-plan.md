@@ -106,7 +106,7 @@ summed blocker power and similar aggregates, so they need no hand-written token.
 | 3. `Clone` in Rust, simulated previews (set 5) | step 2 to measure it | blind-spot rate down across all decision kinds; benchmark and ladder Elo not worse |
 | 4. card-shape tokens, hand entities (set 5 or 6) | none | a held-out deck (cards not seen in training) plays better from step 0 than with names only |
 | 5. relation table + entity attention | 1, 4 | fresh run with `entity_attn >= 1` beats the set-4 run at equal steps |
-| 6. fresh set-6 six-deck run | 3, 4 (set 6), all six decks and sideboards in both engines | benchmark and ladder Elo not worse than the best set-4/5 run on the matchups they share |
+| 6. fresh six-deck run on set 7 (r7 already is one; set 7 is the first set with the hidden-list contract) | 3, 4 (set 6), all six decks and sideboards in both engines | benchmark and ladder Elo not worse than the best set-4/5 run on the matchups they share |
 | 7. trust test | 6 | most pairings inside Pauper-Research's 95% interval, no per-deck bias, not exploitable by the frozen pool (see the milestone below) |
 | 8. first card-choice experiment (Tron with vs without Giant's Boulder) | 7 passed | delta reported with its interval and cross-checked against Pauper-Research's with/without-card numbers |
 
@@ -120,7 +120,7 @@ from the ledger.
   both engines from `data/oracle_cards.json`, [adding-cards.md](adding-cards.md) and XMage's
   implementations as a reference; difftest proves the engines agree, not that they follow the rules.
   Guard correctness with per-card rules tests written from the oracle text and LLM transcript
-  reviews (`mtg_ml.review`). Agents should also turn `custom` ops (9 of 60 cards today) into shared
+  reviews (`mtg_ml.review`). Agents should also turn `custom` ops (9 of 134 cards today) into shared
   ops, which keeps step 4's shape tokens covering new cards.
 - **Training compute per deck.** 25 decks are ~325 pairings, and each new deck needs games against
   all the others. This, not card code, is what grows; it argues for one deck-conditioned model and
@@ -146,8 +146,10 @@ worse-looking cards), and validated against real results before any card conclus
 
 The gate before any card conclusion (step 7 below):
 
-1. Train one deck-conditioned model on feature set 6 with all six decks (Jund Wildfire, Mono Blue
-   Terror, Red Madness, Grixis Affinity, Elves, Tron) and their real sideboards.
+1. Train one deck-conditioned model on feature set 7 (or 8) with all six decks (Jund Wildfire, Mono Blue
+   Terror, Red Madness, Grixis Affinity, Elves, Tron) and their real sideboards. r7 (feature set 7,
+   `docs/experiments/r7-overnight.md`) is already such a run. Sets below 7 disclose the opponent's
+   archetype, so their results are diagnostic only (`--contract diagnostic` in `mtg_ml.benchmark`).
 2. Play the full 6x6 matchup matrix as best-of-three with sideboarding, both seats, with enough
    matches for ±2 points per pairing (about 2,400 matches per pairing at 95%).
 3. Compare with Pauper-Research's Q3 2026 combined matchup matrix

@@ -1,6 +1,6 @@
 # mtg-ml — notes for agents
 
-Rules engine + RL for Pauper Magic (Jund Wildfire vs Mono Blue Terror). Python reference engine, a bit-exact Rust port, scripted bots, masked-PPO self-play. README.md is the user-facing overview; `docs/` has the deep dives.
+Rules engine + RL for Pauper Magic: six decks (Jund Wildfire, Mono Blue Terror, Red Madness, Grixis Affinity, Elves, Tron) and 21 matchups (15 cross-deck, 6 mirrors that run only when named). Jund vs Mono Blue Terror is the standing benchmark. Python reference engine, a bit-exact Rust port, scripted bots, masked-PPO self-play. README.md is the user-facing overview; `docs/` has the deep dives.
 
 ## Commands
 
@@ -17,7 +17,7 @@ use `.venv/bin/python` or activate `.venv`. `make native` rebuilds into that sam
 environment; never install one worktree's native engine into a shared global Python.
 Conductor setup and run commands are described in `docs/development.md`.
 
-`MTG_ENGINE=native` switches play, training, evaluation and trace commands to the Rust engine; `mtg_ml.play`, `mtg_ml.rl.evaluate` and `mtg_ml.trace` also take `--engine native`. The test suite picks engines itself (see `tests/conftest.py`), and `mtg_ml.difftest` always runs both.
+`MTG_ENGINE=native` switches play, training, evaluation and trace commands to the Rust engine; `mtg_ml.play`, `mtg_ml.rl.train`, `mtg_ml.rl.evaluate` and `mtg_ml.trace` also take `--engine native`, and an explicit `--engine python` beats the variable. The test suite picks engines itself (see `tests/conftest.py`), and `mtg_ml.difftest` always runs both.
 
 ## Invariants — do not break
 
