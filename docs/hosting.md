@@ -41,6 +41,10 @@ Hetzner CAX21 (arm64), fsn1, Ubuntu 24.04         Hetzner firewall: inbound TCP 
   SHA-256 and feature set (`python -m mtg_ml.hosted check`).
 - Game state survives restarts in SQLite; replays are files.
 
+For player-submitted flags and surveys, use the [feedback retrieval guide](play-feedback.md).
+It reads SQLite over SSH without restarting the app and includes unfinished
+games that do not yet have replay files.
+
 The interface between app and container (env variables, mounts, health) is
 fixed in the hosted-play interface contract; the env variables are listed in
 `deploy/app.env.example`.

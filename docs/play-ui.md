@@ -76,6 +76,10 @@ The same protocol behind Cloudflare Access ([hosting](hosting.md) for the deploy
 - **Retries.** A repeated `choose` for a decision already taken with the same option returns the view again; a repeated `next` returns the same next game (and token); results, replay exports, flags and issue filing are keyed in the database, so a retry never duplicates them.
 - **Feedback.** Flags and surveys are saved with the game and its replay under the player's pseudonym. GitHub filing is off unless `MTG_HOSTED_GITHUB_FILING=1`; the report form then says the report is saved for the developers instead of published.
 
+Operators: [retrieve and review feedback](play-feedback.md) with the read-only
+SSH command. SQLite includes flags from unfinished games even when the replay
+directory and GitHub have no corresponding entries.
+
 Verified (2026-10-09) with Playwright against `python -m mtg_ml.hosted serve` (native engine, the pinned r7 lr075 and r4 checkpoints) and a local stand-in for the Access issuer, two accounts in isolated browser contexts: deck selection (six decks, seven opponents each), the paying step, reload and resume, a server restart mid-game then resume, flag, survey, post-game review, and the second account seeing neither the game (404 even with the first account's token) nor its replay. On an Apple M3 MacBook (16 GB): about 290 MiB RSS idle and 380 MiB peak with eight concurrent games; per-choice latency with one player p50 7 ms / p95 142 ms, and with eight players answering instantly (one game worker serializes them) p50 275 ms / p95 543 ms.
 
 The live server's frames keep the replay format, with two additions.
