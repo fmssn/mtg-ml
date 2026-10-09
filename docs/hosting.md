@@ -8,8 +8,10 @@ group of invited players on one Hetzner Cloud machine behind Cloudflare Access.
 > pinned checkpoints. Cloudflare: zone `mtg-ml.com`, Zero Trust team
 > `broken-mode-8274`, remotely managed tunnel `mtg-play-1`, Access app `mtg-play`
 > (One-time PIN only, 24 h session) with the reusable policy `mtg-play allowlist`.
-> Adding a player means editing that policy *and* `MTG_ALLOWED_EMAILS`, then
-> `docker compose up -d`.
+> Players are added or removed with the `play-players` skill
+> (`.claude/skills/play-players/SKILL.md`), which keeps the policy and
+> `MTG_ALLOWED_EMAILS` in sync. The image tag in service is pinned in
+> `/opt/mtg-ml/deploy/.env` (gitignored) on the box.
 
 ## Architecture
 
@@ -191,9 +193,9 @@ docker compose -f deploy/compose.yaml ps             # app healthy, cloudflared 
 curl -fsS http://127.0.0.1:8080/healthz             # model hashes + runtime
 ```
 
-Record the image tag in use (e.g. `echo $MTG_PLAY_IMAGE >> /srv/mtg-play/RELEASES`).
-`docker compose` needs the same `MTG_PLAY_IMAGE` exported for later commands,
-otherwise it falls back to `mtg-play:local`.
+Record the image tag in use (e.g. `echo $MTG_PLAY_IMAGE >> /srv/mtg-play/RELEASES`)
+and pin it for later commands: `echo MTG_PLAY_IMAGE=$MTG_PLAY_IMAGE > deploy/.env`
+(gitignored; compose reads it automatically, otherwise it falls back to `mtg-play:local`).
 
 ## 6. Cloudflare tunnel and Access
 
@@ -267,8 +269,9 @@ cd /opt/mtg-ml && git fetch && git checkout <new-rev>
 export GIT_REV=$(git rev-parse HEAD) MTG_PLAY_IMAGE=mtg-play:$(git rev-parse --short HEAD)
 docker compose -f deploy/compose.yaml build app
 docker compose -f deploy/compose.yaml run --rm --no-deps app python -m mtg_ml.hosted check
-# back up first (section 8), then replace the container
+# back up first (section 8), then replace the container and pin the new tag
 docker compose -f deploy/compose.yaml up -d app
+echo MTG_PLAY_IMAGE=$MTG_PLAY_IMAGE > deploy/.env && echo $MTG_PLAY_IMAGE >> /srv/mtg-play/RELEASES
 ```
 
 A restart on the same release restores unfinished games from SQLite. A new
@@ -286,7 +289,7 @@ when `/var/run/reboot-required` exists.
 ## 11. Rollback
 
 ```bash
-export MTG_PLAY_IMAGE=mtg-play:<previous-short-rev>     # see /srv/mtg-play/RELEASES
+echo MTG_PLAY_IMAGE=mtg-play:<previous-short-rev> > deploy/.env   # see /srv/mtg-play/RELEASES
 docker compose -f deploy/compose.yaml up -d app
 ```
 
