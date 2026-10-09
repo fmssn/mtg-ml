@@ -111,21 +111,22 @@ calibration (ECE) and per-card count error, by game of the match, plus how
 distinguishing evidence moves the prediction. Claims of stronger play need a
 specialist gameplay evaluation (`docs/benchmark-plan.md`).
 
-### Smoke result (2026-10-09, Apple M3 Mac, native engine, code 0d96159)
+### Smoke result (2026-10-09, Apple M3 Mac, native engine, 71-variant manifest)
 
 `python tools/belief_smoke.py --train-matches 300 --eval-matches 120 --workers 6 --steps 1500 --hidden 64 --engine native`:
-607 / 241 / 248 games (train / dev / test), 21,764 training decisions; an
-untrained set-8 learner against the scripted bots, `max_turns` 30. Belief
-loss 2.51 -> 0.15 (first / last 50 steps).
+609 / 244 / 244 games (train / dev / test); an untrained set-8 learner against
+the scripted bots, `max_turns` 30. Belief loss 2.63 -> 0.17 (first / last 50
+steps).
 
 | split | archetype log loss (train prior) | accuracy | ECE | count MAE per card |
 |---|---:|---:|---:|---:|
-| dev | 0.137 (1.756) | 0.946 | 0.009 | 0.128 |
-| test | 0.101 (1.802) | 0.953 | 0.009 | 0.127 |
+| dev | 0.106 (1.751) | 0.954 | 0.007 | 0.117 |
+| test | 0.114 (1.783) | 0.945 | 0.008 | 0.140 |
 
-Game-1 decisions: accuracy 0.89 (dev) / 0.90 (test); games 2 and 3, with the
-earlier games' evidence: 0.996-1.0. Evidence of two Lightning Bolts and three
+Game-1 decisions: accuracy 0.90 (dev) / 0.89 (test); games 2 and 3, with the
+earlier games' evidence: 1.0. Evidence of two Lightning Bolts and three
 Mountains moves the prediction to Red Madness, three Islands and a Counterspell
 to Mono Blue Terror, Urza's Tower and Expedition Map to Tron. Archetypes are
 easy to tell apart from a few cards; counts are the harder part. This says the
-head learns from witnessed evidence; it says nothing about play strength.
+head learns from witnessed evidence; it says nothing about play strength. (The
+54-variant manifest before #75 gave 0.946 / 0.953 accuracy.)
