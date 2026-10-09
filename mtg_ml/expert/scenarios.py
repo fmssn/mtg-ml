@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import math
-import re
 
 from ..backend import game_class
 from ..encode import option_object_ids
@@ -242,6 +241,3 @@ def selector_for(g, index: int) -> dict:
     # should attach named objects instead (especially for distinct copies).
     return {"player": g.decision.player, "kind": g.decision.kind, "key": canonical(opt.key), "label": opt.label}
 
-
-def normalized_label(label: str) -> str:
-    return re.sub(r"#\d+", "#object", label)

@@ -41,11 +41,6 @@ def _policy_metadata(spec: str) -> tuple[str | None, dict | None]:
     return "; ".join(parts), cfg
 
 
-def policy_info(spec: str) -> str | None:
-    """One line on a model checkpoint's training state, from the file itself."""
-    return _policy_metadata(spec)[0]
-
-
 def record_game(
     specs: list[str],
     seed: int,
