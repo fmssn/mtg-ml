@@ -5,12 +5,13 @@
 [benchmark-blue.md](benchmark-blue.md)) and the Jund specialist (#66,
 [benchmark-jund.md](benchmark-jund.md)) have merged, and so has the tactical
 puzzle runner with seven reviewed development puzzles (#81,
-[tactical-puzzles.md](tactical-puzzles.md)); `python -m mtg_ml.benchmark` has the
-`validate` and `puzzles` commands. Still to deliver: the remaining reviewed
-puzzle corpus (100 puzzles, PR 4), then the frozen release with public
-`run`/`compare` commands, release statistics and the release gates below
-(PR 5). Sections describing those parts remain proposals; see
-[Delivery and acceptance](#delivery-and-acceptance).
+[tactical-puzzles.md](tactical-puzzles.md)). The release tooling (#84,
+[benchmark-release.md](benchmark-release.md)) adds `run`, `compare`,
+`calibrate`, `turn-limit` and `archive` to `python -m mtg_ml.benchmark`, with
+paired statistics and recomputed aggregates. Still to deliver: the remaining
+reviewed puzzle corpus (100 puzzles, PR 4), the baseline, turn-limit and
+power-pilot campaigns with their archived evidence, and the reserved final
+assessment (PR 5). See [Delivery and acceptance](#delivery-and-acceptance).
 
 The first release will measure preboard Jund Wildfire and Mono Blue Terror play
 against two deterministic scripted specialists, alongside reviewed tactical
@@ -517,29 +518,30 @@ outer resampling in PR57 and report root-specific effects. Do not infer training
 variance from thousands of games against one checkpoint. When there are too
 few independent groups to estimate an interval, report it as unavailable.
 
-## CLI: `validate` and `puzzles` exist, `run` and `compare` are proposed
+## CLI
 
 The entry point is `mtg_ml.benchmark`, separate from the existing evaluator and
-trainer. `validate` (#64) and `puzzles` ([tactical-puzzles.md](tactical-puzzles.md),
-#81) exist; **`run` and `compare` do not exist yet.** Paths
-below refer to future artifacts; writing the example JSON alone is not a
-runnable benchmark. `validate` checks reviews/digests, constructs and verifies
-scenarios/witnesses and compares both-engine inputs/actions/outcomes without
-evaluating a checkpoint. `run` defaults to the manifest's complete panel and
-modes. `compare` writes paired differences from two complete compatible runs.
+trainer. `validate` (#64), `puzzles` ([tactical-puzzles.md](tactical-puzzles.md),
+#81) and `run`, `compare`, `calibrate`, `turn-limit` and `archive` (#84) exist;
+[benchmark-release.md](benchmark-release.md) is the command reference and
+explains how to read each artifact. `validate` checks reviews/digests,
+constructs and verifies scenarios/witnesses and compares both-engine
+inputs/actions/outcomes without evaluating a checkpoint. `run` defaults to the
+manifest's complete panel and modes. `compare` writes paired differences from
+two complete compatible runs.
 
 ```bash
-# Exists: validate the freeze and engine parity before running candidates.
+# Validate the freeze and engine parity before running candidates.
 .venv/bin/python -m mtg_ml.benchmark validate \
   --manifest benchmark.dev.json --engines python,native \
   --out .context/benchmark/validation.json
 
-# Proposed: a development run; checkpoint features come from its metadata.
+# A development run; checkpoint features come from its metadata.
 .venv/bin/python -m mtg_ml.benchmark run \
   --manifest benchmark.dev.json --checkpoint runs/candidate.pt \
   --engine native --workers 4 --out .context/benchmark/candidate.json
 
-# Proposed: treatment-minus-baseline comparisons, separated by mode.
+# Treatment-minus-baseline comparisons, separated by mode.
 .venv/bin/python -m mtg_ml.benchmark compare \
   --baseline .context/benchmark/baseline.json \
   --candidate .context/benchmark/candidate.json \
@@ -550,7 +552,7 @@ An explicit `run --cells jund_vs_jund,jund_vs_blue` supports specialist
 diagnostics, selecting matching learner-deck puzzles as well as game cells.
 Record the selected rows as the run's planned counts and its panel as partial;
 completion of that selection does not authorize a full-suite headline score.
-An optional `--mode sampled` selects one manifest mode; it does not relabel or
+An optional `--modes sampled` selects manifest modes; it does not relabel or
 pool results. Emit JSON atomically, protect existing outputs from overwrite,
 and return nonzero for invalid/incomplete runs or incompatible comparisons.
 Workers affect scheduling only, not row identity or gameplay randomness.
@@ -563,7 +565,7 @@ Workers affect scheduling only, not row identity or gameplay randomness.
 | 2. Jund specialist (merged, #66) | Separate `benchmark-jund@1` registration, ordered rules/parameters and reviewed development fixtures | Every reachable decision has a handler; all reviewed critical development fixtures pass; full-game smoke panel finishes legally; paired comparison against the legacy Jund pilot is recorded |
 | 3. Blue specialist (merged, #65) | Separate `benchmark-blue@1` registration, ordered rules/parameters and reviewed development fixtures | Same gate for Blue, including cantrip/library knowledge, counter/ward interactions and mana reservation |
 | 4. Tactical runner and corpus (runner and 7 development puzzles merged, #81; the 100-puzzle corpus is still to do) | Agent-driven attempts, declarative objectives/boundaries, total response policies, case aggregation and 100 reviewed puzzles split by groups | Both-engine verification of witnesses and adverse responses; equivalent solutions succeed; wrong targets/sequencing, missing history, ambiguous selectors and horizon misses are correctly classified |
-| 5. Frozen benchmark release | Validated suite freeze, paired statistics/CLI, existing-bot/checkpoint baselines, power-pilot sizing and reserved final assessment | Complete provenance and rows; no hidden-information dependence; reported scores/intervals match raw rows; calibration controls and turn-limit sensitivity pass; archived release bundle; baseline results and machine-qualified latency published |
+| 5. Frozen benchmark release (tooling merged, #84; campaigns, archive and final assessment still to do) | Validated suite freeze, paired statistics/CLI, existing-bot/checkpoint baselines, power-pilot sizing and reserved final assessment | Complete provenance and rows; no hidden-information dependence; reported scores/intervals match raw rows; calibration controls and turn-limit sensitivity pass; archived release bundle; baseline results and machine-qualified latency published |
 
 The foundation may use synthetic development fixtures and legacy adapters for
 smoke checks; it cannot advertise the new benchmark as released before the two

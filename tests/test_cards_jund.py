@@ -106,6 +106,23 @@ def test_krark_clan_shaman_hits_only_non_flyers():
     assert find(g, "Tolarian Terror").damage == 1
 
 
+def test_krark_clan_shaman_stacks_three_activations_at_one_priority():
+    # Playtest 2026-10-09: the web client auto-passed after the first activation. The engine
+    # keeps priority with the activating player, so all three activations go on the stack and
+    # resolve (1 damage each to every non-flyer): the 1/3 dies on the third, the Shaman on the first.
+    g = scenario(
+        p0={"battlefield": ["Krark-Clan Shaman", "Ichor Wellspring", "Ichor Wellspring", "Ichor Wellspring"]},
+        p1={"battlefield": ["Masked Vandal"]},
+    )
+    for _ in range(3):
+        assert g.decision.kind == O.PRIORITY and g.decision.player == 0
+        choose(g, "Krark-Clan Shaman: 1 damage")
+    assert sum("Krark-Clan Shaman" in str(i) for i in g.stack) == 3
+    assert g.decision.player == 0 and has(g, "Pass priority")
+    resolve_stack(g)
+    assert bf(g) == []  # the Vandal, the Shaman and all three Wellsprings are gone
+
+
 def test_nyxborn_hydra_x_and_bestow():
     g = scenario(p0={"hand": ["Nyxborn Hydra"], "battlefield": ["Forest"] * 4 + ["Gixian Infiltrator"]})
     assert has(g, "Cast Nyxborn Hydra") and has(g, "Cast Nyxborn Hydra (bestow)")

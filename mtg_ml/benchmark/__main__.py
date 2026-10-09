@@ -1,7 +1,15 @@
-"""Artifact/witness validation and development tactical puzzle attempts.
+"""Frozen benchmark: validate artifacts, run candidates, compare, and release controls.
 
-`run`/`compare` (paired benchmark statistics) are not released yet; `puzzles`
-writes a descriptive development report, not a BenchmarkResult.
+  validate    freeze, native build, reviewed witnesses and mistakes, on each engine
+  run         games + puzzles for a checkpoint or registered agent -> BenchmarkResult
+  compare     paired differences of two complete, compatible results -> BenchmarkComparison
+  turn-limit  rerun the same seeded games under longer turn caps -> BenchmarkTurnLimitSensitivity
+  calibrate   controls: witnesses pass, mistakes fail, engines agree, errors cannot inflate
+  archive     build / verify a durable bundle with SHA256SUMS
+  puzzles     descriptive development puzzle attempts (not a BenchmarkResult)
+
+Outputs are written atomically and never overwritten. `run` exits nonzero unless the result is
+complete; `compare` refuses incompatible or incomplete results. See docs/benchmark-release.md.
 """
 
 import argparse
@@ -10,7 +18,22 @@ import subprocess
 import sys
 
 from .jsonio import write_json
+from .release import CheckpointLearner  # noqa: F401  (kept importable from here)
 from .validation import validate
+
+
+def _learner(args, parser, manifest):
+    from .artifacts import DIAGNOSTIC, FAIR
+    from .release import agent_learner, checkpoint_learner
+    from .tactics import specialist_registry
+    contract = {"fair": FAIR, "diagnostic": DIAGNOSTIC}[args.contract]
+    if args.checkpoint:
+        return checkpoint_learner(args.checkpoint, contract)
+    return agent_learner(args.agent, manifest, specialist_registry(manifest.data["freeze"]["code_revision"]))
+
+
+def _split(value):
+    return value.split(",") if value else None
 
 
 def puzzles(args, parser):
@@ -63,23 +86,63 @@ def puzzles(args, parser):
         parser.exit(1, "benchmark: technical errors in puzzle attempts; see report\n")
 
 
-class CheckpointLearner:
-    """Picklable factory; one adapter per worker process, seat and mode."""
-    _cache = {}
+def run(args, parser):
+    from .artifacts import load_manifest
+    from .release import run_benchmark
+    manifest = load_manifest(args.manifest)
+    result = run_benchmark(args.manifest, _learner(args, parser, manifest), engine=args.engine, workers=args.workers,
+                           cells=_split(args.cells), modes=_split(args.modes), out=args.out, resume=args.resume, command=sys.argv)
+    print(f"{args.out}: {result['status']}")
+    if result["status"] != "complete":
+        parser.exit(1, "benchmark: result is not complete (technical errors); nothing was scored\n")
 
-    def __init__(self, path, contract):
-        self.path, self.contract = path, contract
 
-    def __call__(self, seat, mode):
-        from .adapters import CheckpointAdapter
-        key = self.path, self.contract, seat, mode
-        if key not in self._cache:
-            self._cache[key] = CheckpointAdapter(self.path, seat, mode, self.contract)
-        return self._cache[key]
+def compare(args, parser):
+    from .release import compare_results
+    compare_results(args.baseline, args.candidate, args.out)
+    print(args.out)
+
+
+def turn_limit(args, parser):
+    from .artifacts import load_manifest
+    from .release import turn_limit_sensitivity
+    manifest = load_manifest(args.manifest)
+    caps = tuple(int(c) for c in args.caps.split(","))
+    report = turn_limit_sensitivity(args.manifest, _learner(args, parser, manifest), caps, engine=args.engine, workers=args.workers,
+                                    cells=_split(args.cells), modes=_split(args.modes), out_dir=args.out_dir, command=sys.argv)
+    print(f"{args.out_dir}/turn-limit.json: {report['status']}")
+    if report["status"] == "incomplete":
+        parser.exit(1, "benchmark: technical errors; sensitivity not evaluated\n")
+
+
+def calibrate(args, parser):
+    from .release import calibrate as run_calibration
+    report = run_calibration(args.manifest, args.engines.split(","), args.out, args.checkpoint, workers=args.workers, blocks=args.blocks, command=sys.argv)
+    for check in report["checks"]:
+        print(f"{'pass' if check['passed'] else 'FAIL'}  {check['id']}" + "".join(f"\n      {p}" for p in check["problems"]))
+    if report["status"] != "passed":
+        parser.exit(1, "benchmark: calibration failed\n")
+
+
+def archive(args, parser):
+    from . import archive as bundle
+    if args.action == "build":
+        path = bundle.build(args.out, manifest=args.manifest, results=args.result, comparisons=args.comparison, calibration=args.calibration,
+                            sensitivity=args.sensitivity, validations=args.validation)
+        print(path)
+    else:
+        print(bundle.verify(args.directory))
+
+
+def add_learner(command):
+    learner = command.add_mutually_exclusive_group(required=True)
+    learner.add_argument("--checkpoint")
+    learner.add_argument("--agent", help="benchmark-jund@1, benchmark-blue@1 (fair), legacy-jund or legacy-blue (diagnostic); plays only its own deck's cells")
+    command.add_argument("--contract", choices=["fair", "diagnostic"], default="fair", help="information contract of the candidate (checkpoints below feature set 7 need diagnostic)")
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     command = commands.add_parser("validate")
     command.add_argument("--manifest", required=True)
@@ -96,16 +159,55 @@ def main(argv=None):
     command.add_argument("--cells", help="comma-separated cells; selects learner-deck puzzles")
     command.add_argument("--workers", type=int, default=1)
     command.add_argument("--out", required=True)
+    command = commands.add_parser("run", help="games and puzzles for one candidate -> BenchmarkResult")
+    command.add_argument("--manifest", required=True)
+    add_learner(command)
+    command.add_argument("--engine", choices=["python", "native"], default="python")
+    command.add_argument("--workers", type=int, default=1)
+    command.add_argument("--cells", help="comma-separated cells (a partial panel; never a full-suite headline)")
+    command.add_argument("--modes", help="comma-separated subset of the manifest modes")
+    command.add_argument("--resume", action="store_true", help="reuse clean chunks of this exact run in <out>.parts; error rows are never retried")
+    command.add_argument("--out", required=True)
+    command = commands.add_parser("compare", help="paired treatment-minus-baseline comparison")
+    command.add_argument("--baseline", required=True)
+    command.add_argument("--candidate", required=True)
+    command.add_argument("--out", required=True)
+    command = commands.add_parser("turn-limit", help="does the turn cap change the scores?")
+    command.add_argument("--manifest", required=True)
+    add_learner(command)
+    command.add_argument("--engine", choices=["python", "native"], default="python")
+    command.add_argument("--workers", type=int, default=1)
+    command.add_argument("--cells")
+    command.add_argument("--modes")
+    command.add_argument("--caps", default="100,200,400")
+    command.add_argument("--out-dir", required=True)
+    command = commands.add_parser("calibrate", help="release controls on the manifest's corpus and specialists")
+    command.add_argument("--manifest", required=True)
+    command.add_argument("--engines", default="python,native")
+    command.add_argument("--checkpoint", help="use this checkpoint (sampled) for the self-compare control instead of a specialist")
+    command.add_argument("--workers", type=int, default=2, help="worker count compared against 1 in the self-compare control")
+    command.add_argument("--blocks", type=int, default=4, help="blocks per cell in the game controls")
+    command.add_argument("--out", required=True)
+    command = commands.add_parser("archive", help="build or verify a durable release bundle")
+    actions = command.add_subparsers(dest="action", required=True)
+    build = actions.add_parser("build")
+    build.add_argument("--out", required=True)
+    build.add_argument("--manifest", required=True)
+    build.add_argument("--result", action="append", default=[])
+    build.add_argument("--comparison", action="append", default=[])
+    build.add_argument("--calibration")
+    build.add_argument("--sensitivity")
+    build.add_argument("--validation", action="append", default=[])
+    check = actions.add_parser("verify")
+    check.add_argument("directory")
     args = parser.parse_args(argv)
-    if args.command == "puzzles":
-        try:
-            return puzzles(args, parser)
-        except ValueError as e:
-            parser.exit(1, f"benchmark: {e}\n")
-    report = validate(args.manifest, tuple(args.engines.split(",")))
+    handlers = {"puzzles": puzzles, "run": run, "compare": compare, "turn-limit": turn_limit, "calibrate": calibrate, "archive": archive}
     try:
+        if args.command in handlers:
+            return handlers[args.command](args, parser)
+        report = validate(args.manifest, tuple(args.engines.split(",")))
         write_json(args.out, report)
-    except (OSError, ValueError) as e:
+    except (ValueError, OSError) as e:
         parser.exit(1, f"benchmark: {e}\n")
     if report["status"] != "complete":
         parser.exit(1, "benchmark: " + "; ".join(report["errors"]) + "\n")

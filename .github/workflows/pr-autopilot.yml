@@ -262,7 +262,7 @@ jobs:
           git merge --abort 2> /dev/null || true
           git reset -q --hard "origin/$HEAD_REF" && git clean -fdq
           gh pr edit "$PR" --add-label autopilot:opus-used > /dev/null
-          gh pr view "$PR" --comments --json comments --jq '[.comments[] | select(.body | startswith("**Autopilot"))] | .[-3:][] | .body' > "$RUNNER_TEMP/notes.md"
+          gh pr view "$PR" --json comments --jq '[.comments[] | select(.body | startswith("**Autopilot"))] | .[-3:][] | .body' > "$RUNNER_TEMP/notes.md"
           ESCALATION="$ESCALATION"$'\n\nRecent autopilot comments:\n'"$(cat "$RUNNER_TEMP/notes.md")" \
             bash "$AP/prepare.sh" escalate "$PR" "$BASE_REF"
       - name: "Escalate: Opus"

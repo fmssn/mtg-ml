@@ -290,7 +290,8 @@ function autoAnswer(d) {
     if (top && top.controller === S.seat && S.holdOnce) { S.holdOnce = false; return null; }  // hold priority once
     if (top && top.controller !== S.seat) return canRespond && !S.yields.has(top.card || top.name.split(':')[0]) ? null : pass;  // something of theirs to answer
     if (acted && canRespond) return null;  // never pass right after they did something you could answer
-    if (top) return pass;  // my own spell: let it resolve (they may still respond)
+    if (top && canRespond) return null;  // my own spell or ability is on the stack and I can add to it (stack a second Krark-Clan Shaman activation): keep the stop
+    if (top) return pass;  // my own spell, nothing worth adding: let it resolve (they may still respond)
     const mine = s.active === S.seat;
     if (S.passMode === 'opp') {
       if (mine && s.turn !== S.passTurn) S.passMode = null; else return pass;

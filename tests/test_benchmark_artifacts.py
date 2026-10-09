@@ -145,8 +145,8 @@ def test_result_counts_duplicates_errors_and_roundtrip(tmp_path):
     assert result["status"] == "complete"
     assert result["partial_cells"][0]["score"] == 0.5
     claimed = copy.deepcopy(result)
-    claimed["aggregate"]["greedy"]["game_score"] = 0.5
-    with pytest.raises(ValueError, match="deferred"):
+    claimed["aggregate"]["greedy"]["game_score"] = 0.6
+    with pytest.raises(ValueError, match="do not match the raw rows"):
         validate_result(claimed)
     stored = write_result(tmp_path / "result.json", result)
     assert load_result(tmp_path / "result.json").data == stored

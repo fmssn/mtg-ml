@@ -413,6 +413,35 @@ def test_monstrous_emergence_needs_a_creature():
     assert not has(g, "Cast Monstrous Emergence")
 
 
+def test_monstrous_emergence_cannot_sacrifice_its_only_creature_to_pay():
+    # Regression (r8-fs8-belief crash: "choose_card ... has no options"): the
+    # Eldrazi Spawn is the only creature and the second mana would have to come
+    # from sacrificing it, leaving nothing to choose for the additional cost.
+    g = scenario(p0={"hand": ["Monstrous Emergence"], "battlefield": ["Forest", "Eldrazi Spawn"]}, p1={"battlefield": ["Writhing Chrysalis"]})
+    assert not has(g, "Cast Monstrous Emergence")
+
+
+def test_monstrous_emergence_payment_keeps_a_creature_to_choose():
+    g = scenario(p0={"hand": ["Monstrous Emergence"], "battlefield": FORESTS(2) + ["Eldrazi Spawn"]}, p1={"battlefield": ["Writhing Chrysalis"]})
+    assert has(g, "Cast Monstrous Emergence")
+    choose(g, "Cast Monstrous Emergence")
+    choose(g, "Target Writhing Chrysalis")
+    while g.decision.kind == O.PAY_MANA:
+        assert not has(g, "Sacrifice Eldrazi Spawn")
+        g.step(0)
+    resolve_stack(g)  # the Spawn (power 0) was the only choice and is taken by settle()
+    assert find(g, "Eldrazi Spawn") and find(g, "Writhing Chrysalis").damage == 0
+
+
+def test_monstrous_emergence_may_sacrifice_a_spawn_when_a_creature_card_is_in_hand():
+    g = scenario(p0={"hand": ["Monstrous Emergence", "Avenging Hunter"], "battlefield": ["Forest", "Eldrazi Spawn"]}, p1={"battlefield": ["Writhing Chrysalis"]})
+    assert has(g, "Cast Monstrous Emergence")
+    choose(g, "Cast Monstrous Emergence")
+    choose(g, "Target Writhing Chrysalis")
+    pay(g)
+    assert [lab.split("#")[0] for lab in labels(g)] == ["Reveal Avenging Hunter"] or g.decision.kind != O.CHOOSE_CARD
+
+
 def test_vitu_ghazi_inspector_collects_evidence():
     g = scenario(p0={"hand": ["Vitu-Ghazi Inspector"], "battlefield": FORESTS(2) + ["Llanowar Elves"], "graveyard": ["Generous Ent", "Forest"]})
     assert has(g, "Cast Vitu-Ghazi Inspector (evidence)")
