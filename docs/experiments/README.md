@@ -7,11 +7,13 @@ Every training run that is meant to tell us something gets an entry here, kept e
 | what was done, why, and what came out (human) | [`ledger.md`](ledger.md), newest first |
 | the same, machine-readable, one JSON object per run | [`ledger.jsonl`](ledger.jsonl) |
 | the checkpoints, metrics and launch commands | `~/mtg-ml-checkpoints/<id>/` on h100-private (append-only, see its README) |
+| which run is which: run IDs, handles, legacy names, current roles | [`naming.md`](naming.md), [`models.md`](models.md) / [`models.json`](models.json) |
 | the reference ladder the Elo numbers are measured on | [`ladder.md`](ladder.md); files in `~/mtg-ml-checkpoints/ladder/L1/` |
 
 ## Recording a run
 
-1. Before launching, pick an id `YYYYMMDD-<short-name>` and write down the parent checkpoint (an archive id), the code ref (branch @ commit, deployed as-is to the box) and the exact flags. Change one thing per arm and keep a control arm with the same parent, code and seed.
+0. **Name it by the scheme in [`naming.md`](naming.md)** (`<yyyymmdd>-<campaign>-<arch>-<scope>-<init>[-<variant>]-s<seed>`, plus a short handle) and add the row to `models.md` and `models.json` when you launch, status `running`. Finished runs update their row (status, games, bench, L1, archive path). A change of role (`best/general`, `play/<deck>`, ...) is made in the same two files, with a line in `role_history` and the reason in the ledger entry or PR. Old names are never renamed; they go in the legacy column.
+1. Before launching, pick the run ID (archive id `YYYYMMDD-<name>`; older runs used `YYYYMMDD-<short-name>`) and write down the parent checkpoint (an archive id), the code ref (branch @ commit, deployed as-is to the box) and the exact flags. Change one thing per arm and keep a control arm with the same parent, code and seed.
 2. Train with the standard evaluation on: `--eval-every-games 250000 --bench-games 1000 --bench-greedy-games 1000 --ladder <L1 rungs> --ladder-ratings <L1 ladder.json> --ladder-games 200` (see `ladder.md`), so every run reports the same three numbers.
 3. When it ends, archive it: `~/mtg-ml-checkpoints/archive_run.sh <id> <run dir> "<branch @ commit>" <launch script> [note]`. Then evaluate the final checkpoint:
    - on 2,000 benchmark games, sampled and greedy: `python -m mtg_ml.rl.evaluate <id>/policy.pt bot --jund --games 2000 [--greedy]`;

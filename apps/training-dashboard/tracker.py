@@ -229,7 +229,7 @@ def discover(globs, explicit=()):
     return found
 
 
-def build_state(globs, explicit=(), reader=None, active=None, recent_hours=72, now=None, gpus=None):
+def build_state(globs, explicit=(), reader=None, active=None, recent_hours=72, now=None, gpus=None, handles=None):
     """Live state for every discovered campaign and run. Explicit directories are always shown."""
     reader = reader or RunReader()
     now = now or time.time()
@@ -269,6 +269,8 @@ def build_state(globs, explicit=(), reader=None, active=None, recent_hours=72, n
         alerts = [f"{m['name']}: {m['status']}" for m in members if m['status'] == 'failed']
         campaigns.append(dict(name=path.name, path=str(path), runs=[m['id'] for m in members], alerts=alerts,
                               report_ready=(path / 'morning-report.md').exists() or (path / 'morning-report.json').exists()))
+    for r in runs:
+        r['handle'] = handle_for(handles, r['name'], r['campaign'])
     try:
         disk = shutil.disk_usage(Path.home())
         disk = dict(free=disk.free, total=disk.total)
@@ -322,7 +324,33 @@ def verdict_class(v):
     return 'pend'
 
 
-def load_ledger(path):
+def load_handles(path):
+    """Lookup table from every known name of a run (handle, run ID, legacy names, ``campaign/run``) to its handle.
+
+    Read from ``docs/experiments/models.json`` (see ``docs/experiments/naming.md``). Failed attempts rank last, so a
+    legacy name shared by an attempt and its relaunch resolves to the relaunch; a campaign-qualified name is exact.
+    """
+    try:
+        models = json.loads(Path(path).read_text()).get('models') or []
+    except (OSError, ValueError, AttributeError):
+        return {}
+    out = {}
+    for m in sorted((m for m in models if isinstance(m, dict) and m.get('handle')), key=lambda m: m.get('status') == 'crashed'):
+        for key in [m['handle'], m.get('run_id'), m.get('ledger_id'), *(m.get('legacy') or [])]:
+            if isinstance(key, str):
+                out.setdefault(key, m['handle'])
+    return out
+
+
+def handle_for(handles, name, campaign=None):
+    """Handle of a run by ``campaign/name`` first, then by name alone; None when the registry does not know it."""
+    for key in ((f'{campaign}/{name}',) if campaign else ()) + (name,):
+        if key in (handles or {}):
+            return handles[key]
+    return None
+
+
+def load_ledger(path, handles=None):
     rows = []
     try:
         lines = Path(path).read_text().splitlines()
@@ -336,7 +364,7 @@ def load_ledger(path):
         if not isinstance(r, dict) or 'id' not in r:
             continue
         res = r.get('results') or {}
-        rows.append(dict(id=r['id'], date=r.get('date'), parent=r.get('parent'), code=r.get('code'), engine=r.get('engine'),
+        rows.append(dict(id=r['id'], handle=handle_for(handles, r['id']), date=r.get('date'), parent=r.get('parent'), code=r.get('code'), engine=r.get('engine'),
                          change=r.get('change'), flags=r.get('flags'), games=number(r.get('games')), verdict=r.get('verdict'),
                          verdict_class=verdict_class(r.get('verdict')), archive=r.get('archive'), results=res,
                          elo=_first(res, 'elo_L1', exact='elo_L1'), sampled=_first(res, 'bench_sampled'),

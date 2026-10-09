@@ -24,6 +24,10 @@ Runs idle for more than `--recent-hours` (72) are hidden. `--campaign DIR`
 recognised from `/proc` (`mtg_ml.rl.train --run ...`), which also yields its flags.
 `metrics.jsonl` is read incrementally, so large logs stay cheap.
 `--ledger` defaults to the ledger of the checkout the server runs from.
+`--models` (default `models.json` next to the ledger) is the model registry of
+`docs/experiments/naming.md`: runs and ledger rows are labelled with their
+handle, matched by run ID, legacy name or `campaign/run`; unknown runs keep
+their own name.
 
 ```bash
 python apps/training-dashboard/server.py --port 8768 \

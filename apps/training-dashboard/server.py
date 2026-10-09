@@ -21,8 +21,9 @@ import tracker  # noqa: E402
 class TrackerMonitor:
     """Local, discovery-based monitor: finds campaigns and run directories itself on every poll."""
 
-    def __init__(self, roots, explicit, ledger, interval, recent_hours):
+    def __init__(self, roots, explicit, ledger, interval, recent_hours, models=None):
         self.roots, self.explicit, self.ledger = roots, explicit, Path(ledger)
+        self.models = Path(models) if models else Path(ledger).with_name('models.json')
         self.interval, self.recent_hours = interval, recent_hours
         self.reader, self.stop, self.lock = tracker.RunReader(), threading.Event(), threading.Lock()
         self.value = {'snapshot': None, 'error': None, 'last_attempt': None, 'refresh_seconds': interval}
@@ -30,7 +31,8 @@ class TrackerMonitor:
 
     def poll(self):
         try:
-            data = tracker.build_state(self.roots, self.explicit, self.reader, recent_hours=self.recent_hours)
+            data = tracker.build_state(self.roots, self.explicit, self.reader, recent_hours=self.recent_hours,
+                                    handles=tracker.load_handles(self.models))
             with self.lock:
                 self.value.update(snapshot=data, error=None, last_attempt=time.time())
         except Exception as exc:  # keep serving the last good state
@@ -49,11 +51,11 @@ class TrackerMonitor:
 
     def history(self):
         try:
-            mtime = self.ledger.stat().st_mtime
+            mtime = (self.ledger.stat().st_mtime, self.models.stat().st_mtime if self.models.exists() else None)
         except OSError:
             mtime = None
         if mtime != self._ledger[0]:
-            self._ledger = (mtime, tracker.load_ledger(self.ledger))
+            self._ledger = (mtime, tracker.load_ledger(self.ledger, tracker.load_handles(self.models)))
         return json.dumps(tracker.clean(dict(ledger=str(self.ledger), runs=self._ledger[1])), allow_nan=False).encode()
 
     def report(self, name):
@@ -159,6 +161,7 @@ def main():
     ap.add_argument('--root', action='append', default=None,
                     help='glob of campaign / run directories to discover (repeatable; default %s)' % ' '.join(tracker.DEFAULT_ROOTS))
     ap.add_argument('--ledger', default=str(HERE.parent.parent / 'docs' / 'experiments' / 'ledger.jsonl'))
+    ap.add_argument('--models', help='model registry with run handles (default: models.json next to the ledger)')
     ap.add_argument('--recent-hours', type=float, default=72, help='hide idle runs older than this')
     ap.add_argument('--remote-script')
     ap.add_argument('--port', type=int, default=8767)
@@ -173,7 +176,7 @@ def main():
         monitor = Monitor(args.host, args.remote_script, args.campaign[0], args.cache, args.interval, 'ssh', args.python or 'python3')
     else:
         monitor = TrackerMonitor(args.root if args.root is not None else list(tracker.DEFAULT_ROOTS), args.campaign,
-                                 args.ledger, args.interval, args.recent_hours)
+                                 args.ledger, args.interval, args.recent_hours, args.models)
     monitor.poll()
     worker = threading.Thread(target=monitor.run, daemon=True)
     worker.start()
