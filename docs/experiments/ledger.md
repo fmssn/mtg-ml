@@ -2,6 +2,24 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## 20261009-r8 · three-arm follow-up to r7: continue lr075, feature set 8 + belief head, Jund-vs-Blue fine-tune
+
+- **Status:** running since 18:35 Berlin October 9 (16:35 UTC). Launch record: [r8-launch.json](r8-launch.json). Results will be added to this entry; the arm ids below are the archive ids.
+- **Code:** `889798bc54c7f940200c01d2e7ccee01a30a8159` (origin/HEAD `claude/lucid-euler-0tjz9h` at launch), deployed unchanged to `~/mtg-ml-r8/code` on each host (own venv, native built there). Launch tooling `tools/r8_campaign.py` and `tools/r8_host.sh` (added by the PR carrying this entry) runs from `~/mtg-ml-r8/launch/`, outside the deployed checkout. Campaign `~/mtg-ml-r8/campaigns/r8-20261009` on both hosts. Engine, features and flags are those of r7 (`r7-overnight-launch.json`), so r7's lr075 trajectory is the control at matched games.
+- **Common settings (r7 lr075):** h256 / entity-attn 1 / GRU / shared value, seed 8, native engine, 2048 games per iteration, bf16 compiled PPO (capture 2, minibatch 2048, 4 epochs, target KL 0.03), pipeline 1, inference server with 64 resident slots, 50% self-play + 50% recent/uniform pool, 20% postboard games, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, checkpoint every 25 updates, snapshot every 122, `--eval-every-games 250000` with 1000 sampled + 1000 greedy Jund vs Blue games and L1 ladder (4 rungs, 200 games each, unchanged ratings 0/33.3/50.8/78.8; rung copies in the campaign dir). Per arm: learner GPU + inference GPU, trainer CPUs 2, server 1, workers 24, eval 4, same pinning scheme as r7.
+- **Smoke before launch:** 4 to 6 updates per arm on separate smoke dirs: finite PPO stats, benchmark and L1 evaluation ran. Arm A resumed from a copy at iteration 4075 and continued the lr schedule. Resume of arm B and C was not exercised (A's resume path is the same code).
+
+| arm id | host, GPUs (learner / server, bus) | CPUs | parent | change vs r7 lr075 | stops at |
+|---|---|---|---|---|---|
+| `r8-lr075-continue` | h100-private2, 0A / 18 | 0-31 | `20261008-r7-fs7-h256-lr075` `final.pt` (sha256 dc83fd7d8160c564047b435ba0e01ec42eb7496d9c29291b90b07b68bbc3c3cd, 8.35M games; the copy resumed from checkpoint 4075 = 8.35M, 4 updates were not saved by r7), pool and optimizer copied into a new run dir | none: same flags, `--resume`; `lr_anneal_origin` is in the checkpoint, so the 7.5e-5 → 7.5e-6 linear anneal over 20M games continues where it stopped (lr 4.68e-5) | 20M total games |
+| `r8-fs8-belief` | h100-private2, 87 / 90 | 32-63 | none (fresh, seed 8) | `--features 8 --belief 1`, which requires `--match-rollouts 1 --variants train` (whole best-of-three matches with sampled registered 75s; the postboard fraction no longer applies because games 2/3 are played in the match). Not changeable: the belief head cannot train on isolated games | 20M total games |
+| `r8-jund-blue-ft` | h100-private, 0A / 18 | 0-31 | r7 lr075 `policy.pt` (sha256 672aaa0c2764f853198c44a6fa7847469e01d9767952ea3fb8e9d84e068f636e), `--init` (fresh optimizer, fresh pool) | `--matchup jund_blue` only (feature set 7 swaps seats with p 0.5, so the network plays both Jund and Blue; 80% game 1, 20% postboard), lr 7.5e-5 → 7.5e-6 over 6M games | 6M total games |
+
+- **Questions:** (A) is lr075 still improving past 8.35M games; (B) does feature set 8 with the belief head change strength or L1 at matched games, against lr075's recorded trajectory at 0.25M, 1.25M, 3.25M, 6.25M and 8.25M games (L1 and benchmark; mind that B plays matches with varied lists, so it also sees different training data); (C) does Jund-vs-Blue-only training from a full-matrix parent reach the r4-control level (64% sampled vs the Blue specialist, where lr075 has 46%/49%) without losing too much elsewhere. Goal for C: a new best on the standing benchmark and on `benchmark-blue@1`.
+- **Expected speed:** r7 lr075 recorded about 0.76M games/hour (smoke 1.04M). Arm A needs about 12-15 h for the remaining 11.6M games, C about 6-8 h, B more than 20 h (to be stopped by hand).
+- **How to stop** (all trainers terminate on SIGTERM and keep `latest.pt`): `ssh h100-private2 'bash ~/mtg-ml-r8/launch/r8_host.sh stop ~/mtg-ml-r8/campaigns/r8-20261009'` and the same on `h100-private` for C. Resume only after review: `bash ~/mtg-ml-r8/launch/r8_host.sh start CAMPAIGN ARM --resume` (new tmux session `mtg-r8-ARM`). No automatic restart; training logs rotate at 2 MB with three backups.
+- **Verdict:** pending.
+
 ## 20261009-specialist-benchmark · checkpoints vs the Jund and Blue specialists (evaluation only)
 
 - **Question**: how do the current r7 arms and the old best model score against the new specialists `benchmark-jund@1` (#66) and `benchmark-blue@1` (#65)?
