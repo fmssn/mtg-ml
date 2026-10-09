@@ -73,6 +73,15 @@ SCENARIOS: dict[str, dict] = {
         "me": {"battlefield": ["Mountain", "Mountain", "Kessig Flamebreather"], "hand": ["Lightning Bolt", "Lightning Bolt"]},
         "opp": {"battlefield": ["Swamp", "Forest", "Mountain", "Tolarian Terror", "Gixian Infiltrator"]},
     },
+    "oppdig": {
+        "title": "Opponent digs (Brainstorm, Ponder, Delver: their choices in the spotlight)",
+        "matchup": "jund_blue",
+        "seat": 0,
+        "active": "opp",
+        "me": {"battlefield": ["Mountain", "Swamp", "Forest", "Drossforge Bridge"], "hand": ["Cleansing Wildfire", "Cast Down", "Writhing Chrysalis"]},
+        "opp": {"battlefield": ["Island", "Island", "Island", "Island", "Delver of Secrets"], "hand": ["Brainstorm", "Ponder", "Counterspell"],
+                "library": ["Island", "Counterspell", "Mental Note", "Thought Scour", "Cryptic Serpent"] * 5},
+    },
     "floating": {
         "title": "Floating mana (Tron lands pay a one-drop)",
         "matchup": "jund_tron",

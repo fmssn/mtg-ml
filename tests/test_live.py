@@ -153,8 +153,11 @@ def test_http_endpoints(manager, tmp_path, engine):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
 
+    token = {}
+
     def call(path, body=None):
-        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(), method="GET" if body is None else "POST")
+        headers = {"X-Game-Token": token["t"]} if token else {}
+        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(), headers=headers, method="GET" if body is None else "POST")
         try:
             with urllib.request.urlopen(req) as r:
                 return r.status, json.loads(r.read())
@@ -166,6 +169,7 @@ def test_http_endpoints(manager, tmp_path, engine):
         code, view = call("/api/live/new", {"model": "tiny/model", "seed": 2})
         assert code == 200
         gid = view["live"]["id"]
+        token["t"] = view["live"]["token"]  # every request about the game needs its token
         code, again = call(f"/api/live/{gid}?since=0")
         assert code == 200 and again["frames"] == view["frames"]
         frame = len(view["frames"]) - 1

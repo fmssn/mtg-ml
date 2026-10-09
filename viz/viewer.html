@@ -1040,6 +1040,11 @@ async function openLiveDialog() {
     box.querySelector('.note').textContent = `Live play is not available: ${err.message}. Start the server with: python -m mtg_ml.replay serve --models runs/`;
     return;
   }
+  if (opt.mode === 'play' || !opt.models || !opt.matchups) {
+    // A play-offer server (serve --models without --dev): live games run in the play client.
+    box.querySelector('.note').innerHTML = 'This server offers live play in the play client: <a href="play/">open it</a>.';
+    return;
+  }
   if (!opt.models.length) { box.querySelector('.note').textContent = 'No checkpoints (*.pt) in the --models directory.'; return; }
   const mu = Object.keys(opt.matchups);
   box.innerHTML = `<h2><span>Play against a model</span><button class="btn" onclick="$('#modal').classList.remove('on')">close</button></h2>

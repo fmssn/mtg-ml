@@ -77,8 +77,50 @@ def test_refs_point_only_at_what_the_player_sees(manager, seat, matchup):
         if d["player"] != seat:  # the model's frame: one shown option, private kinds by kind only
             assert len(d["refs"]) == 1
             if d["kind"] not in PUBLIC_KINDS:
-                assert d["refs"] == [{"type": "hidden"}] and d["options"][0].startswith("(hidden")
+                ref = d["refs"][0]
+                assert ref["type"] == "hidden" and set(ref) <= {"type", "text", "source", "step", "group"} and d["options"][0].startswith("(hidden")
+                assert_no_hidden_names(ref, f["state"])
     assert {"pass", "play_land", "cast", "attack"} <= seen_types
+
+
+def assert_no_hidden_names(ref: dict, state: dict) -> None:
+    """A hidden decision's summary names no card the player cannot see in
+    `state` (its source is a spell on the stack or a public permanent)."""
+    from mtg_ml.engine.cards import CARDS
+
+    public = {c["name"] for c in state["battlefield"]} | {it.get("card") or "" for it in state["stack"]}
+    public |= {c["name"] for P in state["players"] for z in ("graveyard", "exile") for c in P[z]}
+    words = f"{ref.get('text', '')} {ref.get('source', '')}"
+    for name in CARDS:
+        if name in words:
+            assert name in public or any(name in p for p in public if p), (name, ref)
+
+
+def test_hidden_summaries_say_only_counts_and_places():
+    from mtg_ml.live_proto import hidden_summary
+
+    put = hidden_summary("choose_card", "Brainstorm: put a card from your hand on top of your library (1/2, the second one ends on top)", "Put back Counterspell", None, 4)
+    assert put == {"text": "puts a card from hand back on top", "source": "Brainstorm", "step": [1, 2], "group": "put_back"}
+    order = hidden_summary("order", "Ponder: put the cards back in any order", "Top to bottom: Island, Island, Thought Scour", ("a", "b", "c"), 3)
+    assert order == {"text": "puts 3 cards back on top in a chosen order", "source": "Ponder"}
+    scry = hidden_summary("choose_mode", "Scry 1: Cast Down", "Put Cast Down on the bottom", "bottom", 2)
+    assert scry["text"] == "puts a card on the bottom" and "Cast Down" not in str(scry)
+    bottom = hidden_summary("choose_card", "Mulligan: put a card on the bottom of your library (1/1)", "Bottom Ponder", None, 7)
+    assert bottom["group"] == "bottom" and "Ponder" not in str(bottom)
+    assert hidden_summary("choose_card", "Search your library for an Island card", "Find Island", None, 2)["text"] == "searches the library and finds a card"
+    assert "Counterspell" not in str(hidden_summary("choose_card", "Faithless Looting: discard a card", "Discard Counterspell", None, 3))
+    assert hidden_summary("weird_kind", "Secret: Counterspell", "Counterspell", None, 1) == {"text": "makes a hidden choice (weird kind)"}
+
+
+def test_cast_refs_carry_cost_and_targets(manager):
+    """What the paying step needs before anything is sent: the mana to pay
+    and the legal targets (here Cleansing Wildfire: {1}{R}, any land)."""
+    view = manager.new({"model": SCRIPTED, "scenario": "wildfire", "seed": 1})
+    d = view["frames"][-1]["decision"]
+    r = next(r for r in d["refs"] if r["type"] == "cast" and r["name"] == "Cleansing Wildfire")
+    assert r["cost"] == "{1}{R}" and r["taps"]
+    lands = {c["oid"] for c in view["frames"][-1]["state"]["battlefield"]}
+    assert r["targets"] and all(t.get("oid") in lands for t in r["targets"])
 
 
 def test_hand_refs_name_the_card_they_play(manager):
@@ -250,7 +292,7 @@ def test_dev_scenarios_only_on_dev_servers(tmp_path):
             m.new({"model": SCRIPTED, "scenario": "crowded"})
     finally:
         m.close()
-    m = LiveManager(None, tmp_path, scripted=True)
+    m = LiveManager(None, tmp_path, scripted=True, max_games=len(SCENARIOS) + 1)
     try:
         for name in SCENARIOS:
             view = m.new({"model": SCRIPTED, "scenario": name, "seed": 0})
@@ -460,4 +502,100 @@ def test_play_config_offer(tmp_path, models):
         m.concede(gid)
         assert m.next_game(gid, {"plan": "maindeck"})["meta"]["match"]["game_no"] == 2  # the match goes on in play mode
     finally:
+        m.close()
+
+
+def test_review_only_after_the_game_and_only_for_its_player(manager):
+    """The post-game review (omniscient: both hands, the bot's policy) is
+    refused while the game runs and without the game's token; the token comes
+    only with the new game, never in later views (anyone with the id)."""
+    view = manager.new({"model": SCRIPTED, "seed": 3, "seat": 0, "matchup": "jund_blue"})
+    gid, token = view["live"]["id"], view["live"]["token"]
+    assert "token" not in manager.view(gid)["live"]
+    with pytest.raises(LiveError, match="over"):
+        manager.review(gid, token)
+    manager.concede(gid)
+    for bad in (None, "", "x" * 22):
+        with pytest.raises(LiveError, match="another player"):
+            manager.review(gid, bad)
+    rep = manager.review(gid, token)
+    assert rep["review"]["seat"] == 0 and rep["review"]["bot"] == 1
+    assert any(c.get("name") and not c.get("hidden") for f in rep["frames"] for c in f["state"]["players"][1]["hand"])  # the bot's hand, by name
+    nxt = manager.next_game(gid, {"plan": "maindeck"})
+    other = nxt["live"]
+    assert other["token"] and other["token"] != token
+    with pytest.raises(LiveError, match="another player"):
+        manager.review(other["id"], token)  # one game's token does not open another game
+
+
+def test_review_flag_files_everything(manager):
+    """A flag from the review may hold everything: the bot's hand, options
+    with probabilities, seed and a rebuild command up to the decision."""
+    manager.filer = FakeFiler()
+    view = manager.new({"model": SCRIPTED, "seed": 4, "seat": 0, "matchup": "jund_blue"})
+    gid, token = view["live"]["id"], view["live"]["token"]
+    with pytest.raises(LiveError):
+        manager.flag(gid, {"category": "bot", "review_frame": 1, "what": "x", "token": token})  # still running
+    play_until_bot_action(manager, gid, list(view["frames"]))
+    manager.concede(gid)
+    rep = manager.review(gid, token)
+    rf = next(i for i, f in enumerate(rep["frames"]) if f["decision"] and f["decision"]["player"] == 1)
+    with pytest.raises(LiveError):
+        manager.flag(gid, {"category": "bot", "review_frame": rf, "what": "x"})  # no token
+    out = manager.flag(gid, {"category": "bot", "review_frame": rf, "what": "Kept a bad hand", "token": token})
+    assert out["filed"]
+    cat, title, body = manager.filer.issues[-1]
+    assert "(review)" in title and f"seed `{rep['meta']['seed']}`" in body and "--choices" in body and "### Options (policy)" in body
+    bot_hand = {c["name"] for c in rep["frames"][rf]["state"]["players"][1]["hand"]}
+    assert any(n in body for n in bot_hand)
+
+
+def test_every_game_endpoint_needs_the_games_token(tmp_path):
+    """Over HTTP, every request about one game (view, choose, concede, next,
+    flag, survey, review) is refused (403) without the game's token or with
+    another game's; with it, it works. The id alone is never enough."""
+    from mtg_ml.replay import make_server
+
+    m = LiveManager(None, tmp_path / "replays", scripted=True)
+    srv = make_server(tmp_path, port=0, live=m)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}/api/live/"
+
+    def call(path, body=None, token=None):
+        headers = {"Content-Type": "application/json"}
+        if token is not None:
+            headers["X-Game-Token"] = token
+        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(), headers=headers, method="GET" if body is None else "POST")
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+
+    try:
+        code, view = call("new", {"model": SCRIPTED, "seed": 5, "seat": 0, "matchup": "jund_blue"})
+        assert code == 200
+        gid, token = view["live"]["id"], view["live"]["token"]
+        _, other = call("new", {"model": SCRIPTED, "seed": 6, "seat": 0, "matchup": "jund_blue"})
+        frame = len(view["frames"]) - 1
+        requests = [
+            (gid, None), (f"{gid}?since=0", None), (f"{gid}/review", None),
+            (f"{gid}/choose", {"frame": frame, "index": 0, "since": frame}),
+            (f"{gid}/flag", {"category": "bug", "what": "x"}), (f"{gid}/survey", {"strength": 3}),
+            (f"{gid}/concede", {}), (f"{gid}/next", {}),
+        ]
+        for path, body in requests:
+            for bad in (None, "", "nope", other["live"]["token"]):
+                code, out = call(path, body, bad)
+                assert code == 403 and "another player" in out["error"], (path, bad, code, out)
+        assert "token" not in call(gid, token=token)[1]["live"]  # later views never carry it
+        assert call(f"{gid}/review", token=token)[0] == 400  # the right key, but the game still runs
+        assert call(f"{gid}/concede", {}, token)[0] == 200
+        assert call(f"{gid}/review?token={token}")[0] == 200  # a query token works too (links)
+        code, nxt = call(f"{gid}/next", {"plan": "maindeck"}, token)
+        assert code == 200 and nxt["live"]["token"] not in (None, token)  # the next game has a key of its own
+        assert call(nxt["live"]["id"], token=token)[0] == 403
+        assert call("nosuchgame", token=token)[0] == 400  # an unknown id says so (no key to check)
+    finally:
+        srv.shutdown()
         m.close()
