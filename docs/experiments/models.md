@@ -12,7 +12,7 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `best/jund_blue` | `r8-jund-blue` | Final specialist benchmark jund_vs_sblue 75.2/79.0 (r4-control 64.0/65.5), L1 238.6 (fs4-ft 212.5); a specialist, its trust test fails |
 | `best/blue_vs_jund` | `r4-control` | Blue as learner vs the Jund specialist 85.3/87.0 (specialist benchmark); r8-jund-blue 83.8/84.0 (level within +-5) |
 | `best/jund_jund` | `r8-jund-mirror` | Mirror vs the Jund specialist 83.0/88.5 (r7-lr075 57.8/68.5); forgets Blue |
-| `best/jund` | `r7-lr075` | Deck vs field; r8-jund-pilot (finished) is better on the Jund cells and passes the per-deck trust check but has no head to head against r7-lr075 yet |
+| `best/jund` | `r8-jund-pilot` | Deck vs field; beats r7-lr075 as Jund in all six pairings on paired seeds (sampled +10.1 to +28.0, mean +18.0; greedy mean +13.8), ledger 20261010-r8-pilot-matrix |
 | `best/blue` | `r7-lr075` | No deck-specific Blue model yet |
 | `best/madness` | `r7-lr075` | rm-1m is a one-matchup baseline, not a full model |
 | `best/affinity` | `r7-lr075` | Only full-matrix model |
@@ -29,7 +29,7 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 |---|---|---|
 | `r8-belief` | `r7-lr075` | does feature set 8 plus the belief head beat the lr075 trajectory at matched games |
 
-Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: `best/jund` (r7-lr075 or r8-jund-pilot) needs a head to head over the full matrix; fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-blue/policy` (the `r8-jund` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
+Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-blue/policy` (the `r8-jund` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
 
 ## Registry
 

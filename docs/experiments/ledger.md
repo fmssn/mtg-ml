@@ -2,6 +2,47 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## 20261010-r8-pilot-matrix · `r8-jund-pilot` vs `r7-lr075` as Jund, over all six Jund pairings (evaluation only)
+
+Question: does `r8-jund-pilot` play Jund Wildfire better than `r7-lr075` across all of Jund's pairings, so that it replaces lr075 as `best/jund`? No training; two archived policies evaluated head to head, `r8-jund-pilot` (`policy.pt`, sha256 `71c758dcf4513deb3bc7021652410d7c573c366c97d8c01a4da1b5f036078379`) and `r7-lr075` (`policy.pt`, sha256 `672aaa0c2764f853198c44a6fa7847469e01d9767952ea3fb8e9d84e068f636e`), both feature set 7.
+
+- **Verdict: adopt.** The pilot is better as Jund against every opponent deck: sampled delta +18.0 points on average over the six pairings, each one positive with its 95% interval clear of zero (smallest +10.1 against Elves and +10.9 against Red Madness); greedy +13.8 on average, all six positive. No pairing is worse. `best/jund` moves to `r8-jund-pilot` ([models.md](models.md)).
+- **Design**: for each opponent deck X (matchup `jund_<x>`, Jund in seat 0; the mirror is `jund_mirror`) three cells on the same seeds and deals: pilot as Jund vs lr075 as X, lr075 as Jund vs lr075 as X (baseline), lr075 as Jund vs pilot as X. Every seed is played 4 times: once per starting player and once per physical seat (`paired_specs(..., balance_seats=True)`, game-1 decks, engine `native`). Score = Jund model's win rate, a draw counts half. The delta is paired over seeds (the 4 games of a seed form one block, normal 95% interval on the per-seed differences); the cell intervals are Wilson 95%. Sampled is primary: 800 games per cell (200 seeds), greedy 400 (100 seeds, a subset of the same seeds, deterministic).
+- **Measured on**: h100-private (2x Intel Xeon Platinum 8462Y+, 64 cores, shared with running r8 trainers), 8 workers, `nice -n 19`, `taskset -c 56-63`, `OMP_NUM_THREADS=1`, no GPU. Code `6ca2fb59e1cfab95a5aa290a76e49a948d18f6b7` (`~/mtg-ml-eval/code`; the engine is identical to this PR's base), new script `tools/eval_matrix.py` (copied to `~/mtg-ml-eval/r8pilot-matrix/tools/`; raw per-seed results in `~/mtg-ml-eval/r8pilot-matrix/{sampled,greedy}.json`). Commands (launcher `~/mtg-ml-eval/r8pilot-matrix/run.sh`, from `~/mtg-ml-eval/code`):
+
+```
+OMP_NUM_THREADS=1 nice -n 19 taskset -c 56-63 .venv/bin/python ~/mtg-ml-eval/r8pilot-matrix/tools/eval_matrix.py --candidate ~/mtg-ml-eval/ckpt/r8-jund-pilot-final.pt --baseline ~/mtg-ml-eval/ckpt/r7-lr075-policy.pt --games 800 --workers 8 --out sampled.json
+OMP_NUM_THREADS=1 nice -n 19 taskset -c 56-63 .venv/bin/python ~/mtg-ml-eval/r8pilot-matrix/tools/eval_matrix.py --candidate ~/mtg-ml-eval/ckpt/r8-jund-pilot-final.pt --baseline ~/mtg-ml-eval/ckpt/r7-lr075-policy.pt --games 400 --greedy --workers 8 --out greedy.json
+```
+
+(`r8-jund-pilot-final.pt` is the benchmarked `v01464` policy, run file `policy/v01464.pt`, copied into the archive as `policy-v01464.pt`; the archive's own `policy.pt` is the later `v01465`.)
+
+Sampled, 800 games per cell, win rate of the Jund model in percent [Wilson 95%], deltas in points ± paired 95% half width:
+
+| opponent deck X | pilot as Jund vs lr075 as X | lr075 as Jund vs lr075 as X (baseline) | **Jund delta** | lr075 as Jund vs pilot as X | X delta (negative: pilot plays X better) |
+|---|---|---|---|---|---|
+| `mono_blue_terror` | 62.5 [59.1, 65.8] | 40.5 [37.2, 43.9] | **+22.0 ± 4.3** | 28.4 [25.4, 31.6] | -12.1 ± 3.8 |
+| `red_madness` | 43.1 [39.7, 46.6] | 32.2 [29.1, 35.6] | **+10.9 ± 4.0** | 19.5 [16.9, 22.4] | -12.8 ± 3.7 |
+| `grixis_affinity` | 70.2 [67.0, 73.3] | 51.2 [47.8, 54.7] | **+19.0 ± 4.3** | 36.9 [33.6, 40.3] | -14.4 ± 4.4 |
+| `elves` | 49.6 [46.2, 53.1] | 39.5 [36.2, 42.9] | **+10.1 ± 4.3** | 30.1 [27.0, 33.4] | -9.4 ± 4.1 |
+| `tron` | 53.9 [50.4, 57.3] | 35.6 [32.4, 39.0] | **+18.2 ± 4.4** | 22.8 [20.0, 25.8] | -12.9 ± 3.8 |
+| `jund_wildfire` (mirror) | 77.4 [74.3, 80.1] | 49.4 [45.9, 52.8] | **+28.0 ± 4.6** | 21.8 [19.0, 24.7] | -27.6 ± 4.2 |
+
+Greedy, 400 games per cell:
+
+| opponent deck X | pilot as Jund vs lr075 as X | lr075 as Jund vs lr075 as X (baseline) | **Jund delta** | lr075 as Jund vs pilot as X | X delta (negative: pilot plays X better) |
+|---|---|---|---|---|---|
+| `mono_blue_terror` | 58.0 [53.1, 62.7] | 43.0 [38.2, 47.9] | **+15.0 ± 6.7** | 33.5 [29.1, 38.3] | -9.5 ± 5.9 |
+| `red_madness` | 36.2 [31.7, 41.1] | 29.5 [25.2, 34.1] | **+6.8 ± 4.7** | 25.2 [21.2, 29.7] | -4.2 ± 4.5 |
+| `grixis_affinity` | 64.5 [59.7, 69.0] | 53.2 [48.4, 58.1] | **+11.2 ± 6.0** | 39.0 [34.3, 43.9] | -14.2 ± 5.7 |
+| `elves` | 48.5 [43.6, 53.4] | 38.2 [33.6, 43.1] | **+10.2 ± 5.5** | 27.5 [23.4, 32.1] | -10.8 ± 5.8 |
+| `tron` | 49.8 [44.9, 54.6] | 32.2 [27.9, 37.0] | **+17.5 ± 5.7** | 27.0 [22.9, 31.6] | -5.2 ± 5.0 |
+| `jund_wildfire` (mirror) | 71.8 [67.1, 75.9] | 50.0 [45.1, 54.9] | **+21.8 ± 4.2** | 28.2 [24.1, 32.9] | -21.8 ± 4.2 |
+
+- **Reading**: the Jund delta is the answer; the X-delta column asks whether the pilot also plays the other deck better than lr075 does (it fine-tuned on both seats of every pairing): in every pairing lr075 as Jund wins less against pilot-as-X than against lr075-as-X (sampled -9.4 to -14.4, mirror -27.6 where it is the same comparison as the first delta seen from the other side). Both come from the same self-play fine-tune, so they are not independent evidence of a better Jund.
+- **Caveats**: the opponent is lr075 playing X, the parent of the pilot, not a scripted bot or another lineage; strength against the fixed bots and the trust check are in the r8-results entry. Greedy intervals are wider (fewer seeds) and its Red Madness (+6.8 ± 4.7) and Elves deltas are the smallest. The mirror baseline is 49.4% (it should be 50%), which checks the seat and start balancing.
+- **What it does not show**: whether a further pilot run would still improve, or how the pilot compares with `r8-jund-blue` and `r8-jund-mirror` on their own pairings (those are specialists with their own roles).
+
 ## 20261009-r8-results · final results and archives of `r8-jund-blue`, `r8-jund-pilot`, `r8-jund-mirror`
 
 Three finished r8 fine-tunes of the r7 lr075 `policy.pt` (parent `r7-lr075`, sha256 `672aaa0c2764f853198c44a6fa7847469e01d9767952ea3fb8e9d84e068f636e`). They answer the questions of the r8 entry below: does fine-tuning on one matchup (`r8-jund-blue`, the mirror `r8-jund-mirror`) or on one deck against the whole field (`r8-jund-pilot`) pay off, and what does it cost the rest of the matrix. Handles and run IDs follow [naming.md](naming.md); the old names (arm C, `r8-jund-blue-ft`, `r8e3`, ...) are in the legacy column of [models.md](models.md). The jsonl `id` of each run stays its old ledger id (the registry's `ledger_id`, which the dashboard and `tests/test_model_registry.py` key on); the jsonl lines also carry `run_id` and `handle`.
