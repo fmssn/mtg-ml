@@ -32,7 +32,7 @@ def database(tmp_path):
 
 def add_game(database, gid="game-1", status="active", survey=None, flags=True, engine="python"):
     path, db = database
-    values = dict(id=gid, owner=PRIVATE, token_hash=PRIVATE, match_id="match-1", game_no=1, opponent="r7-blue",
+    values = dict(id=gid, owner=PRIVATE, token_hash=PRIVATE, match_id="match-1", game_no=1, opponent="r8-blue-pilot",
                   model="r7-lr075/policy", checkpoint_sha256="b" * 64, runtime=REV, engine=engine,
                   matchup="jund_blue", seat=0, greedy=1, seed="7654321987654321", start_arg=None,
                   starting_player=None, plan="standard", status=status, problem=PRIVATE, conceded=0,

@@ -51,6 +51,14 @@ source = "h100-private:~/mtg-ml-checkpoints/20261009-r8-fs7h256-dk-jund-ft-r7-lr
 evaluation = "final r8 Jund pilot (run 20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8, 3.0M games over all six Jund pairings); ledger 20261009-r8-results: specialist benchmark jund_vs_sblue 67.2/67.0, jund_vs_sjund 79.5/79.5 (sampled / greedy); ledger 20261010-r8-pilot-matrix: beats r7-lr075 as Jund in all six pairings head to head, sampled +10.1 to +28.0 (mean +18.0), greedy mean +13.8, 800 games per cell"
 trained_at = "889798b"  # training code
 
+[models."r8-blue-pilot/policy"]
+sha256 = "a69958a3e02e67718a9ab3e71e265d5f46a8d37bdd5b3a84584683ecd8cb41f6"
+features = 7
+games = 3000320
+source = "h100-private2:~/mtg-ml-r8/campaigns/r8g-20261010/r8-blue-pilot/policy/v01465.pt (a copy is at h100-private:~/mtg-ml-eval/ckpt/r8-blue-pilot-final.pt)"
+evaluation = "final r8 Blue pilot (run 20261010-r8-fs7h256-dk-blue-ft-r7-lr075-s8, 3.0M games over all six Blue pairings); final specialist benchmark, 100 blocks, measured on h100-private2, sampled / greedy: blue_vs_sblue 74.0/77.0, blue_vs_sjund 81.8/81.8, blue_vs_ljund 91.5/91.2, jund_vs_sblue 65.2/66.0; trust test (single model): 9 of 14 pairings inside, Tron bias +0.16, 4 exploitable directions"
+trained_at = "889798b"  # training code
+
 [models."r4-control/policy"]
 sha256 = "cb19222d1868a72671c73c80268d75aea977e87758493804c80f895f85024f72"
 features = 3
@@ -68,7 +76,7 @@ model = "r8-jund-pilot/policy"
 deck = "jund_wildfire"
 greedy = true
 
-# r7 lr075, greedy, with every deck: 36 ordered pairs, mirrors included.
+# r7 lr075, greedy, with every deck except Blue (the Blue pilot covers it): 36 ordered pairs, mirrors included.
 [[opponents]]
 id = "r8-jund"
 label = "r8 · Jund Wildfire"
@@ -90,14 +98,14 @@ description = "The older r7 Jund player, kept as a reference. Wins 49% against t
 tested = "some"
 
 [[opponents]]
-id = "r7-blue"
-label = "r7 · Mono Blue Terror"
-note = "r7 lr075 final (8.35M self-play games, greedy) playing Mono Blue Terror"
-model = "r7-lr075/policy"
+id = "r8-blue-pilot"
+label = "r8 · Mono Blue Terror pilot"
+note = "r8 Blue pilot (3.0M games over all six Blue pairings, greedy) playing Mono Blue Terror"
+description = "Trained on all six Blue matchups. Beats the Blue specialist bot 74 to 77% in the mirror and the Jund specialist 82%."
+tested = "well"
+model = "r8-blue-pilot/policy"
 deck = "mono_blue_terror"
 greedy = true
-description = "Mono Blue Terror from r7. Wins 76% against the Jund specialist bot. Part of the standing benchmark."
-tested = "well"
 
 [[opponents]]
 id = "r7-madness"

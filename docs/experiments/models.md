@@ -19,7 +19,7 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `best/elves` | `r7-lr075` | Only full-matrix model |
 | `best/tron` | `r7-lr075` | Only full-matrix model; the trust test flags Tron as overrated |
 | `play/jund` | `r8-jund-pilot` | Play site offer r8-jund-pilot, greedy (default Jund opponent): beats r7-lr075 as Jund in all six pairings, 67% vs the Blue specialist, 80% in the mirror. r8-jund (the Jund vs Blue specialist) and r7-jund (legacy) stay offered |
-| `play/blue` | `r7-lr075` | Play site offer r7-blue, greedy |
+| `play/blue` | `r8-blue-pilot` | Play site offer r8-blue-pilot, greedy (the only Blue opponent besides legacy Delver; replaces r7-blue): trained on all six Blue pairings, 74 to 77% against the Blue specialist bot in the mirror, 82% against the Jund specialist |
 | `play/madness` | `r7-lr075` | Play site offer r7-madness, greedy |
 | `play/affinity` | `r7-lr075` | Play site offer r7-affinity, greedy |
 | `play/elves` | `r7-lr075` | Play site offer r7-elves, greedy |
@@ -30,7 +30,7 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `r8-belief` | `r7-lr075` | does feature set 8 plus the belief head beat the lr075 trajectory at matched games |
 | `r9-jund-pilot` | `r8-jund-pilot` | does a second round against frozen round-1 pilots (all six decks, same recipe) beat each round-1 pilot head to head and on the trust test |
 
-Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-pilot/policy` (the `r8-jund-pilot` opponent), `r8-jund-blue/policy` (the `r8-jund` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
+Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-pilot/policy` (the `r8-jund-pilot` opponent), `r8-jund-blue/policy` (the `r8-jund` opponent), `r8-blue-pilot/policy` (the `r8-blue-pilot` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
 
 ## Registry
 
