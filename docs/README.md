@@ -28,6 +28,8 @@ guides for the compatibility contracts.
 - [Representation plan](representation-plan.md): research direction and rationale.
   Its dated implementation proposals must be read alongside the current feature
   contracts, experiment ledger and benchmark plan.
+- [Research ideas](research-ideas.md): literature-based candidate improvements
+  (2026-10-10), not yet tested.
 - [Width-256 attention training](training-256-attention.md): optimization design
   and validation requirements; measured results and unfinished experiments belong
   in the ledger and shared tracker.
