@@ -105,11 +105,11 @@ impl Eng {
     // Turn structure
     // ------------------------------------------------------------------
 
-    /// `resume`: `Game::copy` finishing a turn from a step-start snapshot.
-    pub fn main(&mut self, start_step: &str, resume: Option<(&'static str, bool)>) -> R<()> {
+    /// `resume`: `Game::copy` finishing a turn from a snapshot.
+    pub fn main(&mut self, start_step: &str, resume: Option<(&'static str, bool, Resume)>) -> R<()> {
         let mut first = true;
-        if let Some((step, skip_draw)) = resume {
-            self.run_turn(step, skip_draw)?;
+        if let Some((step, skip_draw, how)) = resume {
+            self.run_turn(step, skip_draw, how)?;
             let st = self.s();
             st.active = 1 - st.active;
             first = false;
@@ -127,7 +127,7 @@ impl Eng {
             }
             let start = if first { start_step } else { "untap" };
             let skip_draw = first && st.skip_first_draw;
-            self.run_turn(start, skip_draw)?;
+            self.run_turn(start, skip_draw, Resume::StepStart)?;
             first = false;
             let st = self.s();
             st.active = 1 - st.active;
@@ -177,87 +177,114 @@ impl Eng {
         Ok(())
     }
 
-    fn run_turn(&mut self, start: &str, skip_draw: bool) -> R<()> {
+    fn run_turn(&mut self, start: &str, skip_draw: bool, resume: Resume) -> R<()> {
         let from = STEPS.iter().position(|x| *x == start).ok_or_else(|| Stop::Rules(format!("unknown step {start:?}")))?;
+        self.s().turn_skip_draw = skip_draw;
+        let mut resume = Some(resume).filter(|r| *r != Resume::StepStart);
         for &name in &STEPS[from..] {
-            if (name == "declare_blockers" || name == "combat_damage") && self.s().attackers.is_empty() {
+            if resume.is_none() && (name == "declare_blockers" || name == "combat_damage") && self.s().attackers.is_empty() {
                 continue;
             }
             let st = self.s();
             if st.snapshots {
-                st.take_snapshot(name, skip_draw);
+                st.take_snapshot(name, skip_draw, Resume::StepStart);
             } else if let Some(s) = &st.snap {
                 // A copy's inherited snapshot is stale once it leaves the
-                // snapshot's own step start (where it resumed).
-                if !(s.step == name && s.n_actions == st.actions.len() && s.state.turn == st.turn) {
+                // snapshot's own start (where it resumed).
+                let kind_matches = match resume {
+                    Some(r) => s.resume == r,
+                    None => s.resume == Resume::StepStart,
+                };
+                if !(kind_matches && s.step == name && s.n_actions == st.actions.len() && s.state().turn == st.turn) {
                     st.snap = None;
                     st.prio_log.clear();
                 }
             }
-            self.s().step_name = name;
-            self.log(|_| format!("-- {name}"));
+            // Resuming inside the step's priority round: its pre-priority
+            // part (and its log line) already happened in the snapshot.
+            let mid = resume.take();
+            if mid.is_none() {
+                self.s().step_name = name;
+                self.log(|_| format!("-- {name}"));
+            }
+            let at = match mid {
+                Some(Resume::Priority { p, passes }) => Some((p, passes)),
+                _ => None,
+            };
             match name {
                 "untap" => self.s().untap_step(),
                 "upkeep" => {
-                    self.s().emit_upkeep();
-                    self.priority_round()?;
+                    if at.is_none() {
+                        self.s().emit_upkeep();
+                    }
+                    self.priority_round(at)?;
                 }
                 "draw" => {
-                    if !skip_draw {
-                        let a = self.s().active as usize;
-                        self.s().draw(a, 1, true);
+                    if at.is_none() {
+                        if !skip_draw {
+                            let a = self.s().active as usize;
+                            self.s().draw(a, 1, true);
+                        }
                     }
-                    self.priority_round()?;
+                    self.priority_round(at)?;
                 }
                 "declare_attackers" => {
-                    self.declare_attackers()?;
-                    self.priority_round()?;
+                    if at.is_none() {
+                        self.declare_attackers()?;
+                    }
+                    self.priority_round(at)?;
                 }
                 "declare_blockers" => {
-                    self.declare_blockers()?;
-                    self.priority_round()?;
+                    if at.is_none() {
+                        self.declare_blockers()?;
+                    }
+                    self.priority_round(at)?;
                 }
                 "combat_damage" => {
-                    self.combat_damage()?;
-                    self.priority_round()?;
+                    if at.is_none() {
+                        self.combat_damage()?;
+                    }
+                    self.priority_round(at)?;
                 }
                 "end_combat" => {
-                    self.priority_round()?;
+                    self.priority_round(at)?;
                     self.s().clear_combat();
                 }
-                "cleanup" => self.cleanup_step()?,
-                _ => self.priority_round()?,
+                "cleanup" => self.cleanup_step(at)?,
+                _ => self.priority_round(at)?,
             }
             self.s().empty_pools();
         }
         Ok(())
     }
 
-    fn cleanup_step(&mut self) -> R<()> {
+    fn cleanup_step(&mut self, mut at: Option<(u8, u8)>) -> R<()> {
         loop {
-            let p = self.s().active;
-            while self.s().players[p as usize].hand.len() > MAX_HAND {
-                let n = self.s().players[p as usize].hand.len();
-                let options = self.s().hand_card_options(p, "discard");
-                if let Val::Card(c) = self.ask(p, Kind::ChooseCard, || format!("Discard to hand size ({n}/{MAX_HAND})"), options)? {
-                    self.s().discard(c);
+            if at.is_none() {
+                let p = self.s().active;
+                while self.s().players[p as usize].hand.len() > MAX_HAND {
+                    let n = self.s().players[p as usize].hand.len();
+                    let options = self.s().hand_card_options(p, "discard");
+                    if let Val::Card(c) = self.ask(p, Kind::ChooseCard, || format!("Discard to hand size ({n}/{MAX_HAND})"), options)? {
+                        self.s().discard(c);
+                    }
+                }
+                let st = self.s();
+                for i in 0..st.battlefield.len() {
+                    let ci = st.battlefield[i];
+                    let c = st.cm(ci);
+                    c.damage = 0;
+                    c.deathtouch_damage = false;
+                    c.temp.clear();
+                }
+                let st = self.s();
+                let changed = st.sba()?;
+                if !(changed || !self.s().pending.is_empty()) {
+                    return Ok(());
                 }
             }
-            let st = self.s();
-            for i in 0..st.battlefield.len() {
-                let ci = st.battlefield[i];
-                let c = st.cm(ci);
-                c.damage = 0;
-                c.deathtouch_damage = false;
-                c.temp.clear();
-            }
-            let changed = st.sba()?;
-            if changed || !self.s().pending.is_empty() {
-                self.priority_round()?;
-                self.s().empty_pools();
-                continue;
-            }
-            return Ok(());
+            self.priority_round(at.take())?;
+            self.s().empty_pools();
         }
     }
 
@@ -302,24 +329,47 @@ impl Eng {
         }
     }
 
-    fn priority_round(&mut self) -> R<()> {
-        let mut p = self.s().active;
-        let mut passes = 0;
+    /// One priority round. `at`: a copy resuming from a priority snapshot,
+    /// (player with priority, passes in a row), at the top of the loop just
+    /// after state-based actions and triggers.
+    fn priority_round(&mut self, at: Option<(u8, u8)>) -> R<()> {
+        let (mut p, mut passes, mut resumed) = match at {
+            Some((p, n)) => (p, n, true),
+            None => (self.s().active, 0, false),
+        };
         loop {
-            self.sba_and_triggers()?;
+            if !resumed {
+                self.sba_and_triggers()?;
+            }
+            resumed = false;
             let step = self.s().step_name;
+            {
+                // One live priority snapshot per game, replaced as actions
+                // are taken: a copy replays from it, not from the step start.
+                let st = self.s();
+                if st.snapshots && st.sim_viewer.is_none() && !st.step_snapshots_only && st.snap.as_ref().map_or(true, |s| st.actions.len() > s.n_actions) {
+                    st.take_snapshot(step, st.turn_skip_draw, Resume::Priority { p, passes });
+                }
+            }
             let act = if let Some(v) = self.s().sim_viewer {
                 // game.py: a simulation never lists priority options; the
                 // "assume the opponent passes" simulation passes for the
-                // other player, any other priority stops it.
+                // other player, any other priority stops it (and may be
+                // continued with CONTINUE_PASS: the opponent passes).
                 if self.s().sim_assume_pass && p != v {
                     Val::Pass
                 } else {
                     self.s().decision = Some(Decision { player: p, kind: Kind::Priority, prompt: format!("Priority ({step})"), options: vec![] });
-                    if unsafe { (*self.y).suspend(()) } == ABORT {
-                        return Err(Stop::Abort);
+                    match unsafe { (*self.y).suspend(()) } {
+                        ABORT => return Err(Stop::Abort),
+                        CONTINUE_PASS if p != v => {
+                            let st = self.s();
+                            st.decision = None;
+                            st.sim_assume_pass = true;
+                            Val::Pass
+                        }
+                        _ => return rules("a simulation copy cannot continue past a priority"),
                     }
-                    return rules("a simulation copy cannot continue past a priority");
                 }
             } else if let Some(v) = self.replayed(Kind::Priority)? {
                 v
