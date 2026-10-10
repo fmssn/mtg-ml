@@ -49,7 +49,7 @@ def test_parents_and_roles_point_to_registered_handles():
 def test_every_ledger_id_is_in_the_registry_or_not_a_model():
     """New ledger entries that train a model must add it to models.json (evaluation-only entries are exempt)."""
     known = {m['ledger_id'] for m in MODELS}
-    exempt = {'20261009-specialist-benchmark', '20261009-r8-evals-1', '20261008-h256-attention-scaling'}
+    exempt = {'20261009-specialist-benchmark', '20261009-r8-evals-1', '20261008-h256-attention-scaling', '20261010-r8-pilot-matrix'}
     for line in (EXP / 'ledger.jsonl').read_text().splitlines():
         i = json.loads(line)['id']
         assert i in known or i in exempt, i
