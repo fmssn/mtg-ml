@@ -191,7 +191,7 @@ def test_restored_games_match_uninterrupted_ones(tmp_path, tiny7, engine):  # no
     ls = Lockstep(a, b, random.Random(1))
     seen = set()
     for _attempt in range(8):  # a match where the player wins game 2, so there is a game 3
-        ls.new("red_madness", "r7-tron")
+        ls.new("red_madness", "r8-tron-pilot")
         b.restart()  # at the mulligan
         assert b.restored == {"restored": 1, "unrecoverable": {}}
         ls.same()
@@ -250,7 +250,7 @@ def test_retries_change_nothing(tmp_path, tiny7, engine):  # noqa: F811
 @pytest.mark.parametrize("change", ["checkpoint", "runtime", "record"])
 def test_incompatible_recovery_is_reported(tmp_path, tiny7, engine, change):  # noqa: F811
     s = Side(tmp_path, tiny7, engine, [random.Random(5).getrandbits(63) for _ in range(4)])
-    v = s.call("h_new", {"deck": "tron", "opponent": "r7-tron"})
+    v = s.call("h_new", {"deck": "tron", "opponent": "r8-tron-pilot"})
     gid, tok = v["live"]["id"], v["live"]["token"]
     s.call("h_choose", gid, tok, {"frame": len(v["frames"]) - 1, "index": 0})
     if change == "checkpoint":
@@ -270,4 +270,4 @@ def test_incompatible_recovery_is_reported(tmp_path, tiny7, engine, change):  # 
         s.call("h_view", gid, tok, 0)
     assert e.value.status == 409 and e.value.extra["unrecoverable"] and "cannot be resumed" in str(e.value)
     assert s.mgr.store.game(gid)["status"] == "unrecoverable"
-    s.call("h_new", {"deck": "tron", "opponent": "r7-tron"})  # it no longer takes a slot
+    s.call("h_new", {"deck": "tron", "opponent": "r8-tron-pilot"})  # it no longer takes a slot

@@ -17,18 +17,24 @@ from tests.test_live_proto import native_ok, play_out, prefer_plays
 DECKS6 = ["jund_wildfire", "mono_blue_terror", "red_madness", "grixis_affinity", "elves", "tron"]
 R7 = "r7-lr075/policy"
 BLUE_PILOT = "r8-blue-pilot/policy"
+TRON_PILOT = "r8-tron-pilot/policy"
 
 
 def test_packaged_offer_pins_r7_on_every_deck_and_keeps_legacy_delver():
     cfg = load_play_config()
     assert cfg["player_decks"] == DECKS6
     r7 = [o for o in cfg["opponents"] if o["model"] == R7]
-    assert sorted(o["deck"] for o in r7) == sorted(set(DECKS6) - {"mono_blue_terror"}) and all(o["greedy"] for o in r7)
+    assert sorted(o["deck"] for o in r7) == sorted(set(DECKS6) - {"mono_blue_terror", "tron"}) and all(o["greedy"] for o in r7)
     assert "r7-blue" not in {o["id"] for o in cfg["opponents"]}
     blue = next(o for o in cfg["opponents"] if o["id"] == "r8-blue-pilot")
     assert blue["model"] == BLUE_PILOT and blue["deck"] == "mono_blue_terror" and blue["greedy"] and blue["tested"] == "well"
     pin = cfg["models"][BLUE_PILOT]
     assert pin["sha256"] == "a69958a3e02e67718a9ab3e71e265d5f46a8d37bdd5b3a84584683ecd8cb41f6" and pin["features"] == 7 and pin["games"] == 3000320 and pin["trained_at"] == "889798b"
+    assert "r7-tron" not in {o["id"] for o in cfg["opponents"]}
+    tron = next(o for o in cfg["opponents"] if o["id"] == "r8-tron-pilot")
+    assert tron["model"] == TRON_PILOT and tron["deck"] == "tron" and tron["greedy"] and tron["tested"] == "some"
+    tpin = cfg["models"][TRON_PILOT]
+    assert tpin["sha256"] == "5dee22e329d320d86a08f926181af42e0385c20986bd017af5bef18e96022564" and tpin["features"] == 7 and tpin["games"] == 3000320 and tpin["trained_at"] == "889798b"
     delver = next(o for o in cfg["opponents"] if o["id"] == "delver")
     assert delver["greedy"] is False and "legacy" in delver["label"].lower() and delver["deck"] == "mono_blue_terror"
     for o in cfg["opponents"]:
@@ -60,7 +66,7 @@ def test_default_jund_opponent_is_the_pilot_and_testing_fields_are_valid():
     assert next(o for o in cfg["opponents"] if o["id"] == "r8-jund-pilot")["model"] == "r8-jund-pilot/policy"
     for o in cfg["opponents"]:
         assert o["tested"] in TESTED_LEVELS and o["description"].strip(), o["id"]
-    assert {o["id"] for o in cfg["opponents"] if o["tested"] == "experimental"} == {"r7-madness", "r7-affinity", "r7-elves", "r7-tron"}
+    assert {o["id"] for o in cfg["opponents"] if o["tested"] == "experimental"} == {"r7-madness", "r7-affinity", "r7-elves"}
     assert sorted(cfg["recommended_matchup"]["decks"]) == ["jund_wildfire", "mono_blue_terror"]
     assert offer_text_problems(cfg) == []
 
@@ -76,8 +82,8 @@ def test_offer_text_problems():
 
 def test_options_carry_testing_and_recommendation():
     cfg = copy.deepcopy(load_play_config())
-    cfg["opponents"] = [o for o in cfg["opponents"] if o["model"] in (R7, BLUE_PILOT)]
-    cfg["models"] = {k: cfg["models"][k] for k in (R7, BLUE_PILOT)}
+    cfg["opponents"] = [o for o in cfg["opponents"] if o["model"] in (R7, BLUE_PILOT, TRON_PILOT)]
+    cfg["models"] = {k: cfg["models"][k] for k in (R7, BLUE_PILOT, TRON_PILOT)}
     m = LiveManager(None, None, config=cfg, pinned=cfg["models"])
     opt = m.options()
     assert opt["recommended_matchup"]["decks"] == [{"deck": "jund_wildfire", "title": "Jund Wildfire"}, {"deck": "mono_blue_terror", "title": "Mono Blue Terror"}]
@@ -85,7 +91,7 @@ def test_options_carry_testing_and_recommendation():
     rec = {d["deck"]: d["recommended"] for d in opt["player_decks"]}
     assert rec == {"jund_wildfire": ["r8-blue-pilot"], "mono_blue_terror": ["r7-jund"], "red_madness": [], "grixis_affinity": [], "elves": [], "tron": []}
     by = {o["id"]: o for o in opt["opponents"]}
-    assert by["r8-blue-pilot"]["tested"] == "well" and by["r7-tron"]["tested"] == "experimental" and "Experimental" in by["r7-tron"]["description"]
+    assert by["r8-blue-pilot"]["tested"] == "well" and by["r8-tron-pilot"]["tested"] == "some" and by["r7-madness"]["tested"] == "experimental" and "Experimental" in by["r7-madness"]["description"]
     # an older config without any of the fields still works
     old = {"player_decks": cfg["player_decks"], "opponents": [{"id": "a", "label": "A", "model": R7, "deck": "elves"}]}
     o2 = LiveManager(None, None, config=old, pinned={R7: {}}).options()
@@ -112,8 +118,8 @@ def tiny7(tmp_path):
 def r7_config(models, opponents=None) -> dict:
     cfg = copy.deepcopy(load_play_config())
     if opponents is None:
-        # the r8 Blue pilot is served from the same tiny test checkpoint
-        opponents = [{**o, "model": R7} for o in cfg["opponents"] if o["model"] in (R7, BLUE_PILOT)]
+        # the r8 Blue and Tron pilots are served from the same tiny test checkpoint
+        opponents = [{**o, "model": R7} for o in cfg["opponents"] if o["model"] in (R7, BLUE_PILOT, TRON_PILOT)]
     cfg["opponents"] = opponents
     cfg["models"] = {R7: {**cfg["models"][R7], "sha256": sha256_file(models / f"{R7}.pt")}}
     return cfg
