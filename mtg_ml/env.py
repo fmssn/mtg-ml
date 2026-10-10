@@ -13,7 +13,7 @@ from .engine.view import observe
 
 
 class MTGEnv:
-    def __init__(self, decks=None, max_turns: int = 100, auto_single: bool = True, engine: str | None = None):
+    def __init__(self, decks=None, max_turns: int | None = None, auto_single: bool = True, engine: str | None = None):
         self.decks = decks or (expand(JUND_WILDFIRE), expand(MONO_BLUE_TERROR))
         self.max_turns = max_turns
         self.auto_single = auto_single

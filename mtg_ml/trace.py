@@ -27,7 +27,7 @@ class Scenario:
     match_game: int = 1
     starting_player: int | None = None
     mulligans: bool = True
-    max_turns: int = 100
+    max_turns: int | None = None
     # (seat, card name, copies): put cards that are in no decklist yet into
     # a deck (replacing its last `copies` cards) to fuzz them.
     extra: tuple[tuple[int, str, int], ...] = ()

@@ -34,4 +34,5 @@ Every training run that is meant to tell us something gets an entry here, kept e
   - Before 2026-10-07 the trainer benchmarked 100 games (±9 points): treat older single numbers as noise.
 - **Ladder Elo**: strength against fixed past checkpoints on a fixed scale, see `ladder.md`. About ±12 per evaluation at 200 games per rung.
 - **Head to head**: two checkpoints on paired seeds with seats swapped, both decks. The cleanest test between two arms.
+- **Turn limit**: the default is no limit since 2026-10-11 (`max_turns=None`; games still end by decking). Every ledger entry before that was played with the old default of 100 turns (both players' turns counted, turn 101 a draw). An explicit `max_turns` still caps. Draws were near zero at 100, so older numbers should carry over, but do not compare to the last decimal.
 - **Engine version**: engine changes move all numbers, so compare runs only on the same engine version (the ledger records the code ref). The attacker fix of 2026-10-07 (PR #15) moved the overnight checkpoint from 65.9% to 64.6% sampled.

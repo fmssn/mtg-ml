@@ -374,3 +374,25 @@ def test_mulligans_are_replayed_by_fork():
     f = g.fork()
     assert [[c.name for c in p.hand] for p in f.players] == [[c.name for c in p.hand] for p in g.players]
     assert f.mulligans_taken == g.mulligans_taken == [1, 1]
+
+
+def _pass_until_over(g: Game, limit: int = 2000) -> None:
+    for _ in range(limit):
+        if g.over:
+            return
+        choose(g, "Pass priority") if g.decision.kind == O.PRIORITY else g.step(0)
+    raise AssertionError("game did not end")
+
+
+def test_no_turn_limit_by_default_ends_by_decking():
+    # max_turns defaults to None: only decking ends a game that nobody plays
+    g = scenario(p0={"library": ["Swamp"] * 60}, p1={"library": ["Island"] * 60}, active=0, step="upkeep")
+    assert g.max_turns is None
+    _pass_until_over(g)
+    assert g.end_reason == "decking" and g.turn > 100
+
+
+def test_explicit_turn_limit_still_caps():
+    g = scenario(p0={"library": ["Swamp"] * 60}, p1={"library": ["Island"] * 60}, active=0, step="upkeep", max_turns=10)
+    _pass_until_over(g)
+    assert g.end_reason == "turn limit" and g.winner is None and g.turn == 11

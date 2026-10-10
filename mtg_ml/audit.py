@@ -336,7 +336,7 @@ def run(
     max_examples: int = 50,
     per_bucket: int = 3,
     greedy: bool = False,
-    max_turns: int = 100,
+    max_turns: int | None = None,
     auto_mana: bool = False,
     auto_pass: bool = False,
     progress=None,
@@ -410,7 +410,7 @@ def _audit_one(rep: Report, g, features: int, decks, matchup: str, gseed: int, s
             })  # fmt: skip
 
 
-def rebuild(example: dict, engine: str | None = None, max_turns: int = 100, auto_mana: bool = False, auto_pass: bool = False):
+def rebuild(example: dict, engine: str | None = None, max_turns: int | None = None, auto_mana: bool = False, auto_pass: bool = False):
     """The game at an example's decision (replays its `actions`)."""
     g = game_class(engine)(**game_args(1, example["matchup"]), seed=example["seed"], starting_player=example["starting_player"], max_turns=max_turns, auto_mana=auto_mana, auto_pass=auto_pass)
     for a in example["actions"]:
@@ -448,7 +448,7 @@ def main(argv=None) -> None:
     ap.add_argument("--features", type=int, default=0, choices=(0, *FEATURE_VERSIONS), help="audit (and featurize model agents) in this feature set (0: each model's own, else the latest)")
     ap.add_argument("--sample-frac", type=float, default=1.0, help="audit this fraction of decisions (forking per group costs)")
     ap.add_argument("--greedy", action="store_true", help="model agents play argmax instead of sampling")
-    ap.add_argument("--max-turns", type=int, default=100)
+    ap.add_argument("--max-turns", type=int, default=None, help="turn cap (both players' turns); default: no limit")
     ap.add_argument("--auto-mana", action="store_true")
     ap.add_argument("--auto-pass", action="store_true")
     ap.add_argument("--max-examples", type=int, default=50)

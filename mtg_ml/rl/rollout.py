@@ -341,7 +341,7 @@ class Job:
     # cost no longer depends on how many clicks (passes, mana payments) it takes.
     gamma_turn: float = 0.0
     lam_turn: float = 0.0
-    max_turns: int = 100
+    max_turns: int | None = None
     auto_mana: bool = False  # Game(auto_mana=...): colour-preserving auto payment of non-strategic mana costs
     auto_pass: bool = False  # Game(auto_pass=...): collapse uneventful priority passes
     engine: str | None = None  # None: $MTG_ENGINE, else python
