@@ -5,7 +5,7 @@
 use pyo3::create_exception;
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 
 use crate::cards::{self, db, type_names, SacFilter, TK};
 use crate::game::{Game, StepError};
@@ -240,6 +240,7 @@ impl PyGame {
             auto_mana,
             auto_pass,
             deck_names: [deck_names.0, deck_names.1],
+            list_crcs: Default::default(),
         };
         let g = Game::new(args).map_err(PyValueError::new_err)?;
         Ok(PyGame { g, version: 0 })
@@ -289,6 +290,12 @@ impl PyGame {
     #[getter]
     fn edited(&self) -> bool {
         self.st().edited
+    }
+
+    /// Test hook: with False, `copy` replays decisions by listing their
+    /// options (the reference path); the default replays them from a record.
+    fn set_decision_replay(&mut self, on: bool) {
+        self.g.state_mut().no_decision_replay = !on;
     }
 
     #[getter]
@@ -852,6 +859,23 @@ impl PyGame {
         let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim, features, sims.as_deref()).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
         let lens = opts.iter().map(|o| o.len() as u32).collect();
         Ok((state, lens, opts.concat()))
+    }
+
+    /// `featurize_flat` as three native-endian int32 buffers (state, option
+    /// lengths, option tokens): no Python int per token. Every hash is below
+    /// 2**31 (state_dim + a pointer index), so int32 holds it.
+    #[pyo3(signature = (player, state_dim, option_dim, features = crate::features::FEATURES))]
+    fn featurize_flat_bytes<'py>(&mut self, py: Python<'py>, player: u8, state_dim: u32, option_dim: u32, features: u8) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyBytes>, Bound<'py, PyBytes>)> {
+        Self::pidx(player as usize)?;
+        let features = fver(features)?;
+        let sims = self.sim_hashes(player, option_dim, features)?;
+        let (state, opts) = crate::features::featurize(self.st(), player, state_dim, option_dim, features, sims.as_deref()).ok_or_else(|| NativeRulesError::new_err("no decision pending"))?;
+        fn bytes(v: &[u32]) -> Vec<u8> {
+            v.iter().flat_map(|x| (*x as i32).to_ne_bytes()).collect()
+        }
+        let lens: Vec<u32> = opts.iter().map(|o| o.len() as u32).collect();
+        let flat: Vec<u32> = opts.concat();
+        Ok((PyBytes::new_bound(py, &bytes(&state)), PyBytes::new_bound(py, &bytes(&lens)), PyBytes::new_bound(py, &bytes(&flat))))
     }
 
     /// `encode.option_preview(game, player, i, features)`.

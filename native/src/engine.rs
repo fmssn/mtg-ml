@@ -191,6 +191,7 @@ impl Eng {
                 // snapshot's own step start (where it resumed).
                 if !(s.step == name && s.n_actions == st.actions.len() && s.state.turn == st.turn) {
                     st.snap = None;
+                    st.prio_log.clear();
                 }
             }
             self.s().step_name = name;
@@ -264,6 +265,37 @@ impl Eng {
     // Priority
     // ------------------------------------------------------------------
 
+    /// `Game::copy` replaying a recorded priority or payment decision: what
+    /// was chosen, without listing the options again.
+    fn replayed(&mut self, kind: Kind) -> R<Option<Val>> {
+        let st = self.s();
+        let Some(rec) = st.next_replayed() else { return Ok(None) };
+        if rec.kind != kind {
+            return rules("decision replay diverged");
+        }
+        if let Some((pos, idx)) = rec.action {
+            if st.actions.len() != pos {
+                return rules("decision replay diverged");
+            }
+            st.actions.push(idx);
+        }
+        let val = rec.val.clone();
+        if st.snap.is_some() {
+            st.prio_log.push(rec);
+        }
+        Ok(Some(val))
+    }
+
+    /// Record a decision taken normally (see `replayed`); `before`: the
+    /// length of `actions` when it was listed.
+    fn record(&mut self, kind: Kind, before: usize, val: &Val) {
+        let st = self.s();
+        if st.snap.is_some() {
+            let action = (st.actions.len() > before).then(|| (before, st.actions[before]));
+            st.prio_log.push(PrioRec { kind, val: val.clone(), action });
+        }
+    }
+
     fn priority_round(&mut self) -> R<()> {
         let mut p = self.s().active;
         let mut passes = 0;
@@ -283,13 +315,18 @@ impl Eng {
                     }
                     return rules("a simulation copy cannot continue past a priority");
                 }
+            } else if let Some(v) = self.replayed(Kind::Priority)? {
+                v
             } else {
                 let options = self.s().priority_options(p);
-                if self.s().auto_pass && self.s().uneventful_priority(p, &options) {
+                let before = self.s().actions.len();
+                let act = if self.s().auto_pass && self.s().uneventful_priority(p, &options) {
                     Val::Pass
                 } else {
                     self.ask(p, Kind::Priority, || format!("Priority ({step})"), options)?
-                }
+                };
+                self.record(Kind::Priority, before, &act);
+                act
             };
             if let Val::Pass = act {
                 passes += 1;
@@ -474,6 +511,10 @@ impl Eng {
 
     fn pay_mana(&mut self, p: u8, mut rem: Remaining, sac_filter: Option<SacFilter>, exclude: &[u32], what: &str) -> R<()> {
         while !rem.is_paid() {
+            let choice = if let Some(v) = self.replayed(Kind::PayMana)? {
+                v
+            } else {
+            let before = self.s().actions.len();
             let st = self.s();
             let mut options = vec![];
             let mut pool_sorted = st.players[p as usize].pool.clone();
@@ -552,6 +593,9 @@ impl Eng {
                     self.s().paying = None;
                     v
                 }
+            };
+            self.record(Kind::PayMana, before, &choice);
+            choice
             };
             match choice {
                 Val::Pool(c) => {

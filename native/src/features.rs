@@ -43,6 +43,31 @@ const GY_STEPS: &[i64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15];
 pub trait FeatureOut {
     fn direct(&mut self, args: std::fmt::Arguments);
     fn raw(&mut self, args: std::fmt::Arguments);
+    /// Set 7's `self:list:{zone}:{name}#{k}` features (the registered main
+    /// deck and sideboard, the current main deck), all direct.
+    fn lists(&mut self, st: &State, viewer: u8) {
+        for (zone, cards) in list_zones(st, viewer) {
+            list_names(cards, |name, k| self.direct(format_args!("self:list:{zone}:{name}#{k}")));
+        }
+    }
+}
+
+fn list_zones(st: &State, viewer: u8) -> [(&'static str, &Vec<String>); 3] {
+    let v = viewer as usize;
+    [("registered_main", &st.args.registered_main[v]), ("registered_sideboard", &st.args.registered_sideboards[v]), ("current_main", &st.args.decks[v])]
+}
+
+/// `f(name, k)` for k in 1..=count of each distinct name, names in order.
+fn list_names(cards: &[String], mut f: impl FnMut(&str, usize)) {
+    let mut counts = std::collections::BTreeMap::new();
+    for name in cards {
+        *counts.entry(name).or_insert(0usize) += 1;
+    }
+    for (name, count) in counts {
+        for k in 1..=count {
+            f(name, k);
+        }
+    }
 }
 
 macro_rules! direct {
@@ -93,11 +118,7 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
         direct!(o, "opp:deck:{deck}");
     }
     if features >= 7 {
-        for (zone, cards) in [("registered_main", &st.args.registered_main[viewer as usize]), ("registered_sideboard", &st.args.registered_sideboards[viewer as usize]), ("current_main", &st.args.decks[viewer as usize])] {
-            let mut counts = std::collections::BTreeMap::new();
-            for name in cards { *counts.entry(name).or_insert(0usize) += 1; }
-            for (name, count) in counts { for k in 1..=count { direct!(o, "self:list:{zone}:{name}#{k}"); } }
-        }
+        o.lists(st, viewer);
         if let Some(a) = &st.damage_allocation {
             direct!(o, "damage:recipient:{}", a.recipient);
             direct!(o, "damage:remaining:{}", a.remaining);
@@ -1083,6 +1104,24 @@ struct HashOut {
 }
 
 impl FeatureOut for HashOut {
+    fn lists(&mut self, st: &State, viewer: u8) {
+        let crcs = st.args.list_crcs.get_or_init(|| {
+            [0u8, 1].map(|v| {
+                let mut out = vec![];
+                let mut buf = String::new();
+                for (zone, cards) in list_zones(st, v) {
+                    list_names(cards, |name, k| {
+                        buf.clear();
+                        let _ = write!(buf, "self:list:{zone}:{name}#{k}");
+                        out.push(crc32fast::hash(buf.as_bytes()));
+                    });
+                }
+                out
+            })
+        });
+        let dim = self.dim;
+        self.out.extend(crcs[viewer as usize].iter().map(|c| c % dim));
+    }
     fn direct(&mut self, args: std::fmt::Arguments) {
         self.buf.clear();
         let _ = self.buf.write_fmt(args);

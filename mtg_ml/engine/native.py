@@ -21,6 +21,7 @@ supported mutations are the ones scenario setups use (`add_card`,
 from __future__ import annotations
 
 import random
+from array import array
 
 import mtg_ml_native as _n
 
@@ -768,6 +769,16 @@ class NativeGame:
     def featurize_flat(self, player: int, state_dim: int, option_dim: int, features: int):
         self._sim_ready(features)
         return self._g.featurize_flat(player, state_dim, option_dim, features)
+
+    def featurize_flat_arrays(self, player: int, state_dim: int, option_dim: int, features: int):
+        """`featurize_flat` as three `array('i')` (no Python int per token)."""
+        self._sim_ready(features)
+        out = []
+        for b in self._g.featurize_flat_bytes(player, state_dim, option_dim, features):
+            a = array("i")
+            a.frombytes(b)
+            out.append(a)
+        return tuple(out)
 
     def option_preview(self, player: int, index: int, features: int) -> list[str]:
         self._sim_ready(features)

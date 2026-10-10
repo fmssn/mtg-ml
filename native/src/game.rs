@@ -3,6 +3,7 @@
 use corosensei::stack::DefaultStack;
 use corosensei::{Coroutine, CoroutineResult};
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::engine::Eng;
 use crate::state::{Args, State, Stop, ABORT, R};
@@ -102,9 +103,22 @@ impl Game {
         st.snap = Some(snap.clone());
         st.snapshots = false;
         st.edited = false;
+        // Priority decisions of this step are replayed from their record,
+        // without listing their options (not with a log, which prints them).
+        let log = &self.state().prio_log;
+        let mut skip: Vec<usize> = vec![];
+        if !st.logging && !self.state().no_decision_replay && !log.is_empty() {
+            skip = log.iter().filter_map(|r| r.action.map(|a| a.0)).collect();
+            st.prio_replay = Some((Rc::new(log.clone()), 0));
+        }
         let mut g = Game { st: Box::into_raw(Box::new(st)), co: None, started: false, broken: None };
         g.start_with(Some((snap.step, snap.skip_draw))).map_err(StepError::Rules)?;
-        for &a in &self.state().actions[snap.n_actions..] {
+        let mut skip = skip.into_iter().peekable();
+        for (j, &a) in self.state().actions.iter().enumerate().skip(snap.n_actions) {
+            if skip.peek() == Some(&j) {
+                skip.next();
+                continue; // the engine takes it from the record
+            }
             g.step(a as usize)?;
         }
         Ok(Some(g))

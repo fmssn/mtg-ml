@@ -556,6 +556,9 @@ pub struct Args {
     pub auto_pass: bool,
     /// `Game.deck_names`: a seat's deck name when it is not the seat's usual deck.
     pub deck_names: [Option<String>; 2],
+    /// crc32 of each seat's set-7 `self:list:*` features (`features.rs`):
+    /// fixed for the game, so hashed once.
+    pub list_crcs: std::cell::OnceCell<[Vec<u32>; 2]>,
 }
 
 /// The data state at the start of a step, from which `Game::copy` restarts
@@ -632,6 +635,38 @@ pub struct State {
     /// recorded just before a visible card stops being visible. Never read
     /// by the rules.
     pub witnessed: [Vec<(DefId, i32)>; 2],
+    /// Every priority decision since the latest step-start snapshot, so that
+    /// `Game::copy` replays them without listing the options again.
+    pub prio_log: Vec<PrioRec>,
+    /// A copy's replay of `prio_log` (source, next entry); None when
+    /// exhausted or off.
+    pub prio_replay: Option<(Rc<Vec<PrioRec>>, usize)>,
+    /// Off: `Game::copy` lists every replayed decision's options again (the
+    /// reference behaviour the equality tests compare against).
+    pub no_decision_replay: bool,
+}
+
+/// One priority or payment decision: the chosen value and, when a player was asked, the
+/// position of its index in `State::actions`.
+#[derive(Clone)]
+pub struct PrioRec {
+    pub kind: Kind,
+    pub val: Val,
+    /// (position in `State::actions`, the action index).
+    pub action: Option<(usize, u32)>,
+}
+
+impl State {
+    /// The next recorded priority decision of a copy's replay, if any.
+    pub fn next_replayed(&mut self) -> Option<PrioRec> {
+        let (log, i) = self.prio_replay.as_mut()?;
+        let rec = log[*i].clone();
+        *i += 1;
+        if *i == log.len() {
+            self.prio_replay = None;
+        }
+        Some(rec)
+    }
 }
 
 /// `str.capitalize()` (first character upper, the rest lower).
@@ -706,6 +741,9 @@ impl State {
             mulligans_taken: [0, 0],
             sim_viewer: None,
             sim_assume_pass: false,
+            prio_log: Vec::new(),
+            prio_replay: None,
+            no_decision_replay: false,
             shuffles: 0,
             witnessed: [vec![], vec![]],
             snapshots: false,
@@ -2439,6 +2477,7 @@ impl State {
     /// `Game._take_snapshot`.
     pub fn take_snapshot(&mut self, step: &'static str, skip_draw: bool) {
         let old = self.snap.take(); // keep snapshots from chaining
+        self.prio_log.clear();
         let mut state = self.clone();
         state.decision = None;
         self.snap = Some(Rc::new(Snap { state, step, skip_draw, n_actions: self.actions.len() }));
@@ -2449,6 +2488,7 @@ impl State {
     /// `Game._state_edited`.
     pub fn state_edited(&mut self) {
         self.snap = None;
+        self.prio_log.clear();
         self.edited = true;
     }
 }
