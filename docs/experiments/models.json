@@ -1755,8 +1755,8 @@
    "note": "Play site offer r8-jund-pilot, greedy (default Jund opponent): beats r7-lr075 as Jund in all six pairings, 67% vs the Blue specialist, 80% in the mirror. r8-jund (the Jund vs Blue specialist) and r7-jund (legacy) stay offered"
   },
   "play/blue": {
-   "handle": "r7-lr075",
-   "note": "Play site offer r7-blue, greedy"
+   "handle": "r8-blue-pilot",
+   "note": "Play site offer r8-blue-pilot, greedy (the only Blue opponent besides legacy Delver; replaces r7-blue): trained on all six Blue pairings, 74 to 77% against the Blue specialist bot in the mirror, 82% against the Jund specialist"
   },
   "play/madness": {
    "handle": "r7-lr075",
@@ -1823,6 +1823,12 @@
    "role": "play/jund",
    "handle": "r8-jund-pilot",
    "note": "Replaces r8-jund-blue as the default Jund opponent on the play site: trained on all six Jund pairings, +10 to +28 points over lr075 as Jund in every pairing, 67% vs the Blue specialist, 80% in the mirror; r8-jund-blue stays offered as the Jund vs Blue specialist"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "play/blue",
+   "handle": "r8-blue-pilot",
+   "note": "Replaces r7-lr075 (the r7-blue opponent) on the play site: trained on all six Blue pairings; final specialist benchmark (sampled / greedy, 100 blocks, h100-private2) blue_vs_sblue 74.0/77.0, blue_vs_sjund 81.8/81.8, blue_vs_ljund 91.5/91.2, jund_vs_sblue 65.2/66.0; trust test 9 of 14 pairings inside, Tron bias +0.16, 4 exploitable directions"
   }
  ]
 }

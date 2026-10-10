@@ -16,13 +16,19 @@ from tests.test_live_proto import native_ok, play_out, prefer_plays
 
 DECKS6 = ["jund_wildfire", "mono_blue_terror", "red_madness", "grixis_affinity", "elves", "tron"]
 R7 = "r7-lr075/policy"
+BLUE_PILOT = "r8-blue-pilot/policy"
 
 
 def test_packaged_offer_pins_r7_on_every_deck_and_keeps_legacy_delver():
     cfg = load_play_config()
     assert cfg["player_decks"] == DECKS6
     r7 = [o for o in cfg["opponents"] if o["model"] == R7]
-    assert sorted(o["deck"] for o in r7) == sorted(DECKS6) and all(o["greedy"] for o in r7)
+    assert sorted(o["deck"] for o in r7) == sorted(set(DECKS6) - {"mono_blue_terror"}) and all(o["greedy"] for o in r7)
+    assert "r7-blue" not in {o["id"] for o in cfg["opponents"]}
+    blue = next(o for o in cfg["opponents"] if o["id"] == "r8-blue-pilot")
+    assert blue["model"] == BLUE_PILOT and blue["deck"] == "mono_blue_terror" and blue["greedy"] and blue["tested"] == "well"
+    pin = cfg["models"][BLUE_PILOT]
+    assert pin["sha256"] == "a69958a3e02e67718a9ab3e71e265d5f46a8d37bdd5b3a84584683ecd8cb41f6" and pin["features"] == 7 and pin["games"] == 3000320 and pin["trained_at"] == "889798b"
     delver = next(o for o in cfg["opponents"] if o["id"] == "delver")
     assert delver["greedy"] is False and "legacy" in delver["label"].lower() and delver["deck"] == "mono_blue_terror"
     for o in cfg["opponents"]:
@@ -70,16 +76,16 @@ def test_offer_text_problems():
 
 def test_options_carry_testing_and_recommendation():
     cfg = copy.deepcopy(load_play_config())
-    cfg["opponents"] = [o for o in cfg["opponents"] if o["model"] == R7]
-    cfg["models"] = {R7: cfg["models"][R7]}
-    m = LiveManager(None, None, config=cfg, pinned={R7: cfg["models"][R7]})
+    cfg["opponents"] = [o for o in cfg["opponents"] if o["model"] in (R7, BLUE_PILOT)]
+    cfg["models"] = {k: cfg["models"][k] for k in (R7, BLUE_PILOT)}
+    m = LiveManager(None, None, config=cfg, pinned=cfg["models"])
     opt = m.options()
     assert opt["recommended_matchup"]["decks"] == [{"deck": "jund_wildfire", "title": "Jund Wildfire"}, {"deck": "mono_blue_terror", "title": "Mono Blue Terror"}]
     assert "most tested" in opt["recommended_matchup"]["note"]
     rec = {d["deck"]: d["recommended"] for d in opt["player_decks"]}
-    assert rec == {"jund_wildfire": ["r7-blue"], "mono_blue_terror": ["r7-jund"], "red_madness": [], "grixis_affinity": [], "elves": [], "tron": []}
+    assert rec == {"jund_wildfire": ["r8-blue-pilot"], "mono_blue_terror": ["r7-jund"], "red_madness": [], "grixis_affinity": [], "elves": [], "tron": []}
     by = {o["id"]: o for o in opt["opponents"]}
-    assert by["r7-blue"]["tested"] == "well" and by["r7-tron"]["tested"] == "experimental" and "Experimental" in by["r7-tron"]["description"]
+    assert by["r8-blue-pilot"]["tested"] == "well" and by["r7-tron"]["tested"] == "experimental" and "Experimental" in by["r7-tron"]["description"]
     # an older config without any of the fields still works
     old = {"player_decks": cfg["player_decks"], "opponents": [{"id": "a", "label": "A", "model": R7, "deck": "elves"}]}
     o2 = LiveManager(None, None, config=old, pinned={R7: {}}).options()
@@ -105,7 +111,10 @@ def tiny7(tmp_path):
 
 def r7_config(models, opponents=None) -> dict:
     cfg = copy.deepcopy(load_play_config())
-    cfg["opponents"] = [o for o in cfg["opponents"] if o["model"] == R7] if opponents is None else opponents
+    if opponents is None:
+        # the r8 Blue pilot is served from the same tiny test checkpoint
+        opponents = [{**o, "model": R7} for o in cfg["opponents"] if o["model"] in (R7, BLUE_PILOT)]
+    cfg["opponents"] = opponents
     cfg["models"] = {R7: {**cfg["models"][R7], "sha256": sha256_file(models / f"{R7}.pt")}}
     return cfg
 
@@ -164,7 +173,7 @@ def test_all_36_pairs_start_and_sideboard(offer):
 def test_representative_complete_games(offer):
     """A mirror, a cross matchup and a sideboarded game 2, played to the end."""
     rng = random.Random(7)
-    for mine, opp, plan in (("elves", "r7-elves", None), ("tron", "r7-madness", None), ("grixis_affinity", "r7-blue", "standard")):
+    for mine, opp, plan in (("elves", "r7-elves", None), ("tron", "r7-madness", None), ("grixis_affinity", "r8-blue-pilot", "standard")):
         view = offer.new({"deck": mine, "opponent": opp})
         if plan:
             offer.concede(view["live"]["id"])
