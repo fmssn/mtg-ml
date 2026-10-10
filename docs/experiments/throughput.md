@@ -44,3 +44,24 @@ Fused Adam is already used (`make_optimizer`), clipping is folded into it (`FOLD
 Numerics of the BF16 GRU (`tools/check_update_numerics.py`, 20 minibatches, same batches, params fixed): gradient cosine 0.9787 (min 0.77) against the FP32-GRU update, the same level as the existing FP32 -> BF16 autocast gap (cosine 0.9783). It is not identical math, so it needs the learning A/B below.
 
 Learning-equivalence arms (below, `tools/throughput_ab.py`): see the ledger.
+
+## 3. Learning equivalence and packing
+
+Learning results (2M games per arm from the r7 lr075 parent, L1 and head to head) are in the ledger entry `20261010-throughput-ab`. Summary: ep2 +45% games/h with L1 150 vs 94 and h2h +0.07 (one seed, replicate); minibatch 4096 (+13%), 8192 (+25%), BF16 GRU (+18%) and mb4096+GRU (+31%) equal base within noise. PR #116 (featurize, +55% rollout) is merged, so the update is the bound again.
+
+### Packing on h100-private3 (next to the two production base runs, checkout 280ebc5, untouched)
+
+Throughput only (no evaluation), r7 lr075 init, matrix mix, production recipe, one run per learner GPU + server GPU pair. Production baseline over 13 min: h256 858k games/h (wall 8.5 s), h512 654k (11.6 s), box CPU 40%. The box has 64 CPUs without SMT siblings, so a first "third run on siblings" attempt failed at start.
+
+| configuration | extra run games/h | h256 prod | h512 prod | box CPU | notes |
+|---|---|---|---|---|---|
+| 3 runs: third on GPUs 2F+38, workers on cores 8-31 | 743k (wall 9.9 s) | 0.99 | 1.01 | 60% | no production loss over 28 min; third run at 87% of the baseline h256 rate |
+| 4 runs: fourth on GPUs BE+C7, workers over 8-31,40-63 | 601k (wall 12.3 s), short window | 0.71 in the first minutes (startup/compile; wall 8.5 -> 11-12 s) | 0.98 | 64% | ended after about 7 min, before a steady state; the h256 dip exceeds the 25% limit |
+
+Verdict: schedule up to three runs per box (two production runs plus one with workers pinned to the idle cores); do not add a fourth on a 64-CPU box. Server co-location on the learner GPU was not measured.
+
+### Recommendation
+
+1. Adopt `--ppo-epochs 2` after a second-seed replication (about +45% games/h and stronger at equal games in this test).
+2. If epochs stay at 4: `--ppo-minibatch 4096 --ppo-lr 1.06e-4` (x sqrt 2) and `--ppo-gru-precision bf16`, +13% and +18% (+31% together), no measurable learning cost.
+3. Not tested: ep2 combined with the speed knobs.

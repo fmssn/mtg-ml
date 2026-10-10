@@ -31,6 +31,7 @@ ARMS = {  # arm -> overrides of the production flags
     "ep2": {"ppo-epochs": 2},
     "ep2-mb4096": {"ppo-epochs": 2, "ppo-minibatch": 4096},
     "gru-bf16": {"ppo-gru-precision": "bf16"},
+    "mb4096-gru": {"ppo-minibatch": 4096, "ppo-lr": BASE_LR * 2**0.5, "ppo-gru-precision": "bf16"},
 }
 
 
