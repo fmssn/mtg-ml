@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="487.27559055118115" height="189" preserveAspectRatio="xMinYMin meet" viewBox="0 0 487 189" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="487.27559055118115" height="189"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-189)" style="clip-path: url(#clip)">
+		<g transform="">
+			<path d="M 132,34 L 132,174 Z" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="129.776" y="20" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,40) scale(1,-1)">0</text>
+			<path d="M 177.03937,34 L 177.03937,174 Z" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="174.81537007874016" y="20" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,40) scale(1,-1)">5</text>
+			<path d="M 222.07874,34 L 222.07874,174 Z" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="217.63074015748032" y="20" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,40) scale(1,-1)">10</text>
+			<path d="M 267.11811,34 L 267.11811,174 Z" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="262.6701102362205" y="20" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,40) scale(1,-1)">15</text>
+			<path d="M 312.15748,34 L 312.15748,174 Z" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="307.7094803149607" y="20" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,40) scale(1,-1)">20</text>
+			<path d="M 357.19685,34 L 357.19685,174 Z" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="352.7488503937009" y="20" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,40) scale(1,-1)">25</text>
+			<path d="M 402.23622,34 L 402.23622,174 Z" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="397.788220472441" y="20" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,40) scale(1,-1)">30</text>
+			<path d="M 447.275591,34 L 447.275591,174 Z" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="442.8275905511812" y="20" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,40) scale(1,-1)">35</text>
+			<text x="0" y="158" style="font-family: Helvetica; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,316) scale(1,-1)">Mono Blue Terror</text>
+			<path d="M 291.43937,161 L 368.907087,161 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1.7;"/>
+			<path d="M 291.43937,158 L 291.43937,164 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 368.907087,158 L 368.907087,164 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<circle cx="330.17322834645677" cy="161" r="3.2" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="464.50559055118117" y="158" style="font-family: Helvetica-Bold; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,316) scale(1,-1)">+22.0</text>
+			<text x="0" y="135" style="font-family: Helvetica; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,270) scale(1,-1)">Red Madness</text>
+			<path d="M 194.154331,138 L 266.217323,138 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1.7;"/>
+			<path d="M 194.154331,135 L 194.154331,141 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 266.217323,135 L 266.217323,141 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<circle cx="230.18582677165358" cy="138" r="3.2" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="464.50559055118117" y="135" style="font-family: Helvetica-Bold; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,270) scale(1,-1)">+10.9</text>
+			<text x="0" y="112" style="font-family: Helvetica; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,224) scale(1,-1)">Grixis Affinity</text>
+			<path d="M 264.415748,115 L 341.883465,115 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1.7;"/>
+			<path d="M 264.415748,112 L 264.415748,118 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 341.883465,112 L 341.883465,118 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<circle cx="303.1496062992126" cy="115" r="3.2" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="464.50559055118117" y="112" style="font-family: Helvetica-Bold; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,224) scale(1,-1)">+19.0</text>
+			<text x="0" y="89" style="font-family: Helvetica; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,178) scale(1,-1)">Elves</text>
+			<path d="M 184.245669,92 L 261.713386,92 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1.7;"/>
+			<path d="M 184.245669,89 L 184.245669,95 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 261.713386,89 L 261.713386,95 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<circle cx="222.97952755905513" cy="92" r="3.2" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="464.50559055118117" y="89" style="font-family: Helvetica-Bold; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,178) scale(1,-1)">+10.1</text>
+			<text x="0" y="66" style="font-family: Helvetica; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,132) scale(1,-1)">Tron</text>
+			<path d="M 256.308661,69 L 335.577953,69 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1.7;"/>
+			<path d="M 256.308661,66 L 256.308661,72 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 335.577953,66 L 335.577953,72 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<circle cx="295.9433070866142" cy="69" r="3.2" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="464.50559055118117" y="66" style="font-family: Helvetica-Bold; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,132) scale(1,-1)">+18.2</text>
+			<text x="0" y="43" style="font-family: Helvetica; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,86) scale(1,-1)">Jund Wildfire (mirror)</text>
+			<path d="M 342.784252,46 L 425.656693,46 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1.7;"/>
+			<path d="M 342.784252,43 L 342.784252,49 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 425.656693,43 L 425.656693,49 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<circle cx="384.22047244094495" cy="46" r="3.2" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="464.50559055118117" y="43" style="font-family: Helvetica-Bold; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,86) scale(1,-1)">+28.0</text>
+			<text x="200.35329527559057" y="3" style="font-family: Helvetica; font-size: 9px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,6) scale(1,-1)">Jund score improvement (percentage points)</text>
+		</g>
+	</g>
+</svg>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="487.27559055118115" height="94" preserveAspectRatio="xMinYMin meet" viewBox="0 0 487 94" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="487.27559055118115" height="94"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-94)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="0.0" y="40" width="107.56889763779529" height="46" rx="4" ry="4" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6; fill: rgb(92%,96%,95%); fill-rule: evenodd;"/>
+			<text x="43.49944881889765" y="69" style="font-family: Helvetica-Bold; font-size: 10px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,138) scale(1,-1)">Play</text>
+			<text x="10.44294881889764" y="52" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,104) scale(1,-1)">Current + older models</text>
+			<rect x="126.56889763779529" y="40" width="107.56889763779529" height="46" rx="4" ry="4" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6; fill: rgb(92%,96%,95%); fill-rule: evenodd;"/>
+			<text x="163.12834645669292" y="69" style="font-family: Helvetica-Bold; font-size: 10px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,138) scale(1,-1)">Record</text>
+			<text x="137.12659645669294" y="52" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,104) scale(1,-1)">Choices and outcomes</text>
+			<path d="M 109.568898,64 L 124.568898,64 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="124.5689 64, 119.5689 66.5, 119.5689 61.5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<rect x="253.13779527559058" y="40" width="107.56889763779526" height="46" rx="4" ry="4" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6; fill: rgb(92%,96%,95%); fill-rule: evenodd;"/>
+			<text x="289.97724409448824" y="69" style="font-family: Helvetica-Bold; font-size: 10px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,138) scale(1,-1)">Update</text>
+			<text x="275.9779940944882" y="52" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,104) scale(1,-1)">Adjust the policy</text>
+			<path d="M 236.137795,64 L 251.137795,64 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="251.1378 64, 246.1378 66.5, 246.1378 61.5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<rect x="379.70669291338584" y="40" width="107.56889763779532" height="46" rx="4" ry="4" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6; fill: rgb(92%,96%,95%); fill-rule: evenodd;"/>
+			<text x="412.9261417322835" y="69" style="font-family: Helvetica-Bold; font-size: 10px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,138) scale(1,-1)">Evaluate</text>
+			<text x="394.2763917322835" y="52" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,104) scale(1,-1)">Separate test games</text>
+			<path d="M 362.706693,64 L 377.706693,64 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 3, 2;"/>
+			<polygon points="377.7067 64, 372.7067 66.5, 372.7067 61.5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<path d="M 306.922244,40 L 306.922244,14 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 306.922244,14 L 53.784449,14 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 53.784449,14 L 53.784449,40 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="53.78445 40, 51.28445 35, 56.28445 35" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="124.37659645669294" y="21" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,42) scale(1,-1)">Next policy returns to practice</text>
+		</g>
+	</g>
+</svg>

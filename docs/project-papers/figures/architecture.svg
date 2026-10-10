@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="487.27559055118115" height="163" preserveAspectRatio="xMinYMin meet" viewBox="0 0 487 163" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="487.27559055118115" height="163"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-163)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="0" y="111" width="146" height="46" rx="4" ry="4" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6; fill: rgb(92%,96%,95%); fill-rule: evenodd;"/>
+			<text x="24.935000000000002" y="140" style="font-family: Helvetica-Bold; font-size: 10px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,280) scale(1,-1)">CPU rollout workers</text>
+			<text x="30.12175" y="123" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,246) scale(1,-1)">Rust engine + features</text>
+			<rect x="170.63779527559058" y="111" width="146.0" height="46" rx="4" ry="4" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6; fill: rgb(92%,96%,95%); fill-rule: evenodd;"/>
+			<text x="209.1827952755906" y="140" style="font-family: Helvetica-Bold; font-size: 10px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,280) scale(1,-1)">GPU inference</text>
+			<text x="192.50179527559058" y="123" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,246) scale(1,-1)">Batched policies + memory</text>
+			<rect x="341.27559055118115" y="111" width="146.0" height="46" rx="4" ry="4" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6; fill: rgb(92%,96%,95%); fill-rule: evenodd;"/>
+			<text x="385.3755905511812" y="140" style="font-family: Helvetica-Bold; font-size: 10px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,280) scale(1,-1)">GPU learner</text>
+			<text x="369.15759055118116" y="123" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,246) scale(1,-1)">Recurrent PPO updates</text>
+			<path d="M 146,143 L 170.637795,143 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="170.6378 143, 165.6378 145.5, 165.6378 140.5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<path d="M 170.637795,121 L 146,121 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="146 121, 151 123.5, 151 118.5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="183.39779527559057" y="97" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,194) scale(1,-1)">Shared-memory requests / replies</text>
+			<rect x="0" y="39" width="146" height="43" rx="4" ry="4" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6; fill: rgb(92%,96%,95%); fill-rule: evenodd;"/>
+			<text x="21.595" y="65" style="font-family: Helvetica-Bold; font-size: 10px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,130) scale(1,-1)">Recorded trajectories</text>
+			<text x="26.942750000000004" y="51" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,102) scale(1,-1)">Actions, values, rewards</text>
+			<rect x="341.27559055118115" y="39" width="146.0" height="43" rx="4" ry="4" style="stroke: rgb(84%,89%,89%); stroke-linecap: butt; stroke-width: 0.6; fill: rgb(92%,96%,95%); fill-rule: evenodd;"/>
+			<text x="368.98059055118114" y="65" style="font-family: Helvetica-Bold; font-size: 10px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,130) scale(1,-1)">Saved checkpoints</text>
+			<text x="356.98984055118115" y="51" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,102) scale(1,-1)">Versioned weights + metadata</text>
+			<path d="M 73,111 L 73,82 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="73 82, 70.5 87, 75.5 87" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<path d="M 146,59 L 334.275591,59 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 334.275591,59 L 334.275591,104 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 334.275591,104 L 414.275591,104 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 414.275591,104 L 414.275591,111 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="414.2756 111, 411.7756 106, 416.7756 106" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="211.28254527559056" y="67" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,134) scale(1,-1)">Training samples</text>
+			<path d="M 341.275591,134 L 316.637795,134 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="316.6378 134, 321.6378 136.5, 321.6378 131.5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="314.50869291338586" y="161" style="font-family: Helvetica; font-size: 8px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,322) scale(1,-1)">Weights</text>
+			<path d="M 477.275591,111 L 477.275591,82 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="477.2756 82, 474.7756 87, 479.7756 87" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<text x="0" y="15" style="font-family: Helvetica-Bold; font-size: 9px;fill: rgb(9%,17%,23%); stroke:none;" transform="translate(0,30) scale(1,-1)">Separate CPU play service</text>
+			<text x="0" y="1" style="font-family: Helvetica; font-size: 8.5px;fill: rgb(32%,39%,44%); stroke:none;" transform="translate(0,2) scale(1,-1)">Pinned checkpoints &gt; browser games &gt; replays and feedback</text>
+			<path d="M 414.275591,39 L 414.275591,7 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 3, 2;"/>
+			<polygon points="414.2756 7, 411.7756 12, 416.7756 12" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+			<path d="M 414.275591,7 L 330,7 Z" style="stroke: rgb(8%,48%,47%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 3, 2;"/>
+			<polygon points="330 7, 335 9.5, 335 4.5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(8%,48%,47%); fill-rule: evenodd;"/>
+		</g>
+	</g>
+</svg>
