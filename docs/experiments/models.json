@@ -1771,8 +1771,8 @@
    "note": "Play site offer r7-elves, greedy"
   },
   "play/tron": {
-   "handle": "r7-lr075",
-   "note": "Play site offer r7-tron, greedy"
+   "handle": "r8-tron-pilot",
+   "note": "Play site offer r8-tron-pilot, greedy (replaces r7-tron): trained on all six Tron pairings; trust test (six pilots) Tron bias +0.13; Tron audit (PR #108), game 1, 40 games each, win rate vs Jund 0.53, Blue 0.65, Madness 0.57, Affinity 0.75, Elves 0.35"
   }
  },
  "in_flight": [
@@ -1829,6 +1829,12 @@
    "role": "play/blue",
    "handle": "r8-blue-pilot",
    "note": "Replaces r7-lr075 (the r7-blue opponent) on the play site: trained on all six Blue pairings; final specialist benchmark (sampled / greedy, 100 blocks, h100-private2) blue_vs_sblue 74.0/77.0, blue_vs_sjund 81.8/81.8, blue_vs_ljund 91.5/91.2, jund_vs_sblue 65.2/66.0; trust test 9 of 14 pairings inside, Tron bias +0.16, 4 exploitable directions"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "play/tron",
+   "handle": "r8-tron-pilot",
+   "note": "Replaces r7-lr075 (the r7-tron opponent) on the play site: trained on all six Tron pairings; six-pilot trust test Tron bias +0.13; Tron audit (PR #108), game 1, 40 games each, Tron pilot win rate vs Jund 0.53, Blue 0.65, Madness 0.57, Affinity 0.75, Elves 0.35"
   }
  ]
 }
