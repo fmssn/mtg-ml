@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::engine::Eng;
-use crate::state::{Args, Kind, PrioRec, State, Stop, ABORT, R};
+use crate::state::{Args, Kind, PrioRec, Resume, State, Stop, ABORT, CONTINUE_PASS, R};
 
 const STACK_SIZE: usize = 256 * 1024;
 /// Finished games hand their coroutine stack to the next game on the same
@@ -62,7 +62,7 @@ impl Game {
         self.start_with(None)
     }
 
-    fn start_with(&mut self, resume: Option<(&'static str, bool)>) -> Result<(), String> {
+    fn start_with(&mut self, resume: Option<(&'static str, bool, Resume)>) -> Result<(), String> {
         if self.started {
             return Err("game already started".into());
         }
@@ -112,7 +112,7 @@ impl Game {
             (Some(s), true) => s.clone(),
             _ => return Ok(None),
         };
-        let mut st = snap.state.clone();
+        let mut st = State::pooled_box(snap.state());
         st.snap = Some(snap.clone());
         st.snapshots = false;
         st.edited = false;
@@ -135,8 +135,8 @@ impl Game {
                 st.prio_replay = Some((Rc::new(log), 0));
             }
         }
-        let mut g = Game { st: Box::into_raw(Box::new(st)), co: None, started: false, broken: None };
-        g.start_with(Some((snap.step, snap.skip_draw))).map_err(StepError::Rules)?;
+        let mut g = Game { st: Box::into_raw(st), co: None, started: false, broken: None };
+        g.start_with(Some((snap.step, snap.skip_draw, snap.resume))).map_err(StepError::Rules)?;
         let mut skip = skip.into_iter().peekable();
         for (j, &a) in self.state().actions.iter().enumerate().skip(snap.n_actions) {
             if skip.peek() == Some(&j) {
@@ -196,6 +196,21 @@ impl Game {
         }
     }
 
+    /// A simulation copy stopped at the other player's priority carries on as
+    /// if it had been made with `assume_pass`: that player passes (no action
+    /// is recorded, as the engine takes the pass itself).
+    pub fn continue_pass(&mut self) -> Result<(), StepError> {
+        if let Some(m) = &self.broken {
+            return Err(StepError::Rules(format!("engine stopped after an error: {m}")));
+        }
+        let st = self.state();
+        match (&st.decision, st.over, st.sim_viewer) {
+            (Some(d), false, Some(v)) if d.kind == Kind::Priority && d.options.is_empty() && d.player != v => {}
+            _ => return Err(StepError::Over),
+        }
+        self.advance(CONTINUE_PASS)
+    }
+
     pub fn step(&mut self, index: usize) -> Result<(), StepError> {
         if let Some(m) = &self.broken {
             return Err(StepError::Rules(format!("engine stopped after an error: {m}")));
@@ -221,6 +236,6 @@ impl Drop for Game {
     fn drop(&mut self) {
         // Unwind a suspended engine before freeing the state it points to.
         self.release_co();
-        unsafe { drop(Box::from_raw(self.st)) };
+        State::recycle(unsafe { Box::from_raw(self.st) });
     }
 }

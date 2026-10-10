@@ -205,8 +205,9 @@ enum Outcome {
 
 /// encode.py `_run`: step a copy with option `i`, take the opponent's forced
 /// decisions and, with `assume_pass`, pass for it at every priority; None
-/// when the game cannot be copied.
-fn run(g: &mut Game, player: u8, i: usize, assume_pass: bool) -> Result<Option<Outcome>, StepError> {
+/// when the game cannot be copied. Also returns the copy and its step count,
+/// so that a simulation stopped at the opponent's priority can be continued.
+fn run(g: &mut Game, player: u8, i: usize, assume_pass: bool) -> Result<Option<(Outcome, Game, usize)>, StepError> {
     let (mut g2, taken) = match g.copy_for_sim(i, player, assume_pass)? {
         Some(x) => x,
         None => return Ok(None),
@@ -216,10 +217,15 @@ fn run(g: &mut Game, player: u8, i: usize, assume_pass: bool) -> Result<Option<O
         g2.state_mut().sim_assume_pass = assume_pass;
         g2.step(i)?;
     }
-    let mut steps = 1;
+    let o = drive(g, &mut g2, player, 1)?;
+    Ok(Some((o.0, g2, o.1)))
+}
+
+/// The forced-step loop of `run` from `steps` steps taken.
+fn drive(g: &Game, g2: &mut Game, player: u8, mut steps: usize) -> Result<(Outcome, usize), StepError> {
     let stop = loop {
         if hidden_touched(g.state(), g2.state(), player) {
-            return Ok(Some(Outcome::Hidden));
+            return Ok((Outcome::Hidden, steps));
         }
         let st = g2.state();
         if st.over {
@@ -240,16 +246,18 @@ fn run(g: &mut Game, player: u8, i: usize, assume_pass: bool) -> Result<Option<O
     };
     let st = g2.state();
     let next = st.decision.as_ref().map(|d| (d.player == player, d.kind));
-    Ok(Some(Outcome::Done { stop, over: st.over, winner: st.winner, next, after: summary(st, player) }))
+    Ok((Outcome::Done { stop, over: st.over, winner: st.winner, next, after: summary(st, player) }, steps))
 }
 
 /// encode.py `_simulate`: `pv:sim:` (the opponent may respond: its priority
 /// stops the simulation), then `pv:simp:` (it passes). The second simulation
-/// runs only when the first stopped at the opponent's priority; otherwise
-/// the first one's result is repeated under `pv:simp:`.
+/// runs only when the first stopped at the opponent's priority, and then
+/// carries on from that point (the opponent passes there, which is exactly
+/// what a rerun with `assume_pass` does); otherwise the first one's result is
+/// repeated under `pv:simp:`.
 pub fn simulate(g: &mut Game, player: u8, i: usize, before: &Summary, out: &mut impl FnMut(Arguments)) -> Result<(), StepError> {
-    let o1 = match run(g, player, i, false)? {
-        Some(o) => o,
+    let (o1, mut g2, steps) = match run(g, player, i, false)? {
+        Some(x) => x,
         None => {
             out(format_args!("pv:sim:skipped"));
             out(format_args!("pv:simp:skipped"));
@@ -258,9 +266,15 @@ pub fn simulate(g: &mut Game, player: u8, i: usize, before: &Summary, out: &mut 
     };
     delta("pv:sim", &o1, before, player, out);
     if matches!(o1, Outcome::Done { stop: "opponent_decision", next: Some((false, Kind::Priority)), .. }) {
-        match run(g, player, i, true)? {
-            Some(o2) => delta("pv:simp", &o2, before, player, out),
-            None => out(format_args!("pv:simp:skipped")),
+        if g.state().no_continue_sim {
+            match run(g, player, i, true)? {
+                Some((o2, _, _)) => delta("pv:simp", &o2, before, player, out),
+                None => out(format_args!("pv:simp:skipped")),
+            }
+        } else {
+            g2.continue_pass()?;
+            let (o2, _) = drive(g, &mut g2, player, steps)?;
+            delta("pv:simp", &o2, before, player, out);
         }
     } else {
         delta("pv:simp", &o1, before, player, out);

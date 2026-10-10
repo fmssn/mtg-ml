@@ -4,20 +4,20 @@
 title = "mtg-ml fleet board"
 timezone = "Europe/Berlin"
 window_minutes = 45            # trailing window for games/h
-footer = """Each training run uses one learner GPU, one inference-server GPU and about 32 cores. \
-The learner GPUs show "99%" but draw only about 280-360 W of 700 W: the update is limited by latency, not compute. \
+footer = """Most runs use one learner GPU, one inference-server GPU and about 32 cores; the full-box base run on h100-private4 uses all 8 GPUs and 128 threads. \
+CPU is the limit on every box: two 32-core runs fill a 64-core machine. \
 Trackers: gpu-server(1,3,4).tailc02128.ts.net:8444."""
 
 # Legend and role colours.
 [[roles]]
 key = "pilot"
-label = "Pilot league, round 2"
+label = "Pilot league, round 3"
 [[roles]]
 key = "base"
 label = "Base model training"
 [[roles]]
 key = "opt"
-label = "Optimization experiments"
+label = "Full-box run"
 
 # One entry per machine. `color` is the default role colour of its runs and tiles.
 # `runs` are globs expanded ON the box; a directory counts as a run if it has metrics.jsonl or process.json.
@@ -26,9 +26,9 @@ label = "Optimization experiments"
 [[machines]]
 name = "h100-private"
 ssh = "h100-private"
-role = "Pilot league"
+role = "Pilot league + base"
 color = "pilot"
-runs = [{ glob = "~/mtg-ml-r8/campaigns/r9b*/r9-*" }]
+runs = [{ glob = "~/mtg-ml-r8/campaigns/r10*/r10-*" }, { glob = "~/mtg-ml-base/campaigns/*/*" }]
 [machines.gpus]
 "2F" = { label = "ComfyUI", note = "off limits", kind = "foreign" }
 "38" = { label = "ComfyUI", note = "off limits", kind = "foreign" }
@@ -37,9 +37,9 @@ runs = [{ glob = "~/mtg-ml-r8/campaigns/r9b*/r9-*" }]
 [[machines]]
 name = "h100-private2"
 ssh = "h100-private2"
-role = "Pilot league"
+role = "Pilot league + base"
 color = "pilot"
-runs = [{ glob = "~/mtg-ml-r8/campaigns/r9b*/r9-*" }]
+runs = [{ glob = "~/mtg-ml-r8/campaigns/r10*/r10-*" }, { glob = "~/mtg-ml-base/campaigns/*/*" }]
 [machines.gpus]
 "2F" = { label = "ComfyUI", note = "off limits", kind = "foreign" }
 "38" = { label = "ComfyUI (reserved)", note = "off limits", kind = "foreign" }
@@ -55,10 +55,10 @@ runs = [{ glob = "~/mtg-ml-base/campaigns/*/*" }]
 [[machines]]
 name = "h100-private4"
 ssh = "h100-private4"
-role = "Optimization"
+role = "Full-box base model"
 color = "opt"
 cpu_label = "threads"
-runs = [{ glob = "~/mtg-ml/opt/ab/*" }, { glob = "~/mtg-ml/packing/*" }, { glob = "~/mtg-ml-base/campaigns/20261011-r10-base-var/*", color = "base" }]
+runs = [{ glob = "~/mtg-ml-base/campaigns/*/*", color = "base" }]
 
 # Watchdog (python -m tools.fleet_board.watch). Every key is optional; these are the defaults.
 # Run scope: the machines' `runs` globs, unless [watch.runs] lists globs for a machine (replaces them).
@@ -77,33 +77,33 @@ exclude = []                   # regexes on run names to ignore
 
 # Workstream cards: the only hand-written text. Plain English, a few sentences each.
 [[streams]]
-title = "Pilot league - round 2"
+title = "Pilot league - round 3"
 color = "pilot"
-headline = "Each deck's pilot trains against the other five frozen round-1 pilots."
-text = "Wave 1 (Affinity, Jund, Tron, Elves) relaunched at lr 1.5e-5 after the 7.5e-5 attempt degraded them. Wave 2 (Madness, Blue) follows."
+headline = "Each deck's round-2 pilot trains against the other five frozen round-2 pilots."
+text = "Round 2 beat round 1 in every deck and is live on the play site. Round 3 queues three decks per box (h100-private: Affinity, Madness; h100-private2: Blue, Elves, Tron); the Jund run crashed out of GPU memory and is not resumed."
 
 [[streams]]
 title = "Base models"
 color = "base"
-headline = "Two generalists from scratch, h256 and h512, 40M games each."
-text = "PFSP opponent sampling guards against self-play cycling. A specialist check runs every 2M games."
+headline = "Generalists from scratch, 40M games each: h256 and h512 on h100-private3, plus lr variants h256 lr 1e-4 and h512 lr 3.75e-5."
+text = "The first two plateaued near L1 -75 to -83; the lr variants test whether the learning rate is the cause."
 
 [[streams]]
-title = "Optimization"
+title = "Full-box base model"
 color = "opt"
-headline = "Profile done: the GRU takes 40% of the update."
-text = "Four learning A/Bs of 2M games each run on h100-private4. The update gets up to 2x faster, but rollout now limits each iteration. Packing tests (3-4 runs per box) are next on h100-private3."
+headline = "One h256 base run on all of h100-private4: 4 learner GPUs, 4 inference GPUs, 128 threads, varied decklists."
+text = "Uses the fast recipe chosen on 2026-10-10 (2 epochs, bf16 GRU, faster featurization): about 1.9x the games/h of the old recipe per GPU pair."
 
 [[streams]]
 title = "Play site"
 color = ""
-headline = "play.mtg-ml.com runs the Jund, Blue and Tron pilots, the Jund vs Blue specialist, and r7 for Madness, Affinity and Elves."
+headline = "play.mtg-ml.com runs the six round-2 pilots, the Jund vs Blue specialist and the legacy Delver bot."
 text = ""
 
 # Run descriptions for the table: first rule whose regex matches the run name or handle wins.
 [[describe]]
 match = "pilot"
-text = "Pilot vs frozen round-1 pilots"
+text = "Pilot vs frozen round-2 pilots"
 [[describe]]
 match = "base-h256"
 text = "Generalist from scratch, width 256"

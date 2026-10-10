@@ -50,3 +50,54 @@ def test_native_features_match_recorded_digest(features, n):
 @pytest.mark.parametrize("features", [6, 7])
 def test_native_decision_replay_equals_relisting(features):
     assert digest(6, features, replay=True) == digest(6, features, replay=False)
+
+
+def sim_digest(n: int, features: int, **hooks) -> str:
+    h = hashlib.sha256()
+    for g in games(n):
+        for name, on in hooks.items():
+            getattr(g._g, name)(on)
+        for p in (g.decision.player, 1 - g.decision.player):
+            h.update(repr(g.featurize_flat(p, 4096, 4096, features)).encode())
+    return h.hexdigest()
+
+
+@pytest.mark.parametrize("features", [6, 7])
+def test_native_priority_snapshots_equal_step_start_snapshots(features):
+    assert sim_digest(6, features) == sim_digest(6, features, set_step_snapshots_only=True)
+
+
+@pytest.mark.parametrize("features", [6, 7])
+def test_native_simp_continues_first_simulation(features):
+    assert sim_digest(6, features) == sim_digest(6, features, set_continue_sim=False)
+
+
+def test_native_copies_from_priority_and_step_snapshots_are_identical():
+    """At every decision of random games, a copy restarted from the latest
+    priority snapshot equals the game itself and the copy a step-start
+    snapshot gives, and keeps equal as both play on."""
+    pool = sorted(set(MATCHUPS) - EXPLICIT_ONLY)
+    checked = 0
+    for seed in range(14):
+        args = dict(seed=seed, max_turns=30, **game_args(1 + seed // 3 % 2, pool[seed % len(pool)]))
+        a, b = game_class("native")(**args), game_class("native")(**args)
+        b._g.set_step_snapshots_only(True)
+        r = random.Random(seed)
+        while not a.over:
+            ca, cb = a.copy(), b.copy()
+            assert ca.dump() == cb.dump() == a.dump()
+            if checked % 7 == 0 and not a.over:
+                rr = random.Random(seed * 1000 + checked)
+                for _ in range(5):
+                    if ca.over:
+                        break
+                    i = rr.randrange(len(ca.legal_options()))
+                    ca.step(i)
+                    cb.step(i)
+                assert ca.dump() == cb.dump()
+            checked += 1
+            i = r.randrange(len(a.legal_options()))
+            a.step(i)
+            b.step(i)
+        assert a.dump() == b.dump()
+    assert checked > 1000

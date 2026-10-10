@@ -301,6 +301,18 @@ impl PyGame {
         self.g.state_mut().no_decision_replay = !on;
     }
 
+    /// Test hook: with True, snapshots are taken at step starts only (the
+    /// reference path; the default also takes one at priority).
+    fn set_step_snapshots_only(&mut self, on: bool) {
+        self.g.state_mut().step_snapshots_only = on;
+    }
+
+    /// Test hook: with False, `pv:simp:` reruns its simulation from a fresh
+    /// copy (the reference path) instead of continuing the first one.
+    fn set_continue_sim(&mut self, on: bool) {
+        self.g.state_mut().no_continue_sim = !on;
+    }
+
     #[getter]
     fn has_snapshot(&self) -> bool {
         self.st().snap.is_some()
