@@ -23,14 +23,14 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `play/madness` | `r7-lr075` | Play site offer r7-madness, greedy |
 | `play/affinity` | `r7-lr075` | Play site offer r7-affinity, greedy |
 | `play/elves` | `r7-lr075` | Play site offer r7-elves, greedy |
-| `play/tron` | `r7-lr075` | Play site offer r7-tron, greedy |
+| `play/tron` | `r8-tron-pilot` | Play site offer r8-tron-pilot, greedy (replaces r7-tron): trained on all six Tron pairings; trust test (six pilots) Tron bias +0.13; Tron audit (PR #108), game 1, 40 games each, win rate vs Jund 0.53, Blue 0.65, Madness 0.57, Affinity 0.75, Elves 0.35 |
 
 | in flight | compared against | question |
 |---|---|---|
 | `r8-belief` | `r7-lr075` | does feature set 8 plus the belief head beat the lr075 trajectory at matched games |
 | `r9-jund-pilot` | `r8-jund-pilot` | does a second round against frozen round-1 pilots (all six decks, same recipe) beat each round-1 pilot head to head and on the trust test |
 
-Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-pilot/policy` (the `r8-jund-pilot` opponent), `r8-jund-blue/policy` (the `r8-jund` opponent), `r8-blue-pilot/policy` (the `r8-blue-pilot` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
+Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-pilot/policy` (the `r8-jund-pilot` opponent), `r8-jund-blue/policy` (the `r8-jund` opponent), `r8-blue-pilot/policy` (the `r8-blue-pilot` opponent), `r8-tron-pilot/policy` (the `r8-tron-pilot` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
 
 ## Registry
 

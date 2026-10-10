@@ -59,6 +59,14 @@ source = "h100-private2:~/mtg-ml-r8/campaigns/r8g-20261010/r8-blue-pilot/policy/
 evaluation = "final r8 Blue pilot (run 20261010-r8-fs7h256-dk-blue-ft-r7-lr075-s8, 3.0M games over all six Blue pairings); final specialist benchmark, 100 blocks, measured on h100-private2, sampled / greedy: blue_vs_sblue 74.0/77.0, blue_vs_sjund 81.8/81.8, blue_vs_ljund 91.5/91.2, jund_vs_sblue 65.2/66.0; trust test (single model): 9 of 14 pairings inside, Tron bias +0.16, 4 exploitable directions"
 trained_at = "889798b"  # training code
 
+[models."r8-tron-pilot/policy"]
+sha256 = "5dee22e329d320d86a08f926181af42e0385c20986bd017af5bef18e96022564"
+features = 7
+games = 3000320
+source = "h100-private2:~/mtg-ml-r8/campaigns/r8h2-20261010/r8-tron-pilot/policy/v01465.pt (a copy is at h100-private:~/mtg-ml-eval/ckpt/r8-tron-pilot-final.pt)"
+evaluation = "final r8 Tron pilot (3.0M games over all six Tron pairings); six-pilot trust test (~/mtg-ml-eval/results/trust-pilots-20261010T111705Z on h100-private): Tron bias +0.13; Tron audit (PR #108), game 1, 40 games each, Tron pilot win rate vs each round-1 pilot: Jund 0.53, Blue 0.65, Madness 0.57, Affinity 0.75, Elves 0.35"
+trained_at = "889798b"  # training code
+
 [models."r4-control/policy"]
 sha256 = "cb19222d1868a72671c73c80268d75aea977e87758493804c80f895f85024f72"
 features = 3
@@ -76,7 +84,7 @@ model = "r8-jund-pilot/policy"
 deck = "jund_wildfire"
 greedy = true
 
-# r7 lr075, greedy, with every deck except Blue (the Blue pilot covers it): 36 ordered pairs, mirrors included.
+# r7 lr075, greedy, with every deck except Blue and Tron (their pilots cover them): 36 ordered pairs, mirrors included.
 [[opponents]]
 id = "r8-jund"
 label = "r8 · Jund Wildfire"
@@ -138,14 +146,14 @@ description = "Plays Elves. Experimental: only checked by the self-play trust te
 tested = "experimental"
 
 [[opponents]]
-id = "r7-tron"
-label = "r7 · Tron"
-note = "r7 lr075 final (8.35M self-play games, greedy) playing Tron"
-model = "r7-lr075/policy"
+id = "r8-tron-pilot"
+label = "r8 · Tron pilot"
+note = "r8 Tron pilot (3.0M games over all six Tron pairings, greedy) playing Tron"
+description = "Trained on all six Tron matchups. Strong: assembles Tron early. Beats most pilots, weakest against Elves."
+tested = "some"
+model = "r8-tron-pilot/policy"
 deck = "tron"
 greedy = true
-description = "Plays Tron. Experimental: only checked by the self-play trust test against Pauper research win rates. No specialist benchmark."
-tested = "experimental"
 
 [[opponents]]
 id = "delver"

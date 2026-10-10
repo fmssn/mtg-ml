@@ -212,7 +212,7 @@ def test_games_belong_to_their_account(server):
     assert server.get(f"/api/live/{gid}/review", email=BOB, token=tok).status_code == 404
     # Alice without the token, or with another game's token: refused
     assert server.get(f"/api/live/{gid}").status_code == 403
-    _, gid2, tok2 = server.new(deck="tron", opponent="r7-tron")
+    _, gid2, tok2 = server.new(deck="tron", opponent="r8-tron-pilot")
     assert server.get(f"/api/live/{gid}", token=tok2).status_code == 403
     # the token in the URL is refused outright
     r = server.c.get(f"/api/live/{gid}?token={tok}", headers=server.h())
