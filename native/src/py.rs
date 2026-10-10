@@ -280,8 +280,11 @@ impl PyGame {
     /// in the same state. Ignored when this game was edited outside `step()`.
     fn adopt_snapshot(&mut self, other: PyRef<'_, PyGame>) {
         let snap = other.st().snap.clone();
+        let log = other.st().prio_log.clone();
         let st = self.g.state_mut();
         if !st.edited {
+            // the decisions since that snapshot, which `other` recorded
+            st.prio_log = if snap.is_some() { log } else { Vec::new() };
             st.snap = snap;
         }
     }

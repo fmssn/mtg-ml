@@ -644,6 +644,9 @@ pub struct State {
     /// Off: `Game::copy` lists every replayed decision's options again (the
     /// reference behaviour the equality tests compare against).
     pub no_decision_replay: bool,
+    /// (`sim_viewer`, `sim_assume_pass`) a simulation copy takes on once its
+    /// replay has consumed the last record (see `Game::copy_for_sim`).
+    pub sim_after_replay: Option<(u8, bool)>,
 }
 
 /// One priority or payment decision: the chosen value and, when a player was asked, the
@@ -744,6 +747,7 @@ impl State {
             prio_log: Vec::new(),
             prio_replay: None,
             no_decision_replay: false,
+            sim_after_replay: None,
             shuffles: 0,
             witnessed: [vec![], vec![]],
             snapshots: false,

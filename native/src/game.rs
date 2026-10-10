@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::engine::Eng;
-use crate::state::{Args, State, Stop, ABORT, R};
+use crate::state::{Args, Kind, PrioRec, State, Stop, ABORT, R};
 
 const STACK_SIZE: usize = 256 * 1024;
 /// Finished games hand their coroutine stack to the next game on the same
@@ -91,6 +91,19 @@ impl Game {
     /// way this game takes snapshots from now on; the copy does not until it
     /// is copied itself (it shares this one's until its next step begins).
     pub fn copy(&mut self) -> Result<Option<Game>, StepError> {
+        Ok(self.copy_with(None)?.map(|c| c.0))
+    }
+
+    /// `copy`, then (when `sim` = (option, viewer, assume_pass) and the
+    /// pending decision is a priority or payment one) takes that option as
+    /// a simulation copy does (`sim_viewer`, `sim_assume_pass` set, then
+    /// `step(option)`), straight from the record without listing the
+    /// decision's options again. The flag: the option was taken.
+    pub fn copy_for_sim(&mut self, i: usize, viewer: u8, assume_pass: bool) -> Result<Option<(Game, bool)>, StepError> {
+        self.copy_with(Some((i, viewer, assume_pass)))
+    }
+
+    fn copy_with(&mut self, sim: Option<(usize, u8, bool)>) -> Result<Option<(Game, bool)>, StepError> {
         if let Some(m) = &self.broken {
             return Err(StepError::Rules(format!("engine stopped after an error: {m}")));
         }
@@ -105,11 +118,22 @@ impl Game {
         st.edited = false;
         // Priority decisions of this step are replayed from their record,
         // without listing their options (not with a log, which prints them).
-        let log = &self.state().prio_log;
+        let mut log = self.state().prio_log.clone();
         let mut skip: Vec<usize> = vec![];
-        if !st.logging && !self.state().no_decision_replay && !log.is_empty() {
-            skip = log.iter().filter_map(|r| r.action.map(|a| a.0)).collect();
-            st.prio_replay = Some((Rc::new(log.clone()), 0));
+        let mut taken = false;
+        if !st.logging && !self.state().no_decision_replay {
+            if let (Some((i, viewer, assume_pass)), Some(d)) = (sim, &self.state().decision) {
+                if matches!(d.kind, Kind::Priority | Kind::PayMana) && i < d.options.len() {
+                    let pos = self.state().actions.len();
+                    log.push(PrioRec { kind: d.kind, val: d.options[i].value.clone(), action: Some((pos, i as u32)) });
+                    st.sim_after_replay = Some((viewer, assume_pass));
+                    taken = true;
+                }
+            }
+            if !log.is_empty() {
+                skip = log.iter().filter_map(|r| r.action.map(|a| a.0)).collect();
+                st.prio_replay = Some((Rc::new(log), 0));
+            }
         }
         let mut g = Game { st: Box::into_raw(Box::new(st)), co: None, started: false, broken: None };
         g.start_with(Some((snap.step, snap.skip_draw))).map_err(StepError::Rules)?;
@@ -121,7 +145,7 @@ impl Game {
             }
             g.step(a as usize)?;
         }
-        Ok(Some(g))
+        Ok(Some((g, taken)))
     }
 
     fn advance(&mut self, input: usize) -> Result<(), StepError> {

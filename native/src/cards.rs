@@ -495,6 +495,10 @@ pub struct CardDef {
     /// cards.py `card_shape`: what the card does, as entity tokens read from
     /// its spec (feature set 5). Computed once at load.
     pub shape: Vec<String>,
+    /// crc32 of each `shape` token and of `e:name:{name}` (`features.rs` hashes
+    /// them without formatting; filled when the pool is loaded).
+    pub shape_crc: Vec<u32>,
+    pub ent_name_crc: u32,
     pub omen: bool,
     pub enters_tapped_unless_forests: i32,
     pub additional_power: bool,
@@ -545,6 +549,9 @@ pub struct CardDb {
     /// `objects.FREE`: the cost of plot casts and land-sacrifice alternatives.
     pub free: ManaCost,
     pub spec_text: String,
+    /// crc32 of `e:type:{type}` per `TYPE_NAMES` entry and of `e:kw:{keyword}` per keyword bit.
+    pub type_tok_crc: Vec<u32>,
+    pub kw_tok_crc: Vec<u32>,
 }
 
 /// Keywords the engine itself gives meaning to (or grants).
@@ -625,7 +632,10 @@ impl CardDb {
             room_next: vec![],
             free: ManaCost::default(),
             spec_text: text.to_string(),
+            type_tok_crc: TYPE_NAMES.iter().map(|t| crc32fast::hash(format!("e:type:{t}").as_bytes())).collect(),
+            kw_tok_crc: vec![],
         };
+        db.kw_tok_crc = db.keyword_names.iter().map(|k| crc32fast::hash(format!("e:kw:{k}").as_bytes())).collect();
         // Names first so effects can reference tokens and cards can reference faces.
         let mut face_ids = HashMap::new();
         let mut all: Vec<(&str, &Table)> = vec![];
@@ -657,6 +667,10 @@ impl CardDb {
             db.undercity = Some(d.id);
             db.room_next = next;
             db.defs.push(d);
+        }
+        for d in &mut db.defs {
+            d.shape_crc = d.shape.iter().map(|t| crc32fast::hash(t.as_bytes())).collect();
+            d.ent_name_crc = crc32fast::hash(format!("e:name:{}", d.name).as_bytes());
         }
         Ok(db)
     }
@@ -1282,6 +1296,8 @@ fn parse_card(id: DefId, t: &Table, db: &CardDb, faces: &HashMap<String, DefId>,
         },
         modes,
         shape,
+        shape_crc: vec![],
+        ent_name_crc: 0,
         omen: get_bool(t, "omen")?,
         enters_tapped_unless_forests: get_int(t, "enters_tapped_unless_forests")?.unwrap_or(0),
         additional_power: get_bool(t, "additional_power")?,
@@ -1603,6 +1619,8 @@ fn parse_dungeon(id: DefId, t: &Table, db: &CardDb, tokens: &HashMap<String, Def
         station_keywords: 0,
         additional_choose_creature: false,
         shape: vec![],
+        shape_crc: vec![],
+        ent_name_crc: 0,
         bargain: false,
         phyrexian_cost: None,
         phyrexian_life: 0,

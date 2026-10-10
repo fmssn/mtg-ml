@@ -283,6 +283,12 @@ impl Eng {
         if st.snap.is_some() {
             st.prio_log.push(rec);
         }
+        if st.prio_replay.is_none() {
+            if let Some((v, assume_pass)) = st.sim_after_replay.take() {
+                st.sim_viewer = Some(v);
+                st.sim_assume_pass = assume_pass;
+            }
+        }
         Ok(Some(val))
     }
 
