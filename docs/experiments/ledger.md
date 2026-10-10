@@ -2,6 +2,72 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## 20261009-r8-results · final results and archives of `r8-jund-blue`, `r8-jund-pilot`, `r8-jund-mirror`
+
+Three finished r8 fine-tunes of the r7 lr075 `policy.pt` (parent `r7-lr075`, sha256 `672aaa0c2764f853198c44a6fa7847469e01d9767952ea3fb8e9d84e068f636e`). They answer the questions of the r8 entry below: does fine-tuning on one matchup (`r8-jund-blue`, the mirror `r8-jund-mirror`) or on one deck against the whole field (`r8-jund-pilot`) pay off, and what does it cost the rest of the matrix. Handles and run IDs follow [naming.md](naming.md); the old names (arm C, `r8-jund-blue-ft`, `r8e3`, ...) are in the legacy column of [models.md](models.md). The jsonl `id` of each run stays its old ledger id (the registry's `ledger_id`, which the dashboard and `tests/test_model_registry.py` key on); the jsonl lines also carry `run_id` and `handle`.
+
+- **Code**: `889798bc54c7f940200c01d2e7ccee01a30a8159` for all three, deployed unchanged to `~/mtg-ml-r8/code` on each host. Launcher `tools/r8_campaign.py` + `tools/r8_host.sh` (this PR adds the final versions, with arm G `r8-blue-pilot`, and `tools/r8_specialist_watch.sh`). Exact flags: the `command` of each arm in its `campaign.json` (`h100-private:~/mtg-ml-r8/campaigns/r8-20261009/`, `.../r8e3-20261009/`, `h100-private2:~/mtg-ml-r8/campaigns/r8f-20261009/`; copied into the archives as `campaign.json`). Common to all: seed 8, native engine, h256 architecture from `--init`, 2048 games per iteration, bf16 PPO (minibatch 2048, 4 epochs, target KL 0.03), `--ppo-lr 7.5e-05` to `7.5e-06` linear over the whole schedule, 50% self-play + 50% recent/uniform pool, 20% postboard, `--eval-every-games 250000` with 1000 sampled + 1000 greedy benchmark games and the L1 ladder (200 games per rung). Differences: `r8-jund-blue` `--matchup jund_blue`, 6M games; `r8-jund-pilot` `--matchup jund_blue:1,jund_madness:1,jund_affinity:1,jund_elves:1,jund_tron:1,jund_mirror:1`, 3M games; `r8-jund-mirror` `--matchup jund_mirror`, `--ppo-capture 0` (the others use 2), 2M games.
+- **Archives** (all on `h100-private:~/mtg-ml-checkpoints/`, each with `final.pt`, `policy.pt`, `snapshots/`, `metrics.jsonl`, `run.log`, `launch.txt`, `SHA256`, `evals.txt`, `evals/`):
+
+| handle | archive id | `final.pt` sha256 | final policy | policy sha256 |
+|---|---|---|---|---|
+| `r8-jund-blue` | `20261009-r8-fs7h256-mu-jund-blue-ft-r7-lr075-s8` | `58f24a8e621a19cf3e542004799f0fe4aad172c8bc2f10735cd2bbf7b9f604ee` | `policy/v02930.pt` | `b2ca176382139cf5f6733937605e43b836af1973b18624e8ae19d68a850c9e71` |
+| `r8-jund-pilot` | `20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8` | `5afdd804e5384a0169ee8c2a9f93e393216b7ffa4d576f5a0ee6d6ce084eb4ef` | `policy/v01464.pt` | `71c758dcf4513deb3bc7021652410d7c573c366c97d8c01a4da1b5f036078379` |
+| `r8-jund-mirror` | `20261009-r8-fs7h256-mu-jund-jund-ft-r7-lr075-s8` | `0eced842c9b2c218b0595e25181fda9de66096a751ee01073a80b4d19a9526d6` | `policy/v00977.pt` | `f8882e0c4c632cc62ca3ac20a019e55295db10d881e1768c2b6f9aa23e5f715e` |
+
+  `r8-jund-pilot` ran on h100-private2. Its run directory was copied to h100-private with `scp -3` through the Mac (agent forwarding from h100-private2 was not available) into the staging directory `~/mtg-ml-r8/archive-in/r8-jund-pilot`, then archived with `archive_run.sh` like the others (`~/mtg-ml-checkpoints` was only appended to). For the pilot the script's `policy.pt` is the newest file `v01465.pt`, one policy file past the benchmarked `v01464.pt`; the benchmarked file is added to that archive as `policy-v01464.pt` (identical to `~/mtg-ml-r8/eval/r8-jund-pilot-final.pt` on h100-private2). The earlier crashed attempts of the mirror are the registry rows `r8-jund-mirror-x1` and `-x2` (not archived).
+
+### Training curves (in-training evaluation, Jund vs the legacy Blue bot, 1000 games, sampled / greedy; L1 Elo, SE about 12)
+
+| games | `r8-jund-blue` | `r8-jund-pilot` |
+|---|---|---|
+| 0.25M | 66.5 / 74.2, L1 66.0 | 55.3 / 69.1, L1 -9.2 |
+| 1.0M | 69.5 / 77.0, 107.7 | 60.4 / 71.9, 28.5 |
+| 2.0M | 74.4 / 78.8, 106.8 | 66.7 / 72.7, 80.1 |
+| 3.0M | 76.2 / 82.6, 141.8 | **74.3 / 77.7, 148.4** (end) |
+| 4.0M | 79.0 / 82.8, 198.5 | |
+| 5.0M | 81.5 / 83.6, 164.9 | |
+| 6.0M (end) | **83.7 / 85.7, 238.6** | |
+
+`r8-jund-mirror` trained on `jund_mirror` only; its routine benchmark is on that matchup (84.6 / 90.6 at 0.25M, 92.2 / 93.8 at the end) and has no L1, so those numbers are not comparable with the others and it is judged on the specialist benchmark. L1 of `r8-jund-blue` at the end (238.6) is above `fs4-ft` (212.5), the previous highest Jund-vs-Blue L1.
+
+### Final specialist benchmark
+
+`tools/benchmark_checkpoint.py --blocks 100 --contract fair`, 100 four-game blocks per cell and mode (n = 400, Wilson 95% about +-0.05), all six cells, 0 errors. Measured on h100-private for `r8-jund-blue` and `r8-jund-mirror`, on h100-private2 for `r8-jund-pilot`. Cells: `jund_vs_sblue` = Jund vs the Blue specialist, `blue_vs_sjund` = Blue vs the Jund specialist, `jund_vs_sjund` / `blue_vs_sblue` = the mirrors vs the specialist, `jund_vs_lblue` / `blue_vs_ljund` = vs the legacy bots. Score of the checkpoint, sampled / greedy; the `r7-lr075` and `r4-control` rows are from `20261009-specialist-benchmark` (same protocol; r7 is the final v04079).
+
+| checkpoint | jund_vs_sblue | blue_vs_sjund | jund_vs_sjund | blue_vs_sblue | jund_vs_lblue | blue_vs_ljund |
+|---|---|---|---|---|---|---|
+| **`r8-jund-blue`** (6.0M) | **75.2 / 79.0** | 83.8 / 84.0 | 58.3 / 62.7 | 65.2 / 66.0 | 82.0 / 84.8 | 92.7 / 92.7 |
+| `r8-jund-pilot` (3.0M) | 67.2 / 67.0 | 77.7 / 81.0 | 79.5 / 79.5 | 54.5 / 58.8 | 73.5 / 77.2 | 91.0 / 92.5 |
+| `r8-jund-mirror` (2.0M) | 43.5 / 53.7 | 41.7 / 44.3 | **83.0 / 88.5** | 30.2 / 31.0 | 63.2 / 67.5 | 62.0 / 56.2 |
+| `r7-lr075` (parent) | 46.3 / 49.0 | 68.8 / 75.7 | 57.8 / 68.5 | 57.8 / 67.0 | 55.5 / 70.8 | 84.3 / 88.5 |
+| `r4-control` | 64.0 / 65.5 | 85.3 / 87.0 | 32.8 / 36.2 | 48.7 / 48.7 | 74.3 / 74.3 | 93.0 / 93.0 |
+
+Reports: `~/mtg-ml-eval/results/bench-r8-jund-blue-final/report.json` and `bench-r8-jund-mirror-final/report.json` on h100-private; `~/mtg-ml-r8/eval/bench-r8-jund-pilot-final/report.json` on h100-private2 (also in the archives under `evals/`).
+
+### Trust test
+
+`python -m mtg_ml.benchmark.trust`, code `6ca2fb59e1`, the same flags as the lr075 baseline in `20261009-r8-evals-1` (200 matches per pairing and mode, 40 per exploit matchup, mode and pool member; fair contract, bo3, sampled primary).
+
+| | `r7-lr075` (baseline) | `r8-jund-blue` | `r8-jund-pilot` |
+|---|---|---|---|
+| per pairing (need 70% inside) | PASS, 11/14 inside | FAIL, 3/14 inside, 10 above, 1 below | FAIL, 9/14 inside, 2 above, 3 below |
+| per deck bias (margin 0.02) | FAIL, tron +0.163 | FAIL, 6 decks flagged: jund +0.27, blue +0.26, affinity +0.12 over; elves -0.34, tron -0.29, madness -0.14 under | **PASS, none flagged** (first time) |
+| exploitability | FAIL, 7 directions | FAIL, 21 directions, max pool win rate 1.000 | FAIL, 5 directions: elves>tron, blue>elves, madness>elves, tron>affinity, tron>madness; max 0.825 |
+| overall | FAIL | FAIL | FAIL |
+| greedy (pairing / deck / exploit) | FAIL / FAIL / FAIL | FAIL / FAIL / FAIL | PASS / PASS / FAIL |
+
+Outputs: `h100-private:~/mtg-ml-eval/results/trust-r8-jund-blue-final/trust.{md,json}` and `trust-r8-jund-pilot-final/` (copied into the archives under `evals/`). No trust test was run for `r8-jund-mirror`.
+
+### Findings and verdicts
+- **`r8-jund-blue`: adopt as the Jund-vs-Blue model, specialist only.** Against the Blue specialist as Jund it gains +29 points sampled and +30 greedy over its parent (75.2 / 79.0 against 46.3 / 49.0) and beats `r4-control` (64.0 / 65.5) by +11 and +13, clear of the +-5 interval; L1 238.6 is the highest so far. Blue as learner (83.8 / 84.0) is level with `r4-control` (85.3 / 87.0). But the trust test fails hard: only 3/14 pairings inside, both trained decks overrated by about +0.27, four other decks off, 21 exploitable directions. Strong forgetting of the other decks, so it is the model for Jund vs Blue (already `play/jund`, PR #99) and not a general model.
+- **`r8-jund-pilot`: per-deck training works and keeps the other decks intact.** Training on all six Jund pairings reaches 74.3 / 77.7 and L1 148.4 on the standing benchmark in 3M games (lr075 at 8.25M: 56.0 / 65.2, L1 5) and passes the per-deck bias check for the first time. 9/14 pairings inside (lr075: 11/14) and 5 exploitable directions (lr075: 7). Jund vs the Blue specialist is 67.2 / 67.0, below `r8-jund-blue` (it did not train only on that matchup), but the Jund mirror is 79.5 / 79.5 against 58.3 / 62.7. Open: the trust test still fails overall, and the exploitable directions involve decks this run did not train.
+- **`r8-jund-mirror`: best Jund-mirror model, forgets Blue.** Jund mirror vs the Jund specialist 83.0 / 88.5 (lr075 57.8 / 68.5, `r4-control` 32.8 / 36.2); everything else drops: Jund vs the Blue specialist 43.5 / 53.7, Blue as learner 41.7 / 44.3, Blue mirror 30.2 / 31.0.
+- **Across the three**: the narrower a fine-tune trains, the higher it scores on its own cells and the more it forgets elsewhere (mirror only worst, one matchup next, one deck against the field least), consistent with the pilot being the only run that passes the per-deck bias check. One seed each; `r8-jund-blue-s2` replicated `r8-jund-blue` to 1M games (69.5 / 77.0 at 1M for the original, 68.8 / 79.9 for the replication).
+- **Roles moved** (see [models.md](models.md), `role_history`): `best/jund_blue` to `r8-jund-blue` (highest L1, +11 sampled over `r4-control` on `jund_vs_sblue`, equal Blue as learner), `best/jund_jund` to `r8-jund-mirror` (83.0 / 88.5 against 57.8 / 68.5). `best/jund` stays `r7-lr075`: `r8-jund-pilot` is better on the Jund cells, but a head to head against `r7-lr075` over the full matrix and a trust-test pass are missing. `play/jund` was already moved to `r8-jund-blue` in PR #99; its deploy is pending approval.
+- **Not done**: 2,000-game benchmarks against the Jund-vs-Blue bot and head to heads between the three (the boxes are busy with `r8-belief` and `r8-blue-pilot`); the in-training 1000-game values above are the standing benchmark numbers. `r8-jund-pilot` benchmark and trust test were run with the final policy file `v01464`, before the archive existed.
+- **Verdicts**: `r8-jund-blue` **adopt** (specialist); `r8-jund-pilot` **adopt as the per-deck recipe**, inconclusive for `best/jund` until the head to head; `r8-jund-mirror` **adopt for the mirror**, not for general use.
+
 ## 20261009-r8-evals-1 · trust-test baseline (r7 lr075) and specialist benchmark of r8 arm C (evaluation only)
 
 - **Question**: (1) what does the new trust test (`python -m mtg_ml.benchmark.trust`, #94) say about the r7 lr075 final policy, as a baseline for later checkpoints; (2) where does r8 arm C (`r8-jund-blue-ft`, Jund-vs-Blue fine-tune of lr075) stand against the Jund and Blue specialists, compared with r4-control and r7 lr075.

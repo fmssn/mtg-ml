@@ -9,10 +9,10 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | role | handle | why |
 |---|---|---|
 | `best/general` | `r7-lr075` | Only full-matrix model; r8-continue plateaued; r8-belief would replace it if it overtakes at matched games |
-| `best/jund_blue` | `fs4-ft` | Highest L1 (212.5) among archived Jund vs Blue models. Candidates: r8-jund-blue (running, 77.9/82.1, L1 156) and r4-control. fs4-ft was never run against the specialists. |
-| `best/blue_vs_jund` | `r4-control` | Blue as learner vs the Jund specialist 85.3/87.0 (specialist benchmark); r8-jund-blue 78.2/80.5 at 1.56M |
-| `best/jund_jund` | `r7-lr075` | Mirror vs the Jund specialist 57.8/68.5; candidate r8-jund-mirror (running, 2M schedule) |
-| `best/jund` | `r7-lr075` | Deck vs field; candidate r8-jund-pilot (running, 3M schedule) |
+| `best/jund_blue` | `r8-jund-blue` | Final specialist benchmark jund_vs_sblue 75.2/79.0 (r4-control 64.0/65.5), L1 238.6 (fs4-ft 212.5); a specialist, its trust test fails |
+| `best/blue_vs_jund` | `r4-control` | Blue as learner vs the Jund specialist 85.3/87.0 (specialist benchmark); r8-jund-blue 83.8/84.0 (level within +-5) |
+| `best/jund_jund` | `r8-jund-mirror` | Mirror vs the Jund specialist 83.0/88.5 (r7-lr075 57.8/68.5); forgets Blue |
+| `best/jund` | `r7-lr075` | Deck vs field; r8-jund-pilot (finished) is better on the Jund cells and passes the per-deck trust check but has no head to head against r7-lr075 yet |
 | `best/blue` | `r7-lr075` | No deck-specific Blue model yet |
 | `best/madness` | `r7-lr075` | rm-1m is a one-matchup baseline, not a full model |
 | `best/affinity` | `r7-lr075` | Only full-matrix model |
@@ -28,11 +28,8 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | in flight | compared against | question |
 |---|---|---|
 | `r8-belief` | `r7-lr075` | does feature set 8 plus the belief head beat the lr075 trajectory at matched games |
-| `r8-jund-blue` | `r4-control` | does Jund-vs-Blue fine-tuning reach the r4-control and fs4-ft level; replicated by r8-jund-blue-s2 |
-| `r8-jund-mirror` | `r7-lr075` | does matchup fine-tuning work for the mirror (benchmark-jund@1) |
-| `r8-jund-pilot` | `r8-jund-blue` | deck-vs-field fine-tuning against per-matchup fine-tuning |
 
-Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: `best/jund_blue` rests on L1 and bench only, because fs4-ft was never run against the Jund and Blue specialists; r8-jund-blue is the contender once it has finished (6M games) and been benchmarked. The play site pins `r7-lr075/policy`, `r8-jund-blue/policy` (the `r8-jund` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
+Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: `best/jund` (r7-lr075 or r8-jund-pilot) needs a head to head over the full matrix; fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-blue/policy` (the `r8-jund` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
 
 ## Registry
 
@@ -45,12 +42,12 @@ Status: `running`, `stopped` (ended by hand), `archived`, `superseded` (archived
 | `r8-continue` | `20261009-r8-fs7h256-all-ft-r7-lr075-continue-s8` | `r8-lr075-continue`, `r8-20261009/r8-lr075-continue`, `20261009-r8-lr075-continue`, arm A, `A` | `r7-lr075` | `all` | 10.05M | 56.7 / 69.2 | 37.3 @10.0M | stopped | `20261009-r8-lr075-continue` | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
 | `r8-belief` | `20261009-r8-fs8h256-all-scratch-belief-s8` | `r8-fs8-belief`, `r8b-20261009/r8-fs8-belief`, `20261009-r8-fs8-belief`, `r8b`, `r8b-20261009`, arm B, `B` |  | `all` | 3.64M | 49.0 / 62.0 | -51.8 @3.5M | running | not archived yet | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
 | `r8-belief-x1` | `20261009-r8-fs8h256-all-scratch-belief-s8.x1` | r8-fs8-belief (first attempt), `r8-20261009/r8-fs8-belief` |  | `all` | 0.11M |  |  | crashed | not archived | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
-| `r8-jund-blue` | `20261009-r8-fs7h256-mu-jund-blue-ft-r7-lr075-s8` | `r8-jund-blue-ft`, `r8-20261009/r8-jund-blue-ft`, `20261009-r8-jund-blue-ft`, arm C, `C` | `r7-lr075` | `mu-jund-blue` | 3.95M | 77.9 / 82.1 | 156.1 @3.75M | running | not archived yet | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
+| `r8-jund-blue` | `20261009-r8-fs7h256-mu-jund-blue-ft-r7-lr075-s8` | `r8-jund-blue-ft`, `r8-20261009/r8-jund-blue-ft`, `20261009-r8-jund-blue-ft`, arm C, `C` | `r7-lr075` | `mu-jund-blue` | 6.00M | 83.7 / 85.7 | 238.6 | archived | `20261009-r8-fs7h256-mu-jund-blue-ft-r7-lr075-s8` | [entry](ledger.md#20261009-r8-results--final-results-and-archives-of-r8-jund-blue-r8-jund-pilot-r8-jund-mirror) |
 | `r8-jund-blue-s2` | `20261009-r8-fs7h256-mu-jund-blue-ft-r7-lr075-s9` | `r8-jund-blue-ft-s2`, `r8d-20261009/r8-jund-blue-ft-s2`, `20261009-r8-jund-blue-ft-s2`, arm C-s2, `C-s2`, `r8d`, `r8d-20261009` | `r7-lr075` | `mu-jund-blue` | 1.02M | 68.8 / 79.9 | 112.2 @1.0M | archived | `20261009-r8-jund-blue-ft-s2` | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
-| `r8-jund-mirror` | `20261009-r8-fs7h256-mu-jund-jund-ft-r7-lr075-s8` | `r8-jund-mirror-ft`, `r8e3-20261009/r8-jund-mirror-ft`, `20261009-r8-jund-mirror-ft`, arm D, `D`, `r8e3`, `r8e3-20261009` | `r7-lr075` | `mu-jund-jund` | 0.78M |  |  | running | not archived yet | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
+| `r8-jund-mirror` | `20261009-r8-fs7h256-mu-jund-jund-ft-r7-lr075-s8` | `r8-jund-mirror-ft`, `r8e3-20261009/r8-jund-mirror-ft`, `20261009-r8-jund-mirror-ft`, arm D, `D`, `r8e3`, `r8e3-20261009` | `r7-lr075` | `mu-jund-jund` | 2.00M |  |  | archived | `20261009-r8-fs7h256-mu-jund-jund-ft-r7-lr075-s8` | [entry](ledger.md#20261009-r8-results--final-results-and-archives-of-r8-jund-blue-r8-jund-pilot-r8-jund-mirror) |
 | `r8-jund-mirror-x1` | `20261009-r8-fs7h256-mu-jund-jund-ft-r7-lr075-s8.x1` | `r8e-20261009`, `r8e`, `r8e-20261009/r8-jund-mirror-ft` | `r7-lr075` | `mu-jund-jund` | 0.08M |  |  | crashed | not archived | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
 | `r8-jund-mirror-x2` | `20261009-r8-fs7h256-mu-jund-jund-ft-r7-lr075-s8.x2` | `r8e2-20261009`, `r8e2`, `r8e2-20261009/r8-jund-mirror-ft` | `r7-lr075` | `mu-jund-jund` | 0.06M |  |  | stopped | not archived | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
-| `r8-jund-pilot` | `20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8` | `r8-jund-pilot`, `r8f-20261009/r8-jund-pilot`, `20261009-r8-jund-pilot`, `pilot`, Jund pilot, `r8f`, `r8f-20261009` | `r7-lr075` | `dk-jund` | 1.13M | 60.4 / 71.9 | 28.5 @1.0M | running | not archived yet | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
+| `r8-jund-pilot` | `20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8` | `r8-jund-pilot`, `r8f-20261009/r8-jund-pilot`, `20261009-r8-jund-pilot`, `pilot`, Jund pilot, `r8f`, `r8f-20261009` | `r7-lr075` | `dk-jund` | 3.00M | 74.3 / 77.7 | 148.4 | archived | `20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8` | [entry](ledger.md#20261009-r8-results--final-results-and-archives-of-r8-jund-blue-r8-jund-pilot-r8-jund-mirror) |
 
 ### r7 and earlier, newest first
 
