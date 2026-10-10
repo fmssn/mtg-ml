@@ -2,6 +2,33 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## 20261010-r9-base · two long base-model runs from scratch (h256 and h512) with an anti-cycling opponent mix
+
+Status: **running** (both launched 2026-10-10 on h100-private3; verdicts when we stop or extend them on the evaluations).
+
+Question: does a long (40M-game) full-matrix run, with less self-play and PFSP over the snapshot pool, keep climbing past `r7-lr075` (8.35M games, still climbing) and avoid the self-play cycling the lr075 trust test showed (past snapshots beating the final model in 7 directions)? And does h512 beat h256 at equal games on the same recipe?
+
+- **Runs** (handle, run ID): `r9-base-h256` = `20261010-r9-fs7h256-all-scratch-base-s10`; `r9-base-h512` = `20261010-r9-fs7h512-all-scratch-base-s10`. Both from scratch (no `--init`), seed 10.
+- **Machine and code**: h100-private3 (8x H100 80GB, 64 CPUs), checkout `~/mtg-ml/code` at `280ebc5` (branch `claude/lucid-euler-0tjz9h`), native engine, `OMP_NUM_THREADS=1`. Launcher `tools/base_campaign.py` (this PR; run from `~/mtg-ml-base/launch/`, the trainer code is untouched), campaign `~/mtg-ml-base/campaigns/20261010-r9-base/`, exact commands in its `campaign.json`, tmux `mtg-base-<run id>` via `R8_PREFIX=mtg-base tools/r8_host.sh`, no restart.
+- **Layout**: h256 on learner GPU 0A, server GPU 18, CPUs 0-31; h512 on learner 87, server 90, CPUs 32-63. GPUs 2F, 38, BE, C7 free.
+- **Baseline** = the r7 lr075 recipe: the base flags of `tools/r8_campaign.py` `flags()` (set 7, entity trunk, attention 1, GRU, shared value net, inference server, 24 workers, 2048 games per iteration, bf16, capture 2, minibatch 2048, 4 epochs, target KL 0.03, `--postboard-frac 0.2`, `--matchup` = the r7 matrix mix, checkpoint every 25 iterations, snapshot every 122, L1 ladder 200 games per rung, eval every 250k games with 1000 sampled + 1000 greedy benchmark games). Only these differ:
+
+| flag | r7 lr075 | r9-base-h256 | r9-base-h512 |
+|---|---|---|---|
+| `--hidden` | 256 | 256 | **512** |
+| `--ppo-lr` / `--ppo-lr-final` | 7.5e-5 / 7.5e-6 | 7.5e-5 / 7.5e-6 | **5e-5 / 5e-6** |
+| `--seed` | 8 | **10** | **10** |
+| `--self-play-frac` | 0.5 | **0.35** | **0.35** |
+| `--pool-recent-frac` | 0.5 | **0.25** | **0.25** |
+| `--pool-sampling` | uniform | **pfsp** (`--pfsp-power 2`, `--pfsp-ema 0.05`, the trainer defaults) | **pfsp** |
+| `--total-games` / `--lr-anneal-games` | 20M / 20M | **40M / 40M** (linear) | **40M / 40M** |
+
+- **PFSP availability**: the trainer has it (`--pool-sampling pfsp`): the pool games that do not go to the newest snapshot pick snapshot i with weight (1 - p_i)^2, p_i a running win rate of the learner against it (EMA 0.05, start 0.5, stored in `latest.pt`). So 0.65 of games are pool games, 0.25 of those against the newest snapshot and 0.75 PFSP-weighted over the whole pool. **No pool size cap exists**: every `--snapshot-every` snapshot stays in `pool/` (about 160 over 40M games); the server schedules residency in waves (`--server-resident-limit 64`), so a large pool costs disk (about 68 MB per h256 snapshot, about 4x for h512), not GPU memory. No cap was set.
+- **Why h512 at 5e-5**: r5 showed a wider net at the narrower net's lr stalls (h256 at 3e-4 lost 11 points; at half the lr it recovered), r7 that h256 prefers 7.5e-5 over 1.5e-4. 1/sqrt(width) from 7.5e-5 gives 5.3e-5 (1/width would give 3.75e-5); 5e-5 sits in that range and the KL stop at 0.03 guards a too-large step. If h512 stalls early (as h256 did at 3e-4), expect it within 2.5M games and restart at 3.75e-5.
+- **Specialist watcher** (`tools/r8_specialist_watch.sh`, copied from the deployed `~/mtg-ml-r8/launch` version of h100-private2 with the pool-snapshot fallback): every 2M games, 4 CPUs at nice 19 (eval CPUs 4-7 and 36-39), cells `jund_vs_sjund,jund_vs_lblue`.
+- **Smoke before launch**: 3 iterations per arm on a separate smoke campaign: see the PR description for the result.
+- **Stop**: `ssh h100-private3 'R8_PREFIX=mtg-base CODE=~/mtg-ml/code R8_TOOL=~/mtg-ml-base/launch/base_campaign.py bash ~/mtg-ml-base/launch/r8_host.sh stop ~/mtg-ml-base/campaigns/20261010-r9-base'`.
+
 ## 20261010-interference-diag · gradient conflict and scale mismatch of the six-deck generalist `r7-lr075`, and its two specialists (evaluation only)
 
 Question: do the per-deck specialists beat the generalist mainly through interference (negative transfer) between the decks? No training; PPO loss gradients and scale statistics at the weights of `r7-lr075` (`r7-lr075-policy.pt`), `r8-jund-pilot` and `r8-blue-pilot` (`-final.pt`), all feature set 7, h256. Write-up with the tables: [interference.md](interference.md); raw results in [`interference/`](interference/).

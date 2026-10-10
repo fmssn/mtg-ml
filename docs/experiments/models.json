@@ -1707,6 +1707,60 @@
    "ledger_id": "20261010-r9-tron-pilot",
    "kind": "train",
    "notes": "Round 2 of the per-deck pilot league (planned; date is the planned launch day, fix it if the launch slips): continues r8-tron-pilot on all its pairings, with the other five decks played by their frozen round-1 finals (--opponent-models, --opponent-frac 1; mirrors stay self-play plus pool). Same flags and 3M games as round 1, launcher arms L-Q of tools/r8_campaign.py (arm Q)."
+  },
+  {
+   "handle": "r9-base-h256",
+   "run_id": "20261010-r9-fs7h256-all-scratch-base-s10",
+   "date": "20261010",
+   "campaign": "r9",
+   "arch": "fs7h256",
+   "scope": "all",
+   "init": "scratch",
+   "variant": "base",
+   "seed": 10,
+   "seed_recorded": true,
+   "legacy": [
+    "20261010-r9-base"
+   ],
+   "parent": null,
+   "games": 0,
+   "bench_sampled": null,
+   "bench_greedy": null,
+   "l1": null,
+   "l1_at": null,
+   "status": "running",
+   "archive": null,
+   "ledger": "ledger.md#20261010-r9-base--two-long-base-model-runs-from-scratch-h256-and-h512-with-an-anti-cycling-opponent-mix",
+   "ledger_id": "20261010-r9-base",
+   "kind": "train",
+   "notes": "Base-model run 1 of 2 (r9-base): the r7 lr075 recipe from scratch at h256 for 40M games, lr 7.5e-5 to 7.5e-6 linear over all 40M, with the anti-cycling mix (self-play 0.35, recent snapshot 0.25 of pool games, PFSP over the older pool). Seed 10, h100-private3 GPUs 0A/18, CPUs 0-31. Question: does a long run with a less cyclic opponent mix keep climbing past r7-lr075 (8.35M, still climbing) and cure the past-snapshot-beats-final cycling seen in the trust test."
+  },
+  {
+   "handle": "r9-base-h512",
+   "run_id": "20261010-r9-fs7h512-all-scratch-base-s10",
+   "date": "20261010",
+   "campaign": "r9",
+   "arch": "fs7h512",
+   "scope": "all",
+   "init": "scratch",
+   "variant": "base",
+   "seed": 10,
+   "seed_recorded": true,
+   "legacy": [
+    "20261010-r9-base"
+   ],
+   "parent": null,
+   "games": 0,
+   "bench_sampled": null,
+   "bench_greedy": null,
+   "l1": null,
+   "l1_at": null,
+   "status": "running",
+   "archive": null,
+   "ledger": "ledger.md#20261010-r9-base--two-long-base-model-runs-from-scratch-h256-and-h512-with-an-anti-cycling-opponent-mix",
+   "ledger_id": "20261010-r9-base",
+   "kind": "train",
+   "notes": "Base-model run 2 of 2 (r9-base): identical to r9-base-h256 except hidden 512 and lr 5e-5 to 5e-6 (1/sqrt(width) from the lr075 optimum; r5 showed width needs a lower lr, r7 that h256 prefers 7.5e-5 over 1.5e-4). Seed 10, h100-private3 GPUs 87/90, CPUs 32-63."
   }
  ],
  "roles": {
@@ -1785,6 +1839,16 @@
    "handle": "r9-jund-pilot",
    "vs": "r8-jund-pilot",
    "question": "does a second round against frozen round-1 pilots (all six decks, same recipe) beat each round-1 pilot head to head and on the trust test"
+  },
+  {
+   "handle": "r9-base-h256",
+   "vs": "r7-lr075",
+   "question": "does a 40M-game run with the anti-cycling mix (self-play 0.35, PFSP) keep climbing past r7-lr075 and stop the past-snapshots-beat-final cycling"
+  },
+  {
+   "handle": "r9-base-h512",
+   "vs": "r9-base-h256",
+   "question": "does h512 at lr 5e-5 beat h256 at equal games on the same recipe and seed"
   }
  ],
  "role_history": [
