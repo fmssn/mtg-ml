@@ -1,0 +1,24 @@
+{
+  "source_revision": "18a3efa3e891b2b4ecddb51db22b615189a71ef5",
+  "source": "docs/experiments/ledger.md",
+  "section": "20261010-r8-pilot-matrix",
+  "candidate": "r8-jund-pilot v01464",
+  "candidate_sha256": "71c758dcf4513deb3bc7021652410d7c573c366c97d8c01a4da1b5f036078379",
+  "baseline": "r7-lr075",
+  "baseline_sha256": "672aaa0c2764f853198c44a6fa7847469e01d9767952ea3fb8e9d84e068f636e",
+  "opponent": "r7-lr075 playing each opposing deck",
+  "mode": "sampled",
+  "games_per_cell": 800,
+  "seeds_per_cell": 200,
+  "interval": "paired normal 95% interval over four-game seed blocks",
+  "score": "win = 1, draw = 0.5, loss = 0",
+  "machine": "h100-private; dual Intel Xeon Platinum 8462Y+; 8 CPU workers; native engine; no GPU",
+  "rows": [
+    {"deck": "Mono Blue Terror", "candidate_score": 62.5, "baseline_score": 40.5, "delta_pp": 22.0, "half_width_pp": 4.3},
+    {"deck": "Red Madness", "candidate_score": 43.1, "baseline_score": 32.2, "delta_pp": 10.9, "half_width_pp": 4.0},
+    {"deck": "Grixis Affinity", "candidate_score": 70.2, "baseline_score": 51.2, "delta_pp": 19.0, "half_width_pp": 4.3},
+    {"deck": "Elves", "candidate_score": 49.6, "baseline_score": 39.5, "delta_pp": 10.1, "half_width_pp": 4.3},
+    {"deck": "Tron", "candidate_score": 53.9, "baseline_score": 35.6, "delta_pp": 18.2, "half_width_pp": 4.4},
+    {"deck": "Jund Wildfire (mirror)", "candidate_score": 77.4, "baseline_score": 49.4, "delta_pp": 28.0, "half_width_pp": 4.6}
+  ]
+}
