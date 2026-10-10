@@ -45,7 +45,7 @@ their stated dates; do not treat their next-step lists as current assignments.
 - [First training-speed plan](training-speed-plan.md) and [second training-speed plan](training-speed-plan-2.md).
 - [Agent validation](agent-validation.md), [autopilot capacity validation](autopilot-capacity-validation.md), and [generalized Pauper review](generalized-pauper-review.md).
 - [October 9 playtest triage](playtest-reviews/2026-10-09.md), [benchmark evidence](benchmark-jund-results.md), and the dated entries in the [experiment ledger](experiments/ledger.md).
-- [H100 benchmark and plan (2026-10-05)](h100-benchmark.md), [Red Madness review after 1M games (2026-10-07)](red-madness-review.md), [Kalikaiz expert pilot (2026-10-08)](expert-pilot.md), [r7 overnight campaign (2026-10-08/09)](experiments/r7-overnight.md), and the [Pauper RL research notes](research-mtg-pauper-rl.md) (background).
+- [H100 benchmark and plan (2026-10-05)](h100-benchmark.md), [Red Madness review after 1M games (2026-10-07)](red-madness-review.md), [Kalikaiz expert pilot (2026-10-08)](expert-pilot.md), [r7 overnight campaign (2026-10-08/09)](experiments/r7-overnight.md), [multi-deck interference diagnostics (2026-10-10)](experiments/interference.md), and the [Pauper RL research notes](research-mtg-pauper-rl.md) (background).
 
 Historical source references may describe code that has since changed or remained
 on a rejected branch. Keep their evidence intact and use current reference guides

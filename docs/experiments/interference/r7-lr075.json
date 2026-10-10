@@ -1,0 +1,2490 @@
+{
+ "decks": [
+  "jund_wildfire",
+  "mono_blue_terror",
+  "red_madness",
+  "grixis_affinity",
+  "elves",
+  "tron"
+ ],
+ "stats": {
+  "jund_wildfire": {
+   "games": 2400,
+   "decisions": 365462,
+   "adv_mean_sd": [
+    0.008973193451273913,
+    0.18489090556087578
+   ],
+   "ret_mean_sd": [
+    -0.10663193093285665,
+    0.5514500911451136
+   ],
+   "value_mean_sd": [
+    -0.11560512438413056,
+    0.5249091708280026
+   ],
+   "adv_abs_mean": 0.12147971551275709,
+   "explained_var": 0.8875864472964984,
+   "decisions_per_game": 152.27583333333334,
+   "turns_mean_sd": [
+    19.80875,
+    7.188094466780451
+   ],
+   "win_rate": 0.42916666666666664,
+   "by_matchup": {
+    "jund_madness": {
+     "trajectories": 423,
+     "decisions_per_trajectory": 98.6193853427896
+    },
+    "jund_affinity": {
+     "trajectories": 423,
+     "decisions_per_trajectory": 151.34515366430261
+    },
+    "jund_elves": {
+     "trajectories": 465,
+     "decisions_per_trajectory": 124.81505376344086
+    },
+    "jund_blue": {
+     "trajectories": 429,
+     "decisions_per_trajectory": 147.67365967365967
+    },
+    "jund_mirror": {
+     "trajectories": 232,
+     "decisions_per_trajectory": 218.77586206896552
+    },
+    "jund_tron": {
+     "trajectories": 428,
+     "decisions_per_trajectory": 204.62616822429908
+    }
+   },
+   "ppo": {
+    "pg_loss": -0.003346293702276639,
+    "v_loss": 0.01707835965136227,
+    "entropy": 0.3759623384411651,
+    "nt_entropy": 0.6264942480276283,
+    "nt_frac": 0.5955275326293202,
+    "explained_var": 0.887353897344434
+   }
+  },
+  "mono_blue_terror": {
+   "games": 2400,
+   "decisions": 168288,
+   "adv_mean_sd": [
+    0.008017250844058023,
+    0.30246201747512586
+   ],
+   "ret_mean_sd": [
+    -0.11124697932490205,
+    0.657062106186119
+   ],
+   "value_mean_sd": [
+    -0.11926423016896007,
+    0.5875731313085614
+   ],
+   "adv_abs_mean": 0.20668394655100863,
+   "explained_var": 0.7881010296641076,
+   "decisions_per_game": 70.12,
+   "turns_mean_sd": [
+    16.47,
+    5.762198760548366
+   ],
+   "win_rate": 0.5033333333333333,
+   "by_matchup": {
+    "blue_tron": {
+     "trajectories": 448,
+     "decisions_per_trajectory": 79.58035714285714
+    },
+    "blue_mirror": {
+     "trajectories": 193,
+     "decisions_per_trajectory": 77.4041450777202
+    },
+    "blue_affinity": {
+     "trajectories": 433,
+     "decisions_per_trajectory": 68.09237875288683
+    },
+    "jund_blue": {
+     "trajectories": 432,
+     "decisions_per_trajectory": 78.04166666666667
+    },
+    "blue_elves": {
+     "trajectories": 460,
+     "decisions_per_trajectory": 66.87826086956522
+    },
+    "blue_madness": {
+     "trajectories": 434,
+     "decisions_per_trajectory": 54.6889400921659
+    }
+   },
+   "ppo": {
+    "pg_loss": 0.00169186158399541,
+    "v_loss": 0.045861658918493906,
+    "entropy": 0.36213654959130853,
+    "nt_entropy": 0.5406114209368593,
+    "nt_frac": 0.6628744612630177,
+    "explained_var": 0.7875896795444128
+   }
+  },
+  "red_madness": {
+   "games": 2400,
+   "decisions": 218741,
+   "adv_mean_sd": [
+    0.004794479596666865,
+    0.25363851455625513
+   ],
+   "ret_mean_sd": [
+    -0.02720219715018889,
+    0.598405946886263
+   ],
+   "value_mean_sd": [
+    -0.03199667674685576,
+    0.5407559073355444
+   ],
+   "adv_abs_mean": 0.16542480459899214,
+   "explained_var": 0.8203452929529594,
+   "decisions_per_game": 91.14208333333333,
+   "turns_mean_sd": [
+    13.8275,
+    4.552348701435132
+   ],
+   "win_rate": 0.58625,
+   "by_matchup": {
+    "madness_affinity": {
+     "trajectories": 430,
+     "decisions_per_trajectory": 101.99767441860465
+    },
+    "madness_tron": {
+     "trajectories": 453,
+     "decisions_per_trajectory": 94.79690949227373
+    },
+    "jund_madness": {
+     "trajectories": 437,
+     "decisions_per_trajectory": 92.74599542334096
+    },
+    "blue_madness": {
+     "trajectories": 440,
+     "decisions_per_trajectory": 94.35
+    },
+    "madness_mirror": {
+     "trajectories": 203,
+     "decisions_per_trajectory": 86.85221674876847
+    },
+    "madness_elves": {
+     "trajectories": 437,
+     "decisions_per_trajectory": 73.83066361556064
+    }
+   },
+   "ppo": {
+    "pg_loss": 0.011890515895876962,
+    "v_loss": 0.03242871041629899,
+    "entropy": 0.196438401183936,
+    "nt_entropy": 0.4672332970246354,
+    "nt_frac": 0.4094726295305852,
+    "explained_var": 0.8200961010377057
+   }
+  },
+  "grixis_affinity": {
+   "games": 2400,
+   "decisions": 280430,
+   "adv_mean_sd": [
+    0.013389705856827026,
+    0.21692187165695195
+   ],
+   "ret_mean_sd": [
+    -0.1591810904864748,
+    0.5778030123799939
+   ],
+   "value_mean_sd": [
+    -0.17257079634330183,
+    0.5374329632778952
+   ],
+   "adv_abs_mean": 0.13980828437520693,
+   "explained_var": 0.8590558410098492,
+   "decisions_per_game": 116.84583333333333,
+   "turns_mean_sd": [
+    17.449583333333333,
+    5.677225351900545
+   ],
+   "win_rate": 0.4583333333333333,
+   "by_matchup": {
+    "madness_affinity": {
+     "trajectories": 464,
+     "decisions_per_trajectory": 77.96551724137932
+    },
+    "affinity_elves": {
+     "trajectories": 441,
+     "decisions_per_trajectory": 99.0204081632653
+    },
+    "blue_affinity": {
+     "trajectories": 441,
+     "decisions_per_trajectory": 99.12018140589569
+    },
+    "jund_affinity": {
+     "trajectories": 422,
+     "decisions_per_trajectory": 147.36729857819904
+    },
+    "affinity_tron": {
+     "trajectories": 410,
+     "decisions_per_trajectory": 160.8219512195122
+    },
+    "affinity_mirror": {
+     "trajectories": 222,
+     "decisions_per_trajectory": 129.4954954954955
+    }
+   },
+   "ppo": {
+    "pg_loss": -0.030304152542209098,
+    "v_loss": 0.023745098088664436,
+    "entropy": 0.32063715287931505,
+    "nt_entropy": 0.5897643111008477,
+    "nt_frac": 0.534926523948834,
+    "explained_var": 0.8588560724647027
+   }
+  },
+  "elves": {
+   "games": 2400,
+   "decisions": 237812,
+   "adv_mean_sd": [
+    0.006561001923692111,
+    0.23256270852449834
+   ],
+   "ret_mean_sd": [
+    -0.07222428887023134,
+    0.6363607530716677
+   ],
+   "value_mean_sd": [
+    -0.07878529079392345,
+    0.5971737453615652
+   ],
+   "adv_abs_mean": 0.15223194758602202,
+   "explained_var": 0.8664409321502184,
+   "decisions_per_game": 99.08833333333334,
+   "turns_mean_sd": [
+    14.805,
+    4.605157773180171
+   ],
+   "win_rate": 0.5183333333333333,
+   "by_matchup": {
+    "madness_elves": {
+     "trajectories": 461,
+     "decisions_per_trajectory": 85.42082429501085
+    },
+    "elves_tron": {
+     "trajectories": 418,
+     "decisions_per_trajectory": 117.72009569377991
+    },
+    "elves_mirror": {
+     "trajectories": 206,
+     "decisions_per_trajectory": 77.57766990291262
+    },
+    "blue_elves": {
+     "trajectories": 460,
+     "decisions_per_trajectory": 111.78260869565217
+    },
+    "affinity_elves": {
+     "trajectories": 408,
+     "decisions_per_trajectory": 89.15441176470588
+    },
+    "jund_elves": {
+     "trajectories": 447,
+     "decisions_per_trajectory": 101.67785234899328
+    }
+   },
+   "ppo": {
+    "pg_loss": 0.006522227896164112,
+    "v_loss": 0.027138687193673565,
+    "entropy": 0.37489958538724283,
+    "nt_entropy": 0.5833599471815448,
+    "nt_frac": 0.6366038371903653,
+    "explained_var": 0.8662258141483201
+   }
+  },
+  "tron": {
+   "games": 2400,
+   "decisions": 208038,
+   "adv_mean_sd": [
+    0.00206764510473061,
+    0.24293625132750088
+   ],
+   "ret_mean_sd": [
+    0.15898329720679116,
+    0.6378320446535725
+   ],
+   "value_mean_sd": [
+    0.15691565210206057,
+    0.5899920647602076
+   ],
+   "adv_abs_mean": 0.1610859586007705,
+   "explained_var": 0.8549318800574807,
+   "decisions_per_game": 86.6825,
+   "turns_mean_sd": [
+    16.696666666666665,
+    6.352871145694889
+   ],
+   "win_rate": 0.54625,
+   "by_matchup": {
+    "elves_tron": {
+     "trajectories": 470,
+     "decisions_per_trajectory": 86.71702127659574
+    },
+    "jund_tron": {
+     "trajectories": 416,
+     "decisions_per_trajectory": 111.89423076923077
+    },
+    "blue_tron": {
+     "trajectories": 433,
+     "decisions_per_trajectory": 79.08545034642032
+    },
+    "madness_tron": {
+     "trajectories": 428,
+     "decisions_per_trajectory": 54.072429906542055
+    },
+    "tron_mirror": {
+     "trajectories": 231,
+     "decisions_per_trajectory": 120.1038961038961
+    },
+    "affinity_tron": {
+     "trajectories": 422,
+     "decisions_per_trajectory": 84.36492890995261
+    }
+   },
+   "ppo": {
+    "pg_loss": 0.02306057085316402,
+    "v_loss": 0.029497896313356857,
+    "entropy": 0.5237462742225482,
+    "nt_entropy": 0.7025682002417514,
+    "nt_frac": 0.7415333914264692,
+    "explained_var": 0.8545835010255063
+   }
+  }
+ },
+ "batch_share": {
+  "trajectories": {
+   "jund_wildfire": 0.16666666666666666,
+   "mono_blue_terror": 0.16666666666666666,
+   "red_madness": 0.16666666666666666,
+   "grixis_affinity": 0.16666666666666666,
+   "elves": 0.16666666666666666,
+   "tron": 0.16666666666666666
+  },
+  "decisions": {
+   "jund_wildfire": 0.25233057118947616,
+   "mono_blue_terror": 0.1132955532167631,
+   "red_madness": 0.14527860091098704,
+   "grixis_affinity": 0.19042157580374286,
+   "elves": 0.15561880186500865,
+   "tron": 0.14305489701402216
+  }
+ },
+ "global_advantage": {
+  "mean": 0.007735556091232139,
+  "std": 0.23274233586700258
+ },
+ "chunks": 4,
+ "games_per_chunk": 600,
+ "cosines": {
+  "global": {
+   "half": {
+    "emb_tables": {
+     "within": {
+      "jund_wildfire": [
+       0.024148241616785526,
+       0.01850973766411524
+      ],
+      "mono_blue_terror": [
+       0.01485042522350947,
+       0.023166301259662025
+      ],
+      "red_madness": [
+       0.17437047014633814,
+       0.055780643494111784
+      ],
+      "grixis_affinity": [
+       0.03330360415081183,
+       0.05887101850444277
+      ],
+      "elves": [
+       0.05195138851801554,
+       0.034823865881814305
+      ],
+      "tron": [
+       0.002759994938969612,
+       0.005615131312582024
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.015043239173893299,
+       0.02155957111459882
+      ],
+      "jund_wildfire|red_madness": [
+       0.03947411701341884,
+       0.026968564250369535
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.037918432589827314,
+       0.033830990754186885
+      ],
+      "jund_wildfire|elves": [
+       0.04406666998854942,
+       0.024336025096312695
+      ],
+      "jund_wildfire|tron": [
+       0.01567517450570853,
+       0.014652039168812537
+      ],
+      "mono_blue_terror|red_madness": [
+       0.013683003153548472,
+       0.031232511780341463
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.008749007693647096,
+       0.023201248724885274
+      ],
+      "mono_blue_terror|elves": [
+       0.02534725387360797,
+       0.0218615299816734
+      ],
+      "mono_blue_terror|tron": [
+       0.011421965991353823,
+       0.02226594046057964
+      ],
+      "red_madness|grixis_affinity": [
+       0.03152844866660113,
+       0.029778353576543296
+      ],
+      "red_madness|elves": [
+       0.015595692209899426,
+       0.036179601578492676
+      ],
+      "red_madness|tron": [
+       0.012173269176855683,
+       0.024291065948807825
+      ],
+      "grixis_affinity|elves": [
+       0.034836551808338195,
+       0.029257866498628556
+      ],
+      "grixis_affinity|tron": [
+       0.02152708308939408,
+       0.02714115212635038
+      ],
+      "elves|tron": [
+       0.02566394193046209,
+       0.020417142354985006
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.7943815695022596,
+       1.138486581369571
+      ],
+      "jund_wildfire|red_madness": [
+       0.6083215455971667,
+       0.41560292993366726
+      ],
+      "jund_wildfire|grixis_affinity": [
+       1.3370941930139266,
+       1.1929612642656213
+      ],
+      "jund_wildfire|elves": [
+       1.244138979932247,
+       0.6870815844900355
+      ],
+      "jund_wildfire|tron": [
+       1.92006302863115,
+       1.7947384695364712
+      ],
+      "mono_blue_terror|red_madness": [
+       0.268890533697101,
+       0.6137634163403
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.3934084970882972,
+       1.043268986728252
+      ],
+      "mono_blue_terror|elves": [
+       0.9125630713959743,
+       0.7870684944795294
+      ],
+      "mono_blue_terror|tron": [
+       1.7840921208100768,
+       3.477902925662447
+      ],
+      "red_madness|grixis_affinity": [
+       0.41373333596770046,
+       0.39076764274482567
+      ],
+      "red_madness|elves": [
+       0.16385873830398645,
+       0.380127011177464
+      ],
+      "red_madness|tron": [
+       0.5549024127914349,
+       1.1072761892012115
+      ],
+      "grixis_affinity|elves": [
+       0.8375118554331219,
+       0.7033936708803638
+      ],
+      "grixis_affinity|tron": [
+       2.2453571289520355,
+       2.830926008962965
+      ],
+      "elves|tron": [
+       2.1432391869689673,
+       1.705070082362824
+      ]
+     }
+    },
+    "gru": {
+     "within": {
+      "jund_wildfire": [
+       0.28785643478234607,
+       0.1041985593736172
+      ],
+      "mono_blue_terror": [
+       0.07269817466537158,
+       0.04007309456535571
+      ],
+      "red_madness": [
+       0.5010460118452708,
+       0.01758975558311277
+      ],
+      "grixis_affinity": [
+       0.24108447134494781,
+       0.030445656275934527
+      ],
+      "elves": [
+       0.2968081633249919,
+       0.017042665125019823
+      ],
+      "tron": [
+       0.07425952578584354,
+       0.023995295445772717
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.1005128066883319,
+       0.06322959245934642
+      ],
+      "jund_wildfire|red_madness": [
+       0.2017059520456112,
+       0.0803962184257874
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.246587418174992,
+       0.07956011046660626
+      ],
+      "jund_wildfire|elves": [
+       0.2068005420991944,
+       0.06460995548028392
+      ],
+      "jund_wildfire|tron": [
+       0.06014175609582,
+       0.04589642908667154
+      ],
+      "mono_blue_terror|red_madness": [
+       0.15163716735939184,
+       0.06600184035627793
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.04595714737661183,
+       0.058856622264153925
+      ],
+      "mono_blue_terror|elves": [
+       0.11090438693968786,
+       0.05046817165735696
+      ],
+      "mono_blue_terror|tron": [
+       0.06395917720834,
+       0.043543447679614
+      ],
+      "red_madness|grixis_affinity": [
+       0.09026544515250458,
+       0.08965647839993057
+      ],
+      "red_madness|elves": [
+       0.271195237007406,
+       0.04231142996019315
+      ],
+      "red_madness|tron": [
+       0.11166735464293095,
+       0.05527023824557631
+      ],
+      "grixis_affinity|elves": [
+       0.12183253220023794,
+       0.08008003277448818
+      ],
+      "grixis_affinity|tron": [
+       0.016548040659270354,
+       0.05093736270922506
+      ],
+      "elves|tron": [
+       0.11258620230687989,
+       0.03453161161414737
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.6948189841039629,
+       0.43708978632083806
+      ],
+      "jund_wildfire|red_madness": [
+       0.5311191222189003,
+       0.21169414450579807
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.9360484394387072,
+       0.3020110182223021
+      ],
+      "jund_wildfire|elves": [
+       0.7074989196630025,
+       0.22104136303399774
+      ],
+      "jund_wildfire|tron": [
+       0.4113505176611392,
+       0.31391700357935315
+      ],
+      "mono_blue_terror|red_madness": [
+       0.7945204958023608,
+       0.34582428461916453
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.3471416245144512,
+       0.4445790183358878
+      ],
+      "mono_blue_terror|elves": [
+       0.7550036504377774,
+       0.3435721064212406
+      ],
+      "mono_blue_terror|tron": [
+       0.8704924909560021,
+       0.5926318300182417
+      ],
+      "red_madness|grixis_affinity": [
+       0.2597156406636231,
+       0.25796349519953776
+      ],
+      "red_madness|elves": [
+       0.7032428611614663,
+       0.10971878191292363
+      ],
+      "red_madness|tron": [
+       0.5789103810115155,
+       0.2865341870384259
+      ],
+      "grixis_affinity|elves": [
+       0.4554500260342647,
+       0.2993654679361101
+      ],
+      "grixis_affinity|tron": [
+       0.1236761264728499,
+       0.380693753558696
+      ],
+      "elves|tron": [
+       0.7583525710537938,
+       0.23259632098470276
+      ]
+     }
+    },
+    "trunk": {
+     "within": {
+      "jund_wildfire": [
+       -0.03105456878741582,
+       0.02246883902771144
+      ],
+      "mono_blue_terror": [
+       0.010777142364531755,
+       0.013176335348780396
+      ],
+      "red_madness": [
+       0.21037412683169046,
+       0.029781428715512207
+      ],
+      "grixis_affinity": [
+       0.019666834423939388,
+       0.04330860677155216
+      ],
+      "elves": [
+       0.042434812833865486,
+       0.007195781916309856
+      ],
+      "tron": [
+       -0.028740007624340553,
+       0.02388013322930559
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.002341780915028519,
+       0.048283543083529584
+      ],
+      "jund_wildfire|red_madness": [
+       0.02456589005628808,
+       0.049822656364077435
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.017574654187127534,
+       0.028900276576053055
+      ],
+      "jund_wildfire|elves": [
+       0.031065234397020604,
+       0.02701039089019481
+      ],
+      "jund_wildfire|tron": [
+       -0.00010124667056111826,
+       0.024042902111716537
+      ],
+      "mono_blue_terror|red_madness": [
+       -0.05725921570814939,
+       0.036273782474799766
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.010579233277692564,
+       0.025281121855730265
+      ],
+      "mono_blue_terror|elves": [
+       0.030701741692610085,
+       0.03603217419670616
+      ],
+      "mono_blue_terror|tron": [
+       0.006712866015732288,
+       0.02792443266313251
+      ],
+      "red_madness|grixis_affinity": [
+       0.03515657034262808,
+       0.035660958050150585
+      ],
+      "red_madness|elves": [
+       0.012020518330650197,
+       0.03638907837292604
+      ],
+      "red_madness|tron": [
+       -0.005388049489637423,
+       0.025141175168011867
+      ],
+      "grixis_affinity|elves": [
+       -0.004741875487121029,
+       0.026283225406468654
+      ],
+      "grixis_affinity|tron": [
+       0.016111064543818228,
+       0.020877629736369505
+      ],
+      "elves|tron": [
+       0.013157235639583733,
+       0.027841316227072668
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|red_madness": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|grixis_affinity": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|elves": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|tron": [
+       NaN,
+       NaN
+      ],
+      "mono_blue_terror|red_madness": [
+       -1.2025341596436097,
+       0.761806846041382
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.7266665229665764,
+       1.7365100507174678
+      ],
+      "mono_blue_terror|elves": [
+       1.4356549015403541,
+       1.6849131237107777
+      ],
+      "mono_blue_terror|tron": [
+       NaN,
+       NaN
+      ],
+      "red_madness|grixis_affinity": [
+       0.5465666232468239,
+       0.5544081585109596
+      ],
+      "red_madness|elves": [
+       0.12722307442239122,
+       0.38513567374183133
+      ],
+      "red_madness|tron": [
+       NaN,
+       NaN
+      ],
+      "grixis_affinity|elves": [
+       -0.1641427744200983,
+       0.9098091146939613
+      ],
+      "grixis_affinity|tron": [
+       NaN,
+       NaN
+      ],
+      "elves|tron": [
+       NaN,
+       NaN
+      ]
+     }
+    },
+    "option_scorer": {
+     "within": {
+      "jund_wildfire": [
+       0.1277119293808937,
+       0.020835421420327994
+      ],
+      "mono_blue_terror": [
+       0.06696967283884685,
+       0.005782582259953485
+      ],
+      "red_madness": [
+       0.25053125619888306,
+       0.006323388844745758
+      ],
+      "grixis_affinity": [
+       0.06450517723957698,
+       0.006867949186003455
+      ],
+      "elves": [
+       0.08090649545192719,
+       0.010108051252237696
+      ],
+      "tron": [
+       0.044324833899736404,
+       0.00862531411621405
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.0480143197087778,
+       0.011304932024169264
+      ],
+      "jund_wildfire|red_madness": [
+       0.10488309814698166,
+       0.015071178415875864
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.08606512585861816,
+       0.023571464007381644
+      ],
+      "jund_wildfire|elves": [
+       0.06652449640548891,
+       0.012665993065008485
+      ],
+      "jund_wildfire|tron": [
+       0.051152584763864674,
+       0.007973767843147378
+      ],
+      "mono_blue_terror|red_madness": [
+       0.05883543389952845,
+       0.008145914459264941
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.04796760850068596,
+       0.010594889615030934
+      ],
+      "mono_blue_terror|elves": [
+       0.04233569832932618,
+       0.0077085802341792424
+      ],
+      "mono_blue_terror|tron": [
+       0.03303070482797921,
+       0.009316280690419171
+      ],
+      "red_madness|grixis_affinity": [
+       0.08580927685317066,
+       0.014370479116265203
+      ],
+      "red_madness|elves": [
+       0.07789586525824335,
+       0.008816348461254479
+      ],
+      "red_madness|tron": [
+       0.04210142698138952,
+       0.013463556468282586
+      ],
+      "grixis_affinity|elves": [
+       0.06506832130253315,
+       0.013681777065283222
+      ],
+      "grixis_affinity|tron": [
+       0.04728587809950113,
+       0.014353296534127305
+      ],
+      "elves|tron": [
+       0.03957394329417083,
+       0.009257560215903217
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.5191776141156106,
+       0.1222399415767284
+      ],
+      "jund_wildfire|red_madness": [
+       0.5863525477359453,
+       0.08425593844632352
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.9482310860310081,
+       0.2597009496247913
+      ],
+      "jund_wildfire|elves": [
+       0.654446527664946,
+       0.12460395235910646
+      ],
+      "jund_wildfire|tron": [
+       0.6798737796998924,
+       0.10598009283393423
+      ],
+      "mono_blue_terror|red_madness": [
+       0.4542227831071339,
+       0.06288829182357099
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.7298131619881966,
+       0.161198152931703
+      ],
+      "mono_blue_terror|elves": [
+       0.5751431403375363,
+       0.10472337101756447
+      ],
+      "mono_blue_terror|tron": [
+       0.6062548053121125,
+       0.17099362443573415
+      ],
+      "red_madness|grixis_affinity": [
+       0.6750034578091793,
+       0.11304282531656354
+      ],
+      "red_madness|elves": [
+       0.547131542572757,
+       0.06192501126309326
+      ],
+      "red_madness|tron": [
+       0.39952347236453983,
+       0.1277630526148686
+      ],
+      "grixis_affinity|elves": [
+       0.900700950905073,
+       0.18938846686201616
+      ],
+      "grixis_affinity|tron": [
+       0.8843223746758863,
+       0.26842985232879785
+      ],
+      "elves|tron": [
+       0.6608365783808814,
+       0.1545899626872308
+      ]
+     }
+    },
+    "value_head": {
+     "within": {
+      "jund_wildfire": [
+       0.9597499370574951,
+       0.014089448580448445
+      ],
+      "mono_blue_terror": [
+       0.8638676007588705,
+       0.03466446086130324
+      ],
+      "red_madness": [
+       0.6944782733917236,
+       0.08313826829921842
+      ],
+      "grixis_affinity": [
+       0.9674888849258423,
+       0.0038765091330735598
+      ],
+      "elves": [
+       0.9493439594904581,
+       0.007008761063126769
+      ],
+      "tron": [
+       0.8082871039708456,
+       0.07457511527472778
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.7810423639085557,
+       0.023828389137121084
+      ],
+      "jund_wildfire|red_madness": [
+       0.6213899246520467,
+       0.09452333144686997
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.9143692950407664,
+       0.021944740109178695
+      ],
+      "jund_wildfire|elves": [
+       0.8728462159633636,
+       0.023602373718089042
+      ],
+      "jund_wildfire|tron": [
+       0.6556446386708153,
+       0.04063164596992362
+      ],
+      "mono_blue_terror|red_madness": [
+       0.6444404141770469,
+       0.06363685492562389
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.7886909859047996,
+       0.017226768418010213
+      ],
+      "mono_blue_terror|elves": [
+       0.7490880671474669,
+       0.03522176364495455
+      ],
+      "mono_blue_terror|tron": [
+       0.6415817257430818,
+       0.05120895357007866
+      ],
+      "red_madness|grixis_affinity": [
+       0.6867788467142317,
+       0.09766297852407657
+      ],
+      "red_madness|elves": [
+       0.6070969212386343,
+       0.08922913975534255
+      ],
+      "red_madness|tron": [
+       0.5216333940625191,
+       0.06737185087921613
+      ],
+      "grixis_affinity|elves": [
+       0.8150682813591428,
+       0.03734154807952908
+      ],
+      "grixis_affinity|tron": [
+       0.5904976286821895,
+       0.06105634039218358
+      ],
+      "elves|tron": [
+       0.6965760125054253,
+       0.028524323977229774
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.8577721697135468,
+       0.026169296308900455
+      ],
+      "jund_wildfire|red_madness": [
+       0.7611247235872691,
+       0.11577922599941169
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.9488981403699239,
+       0.022773427753359266
+      ],
+      "jund_wildfire|elves": [
+       0.914422474678837,
+       0.02472662490696484
+      ],
+      "jund_wildfire|tron": [
+       0.7444004777828223,
+       0.0461320277619163
+      ],
+      "mono_blue_terror|red_madness": [
+       0.832012485028215,
+       0.08215912075232189
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.8627009812265979,
+       0.018843311617833904
+      ],
+      "mono_blue_terror|elves": [
+       0.827175171408317,
+       0.03889338204420099
+      ],
+      "mono_blue_terror|tron": [
+       0.7677955088360026,
+       0.06128292466210684
+      ],
+      "red_madness|grixis_affinity": [
+       0.8378467439272208,
+       0.11914549923911628
+      ],
+      "red_madness|elves": [
+       0.7476819614709858,
+       0.10989187376626353
+      ],
+      "red_madness|tron": [
+       0.69623079676026,
+       0.0899220754475474
+      ],
+      "grixis_affinity|elves": [
+       0.8504704039225361,
+       0.038963461349928855
+      ],
+      "grixis_affinity|tron": [
+       0.6677476078535063,
+       0.06904384244887941
+      ],
+      "elves|tron": [
+       0.7951954644138358,
+       0.032562724878481615
+      ]
+     }
+    },
+    "embedding+trunk": {
+     "within": {
+      "jund_wildfire": [
+       -0.02501320776840051,
+       0.0216390825002968
+      ],
+      "mono_blue_terror": [
+       0.01116536526630322,
+       0.012083485724341364
+      ],
+      "red_madness": [
+       0.20658902823925018,
+       0.032472249459634055
+      ],
+      "grixis_affinity": [
+       0.02124974907686313,
+       0.04510812205106063
+      ],
+      "elves": [
+       0.04365842044353485,
+       0.010533517615653385
+      ],
+      "tron": [
+       -0.02534783511267354,
+       0.02103637650138357
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.0037662795770706404,
+       0.043868425729943254
+      ],
+      "jund_wildfire|red_madness": [
+       0.026207402723634407,
+       0.0451384193997709
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.019877500909691054,
+       0.028162232921246998
+      ],
+      "jund_wildfire|elves": [
+       0.032624068281923733,
+       0.025226347135223072
+      ],
+      "jund_wildfire|tron": [
+       0.001590264986993538,
+       0.022008036872494856
+      ],
+      "mono_blue_terror|red_madness": [
+       -0.04994867015112606,
+       0.034155636637911574
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.010372598497067682,
+       0.023536935696177486
+      ],
+      "mono_blue_terror|elves": [
+       0.030103268515732553,
+       0.03321747987747932
+      ],
+      "mono_blue_terror|tron": [
+       0.00724509266567313,
+       0.02608341685558352
+      ],
+      "red_madness|grixis_affinity": [
+       0.034784557465981275,
+       0.03422468906235402
+      ],
+      "red_madness|elves": [
+       0.012286967662577,
+       0.03374630838041037
+      ],
+      "red_madness|tron": [
+       -0.003597766212705109,
+       0.021274346849531917
+      ],
+      "grixis_affinity|elves": [
+       0.0003681259614596557,
+       0.024692737527111153
+      ],
+      "grixis_affinity|tron": [
+       0.016685792852917478,
+       0.020428883508631986
+      ],
+      "elves|tron": [
+       0.014697922917548567,
+       0.02544953376894392
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|red_madness": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|grixis_affinity": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|elves": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|tron": [
+       NaN,
+       NaN
+      ],
+      "mono_blue_terror|red_madness": [
+       -1.040001189207985,
+       0.7111681374921058
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.6734016820289269,
+       1.528046428490732
+      ],
+      "mono_blue_terror|elves": [
+       1.3634624294707622,
+       1.5045138965881482
+      ],
+      "mono_blue_terror|tron": [
+       NaN,
+       NaN
+      ],
+      "red_madness|grixis_affinity": [
+       0.5249959499769163,
+       0.516545974877713
+      ],
+      "red_madness|elves": [
+       0.12937700087318413,
+       0.3553355301891788
+      ],
+      "red_madness|tron": [
+       NaN,
+       NaN
+      ],
+      "grixis_affinity|elves": [
+       0.012086081927814478,
+       0.8106965550360706
+      ],
+      "grixis_affinity|tron": [
+       NaN,
+       NaN
+      ],
+      "elves|tron": [
+       NaN,
+       NaN
+      ]
+     }
+    }
+   },
+   "chunk": {
+    "emb_tables": {
+     "within": {
+      "jund_wildfire": [
+       0.011979414460559687,
+       0.01951420170408878
+      ],
+      "mono_blue_terror": [
+       0.008034654039268693,
+       0.03533763593503434
+      ],
+      "red_madness": [
+       0.09496762851874034,
+       0.05401420341137666
+      ],
+      "grixis_affinity": [
+       0.015623819781467319,
+       0.05240338445795627
+      ],
+      "elves": [
+       0.027435770879189175,
+       0.09841946535045416
+      ],
+      "tron": [
+       0.0016814276265601318,
+       0.04103128749243233
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.007621347001986578,
+       0.027544034016908737
+      ],
+      "jund_wildfire|red_madness": [
+       0.020457262318814173,
+       0.027662543712327493
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.018293390254257247,
+       0.034891751445519724
+      ],
+      "jund_wildfire|elves": [
+       0.02231001207837835,
+       0.024756706820099898
+      ],
+      "jund_wildfire|tron": [
+       0.007963257667142898,
+       0.020747084754060292
+      ],
+      "mono_blue_terror|red_madness": [
+       0.007384102063952014,
+       0.030480730392034174
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.0043872363603441045,
+       0.024966219093504993
+      ],
+      "mono_blue_terror|elves": [
+       0.013263573186122812,
+       0.025890463735758068
+      ],
+      "mono_blue_terror|tron": [
+       0.005478508042870089,
+       0.02457477021910319
+      ],
+      "red_madness|grixis_affinity": [
+       0.01617913751397282,
+       0.03166890111966617
+      ],
+      "red_madness|elves": [
+       0.007980969807249494,
+       0.036982368884630606
+      ],
+      "red_madness|tron": [
+       0.006749350635800511,
+       0.02550926536617779
+      ],
+      "grixis_affinity|elves": [
+       0.018395311461063102,
+       0.029957158191571815
+      ],
+      "grixis_affinity|tron": [
+       0.010550267819780856,
+       0.031680352733746545
+      ],
+      "elves|tron": [
+       0.013069716282188892,
+       0.02484971852618336
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.7768377997621949,
+       2.807541341011378
+      ],
+      "jund_wildfire|red_madness": [
+       0.6065155251256392,
+       0.8201372189749483
+      ],
+      "jund_wildfire|grixis_affinity": [
+       1.3371582048842874,
+       2.5504179968664986
+      ],
+      "jund_wildfire|elves": [
+       1.2306184624840864,
+       1.365577946622749
+      ],
+      "jund_wildfire|tron": [
+       1.774327908498991,
+       4.622747754479074
+      ],
+      "mono_blue_terror|red_madness": [
+       0.26731683078934787,
+       1.1034533620980673
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.3915739854420963,
+       2.2283098308151197
+      ],
+      "mono_blue_terror|elves": [
+       0.8933432570975556,
+       1.7438039415854663
+      ],
+      "mono_blue_terror|tron": [
+       1.4905262313861463,
+       6.686006364366115
+      ],
+      "red_madness|grixis_affinity": [
+       0.4200238576378345,
+       0.822150995622947
+      ],
+      "red_madness|elves": [
+       0.15635410488044685,
+       0.7245166092549966
+      ],
+      "red_madness|tron": [
+       0.5341154058584536,
+       2.018696665711316
+      ],
+      "grixis_affinity|elves": [
+       0.888494924894726,
+       1.4469329901708436
+      ],
+      "grixis_affinity|tron": [
+       2.0584047937052365,
+       6.180979577708125
+      ],
+      "elves|tron": [
+       1.9242809787907451,
+       3.6586747298718096
+      ]
+     }
+    },
+    "gru": {
+     "within": {
+      "jund_wildfire": [
+       0.1648986948033174,
+       0.0997734327704318
+      ],
+      "mono_blue_terror": [
+       0.03670076075165222,
+       0.056942434985901416
+      ],
+      "red_madness": [
+       0.31655555218458176,
+       0.12935688521021546
+      ],
+      "grixis_affinity": [
+       0.13537288519243398,
+       0.04398460638945439
+      ],
+      "elves": [
+       0.17198636631170908,
+       0.04584061702676057
+      ],
+      "tron": [
+       0.037611471489071846,
+       0.08502879058133239
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.054533112997887656,
+       0.0741069123598667
+      ],
+      "jund_wildfire|red_madness": [
+       0.12330345885129645,
+       0.0966177524412319
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.14062543853651732,
+       0.09329078791214236
+      ],
+      "jund_wildfire|elves": [
+       0.12008290592348203,
+       0.07416576238598663
+      ],
+      "jund_wildfire|tron": [
+       0.0327007304149447,
+       0.06097779037245965
+      ],
+      "mono_blue_terror|red_madness": [
+       0.0870983446657192,
+       0.0755050122006208
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.02311475671012886,
+       0.06028612334808766
+      ],
+      "mono_blue_terror|elves": [
+       0.060679495451040566,
+       0.05600063421762412
+      ],
+      "mono_blue_terror|tron": [
+       0.033399369931430556,
+       0.049002236494647924
+      ],
+      "red_madness|grixis_affinity": [
+       0.05359623901313171,
+       0.09855664693033037
+      ],
+      "red_madness|elves": [
+       0.16549719916656613,
+       0.054311806067791533
+      ],
+      "red_madness|tron": [
+       0.06445782980881631,
+       0.06745611162650335
+      ],
+      "grixis_affinity|elves": [
+       0.06836258748080581,
+       0.08442256910120646
+      ],
+      "grixis_affinity|tron": [
+       0.007744701986666769,
+       0.053465352689137643
+      ],
+      "elves|tron": [
+       0.06212243944173679,
+       0.04497691099968143
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.7009937526772673,
+       0.9526043854580711
+      ],
+      "jund_wildfire|red_madness": [
+       0.5396866593059058,
+       0.42288604496925036
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.9412162967005352,
+       0.6244020344309196
+      ],
+      "jund_wildfire|elves": [
+       0.7130591702237177,
+       0.44040054310194315
+      ],
+      "jund_wildfire|tron": [
+       0.4152299602836654,
+       0.7742886826457731
+      ],
+      "mono_blue_terror|red_madness": [
+       0.8080670538620349,
+       0.700508293182139
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.32793362582263585,
+       0.8552911572573862
+      ],
+      "mono_blue_terror|elves": [
+       0.7637608927722894,
+       0.7048689852798299
+      ],
+      "mono_blue_terror|tron": [
+       0.8989604356743554,
+       1.3189192478386285
+      ],
+      "red_madness|grixis_affinity": [
+       0.2589068286401383,
+       0.4760966323007422
+      ],
+      "red_madness|elves": [
+       0.7092815617773953,
+       0.2327674596591995
+      ],
+      "red_madness|tron": [
+       0.590732070948095,
+       0.6182102102633907
+      ],
+      "grixis_affinity|elves": [
+       0.4480284978292501,
+       0.5532809422685965
+      ],
+      "grixis_affinity|tron": [
+       0.1085372230734905,
+       0.7492839519860354
+      ],
+      "elves|tron": [
+       0.7723983342555423,
+       0.5592196869328616
+      ]
+     }
+    },
+    "trunk": {
+     "within": {
+      "jund_wildfire": [
+       -0.01564927166327834,
+       0.03556176168371303
+      ],
+      "mono_blue_terror": [
+       0.0055684574181213975,
+       0.02495106818642151
+      ],
+      "red_madness": [
+       0.11728700685004394,
+       0.04505160751739103
+      ],
+      "grixis_affinity": [
+       0.009270692399392525,
+       0.038412273161838914
+      ],
+      "elves": [
+       0.022227474333097536,
+       0.03135866772172398
+      ],
+      "tron": [
+       -0.01464392306903998,
+       0.033575830295664404
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.0007707385229878128,
+       0.05009233202171245
+      ],
+      "jund_wildfire|red_madness": [
+       0.013257879938464612,
+       0.049235651995963525
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.008574060688260943,
+       0.03247431494198087
+      ],
+      "jund_wildfire|elves": [
+       0.015169964346569031,
+       0.032234948891939105
+      ],
+      "jund_wildfire|tron": [
+       6.106222281232476e-05,
+       0.03318224621536659
+      ],
+      "mono_blue_terror|red_madness": [
+       -0.029767703381367028,
+       0.03853000856478053
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.005017224466428161,
+       0.0261495541568464
+      ],
+      "mono_blue_terror|elves": [
+       0.015919136203592643,
+       0.03678305707116399
+      ],
+      "mono_blue_terror|tron": [
+       0.002840006425685715,
+       0.030021864793493374
+      ],
+      "red_madness|grixis_affinity": [
+       0.018616921704960987,
+       0.03599163110571063
+      ],
+      "red_madness|elves": [
+       0.006573643127921969,
+       0.03563062737780165
+      ],
+      "red_madness|tron": [
+       -0.0027326791605446488,
+       0.025169819078826098
+      ],
+      "grixis_affinity|elves": [
+       -0.002348324138438329,
+       0.028902269606406437
+      ],
+      "grixis_affinity|tron": [
+       0.008077887643594295,
+       0.02327763990844236
+      ],
+      "elves|tron": [
+       0.006380691978847608,
+       0.03373832886765229
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|red_madness": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|grixis_affinity": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|elves": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|tron": [
+       NaN,
+       NaN
+      ],
+      "mono_blue_terror|red_madness": [
+       -1.164804195905312,
+       1.5076714205845108
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.6982967073185471,
+       3.639491852070464
+      ],
+      "mono_blue_terror|elves": [
+       1.4308924375085665,
+       3.3062471178364814
+      ],
+      "mono_blue_terror|tron": [
+       NaN,
+       NaN
+      ],
+      "red_madness|grixis_affinity": [
+       0.5645817491741907,
+       1.0914918356174557
+      ],
+      "red_madness|elves": [
+       0.12874670200787808,
+       0.69783614292638
+      ],
+      "red_madness|tron": [
+       NaN,
+       NaN
+      ],
+      "grixis_affinity|elves": [
+       -0.16359005476583058,
+       2.0134034268851413
+      ],
+      "grixis_affinity|tron": [
+       NaN,
+       NaN
+      ],
+      "elves|tron": [
+       NaN,
+       NaN
+      ]
+     }
+    },
+    "option_scorer": {
+     "within": {
+      "jund_wildfire": [
+       0.0675770677626133,
+       0.02618338448404139
+      ],
+      "mono_blue_terror": [
+       0.03448749100789428,
+       0.018827922467583434
+      ],
+      "red_madness": [
+       0.1425607167184353,
+       0.037939147926854135
+      ],
+      "grixis_affinity": [
+       0.03333548673739036,
+       0.009758837340978965
+      ],
+      "elves": [
+       0.04226119940479597,
+       0.02056760943577823
+      ],
+      "tron": [
+       0.022960731914887827,
+       0.021409035569889694
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.025133874063612893,
+       0.01150575986742172
+      ],
+      "jund_wildfire|red_madness": [
+       0.05776675255037844,
+       0.016537251111247375
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.044737432268448174,
+       0.02442427070144821
+      ],
+      "jund_wildfire|elves": [
+       0.03497129213064909,
+       0.017070349307292388
+      ],
+      "jund_wildfire|tron": [
+       0.02669141290243715,
+       0.008908876679563945
+      ],
+      "mono_blue_terror|red_madness": [
+       0.03196532768197358,
+       0.008548519277624065
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.024625155579997227,
+       0.010217880999526613
+      ],
+      "mono_blue_terror|elves": [
+       0.022019543102942407,
+       0.009561053768865112
+      ],
+      "mono_blue_terror|tron": [
+       0.016902951581869274,
+       0.010973197865796862
+      ],
+      "red_madness|grixis_affinity": [
+       0.046381876221857965,
+       0.01512256376410292
+      ],
+      "red_madness|elves": [
+       0.04251122381538153,
+       0.010386384251488225
+      ],
+      "red_madness|tron": [
+       0.022610561340115964,
+       0.014178437959597981
+      ],
+      "grixis_affinity|elves": [
+       0.033653952239546925,
+       0.013671392295754928
+      ],
+      "grixis_affinity|tron": [
+       0.024199208957725205,
+       0.01349054779516834
+      ],
+      "elves|tron": [
+       0.020390739751746878,
+       0.010104626357197452
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.5206297281456788,
+       0.23833335906451014
+      ],
+      "jund_wildfire|red_madness": [
+       0.5885432009361553,
+       0.16848595903345034
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.9425794820093729,
+       0.5145985198275289
+      ],
+      "jund_wildfire|elves": [
+       0.6543966962666762,
+       0.3194271503917389
+      ],
+      "jund_wildfire|tron": [
+       0.6776087852686125,
+       0.22616761154655807
+      ],
+      "mono_blue_terror|red_madness": [
+       0.4558777809787909,
+       0.1219158469986648
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.7262644436162745,
+       0.301353777642177
+      ],
+      "mono_blue_terror|elves": [
+       0.5767752205282697,
+       0.25044020533209527
+      ],
+      "mono_blue_terror|tron": [
+       0.6006740682395351,
+       0.38995055814486684
+      ],
+      "red_madness|grixis_affinity": [
+       0.6728139340406228,
+       0.21936740053890552
+      ],
+      "red_madness|elves": [
+       0.5476874171530173,
+       0.1338115314901411
+      ],
+      "red_madness|tron": [
+       0.3952014646851184,
+       0.24781956379997885
+      ],
+      "grixis_affinity|elves": [
+       0.8966269006466899,
+       0.364240669696535
+      ],
+      "grixis_affinity|tron": [
+       0.8746914983292162,
+       0.48762203280494915
+      ],
+      "elves|tron": [
+       0.6545897620772166,
+       0.324381804856805
+      ]
+     }
+    },
+    "value_head": {
+     "within": {
+      "jund_wildfire": [
+       0.9197084605693817,
+       0.01954339553016576
+      ],
+      "mono_blue_terror": [
+       0.7600503961245219,
+       0.029815596220462648
+      ],
+      "red_madness": [
+       0.40298810849587124,
+       0.3543121212468107
+      ],
+      "grixis_affinity": [
+       0.9348676403363546,
+       0.013789424369221356
+      ],
+      "elves": [
+       0.906584898630778,
+       0.012868070579626887
+      ],
+      "tron": [
+       0.6745558182398478,
+       0.10445804579591463
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.7188737764954567,
+       0.04119586681035925
+      ],
+      "jund_wildfire|red_madness": [
+       0.47573003359138966,
+       0.29252139389665915
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.8786406889557838,
+       0.0442639000052422
+      ],
+      "jund_wildfire|elves": [
+       0.8351890482008457,
+       0.03498965028855718
+      ],
+      "jund_wildfire|tron": [
+       0.586280107498169,
+       0.07414476767361294
+      ],
+      "mono_blue_terror|red_madness": [
+       0.48128570476546884,
+       0.23252059064034936
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.726822029799223,
+       0.03510433005975532
+      ],
+      "mono_blue_terror|elves": [
+       0.6857771202921867,
+       0.057627506781128365
+      ],
+      "mono_blue_terror|tron": [
+       0.5487016700208187,
+       0.08929167802173636
+      ],
+      "red_madness|grixis_affinity": [
+       0.52823496889323,
+       0.3186161015341586
+      ],
+      "red_madness|elves": [
+       0.4635683358646929,
+       0.2743970237985328
+      ],
+      "red_madness|tron": [
+       0.3767089517787099,
+       0.19303068555744976
+      ],
+      "grixis_affinity|elves": [
+       0.778405737131834,
+       0.06243082921392285
+      ],
+      "grixis_affinity|tron": [
+       0.5249599386006594,
+       0.10739459785992767
+      ],
+      "elves|tron": [
+       0.6212672181427479,
+       0.0589081776768025
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.8598176497485279,
+       0.04927281330655178
+      ],
+      "jund_wildfire|red_madness": [
+       0.7814287105550707,
+       0.4804922950035406
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.9475696817004939,
+       0.04773638435597254
+      ],
+      "jund_wildfire|elves": [
+       0.9146510972346071,
+       0.038318656233849314
+      ],
+      "jund_wildfire|tron": [
+       0.7443395948038564,
+       0.09413399093909307
+      ],
+      "mono_blue_terror|red_madness": [
+       0.8696322800041641,
+       0.4201400735245561
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       0.8622472614573806,
+       0.041645150006916314
+      ],
+      "mono_blue_terror|elves": [
+       0.8261474305043705,
+       0.06942316278110569
+      ],
+      "mono_blue_terror|tron": [
+       0.7663129077956045,
+       0.12470413189044875
+      ],
+      "red_madness|grixis_affinity": [
+       0.860609168918132,
+       0.5190946349496055
+      ],
+      "red_madness|elves": [
+       0.7669435651103531,
+       0.4539719722124049
+      ],
+      "red_madness|tron": [
+       0.7225216727657472,
+       0.3702297308454081
+      ],
+      "grixis_affinity|elves": [
+       0.8455255279144221,
+       0.06781406830805134
+      ],
+      "grixis_affinity|tron": [
+       0.661061937750186,
+       0.13523790244724132
+      ],
+      "elves|tron": [
+       0.7944475894659734,
+       0.07532903457400185
+      ]
+     }
+    },
+    "embedding+trunk": {
+     "within": {
+      "jund_wildfire": [
+       -0.012691119064887365,
+       0.033105657181249915
+      ],
+      "mono_blue_terror": [
+       0.005845599380942683,
+       0.02430089009073465
+      ],
+      "red_madness": [
+       0.11506957312424977,
+       0.04424934116624028
+      ],
+      "grixis_affinity": [
+       0.010016498155891895,
+       0.039900583011522724
+      ],
+      "elves": [
+       0.022937066775436204,
+       0.03450841339873872
+      ],
+      "tron": [
+       -0.012917731112490097,
+       0.030922795286594414
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.00157102219236549,
+       0.045911181910393645
+      ],
+      "jund_wildfire|red_madness": [
+       0.014044273062609136,
+       0.04486860353237106
+      ],
+      "jund_wildfire|grixis_affinity": [
+       0.009639304233132862,
+       0.031514594476215824
+      ],
+      "jund_wildfire|elves": [
+       0.016045064985519275,
+       0.029549265162920647
+      ],
+      "jund_wildfire|tron": [
+       0.0008920869440771639,
+       0.030593863868154228
+      ],
+      "mono_blue_terror|red_madness": [
+       -0.025946542853489518,
+       0.03617151130755228
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.004953114068484865,
+       0.024275739924347395
+      ],
+      "mono_blue_terror|elves": [
+       0.01562065034522675,
+       0.033780632614457844
+      ],
+      "mono_blue_terror|tron": [
+       0.0031751202914165333,
+       0.027828128885378875
+      ],
+      "red_madness|grixis_affinity": [
+       0.01839656484662555,
+       0.03445106432391159
+      ],
+      "red_madness|elves": [
+       0.006745629099896178,
+       0.03290384502018138
+      ],
+      "red_madness|tron": [
+       -0.0018325589771848172,
+       0.0217789443644092
+      ],
+      "grixis_affinity|elves": [
+       0.0002523891889723018,
+       0.026967038337960797
+      ],
+      "grixis_affinity|tron": [
+       0.0083277424237167,
+       0.022550446332973283
+      ],
+      "elves|tron": [
+       0.007209037386928685,
+       0.031031871976972863
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|red_madness": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|grixis_affinity": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|elves": [
+       NaN,
+       NaN
+      ],
+      "jund_wildfire|tron": [
+       NaN,
+       NaN
+      ],
+      "mono_blue_terror|red_madness": [
+       -1.0004254354781312,
+       1.3946713500944654
+      ],
+      "mono_blue_terror|grixis_affinity": [
+       -0.6473003589857338,
+       3.1724880449767485
+      ],
+      "mono_blue_terror|elves": [
+       1.3490114863917764,
+       2.9173216484171163
+      ],
+      "mono_blue_terror|tron": [
+       NaN,
+       NaN
+      ],
+      "red_madness|grixis_affinity": [
+       0.5418742665113132,
+       1.0147625584826467
+      ],
+      "red_madness|elves": [
+       0.13130258246844445,
+       0.6404680364590126
+      ],
+      "red_madness|tron": [
+       NaN,
+       NaN
+      ],
+      "grixis_affinity|elves": [
+       0.016651135345783427,
+       1.7791245618273994
+      ],
+      "grixis_affinity|tron": [
+       NaN,
+       NaN
+      ],
+      "elves|tron": [
+       NaN,
+       NaN
+      ]
+     }
+    }
+   }
+  }
+ },
+ "norms": {
+  "global": {
+   "jund_wildfire": {
+    "whole": 0.14407788217067719,
+    "emb_tables": 0.027423011139035225,
+    "gru": 0.02932194247841835,
+    "trunk": 0.07606389373540878,
+    "option_scorer": 0.035112056881189346,
+    "value_head": 0.11013928055763245
+   },
+   "mono_blue_terror": {
+    "whole": 0.2479844093322754,
+    "emb_tables": 0.06270195543766022,
+    "gru": 0.056484706699848175,
+    "trunk": 0.18212661147117615,
+    "option_scorer": 0.07783864438533783,
+    "value_head": 0.12313534319400787
+   },
+   "red_madness": {
+    "whole": 0.16520053148269653,
+    "emb_tables": 0.040706321597099304,
+    "gru": 0.054522134363651276,
+    "trunk": 0.12247190624475479,
+    "option_scorer": 0.05547613278031349,
+    "value_head": 0.06776450574398041
+   },
+   "grixis_affinity": {
+    "whole": 0.19963814318180084,
+    "emb_tables": 0.037559155374765396,
+    "gru": 0.03673282265663147,
+    "trunk": 0.10241053998470306,
+    "option_scorer": 0.04551546275615692,
+    "value_head": 0.15665243566036224
+   },
+   "elves": {
+    "whole": 0.18303170800209045,
+    "emb_tables": 0.04964505881071091,
+    "gru": 0.04318726807832718,
+    "trunk": 0.12384302169084549,
+    "option_scorer": 0.05313616245985031,
+    "value_head": 0.1049678847193718
+   },
+   "tron": {
+    "whole": 0.188592329621315,
+    "emb_tables": 0.05069543793797493,
+    "gru": 0.043287310749292374,
+    "trunk": 0.1426224559545517,
+    "option_scorer": 0.06267410516738892,
+    "value_head": 0.08284445106983185
+   }
+  }
+ },
+ "dominance": {
+  "global": {
+   "whole": {
+    "jund_wildfire": {
+     "norm_share": 0.19983261897062396,
+     "g2_share": 0.24235601796845307,
+     "cos_with_batch": 0.7920165631656298
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.1544316940566977,
+     "g2_share": 0.13496972749118608,
+     "cos_with_batch": 0.5707511187511011
+    },
+    "red_madness": {
+     "norm_share": 0.1319204980614192,
+     "g2_share": 0.09911361115128575,
+     "cos_with_batch": 0.49064553762984375
+    },
+    "grixis_affinity": {
+     "norm_share": 0.208957936069258,
+     "g2_share": 0.25166709297488166,
+     "cos_with_batch": 0.7865283814553248
+    },
+    "elves": {
+     "norm_share": 0.1565624443105488,
+     "g2_share": 0.15826627009658847,
+     "cos_with_batch": 0.660157573831766
+    },
+    "tron": {
+     "norm_share": 0.14829480853145227,
+     "g2_share": 0.11362829162474201,
+     "cos_with_batch": 0.5003885523081718
+    }
+   },
+   "emb_tables": {
+    "jund_wildfire": {
+     "norm_share": 0.1644903965206423,
+     "g2_share": 0.17243120878827303,
+     "cos_with_batch": 0.47297664157878133
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.1688688267736345,
+     "g2_share": 0.15548384626275116,
+     "cos_with_batch": 0.4154322016951485
+    },
+    "red_madness": {
+     "norm_share": 0.14057854525801136,
+     "g2_share": 0.1209114799829853,
+     "cos_with_batch": 0.3880724927027904
+    },
+    "grixis_affinity": {
+     "norm_share": 0.17001510530118713,
+     "g2_share": 0.17338749376947843,
+     "cos_with_batch": 0.46014491636444904
+    },
+    "elves": {
+     "norm_share": 0.18365114207713829,
+     "g2_share": 0.20752554251272545,
+     "cos_with_batch": 0.5098498459337308
+    },
+    "tron": {
+     "norm_share": 0.17239598406938636,
+     "g2_share": 0.17027084576506887,
+     "cos_with_batch": 0.4456331772310494
+    }
+   },
+   "gru": {
+    "jund_wildfire": {
+     "norm_share": 0.17774042551679844,
+     "g2_share": 0.20420779542151613,
+     "cos_with_batch": 0.6717454985964718
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.15373308759986973,
+     "g2_share": 0.1321331013467955,
+     "cos_with_batch": 0.5025310983016151
+    },
+    "red_madness": {
+     "norm_share": 0.19028217406326645,
+     "g2_share": 0.21789372429756138,
+     "cos_with_batch": 0.6695226608520299
+    },
+    "grixis_affinity": {
+     "norm_share": 0.1680327999548316,
+     "g2_share": 0.15279060208565748,
+     "cos_with_batch": 0.5316443976513532
+    },
+    "elves": {
+     "norm_share": 0.16145124825630802,
+     "g2_share": 0.18151067842256693,
+     "cos_with_batch": 0.6573239200194639
+    },
+    "tron": {
+     "norm_share": 0.1487602646089258,
+     "g2_share": 0.11146603335227609,
+     "cos_with_batch": 0.4381010236764431
+    }
+   },
+   "trunk": {
+    "jund_wildfire": {
+     "norm_share": 0.16433101310851517,
+     "g2_share": 0.1727567300653426,
+     "cos_with_batch": 0.44493129624238525
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.17666779168009902,
+     "g2_share": 0.16829086775004243,
+     "cos_with_batch": 0.4031630125783178
+    },
+    "red_madness": {
+     "norm_share": 0.15233834564206689,
+     "g2_share": 0.13063611778873258,
+     "cos_with_batch": 0.3629372491090242
+    },
+    "grixis_affinity": {
+     "norm_share": 0.16696749035028235,
+     "g2_share": 0.1704320879127916,
+     "cos_with_batch": 0.4320131410378036
+    },
+    "elves": {
+     "norm_share": 0.16500789188764453,
+     "g2_share": 0.17711801906470903,
+     "cos_with_batch": 0.454292474742855
+    },
+    "tron": {
+     "norm_share": 0.17468746733139204,
+     "g2_share": 0.18076633995957583,
+     "cos_with_batch": 0.43795887235690456
+    }
+   },
+   "option_scorer": {
+    "jund_wildfire": {
+     "norm_share": 0.1715692229464017,
+     "g2_share": 0.18532491392404096,
+     "cos_with_batch": 0.5465311820367347
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.17077385033592293,
+     "g2_share": 0.16035316816108383,
+     "cos_with_batch": 0.4750908839178348
+    },
+    "red_madness": {
+     "norm_share": 0.15607058917380542,
+     "g2_share": 0.16045675069213866,
+     "cos_with_batch": 0.5201845464729417
+    },
+    "grixis_affinity": {
+     "norm_share": 0.16783725171566558,
+     "g2_share": 0.17617614940386364,
+     "cos_with_batch": 0.5311036385878691
+    },
+    "elves": {
+     "norm_share": 0.16012734228253647,
+     "g2_share": 0.15546683273715847,
+     "cos_with_batch": 0.49123893155682763
+    },
+    "tron": {
+     "norm_share": 0.17362174354566795,
+     "g2_share": 0.16222221332486608,
+     "cos_with_batch": 0.4727447689935135
+    }
+   },
+   "value_head": {
+    "jund_wildfire": {
+     "norm_share": 0.2535647194163644,
+     "g2_share": 0.26794259280206634,
+     "cos_with_batch": 0.9658110199423438
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.12728355889926368,
+     "g2_share": 0.12456098175147412,
+     "cos_with_batch": 0.8944353186165813
+    },
+    "red_madness": {
+     "norm_share": 0.08982157046619534,
+     "g2_share": 0.0794720410646623,
+     "cos_with_batch": 0.8086730130697416
+    },
+    "grixis_affinity": {
+     "norm_share": 0.2721635912045421,
+     "g2_share": 0.2852268479704211,
+     "cos_with_batch": 0.9578546302499814
+    },
+    "elves": {
+     "norm_share": 0.14903738886279616,
+     "g2_share": 0.15072694022700767,
+     "cos_with_batch": 0.9243466617129921
+    },
+    "tron": {
+     "norm_share": 0.10812917115083831,
+     "g2_share": 0.0920705281439396,
+     "cos_with_batch": 0.7782461620480918
+    }
+   }
+  }
+ },
+ "meta": {
+  "checkpoint": "/home/taiga-support/mtg-ml-eval/ckpt/r7-lr075-policy.pt",
+  "engine": "native",
+  "host": "support-bm-NO-11B-2-1-8-17",
+  "python": "3.11.17",
+  "torch": "2.14.1+cpu",
+  "threads": 4,
+  "seconds": 1907.7040131092072,
+  "config": {
+   "hidden": 256,
+   "memory": "gru",
+   "state_dim": 65536,
+   "option_dim": 32768,
+   "trunk": "entity",
+   "value_net": "shared",
+   "value_hidden": 256,
+   "entity_attn": 1,
+   "features": 7
+  },
+  "minibatch": 2048,
+  "ppo": {
+   "clip": 0.2,
+   "vf_coef": 0.5,
+   "ent_coef": 0.01
+  }
+ }
+}
