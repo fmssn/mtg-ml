@@ -129,8 +129,11 @@ def test_end_to_end(ckpt, tmp_path):
         assert -1.0001 <= t["cross"]["jund_wildfire|mono_blue_terror"][0] <= 1.0001
         assert all(math.isfinite(out["norms"][mode][d]["whole"]) for d in decks)
         assert sum(out["dominance"][mode]["whole"][d]["g2_share"] for d in decks) == pytest.approx(1, abs=1e-3)
-    md = D.scale_markdown(out) + D.markdown(out)
+    md = D.scale_markdown(out) + D.markdown(out) + D.summary_markdown(out)
     assert "jund" in md and "blue" in md
+    # the pure policy gradient has no value-head part
+    pg = D.run(net, path, InProcess(), 1, decks, 2, 6, ("global",), ENGINE, 10, cache=str(tmp_path), minibatch=64, log=lambda *_: None, vf_coef=0.0, ent_coef=0.0)
+    assert pg["norms"]["global"]["jund_wildfire"]["value_head"] == 0.0
     # a second run reads the cache and gets the same games
     again = D.run(net, path, InProcess(), 1, decks, 2, 6, ("global",), ENGINE, 10, cache=str(tmp_path), minibatch=64, log=lambda *_: None)
     assert again["stats"][decks[0]]["decisions"] == out["stats"][decks[0]]["decisions"]

@@ -1,0 +1,558 @@
+{
+ "decks": [
+  "jund_wildfire",
+  "mono_blue_terror"
+ ],
+ "stats": {
+  "jund_wildfire": {
+   "games": 2400,
+   "decisions": 420395,
+   "adv_mean_sd": [
+    -0.019441092592043838,
+    0.19089733973692563
+   ],
+   "ret_mean_sd": [
+    -0.03859739258991483,
+    0.5266357081345893
+   ],
+   "value_mean_sd": [
+    -0.019156299997870992,
+    0.5103591310954096
+   ],
+   "adv_abs_mean": 0.12431305678124624,
+   "explained_var": 0.8686049068775898,
+   "decisions_per_game": 175.16458333333333,
+   "turns_mean_sd": [
+    19.514583333333334,
+    7.571460025160426
+   ],
+   "win_rate": 0.3858333333333333,
+   "by_matchup": {
+    "jund_madness": {
+     "trajectories": 423,
+     "decisions_per_trajectory": 88.4160756501182
+    },
+    "jund_blue": {
+     "trajectories": 429,
+     "decisions_per_trajectory": 171.08391608391608
+    },
+    "jund_elves": {
+     "trajectories": 465,
+     "decisions_per_trajectory": 146.08172043010754
+    },
+    "jund_mirror": {
+     "trajectories": 232,
+     "decisions_per_trajectory": 267.1336206896552
+    },
+    "jund_affinity": {
+     "trajectories": 423,
+     "decisions_per_trajectory": 181.71394799054374
+    },
+    "jund_tron": {
+     "trajectories": 428,
+     "decisions_per_trajectory": 240.26168224299064
+    }
+   },
+   "ppo": {
+    "pg_loss": 0.0262106957217101,
+    "v_loss": 0.018901397271848402,
+    "entropy": 0.2565269415765418,
+    "nt_entropy": 0.5947570764233853,
+    "nt_frac": 0.4272163606732454,
+    "explained_var": 0.8683748418828663
+   }
+  },
+  "mono_blue_terror": {
+   "games": 2400,
+   "decisions": 226806,
+   "adv_mean_sd": [
+    -0.00802173766120822,
+    0.2575573673544305
+   ],
+   "ret_mean_sd": [
+    -0.10897325301565841,
+    0.5922649787836713
+   ],
+   "value_mean_sd": [
+    -0.10095151535445018,
+    0.5376920688089063
+   ],
+   "adv_abs_mean": 0.1695302818778592,
+   "explained_var": 0.8108894105747653,
+   "decisions_per_game": 94.5025,
+   "turns_mean_sd": [
+    16.7675,
+    5.754396075834763
+   ],
+   "win_rate": 0.49291666666666667,
+   "by_matchup": {
+    "blue_tron": {
+     "trajectories": 448,
+     "decisions_per_trajectory": 96.40625
+    },
+    "blue_madness": {
+     "trajectories": 434,
+     "decisions_per_trajectory": 74.96543778801843
+    },
+    "blue_elves": {
+     "trajectories": 460,
+     "decisions_per_trajectory": 96.4108695652174
+    },
+    "blue_affinity": {
+     "trajectories": 433,
+     "decisions_per_trajectory": 90.47575057736721
+    },
+    "blue_mirror": {
+     "trajectories": 193,
+     "decisions_per_trajectory": 93.75129533678756
+    },
+    "jund_blue": {
+     "trajectories": 432,
+     "decisions_per_trajectory": 114.49537037037037
+    }
+   },
+   "ppo": {
+    "pg_loss": -0.027357076519635214,
+    "v_loss": 0.03335744112341123,
+    "entropy": 0.20854969685999575,
+    "nt_entropy": 0.4860392333041065,
+    "nt_frac": 0.4219192635379233,
+    "explained_var": 0.8107021215345722
+   }
+  }
+ },
+ "batch_share": {
+  "decisions": {
+   "jund_wildfire": 0.5,
+   "mono_blue_terror": 0.5
+  },
+  "trajectories": {
+   "jund_wildfire": 0.5,
+   "mono_blue_terror": 0.5
+  }
+ },
+ "global_advantage": {
+  "mean": -0.01373141512662603,
+  "std": 0.22676286361604547
+ },
+ "chunks": 4,
+ "games_per_chunk": 600,
+ "cosines": {
+  "global": {
+   "half": {
+    "emb_tables": {
+     "within": {
+      "jund_wildfire": [
+       0.06910940756400426,
+       0.01472364068173141
+      ],
+      "mono_blue_terror": [
+       0.0056621798624595,
+       0.01803945700064944
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.029648692786900535,
+       0.01917721477710328
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       1.4988050047430037,
+       0.9694493342941971
+      ]
+     }
+    },
+    "gru": {
+     "within": {
+      "jund_wildfire": [
+       0.7311924497286478,
+       0.016944237693631542
+      ],
+      "mono_blue_terror": [
+       0.1806235114733378,
+       0.011094459585563007
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.24643297783202595,
+       0.03684103873185717
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.6781032647618019,
+       0.10137453542567926
+      ]
+     }
+    },
+    "trunk": {
+     "within": {
+      "jund_wildfire": [
+       0.05435191902021567,
+       0.028610755103113228
+      ],
+      "mono_blue_terror": [
+       0.01965726384272178,
+       0.019163327348831714
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       -0.0029334892557623484,
+       0.027136315200497963
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       -0.08974608806509049,
+       0.8301984160882985
+      ]
+     }
+    },
+    "option_scorer": {
+     "within": {
+      "jund_wildfire": [
+       0.028033801975349586,
+       0.01815755697942162
+      ],
+      "mono_blue_terror": [
+       0.03312899048129717,
+       0.006387579864890731
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.013742964763271933,
+       0.01034428313869863
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.450957206245744,
+       0.3394339653194225
+      ]
+     }
+    },
+    "value_head": {
+     "within": {
+      "jund_wildfire": [
+       0.97797159353892,
+       0.010544718272133867
+      ],
+      "mono_blue_terror": [
+       0.7229372461636862,
+       0.007950488103023987
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.6255127936601639,
+       0.03501834687825074
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.7439140761579462,
+       0.04164685587656504
+      ]
+     }
+    },
+    "embedding+trunk": {
+     "within": {
+      "jund_wildfire": [
+       0.05576874998708566,
+       0.026240754790266392
+      ],
+      "mono_blue_terror": [
+       0.01835698044548432,
+       0.017936433894245964
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.0002099488370327486,
+       0.024410216122768582
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.006561715485354092,
+       0.7629139336867415
+      ]
+     }
+    }
+   },
+   "chunk": {
+    "emb_tables": {
+     "within": {
+      "jund_wildfire": [
+       0.037474989891052246,
+       0.05227192509887607
+      ],
+      "mono_blue_terror": [
+       0.0026349627102414766,
+       0.038848695357710135
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.015333693299908191,
+       0.021719800675115572
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       1.5430811763345755,
+       2.185736659785057
+      ]
+     }
+    },
+    "gru": {
+     "within": {
+      "jund_wildfire": [
+       0.5637521396080653,
+       0.0718430015878932
+      ],
+      "mono_blue_terror": [
+       0.09765731357038021,
+       0.051301432080618596
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.16004976397380233,
+       0.04985580485333441
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.6821164919010396,
+       0.21248058018395943
+      ]
+     }
+    },
+    "trunk": {
+     "within": {
+      "jund_wildfire": [
+       0.029703074134886265,
+       0.05934025876729355
+      ],
+      "mono_blue_terror": [
+       0.009196365252137184,
+       0.04221349050233106
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       -0.001863011042587459,
+       0.031225823426522643
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       -0.11272146476302794,
+       1.8893181385445634
+      ]
+     }
+    },
+    "option_scorer": {
+     "within": {
+      "jund_wildfire": [
+       0.013750173461933931,
+       0.025233748993069037
+      ],
+      "mono_blue_terror": [
+       0.01665379774446289,
+       0.017287315053504646
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.006998129945714027,
+       0.010808485711442968
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.46245690786227267,
+       0.7142563684243611
+      ]
+     }
+    },
+    "value_head": {
+     "within": {
+      "jund_wildfire": [
+       0.9568500419457754,
+       0.011362695925592766
+      ],
+      "mono_blue_terror": [
+       0.569901833931605,
+       0.0964142796070135
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       0.543956533074379,
+       0.062180737691014336
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       0.7366178349144193,
+       0.08420422880567441
+      ]
+     }
+    },
+    "embedding+trunk": {
+     "within": {
+      "jund_wildfire": [
+       0.030374279556175072,
+       0.056920302385697716
+      ],
+      "mono_blue_terror": [
+       0.008605518999199072,
+       0.04049155432814141
+      ]
+     },
+     "cross": {
+      "jund_wildfire|mono_blue_terror": [
+       -0.00021983380429446697,
+       0.028351018508307128
+      ]
+     },
+     "corrected": {
+      "jund_wildfire|mono_blue_terror": [
+       -0.013597308429353278,
+       1.7535862793302786
+      ]
+     }
+    }
+   }
+  }
+ },
+ "norms": {
+  "global": {
+   "jund_wildfire": {
+    "whole": 0.21623723208904266,
+    "emb_tables": 0.03644152358174324,
+    "gru": 0.07608659565448761,
+    "trunk": 0.10901463031768799,
+    "option_scorer": 0.03515200689435005,
+    "value_head": 0.16287457942962646
+   },
+   "mono_blue_terror": {
+    "whole": 0.23541530966758728,
+    "emb_tables": 0.06184506043791771,
+    "gru": 0.07226013392210007,
+    "trunk": 0.19708482921123505,
+    "option_scorer": 0.059538595378398895,
+    "value_head": 0.06327098608016968
+   }
+  }
+ },
+ "dominance": {
+  "global": {
+   "whole": {
+    "jund_wildfire": {
+     "norm_share": 0.4787689918626888,
+     "g2_share": 0.46393037801235043,
+     "cos_with_batch": 0.7440156940789041
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.5212310081373113,
+     "g2_share": 0.5360711093615187,
+     "cos_with_batch": 0.7896733084986731
+    }
+   },
+   "emb_tables": {
+    "jund_wildfire": {
+     "norm_share": 0.3707680345717742,
+     "g2_share": 0.2693416113442561,
+     "cos_with_batch": 0.5439033852368421
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.6292319654282258,
+     "g2_share": 0.73066114126412,
+     "cos_with_batch": 0.8694123930916552
+    }
+   },
+   "gru": {
+    "jund_wildfire": {
+     "norm_share": 0.5128970208622362,
+     "g2_share": 0.5191520762416234,
+     "cos_with_batch": 0.8308764827688161
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.48710297913776374,
+     "g2_share": 0.48084820640088555,
+     "cos_with_batch": 0.8103250464501853
+    }
+   },
+   "trunk": {
+    "jund_wildfire": {
+     "norm_share": 0.3561412048406028,
+     "g2_share": 0.23321847798302267,
+     "cos_with_batch": 0.4808913342569766
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.6438587951593971,
+     "g2_share": 0.7667817063399814,
+     "cos_with_batch": 0.8745554054580212
+    }
+   },
+   "option_scorer": {
+    "jund_wildfire": {
+     "norm_share": 0.37123015431982803,
+     "g2_share": 0.2640075983577786,
+     "cos_with_batch": 0.5253396567214046
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.6287698456801719,
+     "g2_share": 0.7359924254364625,
+     "cos_with_batch": 0.8646665221141625
+    }
+   },
+   "value_head": {
+    "jund_wildfire": {
+     "norm_share": 0.7202200894917441,
+     "g2_share": 0.7527426602675997,
+     "cos_with_batch": 0.9755971736590081
+    },
+    "mono_blue_terror": {
+     "norm_share": 0.27977991050825585,
+     "g2_share": 0.24725738153232504,
+     "cos_with_batch": 0.8249392622460477
+    }
+   }
+  }
+ },
+ "meta": {
+  "checkpoint": "/home/taiga-support/mtg-ml-eval/ckpt/r8-blue-pilot-final.pt",
+  "engine": "native",
+  "host": "support-bm-NO-11B-2-1-8-17",
+  "python": "3.11.17",
+  "torch": "2.14.1+cpu",
+  "threads": 4,
+  "seconds": 883.0314598083496,
+  "config": {
+   "hidden": 256,
+   "memory": "gru",
+   "state_dim": 65536,
+   "option_dim": 32768,
+   "trunk": "entity",
+   "value_net": "shared",
+   "value_hidden": 256,
+   "entity_attn": 1,
+   "features": 7
+  },
+  "minibatch": 2048,
+  "ppo": {
+   "clip": 0.2,
+   "vf_coef": 0.5,
+   "ent_coef": 0.01
+  }
+ }
+}

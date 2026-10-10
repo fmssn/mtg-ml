@@ -486,9 +486,27 @@ def scale_markdown(out: dict) -> str:
     return "\n".join(lines)
 
 
+def summary_markdown(out: dict, level: str = "half", min_ceiling: float = 0.1) -> str:
+    """One row per parameter group and normalisation: the mean noise ceiling over the
+    decks (and its range), the mean cross-deck cosine over the deck pairs, and the
+    mean noise-corrected cosine over the pairs whose two ceilings are both at least
+    `min_ceiling` (below that the correction divides by noise), with how many pairs
+    that is and how many of them are negative."""
+    lines = ["| norm | group | ceiling mean (min..max) | cross mean | corrected mean | pairs with both ceilings >= %.2f | of them negative |" % min_ceiling, "|---|---|---|---|---|---|---|"]
+    for mode, by_level in out["cosines"].items():
+        for group, t in by_level[level].items():
+            ceil = {d: v[0] for d, v in t["within"].items()}
+            cross = [v[0] for v in t["cross"].values()]
+            ok = [v[0] for k, v in t["corrected"].items() if all(ceil[d] >= min_ceiling for d in k.split("|")) and not math.isnan(v[0])]
+            lines.append(f"| {mode} | {group} | {sum(ceil.values()) / len(ceil):.3f} ({min(ceil.values()):.3f}..{max(ceil.values()):.3f}) | {sum(cross) / len(cross):+.3f} | "
+                         f"{(f'{sum(ok) / len(ok):+.2f}' if ok else 'n/a')} | {len(ok)} of {len(cross)} | {sum(1 for x in ok if x < 0)} |")
+    return "\n".join(lines)
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--checkpoint", required=True)
+    ap.add_argument("--report", default="", help="print the tables of a finished run's JSON (--out) and stop")
+    ap.add_argument("--checkpoint", default="")
     ap.add_argument("--decks", default=",".join(DECKS))
     ap.add_argument("--chunks", type=int, default=4, help="independent chunks per deck (even; two halves are formed from them)")
     ap.add_argument("--games-per-chunk", type=int, default=500)
@@ -502,9 +520,16 @@ def main(argv=None) -> None:
     ap.add_argument("--max-turns", type=int, default=100)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--cache", default="", help="directory for the collected rollouts (reused when the same chunk exists)")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", default="")
     ap.add_argument("--md", default="")
     args = ap.parse_args(argv)
+    if args.report:
+        with open(args.report) as f:
+            out = json.load(f)
+        print(scale_markdown(out) + "\n\n" + summary_markdown(out) + "\n\n" + markdown(out, "half"))
+        return
+    if not args.checkpoint or not args.out:
+        ap.error("--checkpoint and --out are required")
     if args.chunks % 2 or args.chunks < 2:
         ap.error("--chunks must be even and at least 2")
     decks = tuple(args.decks.split(","))
@@ -526,7 +551,7 @@ def main(argv=None) -> None:
                    "ppo": {"clip": cfg.clip, "vf_coef": cfg.vf_coef, "ent_coef": cfg.ent_coef}}
     with open(args.out, "w") as f:
         json.dump(out, f, indent=1)
-    md = scale_markdown(out) + "\n\n" + markdown(out, "half")
+    md = scale_markdown(out) + "\n\n" + summary_markdown(out) + "\n\n" + markdown(out, "half")
     if args.md:
         with open(args.md, "w") as f:
             f.write(md)
