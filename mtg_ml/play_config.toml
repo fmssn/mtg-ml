@@ -23,6 +23,14 @@ evaluation = "final r7 lr075 policy (iteration 4079, run stopped); ledger 202610
 trained_at = "4a32795"  # training code (PR #68 head)
 runtime = "b06fac4"  # first default-branch commit that plays feature set 7 (#63); later revisions keep it
 
+[models."r8-jund-blue/policy"]
+sha256 = "b2ca176382139cf5f6733937605e43b836af1973b18624e8ae19d68a850c9e71"
+features = 7
+games = 6000640
+source = "h100-private:~/mtg-ml-eval/ckpt/r8-jund-blue-final.pt (copy of ~/mtg-ml-r8/campaigns/r8-20261009/r8-jund-blue-ft/policy/v02930.pt)"
+evaluation = "final r8 Jund vs Blue fine-tune (run 20261009-r8-fs7h256-mu-jund-blue-ft-r7-lr075-s8, 6.0M games); specialist benchmark, 100 blocks, --contract fair, on h100-private, sampled / greedy: jund_vs_sblue 75.2/79.0, blue_vs_sjund 83.8/84.0, jund_vs_sjund 58.3/62.7, blue_vs_sblue 65.2/66.0, jund_vs_lblue 82.0/84.8, blue_vs_ljund 92.7/92.7 (r4-control 64.0/65.5 and r7-lr075 46.3/49.0 on jund_vs_sblue)"
+trained_at = "889798b"  # training code
+
 [models."r4-control/policy"]
 sha256 = "cb19222d1868a72671c73c80268d75aea977e87758493804c80f895f85024f72"
 features = 3
@@ -30,6 +38,14 @@ source = "h100-private:~/mtg-ml-checkpoints/20261007-r4-control/policy.pt"
 evaluation = "round 4 control (docs/experiments/ledger.md); legacy, kept for its sampled Delver play"
 
 # r7 lr075, greedy, with every deck: 36 ordered pairs, mirrors included.
+[[opponents]]
+id = "r8-jund"
+label = "r8 · Jund Wildfire"
+note = "r8 Jund-vs-Blue fine-tune (6.0M games, greedy) playing Jund Wildfire; fine-tuned for the Jund vs Mono Blue Terror matchup and strongest against Mono Blue Terror"
+model = "r8-jund-blue/policy"
+deck = "jund_wildfire"
+greedy = true
+
 [[opponents]]
 id = "r7-jund"
 label = "r7 · Jund Wildfire"
