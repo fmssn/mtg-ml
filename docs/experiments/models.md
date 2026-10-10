@@ -18,7 +18,7 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `best/affinity` | `r7-lr075` | Only full-matrix model |
 | `best/elves` | `r7-lr075` | Only full-matrix model |
 | `best/tron` | `r7-lr075` | Only full-matrix model; the trust test flags Tron as overrated |
-| `play/jund` | `r7-lr075` | Play site offer r7-jund, greedy |
+| `play/jund` | `r8-jund-blue` | Play site offer r8-jund, greedy (default Jund opponent); r7-jund stays as a fallback |
 | `play/blue` | `r7-lr075` | Play site offer r7-blue, greedy |
 | `play/madness` | `r7-lr075` | Play site offer r7-madness, greedy |
 | `play/affinity` | `r7-lr075` | Play site offer r7-affinity, greedy |
@@ -32,7 +32,7 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `r8-jund-mirror` | `r7-lr075` | does matchup fine-tuning work for the mirror (benchmark-jund@1) |
 | `r8-jund-pilot` | `r8-jund-blue` | deck-vs-field fine-tuning against per-matchup fine-tuning |
 
-Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: `best/jund_blue` rests on L1 and bench only, because fs4-ft was never run against the Jund and Blue specialists; r8-jund-blue is the contender once it has finished (6M games) and been benchmarked. The play site pins `r7-lr075/policy` (and the legacy `r4-control/policy`) in `mtg_ml/play_config.toml`; those keys are not renamed.
+Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: `best/jund_blue` rests on L1 and bench only, because fs4-ft was never run against the Jund and Blue specialists; r8-jund-blue is the contender once it has finished (6M games) and been benchmarked. The play site pins `r7-lr075/policy`, `r8-jund-blue/policy` (the `r8-jund` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
 
 ## Registry
 

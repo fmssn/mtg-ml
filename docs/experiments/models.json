@@ -1428,8 +1428,8 @@
    "note": "Only full-matrix model; the trust test flags Tron as overrated"
   },
   "play/jund": {
-   "handle": "r7-lr075",
-   "note": "Play site offer r7-jund, greedy"
+   "handle": "r8-jund-blue",
+   "note": "Play site offer r8-jund, greedy (default Jund opponent); r7-jund stays as a fallback"
   },
   "play/blue": {
    "handle": "r7-lr075",
@@ -1480,6 +1480,12 @@
    "role": "all",
    "handle": "(initial)",
    "note": "Registry created; roles filled from the ledger and the play config"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "play/jund",
+   "handle": "r8-jund-blue",
+   "note": "Promoted from r7-lr075: specialist benchmark jund_vs_sblue 75.2/79.0 against 46.3/49.0, mirror 58.3/62.7"
   }
  ]
 }
