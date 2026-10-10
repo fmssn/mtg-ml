@@ -634,7 +634,7 @@ impl Drop for Snap {
 /// Finished games and dropped snapshots hand their `State` box to the next
 /// clone on the same thread (`State::boxed_clone`): the big vectors keep
 /// their allocations. Capped so idle memory stays small.
-const POOLED_STATES: usize = 64;
+const POOLED_STATES: usize = 8;
 
 thread_local! {
     static STATES: std::cell::RefCell<Vec<Box<State>>> = const { std::cell::RefCell::new(Vec::new()) };
