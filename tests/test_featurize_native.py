@@ -43,10 +43,10 @@ def digest(n: int, features: int, replay: bool = True) -> str:
 
 
 @pytest.mark.parametrize("features,n", sorted(GOLDEN))
-def test_features_match_recorded_digest(features, n):
+def test_native_features_match_recorded_digest(features, n):
     assert digest(n, features) == GOLDEN[(features, n)]
 
 
 @pytest.mark.parametrize("features", [6, 7])
-def test_decision_replay_equals_relisting(features):
+def test_native_decision_replay_equals_relisting(features):
     assert digest(6, features, replay=True) == digest(6, features, replay=False)
