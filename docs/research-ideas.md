@@ -7,7 +7,7 @@ DeepNash, Expert Iteration, Gumbel search). None of them has been run. Each need
 a ledger entry with a matched control before it is adopted
 ([recording requirements](experiments/README.md)).
 
-Citations were written from memory and have not been checked against the papers
+Citations for ideas 1–7 were written from memory and have not been checked against the papers
 yet; verify before quoting results from them.
 
 Ordered by fit with the current state of the project; the cheapest useful test is
@@ -113,6 +113,59 @@ one model at all: transfer to new lists and cards, and one network to serve.
   are 8 GPUs per machine. PBT tunes during one run instead of launching one run
   per setting. It costs the most of the seven, so it comes after the cheaper
   ideas.
+
+## 8. µP: learning rates that carry over across widths
+
+- **Paper:** Yang, Hu et al. 2021, *Tensor Programs V: Tuning Large Neural
+  Networks via Zero-Shot Hyperparameter Transfer* (NeurIPS 2021,
+  [arXiv 2203.03466](https://arxiv.org/abs/2203.03466); PyTorch package
+  [microsoft/mup](https://github.com/microsoft/mup)). Verified 2026-10-10.
+- **Idea:** per-layer initialisation and learning-rate rules (the Maximal Update
+  Parametrization) that keep every layer's per-step feature change the same size
+  at any width, so the best learning rate stays roughly fixed: tune at a small
+  width and reuse it ("µTransfer").
+- **Why here:** every width comparison so far (r5, r6, r7, r9-base) needed its own
+  learning rate, and h512's is an untuned 1/√width guess. Training uses one Adam
+  group and lowers the global rate with width. For Adam, µP keeps the rate of
+  input-type parameters (the three hashed lookup tables and biases) unchanged and
+  scales only hidden (width → width) and output layers by 1/width. The lookup
+  tables hold about 97% of the parameters, so every wider run so far trained them
+  2–4× slower than µP prescribes. Hypothesis: part of why wider nets looked slow
+  per game. Verify the per-kind rules against the paper's Adam table before
+  implementing.
+
+  | kind | here | µP Adam lr vs width | init |
+  |---|---|---|---|
+  | input | state / event / option lookup tables, biases | unchanged | unchanged |
+  | hidden | entity layer, trunk, GRU, option MLP, pointer, scorer layer 1, attention | ∝ 1/width | standard |
+  | output | scorer's final layer, value head | ∝ 1/width | much smaller or zero (value head already zero) |
+
+  Attention also uses 1/d instead of 1/√d scaling.
+- **Notes:** gradient clipping is on the global norm at 0.5 (`ppo.py`), which
+  tightens as width adds parameters; µP does not cover it, so clip per layer or
+  scale the threshold with width. The PPO controls (KL stop, clip range, entropy,
+  advantage normalisation) act on policy outputs, which µP keeps width-stable,
+  so they should carry over (an argument, not a result). With base width 256, µP
+  is the same network as now and existing h256 checkpoints continue unchanged.
+  Python only (`model.py`, `ppo.py`, base width recorded in the checkpoint); the
+  engines are not involved.
+- **Unknowns:** no published application of µP to PPO or actor-critic training
+  was found (two searches, 2026-10-10); the evidence is supervised
+  (Transformers, ResNets, LLM pretraining, MoE). The theory is about very wide
+  networks and h128–h512 is small. µP covers width only, not training length,
+  batch size, schedule or depth (depth: Yang et al. 2023). Self-play's moving
+  target is outside the theory.
+- **Test:**
+  1. *Coordinate check* (no training, minutes on CPU): a few PPO updates at
+     widths 64–1024, per-layer activation size over steps (`mup` has a tool);
+     flat across width under correct µP. Catches implementation mistakes.
+  2. *Learning-rate transfer sweep:* 3 learning rates × h128/h256/h512, about
+     0.5M games each on Jund vs Blue (~4.5M games, a few GPU-hours), µP and the
+     current setup. µP passes if the best rate is the same at all three widths
+     and wider is never worse at that rate.
+  3. If it passes, rerun the width comparison in µP with the tuned rate. If it
+     fails, the sweep still shows whether the lookup tables' lowered rate is
+     what slowed wider nets.
 
 ## Suggested start
 
