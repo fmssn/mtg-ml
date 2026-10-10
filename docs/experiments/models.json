@@ -1404,8 +1404,8 @@
    "note": "Mirror vs the Jund specialist 83.0/88.5 (r7-lr075 57.8/68.5); forgets Blue"
   },
   "best/jund": {
-   "handle": "r7-lr075",
-   "note": "Deck vs field; r8-jund-pilot (finished) is better on the Jund cells and passes the per-deck trust check but has no head to head against r7-lr075 yet"
+   "handle": "r8-jund-pilot",
+   "note": "Deck vs field; beats r7-lr075 as Jund in all six pairings on paired seeds (sampled +10.1 to +28.0, mean +18.0; greedy mean +13.8), ledger 20261010-r8-pilot-matrix"
   },
   "best/blue": {
    "handle": "r7-lr075",
@@ -1483,6 +1483,12 @@
    "role": "best/jund_jund",
    "handle": "r8-jund-mirror",
    "note": "Replaces r7-lr075: mirror vs the Jund specialist 83.0/88.5 against 57.8/68.5"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "best/jund",
+   "handle": "r8-jund-pilot",
+   "note": "Replaces r7-lr075: paired head to head over the six Jund pairings (800 games per cell), delta +10.1 to +28.0 points, none worse; see ledger 20261010-r8-pilot-matrix"
   }
  ]
 }
