@@ -1935,6 +1935,33 @@
    "ledger_id": "20261010-r9-base",
    "kind": "train",
    "notes": "Base-model run 2 of 2 (r9-base): identical to r9-base-h256 except hidden 512 and lr 5e-5 to 5e-6 (1/sqrt(width) from the lr075 optimum; r5 showed width needs a lower lr, r7 that h256 prefers 7.5e-5 over 1.5e-4). Seed 10, h100-private3 GPUs 87/90, CPUs 32-63."
+  },
+  {
+   "handle": "r10-base-h256-var",
+   "run_id": "20261011-r10-fs7h256-all-scratch-var-s11",
+   "date": "20261011",
+   "campaign": "r10",
+   "arch": "fs7h256",
+   "scope": "all",
+   "init": "scratch",
+   "variant": "var",
+   "seed": 11,
+   "seed_recorded": true,
+   "legacy": [
+    "20261011-r10-base-var"
+   ],
+   "parent": null,
+   "games": 0,
+   "bench_sampled": null,
+   "bench_greedy": null,
+   "l1": null,
+   "l1_at": null,
+   "status": "running",
+   "archive": null,
+   "ledger": "ledger.md#20261011-r10-base-var--base-model-from-scratch-on-all-8-gpus-of-h100-private4-varied-decklists-fast-recipe",
+   "ledger_id": "20261011-r10-base-var",
+   "kind": "train",
+   "notes": "Base model on varied decklists (--variants train, the 92 registered 75s) with the fast recipe (ppo-epochs 2, BF16 GRU in the update), from scratch at h256, seed 11, 40M games, lr 1.5e-4 -> 1.5e-5 linear over 40M. All 8 GPUs of h100-private4: 4 learner ranks (distributed learner, global minibatch 8192) + 4 inference servers, 8192 games per iteration, 106 rollout workers. Question: does a base model trained on varied lists with the fast recipe at 4x the batch match or beat r9-base-h256 per game, and play unseen (dev/test) lists well."
   }
  ],
  "roles": {
@@ -2023,6 +2050,11 @@
    "handle": "r9-base-h512",
    "vs": "r9-base-h256",
    "question": "does h512 at lr 5e-5 beat h256 at equal games on the same recipe and seed"
+  },
+  {
+   "handle": "r10-base-h256-var",
+   "vs": "r9-base-h256",
+   "question": "does the varied-decklist, fast-recipe (ep2, 4x batch) base model on 8 GPUs match r9-base-h256 per game and play the held-out dev/test lists well"
   }
  ],
  "role_history": [
