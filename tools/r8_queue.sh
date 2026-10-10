@@ -17,8 +17,8 @@ for arm in "$@"; do
     if [ -e "$root/queue.stop" ]; then say "queue.stop present; leaving $arm and the rest"; exit 0; fi
     state=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "$root/$arm/process.json" 2>/dev/null || true)
     if [ "$state" = complete ]; then say "$arm already complete, skipping"; continue; fi
-    if [ -e "$root/$arm/latest.pt" ]; then say "$arm has a previous run (status '$state'); not restarting it automatically, skipping"; continue; fi
     if tmux has-session -t "mtg-r8-$arm" 2>/dev/null; then say "mtg-r8-$arm already running; waiting for it"; else
+        if [ -e "$root/$arm/latest.pt" ]; then say "$arm has a previous run (status '$state'); not restarting it automatically, skipping"; continue; fi
         CODE="$code" R8_TOOL="$code/tools/r8_campaign.py" bash "$host" start "$root" "$arm" >> "$log" 2>&1 || { say "start of $arm failed"; continue; }
         say "started $arm"
     fi
