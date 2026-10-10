@@ -13,7 +13,9 @@ with `balance_seats`: every seed once per starting player and once per physical 
 The Jund delta per deck is cand_vs_base minus base_vs_base; the 4 games of a seed form one block, so
 the interval is a paired one over seeds (normal approximation on the per-seed differences). A draw
 counts as half a win. In the mirror the delta of the first cell is the head to head.
-Sampled play by default, `--greedy` for argmax play.
+Sampled play by default, `--greedy` for argmax play. An existing `--out` is resumed
+(the decks already in it are kept) only when it was written with the same candidate,
+baseline, games, greedy and engine; otherwise the tool stops and asks for a new file.
 """
 
 from __future__ import annotations
@@ -76,6 +78,8 @@ def main(argv=None) -> None:
     ap.add_argument("--decks", default=",".join(DECKS), help="opponent decks X (comma separated)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
+    if args.games < 8 or args.games % 4:
+        ap.error("--games must be a multiple of 4 (4 games per seed: both starts, both seats) and at least 8")
     os.environ[ENV_VAR] = engine_name(args.engine)
     out = {
         "candidate": args.candidate,
@@ -86,9 +90,13 @@ def main(argv=None) -> None:
         "seed": EVAL_SEED,
         "decks": {},
     }
+    keys = ("candidate", "baseline", "games", "greedy", "engine", "seed")
     if os.path.exists(args.out):
         with open(args.out) as f:
-            out = json.load(f)
+            prev = json.load(f)
+        if [prev.get(k) for k in keys] != [out[k] for k in keys]:
+            raise SystemExit(f"{args.out} was written with different settings ({ {k: prev.get(k) for k in keys} }); write to a new --out")
+        out = prev
     with create_pool(args.workers) as pool:
         for deck in args.decks.split(","):
             if deck in out["decks"]:

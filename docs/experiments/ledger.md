@@ -15,7 +15,7 @@ OMP_NUM_THREADS=1 nice -n 19 taskset -c 56-63 .venv/bin/python ~/mtg-ml-eval/r8p
 OMP_NUM_THREADS=1 nice -n 19 taskset -c 56-63 .venv/bin/python ~/mtg-ml-eval/r8pilot-matrix/tools/eval_matrix.py --candidate ~/mtg-ml-eval/ckpt/r8-jund-pilot-final.pt --baseline ~/mtg-ml-eval/ckpt/r7-lr075-policy.pt --games 400 --greedy --workers 8 --out greedy.json
 ```
 
-(`r8-jund-pilot-final.pt` is the file named `policy.pt` in the archive, `policy/v01464.pt`.)
+(`r8-jund-pilot-final.pt` is the benchmarked `v01464` policy, run file `policy/v01464.pt`, copied into the archive as `policy-v01464.pt`; the archive's own `policy.pt` is the later `v01465`.)
 
 Sampled, 800 games per cell, win rate of the Jund model in percent [Wilson 95%], deltas in points ± paired 95% half width:
 
