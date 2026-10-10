@@ -17,6 +17,8 @@ action masking over the open-ended key vocabulary.
 
 from __future__ import annotations
 
+from array import array
+
 import zlib
 
 from ..encode import FEATURES, check_features, entity_features, option_object_ids, option_previews, state_features
@@ -62,14 +64,19 @@ def featurize(game, player: int, state_dim: int = STATE_DIM, option_dim: int = O
     return state, opts
 
 
-def featurize_flat(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM, features: int = FEATURES):
+def featurize_flat(game, player: int, state_dim: int = STATE_DIM, option_dim: int = OPTION_DIM, features: int = FEATURES, arrays: bool = False):
     """`featurize` with the options flattened: (state, option lengths, all
-    option tokens). What rollouts record and send to the inference server."""
+    option tokens). What rollouts record and send to the inference server.
+    `arrays`: return `array('i')`s (what rollouts pack), which the native
+    engine builds without a Python int per token."""
     check_features(features)
     if getattr(game, "NATIVE", False):
+        if arrays:
+            return game.featurize_flat_arrays(player, state_dim, option_dim, features)
         return game.featurize_flat(player, state_dim, option_dim, features)
     state, opts = featurize(game, player, state_dim, option_dim, features)
-    return state, [len(o) for o in opts], [t for o in opts for t in o]
+    flat = state, [len(o) for o in opts], [t for o in opts for t in o]
+    return tuple(array("i", x) for x in flat) if arrays else flat
 
 
 # Decision kinds whose chosen option is public when the opponent makes it.
