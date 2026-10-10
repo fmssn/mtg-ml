@@ -11,7 +11,7 @@ directory is reference material and evidence, not a live task board.
 |---|---|
 | Development and coordination | [Setup](development.md), [agents](agents.md), [workspace ownership and handoffs](workspace-coordination.md), [PR autopilot](pr-autopilot.md) |
 | Rules and decks | [Adding cards](adding-cards.md), [native engine](native-engine.md), [sideboarding](sideboarding.md), [deck variants](deck-variants.md); decks: [Red Madness](red-madness.md), [Grixis Affinity](grixis-affinity.md), [Elves](elves.md), [Tron](tron.md) |
-| Model inputs and training | [Feature versions](features.md), [belief head and BO3 knowledge](belief-head.md), [training options](training-options.md), [action decomposition](action-decomposition.md), [inference server](inference-server.md), [evaluation](evaluation.md), [indistinguishability audit](audit.md) |
+| Model inputs and training | [Feature versions](features.md), [belief head and BO3 knowledge](belief-head.md), [training options](training-options.md), [action decomposition](action-decomposition.md), [inference server](inference-server.md), [evaluation](evaluation.md), [indistinguishability audit](audit.md), [hash-collision census](feature-collisions-set7.md) |
 | Benchmark | [Plan](benchmark-plan.md), [foundation](benchmark-foundation.md), [Blue specialist](benchmark-blue.md), [Jund specialist](benchmark-jund.md), [tactical puzzles](tactical-puzzles.md), [release tooling](benchmark-release.md) |
 | Review and expert evidence | [Game review](game-review.md), [expert data](expert-data.md), [log reconstruction](expert-reconstruction.md) |
 | Playing and hosting | [Play UI](play-ui.md), [hosting](hosting.md), [playtest feedback](play-feedback.md) |
