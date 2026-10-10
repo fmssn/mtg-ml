@@ -60,6 +60,21 @@ color = "opt"
 cpu_label = "threads"
 runs = [{ glob = "~/mtg-ml/opt/ab/*" }, { glob = "~/mtg-ml/packing/*" }]
 
+# Watchdog (python -m tools.fleet_board.watch). Every key is optional; these are the defaults.
+# Run scope: the machines' `runs` globs, unless [watch.runs] lists globs for a machine (replaces them).
+[watch]
+interval = 10                  # minutes between checks
+max_minutes = 60               # exit 0 after this long without events
+stall_minutes = 20             # running run with no train.log / metrics.jsonl write for this long
+unreachable_checks = 2         # consecutive failed checks before a machine is reported
+max_error_lines = 3            # error lines returned per run per check
+error_patterns = ["Traceback", "OutOfMemory", "out of memory", "CUDA error", "\\bKilled\\b", "NativeRulesError"]
+crash_status = ["failed", "crashed"]
+done_status = ["complete", "completed"]
+exclude = []                   # regexes on run names to ignore
+# [watch.runs]
+# h100-private4 = ["~/mtg-ml/opt/ab/*"]
+
 # Workstream cards: the only hand-written text. Plain English, a few sentences each.
 [[streams]]
 title = "Pilot league - round 2"

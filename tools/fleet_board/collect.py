@@ -13,9 +13,13 @@ HERE = Path(__file__).resolve().parent
 REMOTE = HERE / "remote.py"
 
 
-def probe(machine: dict, timeout: int, window_min: int) -> dict:
+def probe(machine: dict, timeout: int, window_min: int, scan: dict | None = None) -> dict:
     """One ssh call. Returns the remote JSON plus status; never raises."""
-    arg = json.dumps({"globs": machine.get("runs", []), "window_min": window_min})
+    req = {"globs": machine.get("runs", []), "window_min": window_min}
+    if scan:  # watchdog: error patterns and per-log byte offsets for this machine
+        req.update(patterns=scan.get("patterns", []), max_lines=scan.get("max_lines", 3),
+                   offsets=scan.get("offsets", {}).get(machine["name"], {}))
+    arg = json.dumps(req)
     cmd = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={min(timeout, 10)}",
            machine["ssh"], f"python3 - {shlex.quote(arg)}"]
     t0 = time.time()
@@ -37,11 +41,11 @@ def probe(machine: dict, timeout: int, window_min: int) -> dict:
     return data
 
 
-def collect(config: dict, timeout: int = 45) -> dict:
+def collect(config: dict, timeout: int = 45, scan: dict | None = None) -> dict:
     machines = config["machines"]
     window = int(config.get("window_minutes", 45))
     with ThreadPoolExecutor(max_workers=max(1, len(machines))) as pool:
-        results = list(pool.map(lambda m: probe(m, timeout, window), machines))
+        results = list(pool.map(lambda m: probe(m, timeout, window, scan), machines))
     return {"collected_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "machines": {m["name"]: r for m, r in zip(machines, results)}}
 
