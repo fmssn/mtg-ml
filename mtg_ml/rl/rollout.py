@@ -786,9 +786,8 @@ def _play(job: Job) -> Result:
                     continue
                 live.append(lv)
                 seat = lv.seats[p]
-                state, o_len, o_flat = featurize_flat(g, p, features=features(pol))
                 # int32 arrays once: batching and recording then only copy memory
-                x = (array("i", state), array("i", o_len), array("i", o_flat), array("i", encode_event_hashes(seat.events)))
+                x = (*featurize_flat(g, p, features=features(pol), arrays=True), array("i", encode_event_hashes(seat.events)))
                 spec_b = belief(pol)
                 if spec_b is not None:  # set 8: the evidence the belief head reads, nothing else of the opponent
                     x += (spec_b.evidence(lv.knowledge[lv.spec.canonical(p)], g.witnessed(p)),)

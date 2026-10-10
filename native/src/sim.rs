@@ -207,13 +207,15 @@ enum Outcome {
 /// decisions and, with `assume_pass`, pass for it at every priority; None
 /// when the game cannot be copied.
 fn run(g: &mut Game, player: u8, i: usize, assume_pass: bool) -> Result<Option<Outcome>, StepError> {
-    let mut g2 = match g.copy()? {
+    let (mut g2, taken) = match g.copy_for_sim(i, player, assume_pass)? {
         Some(x) => x,
         None => return Ok(None),
     };
-    g2.state_mut().sim_viewer = Some(player);
-    g2.state_mut().sim_assume_pass = assume_pass;
-    g2.step(i)?;
+    if !taken {
+        g2.state_mut().sim_viewer = Some(player);
+        g2.state_mut().sim_assume_pass = assume_pass;
+        g2.step(i)?;
+    }
     let mut steps = 1;
     let stop = loop {
         if hidden_touched(g.state(), g2.state(), player) {
