@@ -13,6 +13,10 @@ Arms (all feature set 7/8, h256, seed 8, r7 lr075 settings unless stated):
   E  r8-jund-mirror-ft  like C on --matchup jund_mirror
   F  r8-jund-pilot      like C on every Jund pairing, uniform, 3M games
   G  r8-blue-pilot      like F for Mono Blue Terror: every Blue pairing, uniform, 3M games
+  H-K r8-<deck>-pilot   like F for Red Madness, Grixis Affinity, Elves, Tron
+  L-Q r9-<deck>-pilot   round 2 (jund, blue, madness, affinity, elves, tron): like F-K, but --init is the deck's round-1 final
+                        and the other five decks are played by their frozen round-1 finals (--opponent-models, --opponent-frac 1);
+                        mirrors stay self-play plus pool. Everything else equals round 1.
 
 Run from the deployed checkout's venv:
   python tools/r8_campaign.py prepare --root ROOT --code CODE --arms A --ladder-src DIR ...
@@ -36,7 +40,26 @@ import overnight_campaign as oc  # noqa: E402
 PARENT_RUN = "20261008-r7-fs7-h256-lr075"
 SKIP_COPY = ("train.log", "train.log.1", "train.log.2", "train.log.3", "process.json", "supervisor.lock", "evaluation.lock")
 # arm -> (host layout slot: GPU buses (learner, server), CPU offset)
-ARMS = {"A": "r8-lr075-continue", "B": "r8-fs8-belief", "C": "r8-jund-blue-ft", "D": "r8-jund-blue-ft-s2", "E": "r8-jund-mirror-ft", "F": "r8-jund-pilot", "G": "r8-blue-pilot"}
+ARMS = {"A": "r8-lr075-continue", "B": "r8-fs8-belief", "C": "r8-jund-blue-ft", "D": "r8-jund-blue-ft-s2", "E": "r8-jund-mirror-ft", "F": "r8-jund-pilot", "G": "r8-blue-pilot", "H": "r8-madness-pilot", "I": "r8-affinity-pilot", "J": "r8-elves-pilot", "K": "r8-tron-pilot",
+        "L": "r9-jund-pilot", "M": "r9-blue-pilot", "N": "r9-madness-pilot", "O": "r9-affinity-pilot", "P": "r9-elves-pilot", "Q": "r9-tron-pilot"}
+# round 2 (campaign r9): arm -> deck short name, deck short name -> name in match.DECKS
+ROUND2 = {"L": "jund", "M": "blue", "N": "madness", "O": "affinity", "P": "elves", "Q": "tron"}
+DECKS = {"jund": "jund_wildfire", "blue": "mono_blue_terror", "madness": "red_madness", "affinity": "grixis_affinity", "elves": "elves", "tron": "tron"}
+PILOT_MIX = {  # every pairing of one deck, mirror included
+    "jund": ("jund_blue", "jund_madness", "jund_affinity", "jund_elves", "jund_tron", "jund_mirror"),
+    "blue": ("jund_blue", "blue_madness", "blue_affinity", "blue_elves", "blue_tron", "blue_mirror"),
+    "madness": ("jund_madness", "blue_madness", "madness_affinity", "madness_elves", "madness_tron", "madness_mirror"),
+    "affinity": ("jund_affinity", "blue_affinity", "madness_affinity", "affinity_elves", "affinity_tron", "affinity_mirror"),
+    "elves": ("jund_elves", "blue_elves", "madness_elves", "affinity_elves", "elves_tron", "elves_mirror"),
+    "tron": ("jund_tron", "blue_tron", "madness_tron", "affinity_tron", "elves_tron", "tron_mirror"),
+}
+ROUND1_DIR = Path.home() / "mtg-ml-r8" / "parents" / "round1"  # <deck>.pt for the six round-1 finals plus SHA256SUMS
+PILOTS = {  # every pairing of one deck, mirror included
+    "H": ("jund_madness", "blue_madness", "madness_affinity", "madness_elves", "madness_tron", "madness_mirror"),
+    "I": ("jund_affinity", "blue_affinity", "madness_affinity", "affinity_elves", "affinity_tron", "affinity_mirror"),
+    "J": ("jund_elves", "blue_elves", "madness_elves", "affinity_elves", "elves_tron", "elves_mirror"),
+    "K": ("jund_tron", "blue_tron", "madness_tron", "affinity_tron", "elves_tron", "tron_mirror"),
+}
 RUNG_RATINGS = {488: 0.0, 1464: 33.3, 2440: 50.8, 3904: 78.8}
 
 
@@ -57,7 +80,23 @@ def ladder(root: Path, src: Path) -> dict[str, float]:
     return mapped
 
 
-def flags(arm: str, run: Path, root: Path, rungs: dict, offset: int, parent: str, smoke_iters: int | None) -> dict:
+def round1_finals(directory: Path) -> dict[str, Path]:
+    """The six round-1 finals, checked against the SHA256SUMS manifest next to them."""
+    manifest = {}
+    for line in (directory / "SHA256SUMS").read_text().splitlines():
+        if line.strip():
+            digest, name = line.split(None, 1)
+            manifest[name.strip().lstrip("*")] = digest
+    out = {}
+    for deck in PILOT_MIX:
+        path = directory / f"{deck}.pt"
+        if hashlib.file_digest(path.open("rb"), "sha256").hexdigest() != manifest.get(path.name):
+            raise ValueError(f"{path}: missing from the manifest or sha256 differs")
+        out[deck] = path
+    return out
+
+
+def flags(arm: str, run: Path, root: Path, rungs: dict, offset: int, parent: str, smoke_iters: int | None, finals: dict | None = None) -> dict:
     smoke = smoke_iters is not None
     f = {
         "run": str(run), "hidden": 256, "trunk": "entity", "entity-attn": 1, "value-net": "shared",
@@ -79,7 +118,7 @@ def flags(arm: str, run: Path, root: Path, rungs: dict, offset: int, parent: str
     }
     if arm == "B":  # the only differences from r7 lr075: set 8 + belief head, which requires whole-match rollouts with varied lists
         f.update({"features": 8, "belief": 1, "match-rollouts": 1, "variants": "train"})
-    if arm in ("C", "D", "E", "F", "G"):
+    if arm in ("C", "D", "E", "F", "G", "H", "I", "J", "K") + tuple(ROUND2):
         for k in ("features", "entity-attn", "hidden", "trunk", "value-net", "memory"):
             del f[k]  # architecture comes from --init
         f.update({"init": parent, "matchup": "jund_blue", "lr-anneal-games": 6000000, "total-games": 6000000})
@@ -91,6 +130,16 @@ def flags(arm: str, run: Path, root: Path, rungs: dict, offset: int, parent: str
         if arm == "G":
             f["matchup"] = "jund_blue:1,blue_madness:1,blue_affinity:1,blue_elves:1,blue_tron:1,blue_mirror:1"
             f["lr-anneal-games"] = f["total-games"] = 3000000
+        if arm in PILOTS:
+            f["matchup"] = ",".join(m + ":1" for m in PILOTS[arm])
+            f["lr-anneal-games"] = f["total-games"] = 3000000
+        if arm in ROUND2:  # the round-1 recipe of the deck, continued from its final against the other five frozen finals
+            deck = ROUND2[arm]
+            f["matchup"] = ",".join(m + ":1" for m in PILOT_MIX[deck])
+            f["lr-anneal-games"] = f["total-games"] = 3000000
+            f["init"] = str(finals[deck])
+            f["opponent-models"] = ",".join(f"{DECKS[d]}={p}" for d, p in finals.items() if d != deck)
+            f["opponent-frac"] = 1.0
         if arm == "E":
             f["matchup"] = "jund_mirror"
             f["lr-anneal-games"] = f["total-games"] = 2000000  # 6M games at 0.2M games/h is too long for the question
@@ -120,6 +169,7 @@ def prepare(args):
         b0, b1, off = layout[arm].split(":")
         offset = int(off)
         smoke_iters = None
+        finals = round1_finals(Path(args.round1_dir)) if arm in ROUND2 else None
         if arm == "A":
             if run.exists():
                 raise FileExistsError(run)
@@ -130,8 +180,10 @@ def prepare(args):
         else:
             run.mkdir()
             smoke_iters = 6 if args.smoke else None
-        parent = args.parent_policy if arm in ("C", "D", "E", "F", "G") else None
-        f = flags(arm, run, root, rungs, offset, parent, smoke_iters)
+        parent = args.parent_policy if arm in ("C", "D", "E", "F", "G", "H", "I", "J", "K") else None
+        f = flags(arm, run, root, rungs, offset, parent, smoke_iters, finals)
+        if arm in ROUND2 and args.smoke:
+            f["games-per-iter"] = args.smoke_games  # a short iteration; nothing else differs from the real arm
         command = [str(code / ".venv/bin/python"), "-m", "mtg_ml.rl.train"] + [p for k, v in f.items() for p in ("--" + k, str(v))]
         env = dict(CUDA_VISIBLE_DEVICES=f"{gpu[b0]},{gpu[b1]}", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1",
                    TORCHINDUCTOR_COMPILE_THREADS="1", MTG_EVAL_LOCK=str(run / "evaluation.lock"), PYTHONUNBUFFERED="1",
@@ -142,7 +194,7 @@ def prepare(args):
             cpus=[offset, offset + 1, offset + 2, *range(offset + 4, offset + 32)],
             eval_cpus=list(range(offset + 4, offset + 8)), seed=f["seed"], features=f.get("features", 7),
             target_games=int(f["total-games"]) or 51200, warmup=5, initial_tensor_sha256="n/a",
-            parent=(PARENT_RUN if arm in ("A", "C", "D", "E", "F", "G") else None), created_at=time.time(), smoke=args.smoke,
+            parent=(PARENT_RUN if arm in ("A", "C", "D", "E", "F", "G", "H", "I", "J", "K") else f"r8-{ROUND2[arm]}-pilot" if arm in ROUND2 else None), created_at=time.time(), smoke=args.smoke,
             buses=[b0, b1]))
     oc.atomic(root / "campaign.json", entries)
     print(root / "campaign.json")
@@ -176,7 +228,9 @@ def main():
         ap.add_argument("--ladder-src", required=True)
         ap.add_argument("--parent-run", help="A: the r7 lr075 run dir to copy and resume")
         ap.add_argument("--parent-policy", help="C: policy.pt of the r7 lr075 final")
+        ap.add_argument("--round1-dir", default=str(ROUND1_DIR), help="L-Q: directory with <deck>.pt round-1 finals and SHA256SUMS")
         ap.add_argument("--smoke", action="store_true")
+        ap.add_argument("--smoke-games", type=int, default=256, help="L-Q with --smoke: games per iteration")
         prepare(ap.parse_args())
         return
     oc.ARMS = tuple(ARMS.values())

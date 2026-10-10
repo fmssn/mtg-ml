@@ -14,7 +14,7 @@ tracker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tracker)
 
 ID = re.compile(r'^\d{8}-[a-z0-9]+-fs\d+h\d+-(all|mix\d+|mu-[a-z]+-[a-z]+|dk-[a-z]+)-(scratch|ft-[\w.-]+)(-[a-z0-9]+)?-s\d+(\.x\d+)?$')
-STATUS = {'running', 'stopped', 'archived', 'superseded', 'rejected', 'crashed'}
+STATUS = {'planned', 'finished', 'running', 'stopped', 'archived', 'superseded', 'rejected', 'crashed'}
 
 
 def test_unique_handles_and_run_ids():

@@ -28,12 +28,13 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | in flight | compared against | question |
 |---|---|---|
 | `r8-belief` | `r7-lr075` | does feature set 8 plus the belief head beat the lr075 trajectory at matched games |
+| `r9-jund-pilot` | `r8-jund-pilot` | does a second round against frozen round-1 pilots (all six decks, same recipe) beat each round-1 pilot head to head and on the trust test |
 
 Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-pilot/policy` (the `r8-jund-pilot` opponent), `r8-jund-blue/policy` (the `r8-jund` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
 
 ## Registry
 
-Status: `running`, `stopped` (ended by hand), `archived`, `superseded` (archived and replaced by a better parent, still a valid reference), `rejected`, `crashed`.
+Status: `running`, `stopped` (ended by hand), `finished` (ended, not yet archived), `planned` (prepared, not launched), `archived`, `superseded` (archived and replaced by a better parent, still a valid reference), `rejected`, `crashed`.
 
 ### r8 (running and finished 2026-10-09 to 10)
 
@@ -48,6 +49,17 @@ Status: `running`, `stopped` (ended by hand), `archived`, `superseded` (archived
 | `r8-jund-mirror-x1` | `20261009-r8-fs7h256-mu-jund-jund-ft-r7-lr075-s8.x1` | `r8e-20261009`, `r8e`, `r8e-20261009/r8-jund-mirror-ft` | `r7-lr075` | `mu-jund-jund` | 0.08M |  |  | crashed | not archived | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
 | `r8-jund-mirror-x2` | `20261009-r8-fs7h256-mu-jund-jund-ft-r7-lr075-s8.x2` | `r8e2-20261009`, `r8e2`, `r8e2-20261009/r8-jund-mirror-ft` | `r7-lr075` | `mu-jund-jund` | 0.06M |  |  | stopped | not archived | [entry](ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune) |
 | `r8-jund-pilot` | `20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8` | `r8-jund-pilot`, `r8f-20261009/r8-jund-pilot`, `20261009-r8-jund-pilot`, `pilot`, Jund pilot, `r8f`, `r8f-20261009` | `r7-lr075` | `dk-jund` | 3.00M | 74.3 / 77.7 | 148.4 | archived | `20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8` | [entry](ledger.md#20261009-r8-results--final-results-and-archives-of-r8-jund-blue-r8-jund-pilot-r8-jund-mirror) |
+| `r8-blue-pilot` | `20261010-r8-fs7h256-dk-blue-ft-r7-lr075-s8` | `r8-blue-pilot`, `r8g-20261010/r8-blue-pilot`, `20261010-r8-blue-pilot`, blue pilot, `r8g-20261010` | `r7-lr075` | `dk-blue` | 3.00M |  |  | finished | not archived yet | pending |
+| `r8-madness-pilot` | `20261010-r8-fs7h256-dk-madness-ft-r7-lr075-s8` | `r8-madness-pilot`, `r8h1-20261010/r8-madness-pilot`, `20261010-r8-madness-pilot`, madness pilot, `r8h1-20261010` | `r7-lr075` | `dk-madness` | 3.00M |  |  | finished | not archived yet | pending |
+| `r8-affinity-pilot` | `20261010-r8-fs7h256-dk-affinity-ft-r7-lr075-s8` | `r8-affinity-pilot`, `r8h1-20261010/r8-affinity-pilot`, `20261010-r8-affinity-pilot`, affinity pilot, `r8h1-20261010` | `r7-lr075` | `dk-affinity` | 3.00M |  |  | finished | not archived yet | pending |
+| `r8-elves-pilot` | `20261010-r8-fs7h256-dk-elves-ft-r7-lr075-s8` | `r8-elves-pilot`, `r8h2-20261010/r8-elves-pilot`, `20261010-r8-elves-pilot`, elves pilot, `r8h2-20261010` | `r7-lr075` | `dk-elves` | 3.00M |  |  | finished | not archived yet | pending |
+| `r8-tron-pilot` | `20261010-r8-fs7h256-dk-tron-ft-r7-lr075-s8` | `r8-tron-pilot`, `r8h2-20261010/r8-tron-pilot`, `20261010-r8-tron-pilot`, tron pilot, `r8h2-20261010` | `r7-lr075` | `dk-tron` | 3.00M |  |  | finished | not archived yet | pending |
+| `r9-jund-pilot` | `20261010-r9-fs7h256-dk-jund-ft-r8-jund-pilot-s8` | `r9-jund-pilot`, round 2 jund | `r8-jund-pilot` | `dk-jund` |  |  |  | planned |  | planned |
+| `r9-blue-pilot` | `20261010-r9-fs7h256-dk-blue-ft-r8-blue-pilot-s8` | `r9-blue-pilot`, round 2 blue | `r8-blue-pilot` | `dk-blue` |  |  |  | planned |  | planned |
+| `r9-madness-pilot` | `20261010-r9-fs7h256-dk-madness-ft-r8-madness-pilot-s8` | `r9-madness-pilot`, round 2 madness | `r8-madness-pilot` | `dk-madness` |  |  |  | planned |  | planned |
+| `r9-affinity-pilot` | `20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8` | `r9-affinity-pilot`, round 2 affinity | `r8-affinity-pilot` | `dk-affinity` |  |  |  | planned |  | planned |
+| `r9-elves-pilot` | `20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8` | `r9-elves-pilot`, round 2 elves | `r8-elves-pilot` | `dk-elves` |  |  |  | planned |  | planned |
+| `r9-tron-pilot` | `20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8` | `r9-tron-pilot`, round 2 tron | `r8-tron-pilot` | `dk-tron` |  |  |  | planned |  | planned |
 
 ### r7 and earlier, newest first
 
