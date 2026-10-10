@@ -433,15 +433,19 @@ class Trainer:
         c, out = self.cfg, {}
         if not 0.0 <= c.opponent_frac <= 1.0:
             raise ValueError(f"--opponent-frac must be in [0, 1], not {c.opponent_frac}")
+        paths: dict[str, str] = {}  # checkpoint path -> the deck it is listed for (the metrics key games by path)
         for part in filter(None, (x.strip() for x in c.opponent_models.split(","))):
             deck, _, path = part.partition("=")
             if deck not in DECK_KEYS or not path or deck in out:
                 raise ValueError(f"--opponent-models {c.opponent_models!r}: expected unique deck=PATH pairs, deck one of {sorted(DECK_KEYS)}")
+            if path in paths:  # one file per deck: win_vs_frozen_by_deck cannot tell the decks apart otherwise
+                raise ValueError(f"--opponent-models {deck}={path}: the same checkpoint is listed for {paths[path]}; list one checkpoint per deck")
             if not os.path.isfile(path):
                 raise FileNotFoundError(f"--opponent-models {deck}={path}: no such checkpoint")
             f = checkpoint_config(path).get("features", 1)
             if f != self.net.features:
                 raise ValueError(f"--opponent-models {deck}={path}: feature set {f}, but this run's is {self.net.features}; frozen opponents must share it")
+            paths[path] = deck
             out[deck] = os.path.abspath(path)
         if out and c.exploit:
             raise ValueError("--opponent-models does not combine with exploiter mode")
