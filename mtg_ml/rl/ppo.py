@@ -71,6 +71,7 @@ class PPOConfig:
     target_kl: float | None = 0.03  # stop the epoch loop early past this
     capture: int = 2  # on CUDA: 1 every step a CUDA graph replay over padded minibatches, 2 also the forward and losses compiled by Inductor (~15% faster, ~10-30 s of compiling per process), 0 plain eager steps
     precision: str = "fp32"  # selective BF16 dense/attention; optimizer and probability math stay FP32
+    gru_precision: str = "fp32"  # "bf16": the GRU of the update runs in BF16 (cuDNN, ~2x faster at h256); the rollout's GRU stays FP32. Changes the math slightly: only with a learning A/B
     belief_coef: tuple[float, float] | None = None  # (archetype, counts) belief loss coefficients; None: the network's config `belief_coef`
 
 
@@ -383,7 +384,7 @@ class _StepGraphs:
         lr = lambda x: ("tensor", x.data_ptr(), x.device) if torch.is_tensor(x) else x  # noqa: E731
         groups = tuple((lr(g["lr"]), g["betas"], g["eps"], g["weight_decay"], g.get("amsgrad"), g.get("maximize")) for g in opt.param_groups)
         coef = _belief_coef(net, cfg) if getattr(net, "belief_net", None) is not None else None
-        return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm, cfg.capture, cfg.precision, coef)
+        return (id(net), tuple(p.data_ptr() for p in params), state, groups, cfg.clip, cfg.vf_coef, cfg.ent_coef, cfg.max_grad_norm, cfg.capture, cfg.precision, cfg.gru_precision, coef)
 
     def choose(self, counts: dict, extra: dict) -> dict:
         """The smallest captured shape these pieces fit, else a new one with
@@ -501,6 +502,16 @@ def _compiled_losses():
     return _COMPILED[0]
 
 
+def set_gru_precision(net: PolicyNet, precision: str) -> None:
+    """Run the GRUs of `net` in sequence mode (the update) in `precision` ("fp32" or "bf16"); step mode
+    (rollouts) is unaffected."""
+    if precision not in ("fp32", "bf16"):
+        raise ValueError("gru_precision must be fp32 or bf16")
+    for m in net.modules():
+        if hasattr(m, "seq_bf16"):
+            m.seq_bf16 = precision == "bf16"
+
+
 def _drop_entities(net: PolicyNet) -> None:
     """The cores keep the entity vectors of their last forward (for the
     pointer scores); a capture must not start with stale autograd references."""
@@ -544,6 +555,7 @@ def ppo_update(net: PolicyNet, opt: torch.optim.Optimizer, data: Result, cfg: PP
     explained_var = float("nan") if var == 0 else 1 - adv.var().item() / var  # values = ret - adv
     adv = (adv - adv.mean()) / (adv.std() + 1e-8) if n > 1 else adv - adv.mean()  # std of one sample is NaN
     net.train()
+    set_gru_precision(net, cfg.gru_precision)
     dev = torch.device(device)
     if mode is None:
         mode = "graph" if dev.type == "cuda" and cfg.capture and net.config["trunk"] != "transformer" else "eager"

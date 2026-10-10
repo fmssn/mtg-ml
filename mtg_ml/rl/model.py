@@ -717,6 +717,7 @@ class _Core(nn.Module):
         self.memory = memory
         self.sep = state_dim
         self.entities = None  # (entity vectors, first row per sample) of the last forward, trunk="entity"
+        self.seq_bf16 = False  # sequence mode (the PPO update) runs the GRU in BF16: set by `ppo.ppo_update` from PPOConfig.gru_precision
         if trunk == "transformer":
             self.state = TokenEncoder(state_dim, hidden)
         elif trunk == "entity":
@@ -744,6 +745,16 @@ class _Core(nn.Module):
             dtype = self.gru.weight_ih_l0.dtype
             return self._recurrent(x.to(dtype), None if hidden is None else hidden.to(dtype), lengths)
 
+    def _gru_seq(self, xp: torch.Tensor) -> torch.Tensor:
+        """The GRU over a padded batch (sequences, steps, features) from zero state. With `seq_bf16`
+        cuDNN runs it in BF16 (weights cast per call, so the gradients reach the FP32 parameters;
+        ~2x faster at h256, where the FP32 kernels are launch-latency bound); the output is FP32."""
+        if not self.seq_bf16 or not xp.is_cuda:
+            return self.gru(xp)[0]
+        w = [p.to(torch.bfloat16) for p in self.gru._flat_weights]
+        out = torch._VF.gru(xp.to(torch.bfloat16), torch.zeros(1, xp.shape[0], self.hidden, device=xp.device, dtype=torch.bfloat16), w, True, 1, 0.0, self.training, False, True)[0]
+        return out.to(xp.dtype)
+
     def _recurrent(self, x, hidden, lengths):
         if lengths is None:  # step mode
             h0 = torch.zeros(x.shape[0], self.hidden, device=x.device, dtype=x.dtype) if hidden is None else hidden
@@ -760,14 +771,14 @@ class _Core(nn.Module):
         if isinstance(lengths, SequenceLayout):  # static shapes (captured step): always padded
             pos_in, pos_out, T, S = lengths
             xp = x.new_zeros(T * S + 1, x.shape[1]).index_copy(0, pos_in, x)[:-1].view(T, S, -1)
-            return self.gru(xp)[0].reshape(-1, self.hidden).index_select(0, pos_out), None
+            return self._gru_seq(xp).reshape(-1, self.hidden).index_select(0, pos_out), None
         if x.is_cuda and self.hidden > 128:
             rows, batch_sizes = _sequence_layout(lengths, x.device, packed=True)
             y = self.gru(PackedSequence(x.index_select(0, rows), batch_sizes))[0].data
             return y.new_empty(y.shape).index_copy(0, rows, y), None
         pos, steps = _sequence_layout(lengths, x.device, packed=False)
         xp = x.new_zeros(len(lengths) * steps, x.shape[1]).index_copy(0, pos, x).view(len(lengths), steps, -1)
-        return self.gru(xp)[0].reshape(-1, self.hidden).index_select(0, pos), None
+        return self._gru_seq(xp).reshape(-1, self.hidden).index_select(0, pos), None
 
     def forward(self, b: Batch, hidden, lengths):
         if self.trunk_kind == "entity":

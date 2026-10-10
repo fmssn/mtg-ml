@@ -2,6 +2,24 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## 20261010-throughput-ab · update-throughput A/Bs from the r7 lr075 parent (2M games each)
+
+Status: **done** (PR #112). Verdict: **ep2 (`--ppo-epochs 2`) is the candidate to adopt, pending a second seed**: in this single-seed test it was both the fastest and the strongest arm. `--ppo-minibatch 4096` (lr x sqrt 2) and `--ppo-gru-precision bf16` are speed-only knobs, equal to base within noise (adopt where the update is the bound and epochs stay at 4).
+
+Machine: h100-private4 (8x H100, 128 CPUs), 2 GPUs and 32 CPUs per arm, arms run concurrently. Code: PR #112 on `claude/lucid-euler-0tjz9h` 18a3efa. Parent: r7 lr075 (`672aaa0c...`). Recipe: r8 production flags (`r8_campaign.flags` arm C) on the 21-matchup matrix mix, seed 8, 2,000,896 games, lr anneal over the 2M games to lr/10; launcher `tools/throughput_ab.py`, flags in each arm's `flags.txt`. L1 rated at 800 games per rung (`tools/rate_arms.py`, se about 6). Head to head: `tools/eval_matrix.py`, 400 games, paired seeds, mean of the six Jund cells' delta against base (each cell about +-0.06).
+
+| arm | change from base | iteration wall s | update_s | games/h | bench sampled / greedy at 2M | L1 Elo | h2h vs base |
+|---|---|---:|---:|---:|---|---:|---|
+| base | minibatch 2048, 4 epochs, lr 7.5e-5 | 10.3 | 10.3 | 718k | 0.689 / 0.726 | 94.4 | |
+| mb4096 | minibatch 4096, lr x1.41 | 9.1 | 9.0 | 810k (+13%) | 0.717 / 0.742 | 100.9 | +0.003 |
+| mb8192 | minibatch 8192, lr x2 | 8.2 | 6.1 | 898k (+25%) | 0.690 / 0.734 | 97.1 | -0.005 |
+| gru-bf16 | BF16 GRU in the update | 8.7 | 7.8 | 849k (+18%) | 0.705 / 0.735 | 100.2 | +0.005 |
+| mb4096-gru | both | 7.8 | 7.8 | 940k (+31%) | 0.708 / 0.734 | 88.4 | +0.013 |
+| **ep2** | 2 epochs | **7.1** | 6.0 | **1040k (+45%)** | **0.759 / 0.784** | **150.0** | **+0.07** (six cells +0.015 to +0.087) |
+
+Reading: mb4096, mb8192, gru-bf16 and mb4096-gru are equal to base within noise on L1, head to head and benchmark. ep2 is clearly ahead at equal games (L1 +56, h2h +0.07, benchmark +7 points, ahead from the first evaluation at 250k games), consistent with the 4-epoch update over-fitting each batch. Caveats: one seed per arm; in the ep2 head to head the opponent-side cells fall (base plays the other decks worse against ep2). Replicate with a second seed (and ep3) before trusting +56 Elo as the effect size. PR #116 (featurize, +55% rollout) is merged, so the rollout gets faster and the update becomes the bound again; every update-side saving gains value. Production defaults are unchanged.
+
+Packing (h100-private3 next to `r9-base-h256` / `h512`, which were not touched): three runs per box fit with no measurable production loss when the third run's workers are pinned to idle cores; a fourth does not (details in throughput.md section 3).
 ## 20261010-r9-pilots · round 2 per-deck pilots of all six decks, fine-tuned against the frozen round-1 pilots
 
 Question: does a second round of per-deck fine-tuning, each deck's pilot training against the five other decks played by the frozen round-1 pilots, beat its round-1 pilot head to head, and does it fix the round-1 trust test (8/14 pairings inside, Jund -0.09 and Tron +0.13 bias, one exploitable direction red_madness over elves)?
