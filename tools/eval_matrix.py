@@ -2,7 +2,8 @@
 
     python tools/eval_matrix.py --candidate pilot.pt --baseline lr075.pt --out results.json --games 800 --workers 8
 
-For each opponent deck X (matchup `jund_<x>`; the Jund mirror for jund_wildfire) three cells are
+`--deck D` (default jund_wildfire) picks the deck whose play is compared; "Jund" below reads as D.
+For each opponent deck X (the named matchup of D and X; the mirror for X = D) three cells are
 played with the same seeds and deals, the Jund model always in canonical seat 0 (`evaluate.paired_specs`
 with `balance_seats`: every seed once per starting player and once per physical seat, 4 games per seed):
 
@@ -31,25 +32,32 @@ from collections import defaultdict
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from mtg_ml.backend import ENV_VAR, engine_name  # noqa: E402
+from mtg_ml.match import MATCHUPS  # noqa: E402
 from mtg_ml.rl.evaluate import EVAL_SEED, paired_specs, wilson  # noqa: E402
 from mtg_ml.rl.rollout import Job, create_pool, play  # noqa: E402
 
-DECKS = {
-    "mono_blue_terror": "jund_blue",
-    "red_madness": "jund_madness",
-    "grixis_affinity": "jund_affinity",
-    "elves": "jund_elves",
-    "tron": "jund_tron",
-    "jund_wildfire": "jund_mirror",
-}
+ALL_DECKS = ("jund_wildfire", "mono_blue_terror", "red_madness", "grixis_affinity", "elves", "tron")
+
+
+def matchup_for(deck: str, other: str) -> tuple[str, bool]:
+    """Matchup name for `deck` against `other`, and whether `deck` sits in its seat 0 (each pair is named once)."""
+    for name, (a, b) in MATCHUPS.items():
+        if (a, b) == (deck, other):
+            return name, True
+        if (b, a) == (deck, other):
+            return name, False
+    raise ValueError(f"no matchup for {deck} vs {other}")
+
+
 CELLS = ("cand_vs_base", "base_vs_base", "base_vs_cand")
 
 
-def per_seed(games: list) -> dict[int, float]:
-    """Jund model's mean score per seed (canonical seat 0 won = 1, draw 0.5)."""
+def per_seed(games: list, first: bool = True) -> dict[int, float]:
+    """The tested deck's mean score per seed (draw 0.5); `first`: it is the matchup's seat-0 deck."""
     blocks = defaultdict(list)
     for seats, winner, _reason, _turn, _actions, seed in games:
-        blocks[seed].append(1.0 if winner == 0 else 0.5 if winner is None else 0.0)
+        win = 0 if first else 1
+        blocks[seed].append(1.0 if winner == win else 0.5 if winner is None else 0.0)
     return {s: sum(v) / len(v) for s, v in blocks.items()}
 
 
@@ -62,9 +70,13 @@ def paired(a: dict[int, float], b: dict[int, float]) -> tuple[float, float]:
     return m, 1.96 * sd / math.sqrt(n)
 
 
-def run_cell(pool, workers: int, jund: str, other: str, matchup: str, games: int, greedy: bool) -> list:
-    specs = paired_specs(other, games, matchup=matchup, seat=0, balance_seats=True)
-    return play(pool, specs, Job([], jund, 0, record=False, greedy=greedy), workers).games
+def run_cell(
+    pool, workers: int, mine: str, other: str, matchup: str, games: int, greedy: bool, first: bool = True
+) -> list:
+    """`mine` plays the tested deck, `other` the opponent deck; the model of the matchup's seat-0 deck is the job's learner."""
+    seat0, seat1 = (mine, other) if first else (other, mine)
+    specs = paired_specs(seat1, games, matchup=matchup, seat=0, balance_seats=True)
+    return play(pool, specs, Job([], seat0, 0, record=False, greedy=greedy), workers).games
 
 
 def main(argv=None) -> None:
@@ -75,7 +87,13 @@ def main(argv=None) -> None:
     ap.add_argument("--greedy", action="store_true")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--engine", default="native")
-    ap.add_argument("--decks", default=",".join(DECKS), help="opponent decks X (comma separated)")
+    ap.add_argument(
+        "--deck",
+        default="jund_wildfire",
+        choices=ALL_DECKS,
+        help="the deck the candidate and baseline play (the others are played by the baseline / candidate)",
+    )
+    ap.add_argument("--decks", default=None, help="opponent decks X (comma separated); default: all six")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     if args.games < 8 or args.games % 4:
@@ -90,23 +108,28 @@ def main(argv=None) -> None:
         "seed": EVAL_SEED,
         "decks": {},
     }
-    keys = ("candidate", "baseline", "games", "greedy", "engine", "seed")
+    keys = ("deck", "candidate", "baseline", "games", "greedy", "engine", "seed")
     if os.path.exists(args.out):
         with open(args.out) as f:
             prev = json.load(f)
+        prev.setdefault("deck", "jund_wildfire")
         if [prev.get(k) for k in keys] != [out[k] for k in keys]:
-            raise SystemExit(f"{args.out} was written with different settings ({ {k: prev.get(k) for k in keys} }); write to a new --out")
+            raise SystemExit(
+                f"{args.out} was written with different settings ({ {k: prev.get(k) for k in keys} }); write to a new --out"
+            )
         out = prev
     with create_pool(args.workers) as pool:
-        for deck in args.decks.split(","):
+        for deck in args.decks.split(",") if args.decks else ALL_DECKS:
             if deck in out["decks"]:
                 continue
-            matchup, t0, rows = DECKS[deck], time.time(), {}
+            (matchup, first), t0, rows = matchup_for(args.deck, deck), time.time(), {}
             for cell, (jund, other) in zip(
                 CELLS,
                 ((args.candidate, args.baseline), (args.baseline, args.baseline), (args.baseline, args.candidate)),
             ):
-                rows[cell] = per_seed(run_cell(pool, args.workers, jund, other, matchup, args.games, args.greedy))
+                rows[cell] = per_seed(
+                    run_cell(pool, args.workers, jund, other, matchup, args.games, args.greedy, first), first
+                )
             res = {"matchup": matchup, "seeds": {c: {str(s): v for s, v in r.items()} for c, r in rows.items()}}
             for c, r in rows.items():
                 n = len(r) * 4
