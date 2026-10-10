@@ -1,11 +1,12 @@
 """Read-only probe that runs ON a GPU box (python3 >= 3.8, stdlib only).
 
 collect.py sends this file over ssh stdin; argv[1] is a JSON object
-{"globs": [...], "window_min": 45}. Prints one compact JSON object. Nothing is modified.
+{"globs": [...], "window_min": 45} and optionally "patterns", "offsets" ({train.log path: byte offset}), "max_lines". Prints one compact JSON object. Nothing is modified.
 """
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -181,6 +182,41 @@ def metrics(path, window_min):
     return out
 
 
+def scan_log(path, offsets, patterns, max_lines, max_bytes=524288):
+    """Read-only: size and age of train.log, plus error lines added since the stored byte offset.
+
+    No stored offset (first look) only records the size. At most max_lines short lines come back."""
+    out = {}
+    try:
+        st = os.stat(path)
+    except OSError:
+        return out
+    out["log_size"], out["log_age_s"] = st.st_size, time.time() - st.st_mtime
+    off = offsets.get(path) if offsets else None
+    if not patterns or off is None:
+        return out
+    if off > st.st_size:  # truncated or rotated: look at the start again
+        off = 0
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(off, st.st_size - max_bytes))
+            text = f.read(max_bytes).decode("utf-8", "replace")
+    except OSError:
+        return out
+    rx = re.compile("|".join("(?:%s)" % p for p in patterns))
+    hits, tb = [], False
+    for line in text.splitlines():
+        if tb and line.strip() and not line[:1].isspace() and not line.startswith("Traceback"):
+            hits[-1] = "Traceback: " + line.strip()  # the exception line closes the traceback
+            tb = False
+        elif rx.search(line):
+            hits.append(line.strip())
+            tb = line.startswith("Traceback")
+    out["errors"] = [h[:160] for h in hits[-max_lines:]]
+    out["error_count"] = len(hits)
+    return out
+
+
 def main():
     cfg = json.loads(sys.argv[1])
     t0 = cpu_times()
@@ -280,10 +316,13 @@ def main():
         entry["live"] = real in live
         entry.update(runs.get(real, {}))
         entry["metrics"] = metrics(os.path.join(d, "metrics.jsonl"), cfg.get("window_min", 45))
+        entry.update(scan_log(os.path.join(d, "train.log"), cfg.get("offsets"), cfg.get("patterns"),
+                              cfg.get("max_lines", 3)))
         out_runs.append(entry)
     print(json.dumps({"nproc": ncpu,
                       "cpu_busy": round(sum(percpu) / len(percpu), 1) if percpu else None,
                       "gpus": sorted(gpus.values(), key=lambda g: g["bus"]), "runs": out_runs}))
 
 
-main()
+if __name__ == "__main__":  # `python3 -` over ssh runs as __main__
+    main()

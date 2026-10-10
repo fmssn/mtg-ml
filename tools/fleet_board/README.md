@@ -12,6 +12,31 @@ python -m tools.fleet_board --from-json .context/fleet.json   # re-render a snap
 It prints the output path and one summary line, for example `4/4 machines up · 32 GPUs (14 busy) · 10 runs live`.
 Publish the file with the Artifact tool afterwards.
 
+## Watchdog
+
+`watch.py` is the token-cheap manager watcher: one local background process that refreshes the page and exits only
+when someone must act. Every `--interval` minutes (default 10) it collects, renders `--out`, writes `fleet.json`, and
+compares with `watch-state.json` (next to `--out`, so nothing is reported twice across restarts).
+
+```bash
+python3 -m tools.fleet_board.watch --out <scratchpad>/fleet.html --interval 10 --max-minutes 60
+```
+
+Run it as a background shell command. Exit codes:
+
+- **0**: no events for `--max-minutes`. Output is the summary line and the path. Publish `--out`, restart the watcher.
+- **1**: events. One line per event (at most 10) plus the summary line, for example
+  `crash h100-private r9-jund-pilot: status failed; last error: CUDA error: out of memory`. Handle them, then publish
+  `--out` and restart the watcher.
+
+Events: `crash` (status running to failed/crashed, or the trainer process is gone while status says running),
+`error` (Traceback, OOM, CUDA error, Killed, NativeRulesError among the `train.log` lines added since the last check,
+at most 3 per run), `stall` (running, but `train.log` and `metrics.jsonl` untouched for `--stall-minutes`, default 20),
+`finished` (status complete), `unreachable` (box down on 2 consecutive checks), `started` (only with `--report-starts`).
+The first check after a fresh state only records a baseline. Everything else goes to `watch.log` next to `--out`.
+Scope, patterns and thresholds live in the `[watch]` section of `fleet.toml`. It is read-only on the boxes
+(same probe as the board plus a read of the new bytes of `train.log`).
+
 ## How it works
 
 - `collect.py` makes one ssh call per machine (parallel, 45 s timeout, `BatchMode`). It pipes `remote.py` to
