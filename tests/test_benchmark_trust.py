@@ -144,3 +144,70 @@ def test_random_agent_end_to_end_schema(tmp_path):
     assert len(result["game_rows"]["selfplay"]) == 15 * 4
     text = (out / "trust.md").read_text()
     assert "## Pairings" in text and "NOT RUN" in text
+
+
+# --- per-deck models --------------------------------------------------------------------
+
+class Tagged(trust.RandomLearner):
+    def __init__(self, tag, log):
+        self.tag, self.log = tag, log
+
+    def __call__(self, seat, mode):
+        self.log.append((self.tag, seat))
+        return super().__call__(seat, mode)
+
+
+def test_parse_deck_models():
+    got = trust.parse_deck_models("jund_wildfire=a.pt, tron=/x/b.pt,")
+    assert list(got) == ["jund_wildfire", "tron"] and str(got["tron"]) == "/x/b.pt"
+    for bad in ("jund_wildfire", "jund_wildfire=", "nope=a.pt", "tron=a.pt,tron=b.pt"):
+        with pytest.raises(ValueError):
+            trust.parse_deck_models(bad)
+
+
+def fake_load(path):
+    return Tagged(str(path), []), {"kind": "checkpoint", "checkpoint": str(path), "sha256": f"sha-{path}", "features": 7}
+
+
+def test_deck_pilots_fall_back_and_report_every_sha():
+    models, record = trust.deck_pilots({"jund_wildfire": "j.pt", "tron": "t.pt"}, "base.pt", "fair", load=fake_load)
+    assert models.for_deck("jund_wildfire").tag == "j.pt" and models.for_deck("elves").tag == "base.pt"
+    assert models.for_deck("elves") is models.for_deck("red_madness")  # one load per distinct file
+    assert record["kind"] == "per_deck" and set(record["decks"]) == set(ref.DECK_ORDER)
+    assert record["decks"]["tron"]["sha256"] == "sha-t.pt" and record["decks"]["tron"]["source"] == "deck-models"
+    assert record["decks"]["elves"]["source"] == "fallback" and record["fallback"] == "base.pt"
+    with pytest.raises(ValueError, match="elves"):
+        trust.deck_pilots({d: f"{d}.pt" for d in ref.DECK_ORDER if d != "elves"}, None, "fair", load=fake_load)
+    assert trust.deck_pilots({d: f"{d}.pt" for d in ref.DECK_ORDER}, None, "fair", load=fake_load)[1]["fallback"] is None
+
+
+def test_match_gives_each_side_its_decks_pilot():
+    log = []
+    models = trust.DeckModels({d: Tagged(d, log) for d in ref.DECK_ORDER})
+    for spec in trust.episodes(trust.manifest(1, ["greedy"], [("jund_wildfire|tron", "jund_wildfire", "tron")])):
+        log.clear()
+        row = trust.play_match(spec, models, models, "python")
+        assert row["status"] == "completed", row["reason"]
+        assert sorted(log) == sorted([("jund_wildfire", spec.learner_seat), ("tron", 1 - spec.learner_seat)])
+    # a plain learner is still used for both seats, as before
+    plain = Tagged("plain", log)
+    log.clear()
+    trust.play_match(spec, plain, plain, "python")
+    assert sorted(log) == [("plain", 0), ("plain", 1)]
+
+
+def test_markdown_lists_pilots_and_cli_checks_arguments(tmp_path):
+    _, record = trust.deck_pilots({}, "base.pt", "fair", load=fake_load)
+    reference = fake_reference()
+    blocks = {"greedy": blocks_for(reference, n=4)}
+    result = {"candidate": record, "primary_mode": "greedy", "code_revision": "0" * 40, "engine": "python",
+              "parameters": {"matches": 16, "unit": "match", "format": "bo3"},
+              "modes": trust.evaluate(reference, [], blocks, {}, dict(trust.DEFAULTS, replicates=20))}
+    for r in result["modes"]["greedy"]["pairings"]:
+        r["model_ci95"] = None
+    text = trust.markdown(result)
+    assert "## Pilots" in text and "| tron | base.pt | `sha-base.pt` | 7 | fallback |" in text
+    for argv in (["--deck-models", "tron=a.pt", "--format", "game1"], ["--deck-models", "tron=a.pt", "--agent", "random"],
+                 ["--deck-models", "tron=a.pt"], ["--deck-models", "bogus=a.pt", "base.pt"]):
+        with pytest.raises(SystemExit):
+            trust.main([*argv, "--out", str(tmp_path)])

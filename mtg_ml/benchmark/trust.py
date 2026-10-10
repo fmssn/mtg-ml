@@ -15,6 +15,9 @@ four-slot blocks, one shared bootstrap index list per replicate):
    ordered matchups; the best pool member per matchup is reported; the check fails when
    any member's interval lies above 50% by more than `--exploit-margin` (`exploitability`).
 
+`--deck-models deck=PATH,...` evaluates per-deck pilots instead: each side plays with its deck's
+checkpoint (unlisted decks use the positional checkpoint), and a pool member plays X against Y's pilot.
+
 Win rates are best-of-three match win rates (a tied match counts half), like the reference's
 match points: game one with the maindecks, games 2 and 3 sideboarded with the plan table.
 `--format game1` plays single game-one games for diagnostics only. Thresholds are uncalibrated
@@ -167,6 +170,22 @@ def exploitability(pool_intervals, exploit_margin):
 
 # --- games ------------------------------------------------------------------------------
 
+class DeckModels:
+    """Per-deck models (`--deck-models`): `for_deck(deck)` is the agent factory of that deck's
+    pilot. `play_match` asks a factory that has `for_deck` for the factory of the deck a seat
+    plays, so cell A vs B is pilot A on deck A against pilot B on deck B. Picklable."""
+
+    def __init__(self, factories):
+        self.factories = dict(factories)
+
+    def for_deck(self, deck):
+        return self.factories[deck]
+
+
+def _factory(factory, deck):
+    return factory.for_deck(deck) if hasattr(factory, "for_deck") else factory
+
+
 class RandomLearner:
     """Smoke-test agent (`--agent random`): uniformly random legal actions, deterministic per
     episode. Picklable, one adapter per seat."""
@@ -218,8 +237,8 @@ def play_match(spec, learner, opponent, engine):
     try:
         names = spec.deck_ids
         agents = [None, None]
-        agents[spec.learner_seat] = learner(spec.learner_seat, spec.mode)
-        agents[1 - spec.learner_seat] = opponent(1 - spec.learner_seat, spec.mode)
+        agents[spec.learner_seat] = _factory(learner, names[spec.learner_seat])(spec.learner_seat, spec.mode)
+        agents[1 - spec.learner_seat] = _factory(opponent, names[1 - spec.learner_seat])(1 - spec.learner_seat, spec.mode)
         knowledge, start, wins = [EMPTY, EMPTY], spec.starting_player, [0, 0]
         for n in (1, 2, 3):
             decks = spec.decks if n == 1 else tuple(tuple(expand(postboard(names[s], names[1 - s]))) for s in (0, 1))
@@ -347,8 +366,10 @@ def markdown(result):
     c = m["checks"]
     word = {True: "PASS", False: "FAIL", None: "NOT RUN"}
     cand = result["candidate"]
+    who = (f"checkpoint sha256 `{cand['sha256']}`, features {cand['features']}" if cand.get("kind") != "per_deck"
+           else "per-deck models (sha256 per deck below)")
     out = [f"# Trust test: {cand['checkpoint']}", "",
-           f"checkpoint sha256 `{cand['sha256']}`, features {cand['features']}, code `{result['code_revision'][:10]}`, engine {result['engine']}, "
+           f"{who}, code `{result['code_revision'][:10]}`, engine {result['engine']}, "
            f"{result['parameters']['matches']} {result['parameters']['unit']}(s) per pairing, format {result['parameters']['format']}, "
            f"primary mode {mode}; thresholds are {THRESHOLD_STATUS}", "",
            f"**Overall: {word[c['overall']['passed']]}**"
@@ -360,6 +381,9 @@ def markdown(result):
     e = c["exploitability"]
     out.append(f"| exploitability | {word[e['passed']]} | " + (e.get("reason") or f"clearly exploitable: {', '.join(e['clearly_exploitable']) or 'none'}; "
                f"max pool win rate {e['max_pool_win_rate']:.3f} (margin {e['exploit_margin']})") + " |")
+    if cand.get("kind") == "per_deck":
+        out += ["", "## Pilots", "", "| deck | checkpoint | sha256 | features | source |", "|---|---|---|---|---|"]
+        out += [f"| {d} | {r['checkpoint']} | `{r['sha256']}` | {r['features']} | {r['source']} |" for d, r in cand["decks"].items()]
     out += ["", "## Pairings", "", "| pairing | model | reference | status | n ref |", "|---|---|---|---|---|"]
     for r in m["pairings"]:
         rf = r["reference"]
@@ -396,9 +420,46 @@ def _learner(path, contract, agent):
     return learner.games, dict(learner.record, checkpoint=str(path))
 
 
+def parse_deck_models(text):
+    """'deck=PATH,deck=PATH' -> {deck: Path}. Unknown decks, repeats and empty paths are errors."""
+    out = {}
+    for item in filter(None, (t.strip() for t in text.split(","))):
+        deck, sep, path = item.partition("=")
+        deck, path = deck.strip(), path.strip()
+        require(sep and path, "deck_models", f"expected deck=PATH, got {item!r}")
+        require(deck in ref.DECK_ORDER, "deck_models", f"unknown deck {deck!r}; use one of {list(ref.DECK_ORDER)}")
+        require(deck not in out, "deck_models", f"deck {deck} given twice")
+        out[deck] = Path(path).expanduser()
+    return out
+
+
+def deck_pilots(deck_paths, fallback, contract, load=None):
+    """-> (DeckModels, candidate record) for every deck: the listed checkpoint, else `fallback`.
+    Each distinct file is loaded and admitted once (`load(path)` -> (factory, record), default
+    `_learner`). The record has the per-deck records, so trust.json and trust.md carry every
+    checkpoint's sha."""
+    load = load or (lambda path: _learner(path, contract, "checkpoint"))
+    missing = [d for d in ref.DECK_ORDER if d not in deck_paths and fallback is None]
+    require(not missing, "deck_models", f"no checkpoint for {', '.join(missing)}: list them or give the positional checkpoint")
+    loaded, decks, factories = {}, {}, {}
+    for d in ref.DECK_ORDER:
+        path = deck_paths.get(d, fallback)
+        if str(path) not in loaded:
+            loaded[str(path)] = load(path)
+        factories[d], record = loaded[str(path)]
+        decks[d] = dict(record, source="deck-models" if d in deck_paths else "fallback")
+    shas = {d: r["sha256"] for d, r in decks.items()}
+    return DeckModels(factories), {"kind": "per_deck", "checkpoint": "per-deck models", "sha256": digest(shas), "features": None, "decks": decks,
+                                   "fallback": None if fallback is None else str(fallback), "information_contract": contract}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("checkpoint", type=Path, nargs="?", help="the final model (omit with --agent random)")
+    ap.add_argument("--deck-models", default=None, metavar="DECK=PATH,...",
+                    help="per-deck pilots, e.g. jund_wildfire=a.pt,mono_blue_terror=b.pt: each deck plays with its own checkpoint, so cell A vs B is "
+                         "pilot A on deck A against pilot B on deck B, and a pool member plays X against Y's pilot. Decks not listed use the "
+                         "positional checkpoint (required then). bo3 only")
     ap.add_argument("--pool", nargs="*", default=[], type=Path, help="frozen-pool checkpoints that play the final model")
     ap.add_argument("--matches", type=int, default=400, help="matches per pairing and mode, rounded up to four-match blocks (default 400)")
     ap.add_argument("--exploit-matches", type=int, default=200, help="matches per ordered matchup, mode and pool member (default 200)")
@@ -421,13 +482,21 @@ def main(argv=None):
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
     modes = args.modes.split(",")
-    if (args.agent == "checkpoint") == (args.checkpoint is None) or args.matches < 1 or args.exploit_matches < 1 or args.workers < 1:
+    if (args.agent == "checkpoint") == (args.checkpoint is None and args.deck_models is None) or args.matches < 1 or args.exploit_matches < 1 or args.workers < 1:
         ap.error("give a checkpoint (or --agent random), and positive matches/workers")
     if args.primary_mode not in modes or not set(modes) <= {"sampled", "greedy"}:
         ap.error("--primary-mode must be one of --modes (sampled, greedy)")
+    if args.deck_models is not None and (args.agent != "checkpoint" or args.format != "bo3"):
+        ap.error("--deck-models needs --agent checkpoint and --format bo3")
     contract = {"fair": FAIR, "diagnostic": DIAGNOSTIC}[args.contract]
     reference = ref.load()
-    final, candidate = _learner(args.checkpoint, contract, args.agent)
+    if args.deck_models is None:
+        final, candidate = _learner(args.checkpoint, contract, args.agent)
+    else:
+        try:
+            final, candidate = deck_pilots(parse_deck_models(args.deck_models), args.checkpoint, contract)
+        except ValueError as e:
+            ap.error(str(e))
     pool_learners = {str(p): _learner(p, contract, "checkpoint") for p in args.pool}
     blocks, exploit_blocks = -(-args.matches // 4), -(-args.exploit_matches // 4)
     code = {"revision": _git("rev-parse", "HEAD"), "dirty": bool(_git("status", "--porcelain", "--", "mtg_ml", "native", "tools"))}

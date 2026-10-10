@@ -218,6 +218,22 @@ sampled): 0 only if all three checks pass; a run without `--pool` cannot pass. S
 | per deck | bias = mean of (model - reference) over the deck's non-thin pairings. Its 95% interval adds the model's block-bootstrap variance and the reference's binomial variance (normal approximation). A deck is flagged when the interval excludes 0 by more than the margin (lower bound above +margin, or upper bound below -margin). Pass: no flagged deck and every deck computable | `--bias-margin 0.02` |
 | exploitability | per ordered matchup, the best pool member's win rate and interval; clearly exploitable when the interval's lower bound exceeds 0.5 plus the margin. Pass: none | `--exploit-margin 0.02` |
 
+**Per-deck pilots.** With one fine-tuned model per deck, pass `--deck-models
+jund_wildfire=PATH,mono_blue_terror=PATH,...` (deck ids as in `DECK_ORDER`; the positional checkpoint is
+optional and fills every unlisted deck, and is required if any deck is unlisted). Each side of a match
+then plays with its own deck's checkpoint, so the cell `A|B` is pilot A on deck A against pilot B on deck B;
+seats, starts and blocks are balanced as before, and the per-pairing and per-deck checks run unchanged on
+that matrix. Exploitability: each `--pool` member plays X against Y's pilot in the ordered matchup `X>Y`
+(the same pool for every deck; per-deck pools are not supported). `trust.json` carries `candidate.kind
+= "per_deck"` with one record per deck (`candidate.decks.<deck>`: path, sha256, features, and whether it came
+from `--deck-models` or the fallback), and `trust.md` has a "Pilots" table with the same. bo3 only (not with
+`--format game1` or `--agent random`). Without `--deck-models` nothing changes. Same flags otherwise, for example:
+
+```bash
+.venv/bin/python -m mtg_ml.benchmark.trust --deck-models jund_wildfire=jund.pt,mono_blue_terror=blue.pt r7-lr075.pt \
+    --pool ckpts/old1.pt --matches 200 --exploit-matches 40 --workers 4 --out runs/trust/pilots
+```
+
 Also `--replicates 2000` (bootstrap), `--modes sampled,greedy`, `--workers`, `--engine`.
 
 Caveats. The thresholds (0.70, 0.02, 0.02) are uncalibrated starting values (the result JSON records
