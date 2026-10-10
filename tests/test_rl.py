@@ -231,9 +231,9 @@ def test_each_seat_is_featurized_with_its_own_policys_version(tmp_path, monkeypa
     calls = []
     real = rollout.featurize_flat
 
-    def spy(g, p, features):
+    def spy(g, p, features, **kw):
         calls.append((id(g), p, features))
-        return real(g, p, features=features)
+        return real(g, p, features=features, **kw)
 
     monkeypatch.setattr(rollout, "featurize_flat", spy)
     specs = [GameSpec(1, (LEARNER, old_path)), GameSpec(2, (old_path, LEARNER))]
@@ -267,7 +267,7 @@ def test_job_features_override_a_checkpoints_version(tmp_path, monkeypatch):
     _, b = _ckpt(tmp_path, "b.pt")
     calls = []
     real = rollout.featurize_flat
-    monkeypatch.setattr(rollout, "featurize_flat", lambda g, p, features: calls.append((p, features)) or real(g, p, features=features))
+    monkeypatch.setattr(rollout, "featurize_flat", lambda g, p, features, **kw: calls.append((p, features)) or real(g, p, features=features, **kw))
     run_job(Job([GameSpec(1, (LEARNER, b))], a, 1, record=False, max_turns=6, features={LEARNER: 2}))
     assert {p: f for p, f in calls} == {0: 2, 1: 1}
     calls.clear()

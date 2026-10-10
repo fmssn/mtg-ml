@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 use crc32fast::Hasher;
 
-use crate::cards::{db, type_names, CardDef, Op, SacFilter, TYPE_NAMES};
+use crate::cards::{db, CardDef, Op, SacFilter, TYPE_NAMES};
 use crate::mana::{bit, ManaCost, Remaining};
 use crate::state::*;
 
@@ -43,6 +43,43 @@ const GY_STEPS: &[i64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15];
 pub trait FeatureOut {
     fn direct(&mut self, args: std::fmt::Arguments);
     fn raw(&mut self, args: std::fmt::Arguments);
+    /// Set 7's `self:list:{zone}:{name}#{k}` features (the registered main
+    /// deck and sideboard, the current main deck), all direct.
+    /// `{side}:{name}>={k}` for each step `k` <= n (`{name}>={k}` without a side).
+    fn therm(&mut self, side: &'static str, name: &'static str, n: i64, steps: &'static [i64]) {
+        for &k in steps {
+            if n >= k {
+                if side.is_empty() {
+                    self.direct(format_args!("{name}>={k}"));
+                } else {
+                    self.direct(format_args!("{side}:{name}>={k}"));
+                }
+            }
+        }
+    }
+    fn lists(&mut self, st: &State, viewer: u8) {
+        for (zone, cards) in list_zones(st, viewer) {
+            list_names(cards, |name, k| self.direct(format_args!("self:list:{zone}:{name}#{k}")));
+        }
+    }
+}
+
+fn list_zones(st: &State, viewer: u8) -> [(&'static str, &Vec<String>); 3] {
+    let v = viewer as usize;
+    [("registered_main", &st.args.registered_main[v]), ("registered_sideboard", &st.args.registered_sideboards[v]), ("current_main", &st.args.decks[v])]
+}
+
+/// `f(name, k)` for k in 1..=count of each distinct name, names in order.
+fn list_names(cards: &[String], mut f: impl FnMut(&str, usize)) {
+    let mut counts = std::collections::BTreeMap::new();
+    for name in cards {
+        *counts.entry(name).or_insert(0usize) += 1;
+    }
+    for (name, count) in counts {
+        for k in 1..=count {
+            f(name, k);
+        }
+    }
 }
 
 macro_rules! direct {
@@ -52,12 +89,30 @@ macro_rules! raw {
     ($o:expr, $($arg:tt)*) => { $o.raw(format_args!($($arg)*)) };
 }
 
-fn thermo<O: FeatureOut>(o: &mut O, name: &str, n: i64, steps: &[i64]) {
-    for &k in steps {
-        if n >= k {
-            direct!(o, "{name}>={k}");
-        }
-    }
+fn thermo<O: FeatureOut>(o: &mut O, name: &'static str, n: i64, steps: &'static [i64]) {
+    o.therm("", name, n, steps);
+}
+
+thread_local! {
+    static THERMO_CRCS: std::cell::RefCell<std::collections::HashMap<(usize, usize, usize, usize, usize), &'static [u32]>> = Default::default();
+}
+
+/// crc32 of every `{side}:{name}>={k}` of `steps` (`{name}>={k}` without a
+/// side), computed once per thermometer. The few dozen tables are leaked.
+fn thermo_crcs(side: &'static str, name: &'static str, steps: &'static [i64]) -> &'static [u32] {
+    let key = (side.as_ptr() as usize, side.len(), name.as_ptr() as usize, name.len(), steps.as_ptr() as usize);
+    THERMO_CRCS.with(|m| {
+        *m.borrow_mut().entry(key).or_insert_with(|| {
+            let v: Vec<u32> = steps
+                .iter()
+                .map(|k| {
+                    let s = if side.is_empty() { format!("{name}>={k}") } else { format!("{side}:{name}>={k}") };
+                    crc32fast::hash(s.as_bytes())
+                })
+                .collect();
+            Box::leak(v.into_boxed_slice())
+        })
+    })
 }
 
 /// encode.py `FEATURES` / `FEATURE_VERSIONS`: feature-set versions (1: up to
@@ -93,11 +148,7 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
         direct!(o, "opp:deck:{deck}");
     }
     if features >= 7 {
-        for (zone, cards) in [("registered_main", &st.args.registered_main[viewer as usize]), ("registered_sideboard", &st.args.registered_sideboards[viewer as usize]), ("current_main", &st.args.decks[viewer as usize])] {
-            let mut counts = std::collections::BTreeMap::new();
-            for name in cards { *counts.entry(name).or_insert(0usize) += 1; }
-            for (name, count) in counts { for k in 1..=count { direct!(o, "self:list:{zone}:{name}#{k}"); } }
-        }
+        o.lists(st, viewer);
         if let Some(a) = &st.damage_allocation {
             direct!(o, "damage:recipient:{}", a.recipient);
             direct!(o, "damage:remaining:{}", a.remaining);
@@ -112,11 +163,11 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
     }
     for (side, p) in [("self", viewer), ("opponent", opp)] {
         let pl = &st.players[p as usize];
-        thermo(o, &format!("{side}:life"), pl.life as i64, LIFE_STEPS);
+        o.therm(side, "life", pl.life as i64, LIFE_STEPS);
         direct!(o, "{side}:library:{}", bucket(pl.library.len() as i64));
         direct!(o, "{side}:mulligans:{}", st.mulligans_taken[p as usize]);
-        thermo(o, &format!("{side}:gy_count"), pl.graveyard.len() as i64, GY_STEPS);
-        thermo(o, &format!("{side}:exile_count"), pl.exile.len() as i64, COUNT_STEPS);
+        o.therm(side, "gy_count", pl.graveyard.len() as i64, GY_STEPS);
+        o.therm(side, "exile_count", pl.exile.len() as i64, COUNT_STEPS);
         for &c in &pl.graveyard {
             raw!(o, "{side}:gy:{}", st.c(c).name());
         }
@@ -188,13 +239,9 @@ pub fn state_features_into<O: FeatureOut>(st: &State, viewer: u8, features: u8, 
     }
 }
 
-/// `thermo` for `{side}:{name}` without allocating the name.
-fn side_thermo<O: FeatureOut>(o: &mut O, side: &str, name: &str, n: i64, steps: &[i64]) {
-    for &k in steps {
-        if n >= k {
-            direct!(o, "{side}:{name}>={k}");
-        }
-    }
+/// `thermo` for `{side}:{name}`.
+fn side_thermo<O: FeatureOut>(o: &mut O, side: &'static str, name: &'static str, n: i64, steps: &'static [i64]) {
+    o.therm(side, name, n, steps);
 }
 
 /// encode.py `KNOWN_POS_CAP`.
@@ -344,18 +391,26 @@ pub const MAX_ENTITIES: usize = 64; // legacy versions only; set 7 is ragged
 pub trait EntityOut {
     fn begin(&mut self);
     fn tok(&mut self, args: std::fmt::Arguments);
+    /// `tok` of a feature whose crc32 is already known.
+    fn tok_crc(&mut self, _crc: u32, args: std::fmt::Arguments) {
+        self.tok(args);
+    }
+    /// `{name}>={k}` for each `ENT_STEPS` step `k` <= n.
+    fn therm(&mut self, name: &'static str, n: i64) {
+        for &k in ENT_STEPS {
+            if n >= k {
+                self.tok(format_args!("{name}>={k}"));
+            }
+        }
+    }
 }
 
 macro_rules! tok {
     ($o:expr, $($arg:tt)*) => { $o.tok(format_args!($($arg)*)) };
 }
 
-fn ent_thermo<E: EntityOut>(o: &mut E, name: &str, n: i64) {
-    for &k in ENT_STEPS {
-        if n >= k {
-            tok!(o, "{name}>={k}");
-        }
-    }
+fn ent_thermo<E: EntityOut>(o: &mut E, name: &'static str, n: i64) {
+    o.therm(name, n);
 }
 
 /// encode.py `_combat_entity` (set 4): attacker and blocker relations.
@@ -400,17 +455,16 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, 
         }
         let c = st.c(ci);
         o.begin();
-        tok!(o, "e:name:{}", c.name());
+        let f = c.face();
+        o.tok_crc(f.ent_name_crc, format_args!("e:name:{}", f.name));
         tok!(o, "e:ctrl:{}", rel(c.controller, viewer));
         let types = st.types(c);
         for (i, t) in TYPE_NAMES.iter().enumerate() {
             if types & (1 << i) != 0 {
-                tok!(o, "e:type:{t}");
+                o.tok_crc(db().type_tok_crc[i], format_args!("e:type:{t}"));
             }
         }
-        for k in db().keyword_list(st.keywords(c)) {
-            tok!(o, "e:kw:{k}");
-        }
+        keyword_toks(o, st.keywords(c));
         if c.tapped {
             tok!(o, "e:tapped");
         }
@@ -510,8 +564,18 @@ pub fn entity_features_into<E: EntityOut>(st: &State, viewer: u8, features: u8, 
 }
 
 fn shape<E: EntityOut>(d: &CardDef, o: &mut E) {
-    for t in &d.shape {
-        tok!(o, "{t}");
+    for (t, &c) in d.shape.iter().zip(&d.shape_crc) {
+        o.tok_crc(c, format_args!("{t}"));
+    }
+}
+
+/// `e:kw:{keyword}` for each keyword of `mask`.
+fn keyword_toks<E: EntityOut>(o: &mut E, mask: u32) {
+    let d = db();
+    for (i, k) in d.keyword_names.iter().enumerate() {
+        if mask & (1 << i) != 0 {
+            o.tok_crc(d.kw_tok_crc[i], format_args!("e:kw:{k}"));
+        }
     }
 }
 
@@ -545,14 +609,14 @@ fn hand_entities<E: EntityOut>(st: &State, viewer: u8, features: u8, o: &mut E, 
         let f = c.face();
         o.begin();
         tok!(o, "e:zone:hand");
-        tok!(o, "e:name:{}", c.name());
+        o.tok_crc(f.ent_name_crc, format_args!("e:name:{}", f.name));
         tok!(o, "e:ctrl:self");
-        for t in type_names(f.types) {
-            tok!(o, "e:type:{t}");
+        for (i, t) in TYPE_NAMES.iter().enumerate() {
+            if f.types & (1 << i) != 0 {
+                o.tok_crc(db().type_tok_crc[i], format_args!("e:type:{t}"));
+            }
         }
-        for k in db().keyword_list(f.keywords) {
-            tok!(o, "e:kw:{k}");
-        }
+        keyword_toks(o, f.keywords);
         if let (Some(p), Some(t)) = (f.power, f.toughness) {
             ent_thermo(o, "e:power", p as i64);
             ent_thermo(o, "e:toughness", t as i64);
@@ -1018,6 +1082,20 @@ impl EntityHashes<'_> {
 }
 
 impl EntityOut for EntityHashes<'_> {
+    fn tok_crc(&mut self, crc: u32, _args: std::fmt::Arguments) {
+        self.out.push(crc % self.dim);
+    }
+    fn therm(&mut self, name: &'static str, n: i64) {
+        if n < ENT_STEPS[0] {
+            return;
+        }
+        let dim = self.dim;
+        for (&k, &c) in ENT_STEPS.iter().zip(thermo_crcs("", name, ENT_STEPS)) {
+            if n >= k {
+                self.out.push(c % dim);
+            }
+        }
+    }
     fn begin(&mut self) {
         self.close();
         self.out.push(self.dim);
@@ -1083,6 +1161,35 @@ struct HashOut {
 }
 
 impl FeatureOut for HashOut {
+    fn therm(&mut self, side: &'static str, name: &'static str, n: i64, steps: &'static [i64]) {
+        if n < steps[0] {
+            return;
+        }
+        let dim = self.dim;
+        for (&k, &c) in steps.iter().zip(thermo_crcs(side, name, steps)) {
+            if n >= k {
+                self.out.push(c % dim);
+            }
+        }
+    }
+    fn lists(&mut self, st: &State, viewer: u8) {
+        let crcs = st.args.list_crcs.get_or_init(|| {
+            [0u8, 1].map(|v| {
+                let mut out = vec![];
+                let mut buf = String::new();
+                for (zone, cards) in list_zones(st, v) {
+                    list_names(cards, |name, k| {
+                        buf.clear();
+                        let _ = write!(buf, "self:list:{zone}:{name}#{k}");
+                        out.push(crc32fast::hash(buf.as_bytes()));
+                    });
+                }
+                out
+            })
+        });
+        let dim = self.dim;
+        self.out.extend(crcs[viewer as usize].iter().map(|c| c % dim));
+    }
     fn direct(&mut self, args: std::fmt::Arguments) {
         self.buf.clear();
         let _ = self.buf.write_fmt(args);
