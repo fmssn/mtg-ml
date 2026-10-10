@@ -936,17 +936,17 @@
     "C"
    ],
    "parent": "r7-lr075",
-   "games": 3946496,
-   "bench_sampled": 0.779,
-   "bench_greedy": 0.821,
-   "l1": 156.1,
-   "l1_at": "3.75M",
-   "status": "running",
-   "archive": null,
-   "ledger": "ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune",
+   "games": 6000640,
+   "bench_sampled": 0.837,
+   "bench_greedy": 0.857,
+   "l1": 238.6,
+   "l1_at": "6.0M",
+   "status": "archived",
+   "archive": "h100-private:~/mtg-ml-checkpoints/20261009-r8-fs7h256-mu-jund-blue-ft-r7-lr075-s8",
+   "ledger": "ledger.md#20261009-r8-results--final-results-and-archives-of-r8-jund-blue-r8-jund-pilot-r8-jund-mirror",
    "ledger_id": "20261009-r8-jund-blue-ft",
    "kind": "train",
-   "notes": "Jund vs Blue fine-tune, 6M-game schedule. Games read 2026-10-10; last eval at 3.75M. Interim specialist benchmark at 1.56M in ledger r8-evals-1. Run dir h100-private:~/mtg-ml-r8/campaigns/r8-20261009/r8-jund-blue-ft."
+   "notes": "Jund vs Blue fine-tune, 6M games, final policy v02930 (sha256 b2ca1763...9e71). Final specialist benchmark jund_vs_sblue 75.2/79.0, blue_vs_sjund 83.8/84.0 (ledger). Trust test FAIL: 3/14 pairings inside, Jund +0.27 and Blue +0.26 bias, 21 exploitable directions; strong forgetting of the other decks. A specialist; play/jund since PR #99. Run dir h100-private:~/mtg-ml-r8/campaigns/r8-20261009/r8-jund-blue-ft."
   },
   {
    "handle": "r8-jund-blue-s2",
@@ -1002,17 +1002,17 @@
     "r8e3-20261009"
    ],
    "parent": "r7-lr075",
-   "games": 778240,
+   "games": 2000896,
    "bench_sampled": null,
    "bench_greedy": null,
    "l1": null,
    "l1_at": null,
-   "status": "running",
-   "archive": null,
-   "ledger": "ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune",
+   "status": "archived",
+   "archive": "h100-private:~/mtg-ml-checkpoints/20261009-r8-fs7h256-mu-jund-jund-ft-r7-lr075-s8",
+   "ledger": "ledger.md#20261009-r8-results--final-results-and-archives-of-r8-jund-blue-r8-jund-pilot-r8-jund-mirror",
    "ledger_id": "20261009-r8-jund-mirror-ft",
    "kind": "train",
-   "notes": "Jund mirror fine-tune, 2M-game schedule, --ppo-capture 0. Games read 2026-10-10. Routine eval is on the mirror, so there is no L1 and the in-training bench (85.3/91.9 at 0.75M) is not comparable; judge it on benchmark-jund@1. Run dir h100-private:~/mtg-ml-r8/campaigns/r8e3-20261009/r8-jund-mirror-ft."
+   "notes": "Jund mirror fine-tune, 2M games, --ppo-capture 0, final policy v00977 (sha256 f8882e0c...715e). Routine eval is on the mirror (92.2/93.8 at the end), so there is no L1 and that bench is not comparable; judged on the specialist benchmark: jund_vs_sjund 83.0/88.5, but forgets Blue (jund_vs_sblue 43.5/53.7). Best Jund-mirror model. Run dir h100-private:~/mtg-ml-r8/campaigns/r8e3-20261009/r8-jund-mirror-ft."
   },
   {
    "handle": "r8-jund-mirror-x1",
@@ -1093,17 +1093,17 @@
     "r8f-20261009"
    ],
    "parent": "r7-lr075",
-   "games": 1134592,
-   "bench_sampled": 0.604,
-   "bench_greedy": 0.719,
-   "l1": 28.5,
-   "l1_at": "1.0M",
-   "status": "running",
-   "archive": null,
-   "ledger": "ledger.md#20261009-r8--three-arm-follow-up-to-r7-continue-lr075-feature-set-8--belief-head-jund-vs-blue-fine-tune",
+   "games": 3000320,
+   "bench_sampled": 0.743,
+   "bench_greedy": 0.777,
+   "l1": 148.4,
+   "l1_at": "3.0M",
+   "status": "archived",
+   "archive": "h100-private:~/mtg-ml-checkpoints/20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8",
+   "ledger": "ledger.md#20261009-r8-results--final-results-and-archives-of-r8-jund-blue-r8-jund-pilot-r8-jund-mirror",
    "ledger_id": "20261009-r8-jund-pilot",
    "kind": "train",
-   "notes": "All six Jund pairings, uniform; 3M-game schedule. Games read 2026-10-10; last eval at 1.0M (L1 on jund_blue). Run dir h100-private2:~/mtg-ml-r8/campaigns/r8f-20261009/r8-jund-pilot."
+   "notes": "All six Jund pairings, uniform; 3M games, final policy v01464 (sha256 71c758dc...8379; archive policy.pt is the newer v01465, policy-v01464.pt is the benchmarked file). Bench and L1 are on jund_blue. Specialist benchmark jund_vs_sblue 67.2/67.0, jund_vs_sjund 79.5/79.5. Trust test FAIL overall but per-deck bias PASSES (first ever), 9/14 pairings inside, 5 exploitable directions. Per-deck training works and keeps the other decks intact. Run dir h100-private2:~/mtg-ml-r8/campaigns/r8f-20261009/r8-jund-pilot, copied to h100-private for archiving."
   },
   {
    "handle": "scr-batch8192-lr150",
@@ -1392,20 +1392,20 @@
    "note": "Only full-matrix model; r8-continue plateaued; r8-belief would replace it if it overtakes at matched games"
   },
   "best/jund_blue": {
-   "handle": "fs4-ft",
-   "note": "Highest L1 (212.5) among archived Jund vs Blue models. Candidates: r8-jund-blue (running, 77.9/82.1, L1 156) and r4-control. fs4-ft was never run against the specialists."
+   "handle": "r8-jund-blue",
+   "note": "Final specialist benchmark jund_vs_sblue 75.2/79.0 (r4-control 64.0/65.5), L1 238.6 (fs4-ft 212.5); a specialist, its trust test fails"
   },
   "best/blue_vs_jund": {
    "handle": "r4-control",
-   "note": "Blue as learner vs the Jund specialist 85.3/87.0 (specialist benchmark); r8-jund-blue 78.2/80.5 at 1.56M"
+   "note": "Blue as learner vs the Jund specialist 85.3/87.0 (specialist benchmark); r8-jund-blue 83.8/84.0 (level within +-5)"
   },
   "best/jund_jund": {
-   "handle": "r7-lr075",
-   "note": "Mirror vs the Jund specialist 57.8/68.5; candidate r8-jund-mirror (running, 2M schedule)"
+   "handle": "r8-jund-mirror",
+   "note": "Mirror vs the Jund specialist 83.0/88.5 (r7-lr075 57.8/68.5); forgets Blue"
   },
   "best/jund": {
    "handle": "r7-lr075",
-   "note": "Deck vs field; candidate r8-jund-pilot (running, 3M schedule)"
+   "note": "Deck vs field; r8-jund-pilot (finished) is better on the Jund cells and passes the per-deck trust check but has no head to head against r7-lr075 yet"
   },
   "best/blue": {
    "handle": "r7-lr075",
@@ -1457,21 +1457,6 @@
    "handle": "r8-belief",
    "vs": "r7-lr075",
    "question": "does feature set 8 plus the belief head beat the lr075 trajectory at matched games"
-  },
-  {
-   "handle": "r8-jund-blue",
-   "vs": "r4-control",
-   "question": "does Jund-vs-Blue fine-tuning reach the r4-control and fs4-ft level; replicated by r8-jund-blue-s2"
-  },
-  {
-   "handle": "r8-jund-mirror",
-   "vs": "r7-lr075",
-   "question": "does matchup fine-tuning work for the mirror (benchmark-jund@1)"
-  },
-  {
-   "handle": "r8-jund-pilot",
-   "vs": "r8-jund-blue",
-   "question": "deck-vs-field fine-tuning against per-matchup fine-tuning"
   }
  ],
  "role_history": [
@@ -1486,6 +1471,18 @@
    "role": "play/jund",
    "handle": "r8-jund-blue",
    "note": "Promoted from r7-lr075: specialist benchmark jund_vs_sblue 75.2/79.0 against 46.3/49.0, mirror 58.3/62.7"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "best/jund_blue",
+   "handle": "r8-jund-blue",
+   "note": "Replaces fs4-ft: final specialist benchmark jund_vs_sblue 75.2/79.0 against r4-control 64.0/65.5, L1 238.6 against 212.5"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "best/jund_jund",
+   "handle": "r8-jund-mirror",
+   "note": "Replaces r7-lr075: mirror vs the Jund specialist 83.0/88.5 against 57.8/68.5"
   }
  ]
 }
