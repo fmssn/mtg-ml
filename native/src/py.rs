@@ -197,14 +197,14 @@ impl PyGame {
 #[pymethods]
 impl PyGame {
     #[new]
-    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=100, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1, auto_mana=false, auto_pass=false, deck_names=(None, None), registered_main=None, registered_sideboards=None))]
+    #[pyo3(signature = (decks, seed=0, starting_player=None, auto_single=true, max_turns=None, log=false, has_setup=false, start_step="untap".to_string(), mulligans=true, match_game=1, auto_mana=false, auto_pass=false, deck_names=(None, None), registered_main=None, registered_sideboards=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         decks: (Vec<String>, Vec<String>),
         seed: i128,
         starting_player: Option<u8>,
         auto_single: bool,
-        max_turns: i32,
+        max_turns: Option<i32>,
         log: bool,
         has_setup: bool,
         start_step: String,
@@ -231,7 +231,7 @@ impl PyGame {
             seed,
             starting_player,
             auto_single,
-            max_turns,
+            max_turns: max_turns.unwrap_or(i32::MAX), // None = no turn limit
             log,
             has_setup,
             start_step,

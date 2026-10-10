@@ -147,7 +147,8 @@ def validate_manifest(d):
     integer(d.get("puzzle_repetitions"), "puzzle_repetitions")
     settings = d["engine_settings"]
     require(set(settings) == {"max_turns", "max_decisions", "auto_single", "auto_mana", "auto_pass"}, "engine_settings", "explicit settings required")
-    integer(settings["max_turns"], "engine_settings.max_turns")
+    if settings["max_turns"] is not None:  # null = no turn limit
+        integer(settings["max_turns"], "engine_settings.max_turns")
     integer(settings["max_decisions"], "engine_settings.max_decisions")
     for k in ("auto_single", "auto_mana", "auto_pass"):
         require(type(settings[k]) is bool, "engine_settings." + k, "boolean required")

@@ -182,7 +182,7 @@ class Game:
         seed: int = 0,
         starting_player: int | None = None,
         auto_single: bool = True,
-        max_turns: int = 100,
+        max_turns: int | None = None,
         log: bool = False,
         setup: Callable[["Game"], None] | None = None,
         start_step: str = "untap",
@@ -564,7 +564,7 @@ class Game:
             first = True
         while True:
             self.turn += 1
-            if self.turn > self.max_turns:
+            if self.max_turns is not None and self.turn > self.max_turns:
                 raise GameOver(None, "turn limit")
             if not (first and self._args["setup"] is not None):
                 self._begin_turn()  # a scenario setup defines the opening turn state itself

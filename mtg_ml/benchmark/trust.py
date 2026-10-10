@@ -47,7 +47,7 @@ SCHEMA = "TrustTestResult"
 VERSION = 1
 ROOT = Path(__file__).resolve().parents[2]
 STREAM = "trust-v1"
-SETTINGS = dict(max_turns=100, max_decisions=10000, auto_single=False, auto_mana=False, auto_pass=False)
+SETTINGS = dict(max_turns=None, max_decisions=10000, auto_single=False, auto_mana=False, auto_pass=False)
 DEFAULTS = dict(min_inside=0.70, bias_margin=0.02, exploit_margin=0.02, replicates=2000)
 THRESHOLD_STATUS = "uncalibrated starting values"
 CHECKS = ("per_pairing", "per_deck", "exploitability")

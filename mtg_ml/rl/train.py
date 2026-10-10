@@ -208,7 +208,7 @@ class TrainConfig:
     ladder_games: int = 200  # paired games against each rung
     ladder_ratings: str = ""  # JSON with the rungs' Elo (`evaluate ladder`); "" = <run>/ladder.json, rated by the first evaluation if missing
     ladder_greedy: int = 0  # 1: ladder games (and the rating round robin) with greedy play
-    max_turns: int = 100
+    max_turns: int | None = None
     matchup: str = "jund_blue"  # match.MATCHUPS: the deck in each seat; a mix "a:w,b:w,..." draws each game's matchup by weight (default 1), the first is the primary (full evaluation; the others: benchmark of both seats)
     auto_mana: int = 0  # 1: pay non-strategic mana costs automatically (colour-preserving payer; docs/action-decomposition.md)
     auto_pass: int = 0  # 1: auto-pass priority when the only other options are side-effect-free sacrifice-for-mana abilities
@@ -1089,7 +1089,7 @@ def parse_args(argv=None) -> TrainConfig:
             if f.name == "ppo":
                 continue
             v = getattr(obj, f.name)
-            typ = (lambda x: None if x.lower() == "none" else float(x)) if f.name == "target_kl" else (
+            typ = (lambda x: None if x.lower() == "none" else float(x)) if f.name == "target_kl" else (lambda x: None if x.lower() == "none" else int(x)) if f.name == "max_turns" else (
                 lambda x: None if x.lower() == "none" else tuple(float(y) for y in x.split(","))) if f.name == "belief_coef" else type(v)
             ap.add_argument(f"--{prefix}{f.name.replace('_', '-')}", type=typ, default=v, choices=CHOICES.get(f.name) if obj is cfg else None)
     a = vars(ap.parse_args(argv))

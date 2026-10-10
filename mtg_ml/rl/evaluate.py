@@ -140,13 +140,13 @@ def _balance_seats(path: str, opponent: str, features: dict | None) -> bool:
     return evaluation_features(path, features) >= 7 or (opponent not in (BOT, RANDOM) and evaluation_features(opponent, features, opponent) >= 7)
 
 
-def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
+def head_to_head(procs, learner_path: str, opponent: str, games: int, n_jobs: int, version: int = 0, max_turns: int | None = None, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
                  seat: int | None = None, matchup: str = DEFAULT_MATCHUP, features: dict | None = None) -> dict:  # fmt: skip
     specs = paired_specs(opponent, games, jund_only=jund_only, seat=seat, matchup=matchup, balance_seats=_balance_seats(learner_path, opponent, features))
     return score(play(procs, specs, Job([], learner_path, version, record=False, max_turns=max_turns, inference=inference, greedy=greedy, auto_mana=auto_mana, auto_pass=auto_pass, features=features or {}), n_jobs).games, matchup)
 
 
-def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
+def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jobs: int, version: int = 0, max_turns: int | None = None, inference: str = "local", jund_only: bool = False, greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
                      seat: int | None = None, matchup: str = DEFAULT_MATCHUP, features: dict | None = None) -> dict:  # fmt: skip
     """Best-of-three matches on paired seeds (`seat`, `jund_only`: seat 0: one
     match per seed, the learner in that seat). Each match is one best-of-three
@@ -168,7 +168,7 @@ def head_to_head_bo3(procs, learner_path: str, opponent: str, matches: int, n_jo
     return score([(seats, winner) for seats, _, _, _, winner in play(procs, specs, job, n_jobs).matches], matchup)
 
 
-def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy_games: int = 0, auto_mana: bool = False, auto_pass: bool = False,
+def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: int, version: int = 0, max_turns: int | None = None, inference: str = "local", greedy_games: int = 0, auto_mana: bool = False, auto_pass: bool = False,
               matchup: str = DEFAULT_MATCHUP, seat: int = 0) -> dict:  # fmt: skip
     """The fixed benchmark: the learner plays Jund Wildfire against the scripted
     Mono Blue Terror (Delver) bot; in general the deck in `seat` of
@@ -192,7 +192,7 @@ def benchmark(procs, learner_path: str, games: int, bo3_matches: int, n_jobs: in
 
 @serialized_evaluation
 def evaluate_policy(procs, policy: str, pool0: str, version: int, n_jobs: int, eval_games: int, eval_bo3_matches: int, bench_games: int, bench_bo3_matches: int,
-                    max_turns: int = 100, inference: str = "local", blocks: tuple = EVAL_BLOCKS, bench_greedy_games: int = 0,
+                    max_turns: int | None = None, inference: str = "local", blocks: tuple = EVAL_BLOCKS, bench_greedy_games: int = 0,
                     ladder: tuple = (), ladder_games: int = 200, ladder_ratings: str = "", ladder_greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False,
                     matchup: str = DEFAULT_MATCHUP, seat: int | None = None, opponent: str = "", features: dict | None = None, extra_matchups: tuple = ()) -> dict:
     """The trainer's evaluation of a policy file: learner vs the opponents of
@@ -311,7 +311,7 @@ def rung_names(paths: list[str]) -> list[str]:
     return [f"{k}_{s}" if stems.count(s) > 1 else s for k, s in enumerate(stems)]
 
 
-def rate_ladder(procs, paths: list[str], games: int, n_jobs: int, max_turns: int = 100, inference: str = "local", greedy: bool = False, features: int = 0) -> dict:
+def rate_ladder(procs, paths: list[str], games: int, n_jobs: int, max_turns: int | None = None, inference: str = "local", greedy: bool = False, features: int = 0) -> dict:
     """Round robin of the checkpoints `paths` on paired seeds, `games` per
     pair. Returns the ratings JSON: {"ratings": {path: Elo}, "games",
     "greedy", "results": [[i, j, score of i, games], ...]}. `features` > 0:
@@ -327,7 +327,7 @@ def rate_ladder(procs, paths: list[str], games: int, n_jobs: int, max_turns: int
     return {"ratings": {p: round(r, 1) for p, r in zip(paths, elo)}, "games": games, "greedy": greedy, "results": results} | ({"features": features} if features else {})
 
 
-def load_or_rate_ladder(procs, paths: list[str], path: str, games: int, n_jobs: int, max_turns: int = 100, inference: str = "local", greedy: bool = False) -> dict:
+def load_or_rate_ladder(procs, paths: list[str], path: str, games: int, n_jobs: int, max_turns: int | None = None, inference: str = "local", greedy: bool = False) -> dict:
     """{rung path: Elo} from the ratings JSON at `path` if it rates every
     rung; otherwise rate the ladder (`rate_ladder`) and write it there."""
     if path and os.path.exists(path):
@@ -344,7 +344,7 @@ def load_or_rate_ladder(procs, paths: list[str], path: str, games: int, n_jobs: 
     return out["ratings"]
 
 
-def ladder_eval(procs, policy: str, ratings: dict, games: int, n_jobs: int, version: int = 0, max_turns: int = 100, inference: str = "local", greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
+def ladder_eval(procs, policy: str, ratings: dict, games: int, n_jobs: int, version: int = 0, max_turns: int | None = None, inference: str = "local", greedy: bool = False, auto_mana: bool = False, auto_pass: bool = False) -> dict:
     """The learner against every rung of the ladder ({path: Elo}) on paired
     seeds (`games` each, both seats): keys `ladder/<rung>` (score) with
     `_ci`, and the learner's fitted Elo on the ladder's scale `ladder/elo`

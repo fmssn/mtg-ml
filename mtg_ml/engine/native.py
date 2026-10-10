@@ -291,7 +291,7 @@ class NativeGame:
         seed: int = 0,
         starting_player: int | None = None,
         auto_single: bool = True,
-        max_turns: int = 100,
+        max_turns: int | None = None,
         log: bool = False,
         setup=None,
         start_step: str = "untap",
