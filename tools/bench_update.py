@@ -95,9 +95,11 @@ def main(argv=None) -> None:
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--iter-decisions", type=int, default=378_000)
     ap.add_argument("--capture", type=int, default=2, help="PPOConfig.capture (2: also compile the forward and losses)")
+    ap.add_argument("--gru-precision", choices=("fp32", "bf16"), default="fp32")
     ap.add_argument("--mode", default=None, choices=("eager", "padded", "graph"), help="ppo_update mode (default: graph on CUDA)")
     ap.add_argument("--profile", action="store_true", help="cProfile the timed epochs")
     ap.add_argument("--torch-profile", action="store_true", help="torch.profiler table (CUDA kernels) of the timed epochs")
+    ap.add_argument("--torch-profile-json", default=None, help="with --torch-profile: also write every kernel row (name, self CUDA us, calls) here, for tools/profile_breakdown.py")
     args = ap.parse_args(argv)
     if min(args.minibatch, args.epochs, args.warmup_epochs, args.warmup_updates, args.repeats) < 1:
         ap.error("minibatch, epochs, warmup epochs/updates and repeats must be positive")
@@ -132,7 +134,7 @@ def main(argv=None) -> None:
     net = PolicyNet(**config).to(dev)
     if args.init:
         load_partial(net, torch.load(args.init, map_location="cpu", weights_only=False)["model"])
-    cfg = PPOConfig(minibatch=args.minibatch, epochs=args.warmup_epochs, target_kl=None, capture=args.capture, precision=args.precision)
+    cfg = PPOConfig(minibatch=args.minibatch, epochs=args.warmup_epochs, target_kl=None, capture=args.capture, precision=args.precision, gru_precision=args.gru_precision)
     opt = make_optimizer(net.parameters(), cfg.lr, dev)
     learner = None
     if args.learner_devices:
@@ -201,6 +203,12 @@ def main(argv=None) -> None:
     print({k: round(v, 5) if isinstance(v, float) else v for k, v in stats.items()})
     if pr:
         pstats.Stats(pr).sort_stats("tottime").print_stats(25)
+    if tp and args.torch_profile_json:
+        import json
+
+        rows = [{"name": e.key, "cuda_us": e.self_device_time_total, "cpu_us": e.self_cpu_time_total, "calls": e.count} for e in tp.key_averages()]
+        with open(args.torch_profile_json, "w") as f:
+            json.dump({"steps": steps, "wall_s": dt, "rows": rows}, f)
     if tp:
         print(tp.key_averages().table(sort_by="cuda_time_total" if dev.type == "cuda" else "cpu_time_total", row_limit=40, max_name_column_width=60))
     if learner:

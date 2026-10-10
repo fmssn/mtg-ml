@@ -409,3 +409,34 @@ def test_captured_update_survives_emptying_the_cache(data):
         torch.cuda.empty_cache()
         junk = [torch.full((1 << 20,), float("nan"), device="cuda") for _ in range(64)]  # reuse what was freed
         del junk
+
+
+def test_gru_precision_is_validated_and_a_noop_on_the_cpu(data):
+    """`gru_precision="bf16"` only changes the CUDA path; on the CPU the update is the same."""
+    cfg = PPOConfig(epochs=1, minibatch=128, target_kl=None)
+    torch.manual_seed(0)
+    a = PolicyNet(hidden=32)
+    b = copy.deepcopy(a)
+    stats = [
+        ppo_update(n, make_optimizer(n.parameters(), cfg.lr, "cpu"), data, replace(cfg, gru_precision=g), gen=torch.Generator().manual_seed(0), mode="padded")
+        for n, g in ((a, "fp32"), (b, "bf16"))
+    ]
+    assert stats[0]["pg_loss"] == stats[1]["pg_loss"]
+    with pytest.raises(ValueError):
+        ppo_update(a, make_optimizer(a.parameters(), cfg.lr, "cpu"), data, replace(cfg, gru_precision="fp16"), mode="padded")
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuDNN BF16 GRU")
+def test_bf16_gru_update_stays_close_to_the_fp32_one(data):
+    """The BF16 GRU of the update (captured path) gives losses within BF16 noise of the FP32 GRU's."""
+    data = replace(data, logps=[lp + 0.3 * math.sin(i) for i, lp in enumerate(data.logps)])
+    torch.manual_seed(0)
+    nets = [PolicyNet(hidden=32).cuda()]
+    nets.append(copy.deepcopy(nets[0]))
+    stats = []
+    for n, g in zip(nets, ("fp32", "bf16")):
+        cfg = PPOConfig(epochs=1, minibatch=128, target_kl=None, capture=1, gru_precision=g)
+        stats.append(ppo_update(n, make_optimizer(n.parameters(), cfg.lr, "cuda"), data, cfg, device="cuda", gen=torch.Generator().manual_seed(0), mode="graph"))
+    for k in ("pg_loss", "v_loss", "entropy"):
+        assert stats[0][k] == pytest.approx(stats[1][k], rel=0.05, abs=1e-3), k

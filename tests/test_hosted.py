@@ -20,7 +20,7 @@ from starlette.testclient import TestClient  # noqa: E402
 from mtg_ml.hosted.app import create_app  # noqa: E402
 from mtg_ml.hosted.auth import AccessVerifier, AuthError  # noqa: E402
 from mtg_ml.hosted.config import ConfigError, HostedConfig  # noqa: E402
-from tests.test_play_offer import R7, r7_config, tiny7  # noqa: E402,F401 (fixture)
+from tests.test_play_offer import TINY, pilot_config, tiny7  # noqa: E402,F401 (fixture)
 
 TEAM = "https://team.cloudflareaccess.com"
 AUD = "aud-tag-123"
@@ -56,8 +56,8 @@ def keys():
 
 
 def write_offer(tmp_path, models):
-    """The packaged r7 offer, pinned to the tiny checkpoint, as a TOML file."""
-    cfg = r7_config(models)
+    """The packaged offer, pinned to the tiny checkpoint, as a TOML file."""
+    cfg = pilot_config(models)
     lines = [f"player_decks = {json.dumps(cfg['player_decks'])}", ""]
     for name, pin in cfg["models"].items():
         lines.append(f'[models."{name}"]')
@@ -108,7 +108,7 @@ class Server:
     def post(self, path, body=None, email=ALICE, token=None, headers=None, **kw):
         return self.c.post(path, json={} if body is None else body, headers={**self.h(email, token), **(headers or {})}, **kw)
 
-    def new(self, email=ALICE, deck="elves", opponent="r7-elves"):
+    def new(self, email=ALICE, deck="elves", opponent="r9-elves-pilot"):
         r = self.post("/api/live/new", {"deck": deck, "opponent": opponent}, email=email)
         assert r.status_code == 200, r.text
         v = r.json()
@@ -180,7 +180,7 @@ def test_config_from_env(tmp_path):
 
 def test_requests_need_a_valid_access_token(server):
     assert server.c.get("/healthz").status_code == 200
-    assert server.c.get("/healthz").json()["models"] == {R7: server.mgr.pinned[R7]["sha256"]}
+    assert server.c.get("/healthz").json()["models"] == {TINY: server.mgr.pinned[TINY]["sha256"]}
     for path in ("/", "/play/", "/api/replays", "/api/live/options"):
         r = server.c.get(path)
         assert r.status_code == 401 and r.json()["auth"], path
@@ -212,7 +212,7 @@ def test_games_belong_to_their_account(server):
     assert server.get(f"/api/live/{gid}/review", email=BOB, token=tok).status_code == 404
     # Alice without the token, or with another game's token: refused
     assert server.get(f"/api/live/{gid}").status_code == 403
-    _, gid2, tok2 = server.new(deck="tron", opponent="r8-tron-pilot")
+    _, gid2, tok2 = server.new(deck="tron", opponent="r9-tron-pilot")
     assert server.get(f"/api/live/{gid}", token=tok2).status_code == 403
     # the token in the URL is refused outright
     r = server.c.get(f"/api/live/{gid}?token={tok}", headers=server.h())
@@ -221,9 +221,9 @@ def test_games_belong_to_their_account(server):
 
 
 def test_player_seeds_and_dev_requests_are_refused(server):
-    r = server.post("/api/live/new", {"deck": "elves", "opponent": "r7-elves", "seed": 3})
+    r = server.post("/api/live/new", {"deck": "elves", "opponent": "r9-elves-pilot", "seed": 3})
     assert r.status_code == 400 and "seed" in r.json()["error"]
-    for body in ({"model": R7, "matchup": "jund_blue", "seat": 0}, {"scenario": "wildfire", "model": "scripted-bot"}, {"deck": "elves", "opponent": "nope"}):
+    for body in ({"model": TINY, "matchup": "jund_blue", "seat": 0}, {"scenario": "wildfire", "model": "scripted-bot"}, {"deck": "elves", "opponent": "nope"}):
         assert server.post("/api/live/new", body).status_code == 400, body
 
 
@@ -283,11 +283,11 @@ def test_capacity_per_account_and_global(server):
     mgr = server.mgr
     server.new()
     server.new()
-    r = server.post("/api/live/new", {"deck": "elves", "opponent": "r7-elves"})
+    r = server.post("/api/live/new", {"deck": "elves", "opponent": "r9-elves-pilot"})
     assert r.status_code == 429
     mgr.max_games = 3
     server.new(email=BOB)
-    r = server.post("/api/live/new", {"deck": "elves", "opponent": "r7-elves"}, email=BOB)
+    r = server.post("/api/live/new", {"deck": "elves", "opponent": "r9-elves-pilot"}, email=BOB)
     assert r.status_code == 503 and "full" in r.json()["error"]
 
 
@@ -333,8 +333,8 @@ def test_dev_user_needs_no_jwt_but_keeps_origin_checks(tmp_path, tiny7):  # noqa
     cfg = make_cfg(tmp_path, tiny7, dev_user="me@local", public_origin="", team_domain="", aud="", allowed_emails=frozenset())
     with TestClient(create_app(cfg, background=False), base_url="http://127.0.0.1:8080") as c:
         assert c.get("/api/live/options").json()["account"] == "me@local"
-        assert c.post("/api/live/new", json={"deck": "elves", "opponent": "r7-elves"}).status_code == 403  # no Origin
-        r = c.post("/api/live/new", json={"deck": "elves", "opponent": "r7-elves"}, headers={"Origin": "http://127.0.0.1:8080"})
+        assert c.post("/api/live/new", json={"deck": "elves", "opponent": "r9-elves-pilot"}).status_code == 403  # no Origin
+        r = c.post("/api/live/new", json={"deck": "elves", "opponent": "r9-elves-pilot"}, headers={"Origin": "http://127.0.0.1:8080"})
         assert r.status_code == 200
 
 
@@ -351,7 +351,7 @@ def test_zero_opponents_starts_healthy(tmp_path):
 def test_bad_pin_keeps_healthz_unready(tmp_path, tiny7):  # noqa: F811
     cfg = make_cfg(tmp_path, tiny7, dev_user="ci@local")
     text = cfg.play_config.read_text()
-    cfg.play_config.write_text(text.replace(r7_config(tiny7)["models"][R7]["sha256"], "0" * 64))
+    cfg.play_config.write_text(text.replace(pilot_config(tiny7)["models"][TINY]["sha256"], "0" * 64))
     with TestClient(create_app(cfg, background=False)) as c:
         r = c.get("/healthz")
         assert r.status_code == 503 and r.json()["status"] == "invalid"
