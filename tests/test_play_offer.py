@@ -9,7 +9,7 @@ import re
 import pytest
 
 from mtg_ml.engine import plan_for
-from mtg_ml.live import LiveError, LiveManager, load_play_config, matchup_for, sha256_file, validate_offer
+from mtg_ml.live import TESTED_LEVELS, LiveError, LiveManager, load_play_config, matchup_for, offer_text_problems, sha256_file, validate_offer
 from mtg_ml.match import matchup_decks
 
 from tests.test_live_proto import native_ok, play_out, prefer_plays
@@ -42,6 +42,52 @@ def test_every_ordered_pair_is_a_matchup_with_sideboard_plans():
             decks = matchup_decks(m[0])
             assert (decks[m[1]], decks[1 - m[1]]) == (mine, theirs)
             assert plan_for(mine, theirs).swaps and plan_for(theirs, mine).swaps
+
+
+def test_default_jund_opponent_is_the_pilot_and_testing_fields_are_valid():
+    cfg = load_play_config()
+    ids = [o["id"] for o in cfg["opponents"]]
+    assert ids[0] == "r8-jund-pilot" and {"r8-jund", "r7-jund"} <= set(ids)
+    pilot = cfg["models"]["r8-jund-pilot/policy"]
+    assert pilot["sha256"] == "71c758dcf4513deb3bc7021652410d7c573c366c97d8c01a4da1b5f036078379" and pilot["features"] == 7 and pilot["games"] == 3000320
+    assert pilot["trained_at"] == "889798b" and "ledger 20261010-r8-pilot-matrix" in pilot["evaluation"]
+    assert next(o for o in cfg["opponents"] if o["id"] == "r8-jund-pilot")["model"] == "r8-jund-pilot/policy"
+    for o in cfg["opponents"]:
+        assert o["tested"] in TESTED_LEVELS and o["description"].strip(), o["id"]
+    assert {o["id"] for o in cfg["opponents"] if o["tested"] == "experimental"} == {"r7-madness", "r7-affinity", "r7-elves", "r7-tron"}
+    assert sorted(cfg["recommended_matchup"]["decks"]) == ["jund_wildfire", "mono_blue_terror"]
+    assert offer_text_problems(cfg) == []
+
+
+def test_offer_text_problems():
+    base = {"opponents": [{"id": "x", "tested": "well", "description": "d"}], "recommended_matchup": {"decks": ["jund_wildfire", "elves"], "note": "n"}}
+    assert offer_text_problems(base) == [] and offer_text_problems({"opponents": [{"id": "x"}]}) == []  # the fields are optional
+    assert "tested must be one of" in offer_text_problems({"opponents": [{"id": "x", "tested": "great"}]})[0]
+    assert "description must be a string" in offer_text_problems({"opponents": [{"id": "x", "description": 3}]})[0]
+    for bad in (["jund_wildfire"], ["elves", "elves"], ["elves", "nope"], "elves"):
+        assert "recommended_matchup.decks" in offer_text_problems({"recommended_matchup": {"decks": bad}})[0]
+
+
+def test_options_carry_testing_and_recommendation():
+    cfg = copy.deepcopy(load_play_config())
+    cfg["opponents"] = [o for o in cfg["opponents"] if o["model"] == R7]
+    cfg["models"] = {R7: cfg["models"][R7]}
+    m = LiveManager(None, None, config=cfg, pinned={R7: cfg["models"][R7]})
+    opt = m.options()
+    assert opt["recommended_matchup"]["decks"] == [{"deck": "jund_wildfire", "title": "Jund Wildfire"}, {"deck": "mono_blue_terror", "title": "Mono Blue Terror"}]
+    assert "most tested" in opt["recommended_matchup"]["note"]
+    rec = {d["deck"]: d["recommended"] for d in opt["player_decks"]}
+    assert rec == {"jund_wildfire": ["r7-blue"], "mono_blue_terror": ["r7-jund"], "red_madness": [], "grixis_affinity": [], "elves": [], "tron": []}
+    by = {o["id"]: o for o in opt["opponents"]}
+    assert by["r7-blue"]["tested"] == "well" and by["r7-tron"]["tested"] == "experimental" and "Experimental" in by["r7-tron"]["description"]
+    # an older config without any of the fields still works
+    old = {"player_decks": cfg["player_decks"], "opponents": [{"id": "a", "label": "A", "model": R7, "deck": "elves"}]}
+    o2 = LiveManager(None, None, config=old, pinned={R7: {}}).options()
+    assert "recommended_matchup" not in o2 and o2["opponents"][0]["tested"] == "" and o2["opponents"][0]["description"] == ""
+    assert all(d["recommended"] == [] for d in o2["player_decks"])
+    # a recommended matchup nobody can play here is not shown
+    only = {**old, "recommended_matchup": {"decks": ["jund_wildfire", "mono_blue_terror"]}}
+    assert "recommended_matchup" not in LiveManager(None, None, config=only, pinned={R7: {}}).options()
 
 
 @pytest.fixture

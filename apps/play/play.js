@@ -2886,6 +2886,13 @@ async function openNewGame() {
   };
 }
 
+// How well an opponent is tested (play_config.toml `tested`).
+const TESTED = {
+  well: {label: 'Well tested', tip: 'Checked against the standing benchmark and the specialist bots'},
+  some: {label: 'Some testing', tip: 'Checked in some benchmarks, less than the main matchup'},
+  experimental: {label: 'Experimental', tip: 'Only checked by the self-play trust test; expect weaker or odd play'},
+};
+
 // The normal new-game screen: the decks and opponents this server offers (mtg_ml/play_config.toml).
 function newGamePlay(m, opt) {
   const last = loadJSON('mtgml-play-pick', {});
@@ -2893,10 +2900,11 @@ function newGamePlay(m, opt) {
   let foe = last.opponent;
   const draw = () => {
     const mine = opt.player_decks.find(d => d.deck === deck);
-    if (!mine || !mine.opponents.includes(foe)) foe = mine?.opponents[0];
+    if (!mine || !mine.opponents.includes(foe)) foe = mine?.recommended?.[0] || mine?.opponents[0];
+    const rec = opt.recommended_matchup, recDecks = (rec?.decks || []).map(x => x.deck), recFoes = mine?.recommended || [];
     m.innerHTML = `<div class="mbox newgame"><h2>New game</h2>
-      <div class="ngsec"><h3>Your deck</h3><div class="ngopts">${opt.player_decks.map(d => `<button type="button" class="ngopt ${d.deck === deck ? 'sel' : ''}" data-deck="${esc(d.deck)}" ${d.opponents.length ? '' : 'disabled'}><b>${esc(d.title)}</b><span>${d.opponents.length ? 'Best of three, sideboarded games 2 and 3' : 'No opponent for this deck yet'}</span></button>`).join('')}</div></div>
-      <div class="ngsec"><h3>Opponent</h3><div class="ngopts">${opt.opponents.map(o => `<button type="button" class="ngopt ${o.id === foe ? 'sel' : ''}" data-opp="${esc(o.id)}" ${mine?.opponents.includes(o.id) ? '' : 'disabled'}><b>${esc(o.label)}</b><span>${esc(o.note || `The model playing ${o.deck_title}`)}</span></button>`).join('') || '<div class="note">No opponent is available on this server.</div>'}</div></div>
+      <div class="ngsec"><h3>Your deck</h3><div class="ngopts">${opt.player_decks.map(d => `<button type="button" class="ngopt ${d.deck === deck ? 'sel' : ''}" data-deck="${esc(d.deck)}" ${d.opponents.length ? '' : 'disabled'}><b>${esc(d.title)}${recDecks.includes(d.deck) && d.recommended?.length ? ' <i class="ngtag rec">Recommended</i>' : ''}</b><span>${d.opponents.length ? 'Best of three, sideboarded games 2 and 3' : 'No opponent for this deck yet'}</span></button>`).join('')}</div></div>
+      <div class="ngsec"><h3>Opponent</h3>${recFoes.length && rec ? `<p class="ngrec">${esc(rec.note)}</p>` : ''}<div class="ngopts">${opt.opponents.map(o => `<button type="button" class="ngopt ${o.id === foe ? 'sel' : ''}" data-opp="${esc(o.id)}" ${mine?.opponents.includes(o.id) ? '' : 'disabled'}><b>${esc(o.label)}${recFoes.includes(o.id) ? ' <i class="ngtag rec">Recommended</i>' : ''}${TESTED[o.tested] ? ` <i class="ngtag ${o.tested}" title="${esc(TESTED[o.tested].tip)}">${TESTED[o.tested].label}</i>` : ''}</b><span>${esc(o.description || o.note || `The model playing ${o.deck_title}`)}</span></button>`).join('') || '<div class="note">No opponent is available on this server.</div>'}</div></div>
       <div style="display:flex;gap:10px;align-items:center"><button class="primary" id="bStart" ${deck && foe ? '' : 'disabled'}>Start game</button>${S.gid && !S.over ? '<button class="btn" type="button" id="bCancel">Back to the game</button>' : ''}<span class="err" id="newErr"></span></div>
       <p class="note" style="margin-top:14px">Space passes or confirms · drag cards to play them (or double-click) · click a land to tap it for mana · ? shows every control</p></div>`;
     m.querySelectorAll('[data-deck]').forEach(b => b.onclick = () => { deck = b.dataset.deck; draw(); });
