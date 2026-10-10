@@ -12,12 +12,12 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `best/jund_blue` | `r8-jund-blue` | Final specialist benchmark jund_vs_sblue 75.2/79.0 (r4-control 64.0/65.5), L1 238.6 (fs4-ft 212.5); a specialist, its trust test fails |
 | `best/blue_vs_jund` | `r4-control` | Blue as learner vs the Jund specialist 85.3/87.0 (specialist benchmark); r8-jund-blue 83.8/84.0 (level within +-5) |
 | `best/jund_jund` | `r8-jund-mirror` | Mirror vs the Jund specialist 83.0/88.5 (r7-lr075 57.8/68.5); forgets Blue |
-| `best/jund` | `r8-jund-pilot` | Deck vs field; beats r7-lr075 as Jund in all six pairings on paired seeds (sampled +10.1 to +28.0, mean +18.0; greedy mean +13.8), ledger 20261010-r8-pilot-matrix |
-| `best/blue` | `r7-lr075` | No deck-specific Blue model yet |
-| `best/madness` | `r7-lr075` | rm-1m is a one-matchup baseline, not a full model |
-| `best/affinity` | `r7-lr075` | Only full-matrix model |
-| `best/elves` | `r7-lr075` | Only full-matrix model |
-| `best/tron` | `r7-lr075` | Only full-matrix model; the trust test flags Tron as overrated |
+| `best/jund` | `r9-jund-pilot` | Round 2 pilot: beats r8-jund-pilot as Jund in all six pairings on paired seeds (sampled +7.7 mean, greedy +5.1), L1 168.8 (round 1 148.4), ledger 20261010-r9-pilots |
+| `best/blue` | `r9-blue-pilot` | Round 2 pilot: beats r8-blue-pilot as Blue in all six pairings (sampled +7.6 mean, greedy +4.5), L1 177.8 (round 1 160.0), ledger 20261010-r9-pilots |
+| `best/madness` | `r9-madness-pilot` | Round 2 pilot: beats r8-madness-pilot (sampled +5.8 mean, 6/6; greedy +2.3, 1/6), ledger 20261010-r9-pilots |
+| `best/affinity` | `r9-affinity-pilot` | Round 2 pilot: beats r8-affinity-pilot (sampled +6.5 mean, 6/6; greedy +3.5, 2/6), ledger 20261010-r9-pilots |
+| `best/elves` | `r9-elves-pilot` | Round 2 pilot: beats r8-elves-pilot (sampled +5.1 mean, 5/6; greedy +4.8, 2/6), ledger 20261010-r9-pilots |
+| `best/tron` | `r9-tron-pilot` | Round 2 pilot: beats r8-tron-pilot (sampled +4.0 mean, 4/6; greedy +5.4, 3/6), a weak gain; the trust test still flags Tron as overrated (+0.124), ledger 20261010-r9-pilots |
 | `play/jund` | `r8-jund-pilot` | Play site offer r8-jund-pilot, greedy (default Jund opponent): beats r7-lr075 as Jund in all six pairings, 67% vs the Blue specialist, 80% in the mirror. r8-jund (the Jund vs Blue specialist) and r7-jund (legacy) stay offered |
 | `play/blue` | `r8-blue-pilot` | Play site offer r8-blue-pilot, greedy (the only Blue opponent besides legacy Delver; replaces r7-blue): trained on all six Blue pairings, 74 to 77% against the Blue specialist bot in the mirror, 82% against the Jund specialist |
 | `play/madness` | `r7-lr075` | Play site offer r7-madness, greedy |
@@ -30,7 +30,6 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `r8-belief` | `r7-lr075` | does feature set 8 plus the belief head beat the lr075 trajectory at matched games |
 | `r9-base-h256` | `r7-lr075` | does a 40M-game run with the anti-cycling mix (self-play 0.35, PFSP) keep climbing past r7-lr075 and stop the past-snapshots-beat-final cycling |
 | `r9-base-h512` | `r9-base-h256` | does h512 at lr 5e-5 beat h256 at equal games on the same recipe and seed |
-| `r9-jund-pilot` | `r8-jund-pilot` | does a second round against frozen round-1 pilots (all six decks, same recipe) beat each round-1 pilot head to head and on the trust test |
 
 Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-pilot/policy` (the `r8-jund-pilot` opponent), `r8-jund-blue/policy` (the `r8-jund` opponent), `r8-blue-pilot/policy` (the `r8-blue-pilot` opponent), `r8-tron-pilot/policy` (the `r8-tron-pilot` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
 
@@ -56,12 +55,12 @@ Status: `running`, `stopped` (ended by hand), `finished` (ended, not yet archive
 | `r8-affinity-pilot` | `20261010-r8-fs7h256-dk-affinity-ft-r7-lr075-s8` | `r8-affinity-pilot`, `r8h1-20261010/r8-affinity-pilot`, `20261010-r8-affinity-pilot`, affinity pilot, `r8h1-20261010` | `r7-lr075` | `dk-affinity` | 3.00M |  |  | finished | not archived yet | pending |
 | `r8-elves-pilot` | `20261010-r8-fs7h256-dk-elves-ft-r7-lr075-s8` | `r8-elves-pilot`, `r8h2-20261010/r8-elves-pilot`, `20261010-r8-elves-pilot`, elves pilot, `r8h2-20261010` | `r7-lr075` | `dk-elves` | 3.00M |  |  | finished | not archived yet | pending |
 | `r8-tron-pilot` | `20261010-r8-fs7h256-dk-tron-ft-r7-lr075-s8` | `r8-tron-pilot`, `r8h2-20261010/r8-tron-pilot`, `20261010-r8-tron-pilot`, tron pilot, `r8h2-20261010` | `r7-lr075` | `dk-tron` | 3.00M |  |  | finished | not archived yet | pending |
-| `r9-jund-pilot` | `20261010-r9-fs7h256-dk-jund-ft-r8-jund-pilot-s8` | `r9-jund-pilot`, round 2 jund | `r8-jund-pilot` | `dk-jund` |  |  |  | planned |  | planned |
-| `r9-blue-pilot` | `20261010-r9-fs7h256-dk-blue-ft-r8-blue-pilot-s8` | `r9-blue-pilot`, round 2 blue | `r8-blue-pilot` | `dk-blue` |  |  |  | planned |  | planned |
-| `r9-madness-pilot` | `20261010-r9-fs7h256-dk-madness-ft-r8-madness-pilot-s8` | `r9-madness-pilot`, round 2 madness | `r8-madness-pilot` | `dk-madness` |  |  |  | planned |  | planned |
-| `r9-affinity-pilot` | `20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8` | `r9-affinity-pilot`, round 2 affinity | `r8-affinity-pilot` | `dk-affinity` |  |  |  | planned |  | planned |
-| `r9-elves-pilot` | `20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8` | `r9-elves-pilot`, round 2 elves | `r8-elves-pilot` | `dk-elves` |  |  |  | planned |  | planned |
-| `r9-tron-pilot` | `20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8` | `r9-tron-pilot`, round 2 tron | `r8-tron-pilot` | `dk-tron` |  |  |  | planned |  | planned |
+| `r9-jund-pilot` | `20261010-r9-fs7h256-dk-jund-ft-r8-jund-pilot-s8` | `r9-jund-pilot`, round 2 jund, `r9bp1w1-20261010/r9-jund-pilot` | `r8-jund-pilot` | `dk-jund` | 3.00M | 80.8 / 82.4 | 168.8 | archived | `20261010-r9-fs7h256-dk-jund-ft-r8-jund-pilot-s8` | [entry](ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots) |
+| `r9-blue-pilot` | `20261010-r9-fs7h256-dk-blue-ft-r8-blue-pilot-s8` | `r9-blue-pilot`, round 2 blue, `r9bp2w2-20261010/r9-blue-pilot` | `r8-blue-pilot` | `dk-blue` | 3.00M | 72.9 / 73.0 | 177.8 | archived | `20261010-r9-fs7h256-dk-blue-ft-r8-blue-pilot-s8` | [entry](ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots) |
+| `r9-madness-pilot` | `20261010-r9-fs7h256-dk-madness-ft-r8-madness-pilot-s8` | `r9-madness-pilot`, round 2 madness, `r9bp2w3-20261010/r9-madness-pilot` | `r8-madness-pilot` | `dk-madness` | 3.00M | 64.2 / 67.0 |  | archived | `20261010-r9-fs7h256-dk-madness-ft-r8-madness-pilot-s8` | [entry](ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots) |
+| `r9-affinity-pilot` | `20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8` | `r9-affinity-pilot`, round 2 affinity, `r9bp1w1-20261010/r9-affinity-pilot` | `r8-affinity-pilot` | `dk-affinity` | 3.00M | 86.4 / 86.9 |  | archived | `20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8` | [entry](ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots) |
+| `r9-elves-pilot` | `20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8` | `r9-elves-pilot`, round 2 elves, `r9bp2w1-20261010/r9-elves-pilot` | `r8-elves-pilot` | `dk-elves` | 3.00M | 68.5 / 68.4 |  | archived | `20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8` | [entry](ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots) |
+| `r9-tron-pilot` | `20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8` | `r9-tron-pilot`, round 2 tron, `r9bp2w1-20261010/r9-tron-pilot` | `r8-tron-pilot` | `dk-tron` | 3.00M | 61.7 / 62.2 |  | archived | `20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8` | [entry](ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots) |
 
 ### r9 base runs (running since 2026-10-10)
 

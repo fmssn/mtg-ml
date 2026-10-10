@@ -1553,20 +1553,21 @@
    "seed_recorded": true,
    "legacy": [
     "r9-jund-pilot",
-    "round 2 jund"
+    "round 2 jund",
+    "r9bp1w1-20261010/r9-jund-pilot"
    ],
    "parent": "r8-jund-pilot",
-   "games": 0,
-   "bench_sampled": null,
-   "bench_greedy": null,
-   "l1": null,
-   "l1_at": null,
-   "status": "planned",
-   "archive": null,
-   "ledger": "",
+   "games": 3000320,
+   "bench_sampled": 0.808,
+   "bench_greedy": 0.824,
+   "l1": 168.8,
+   "l1_at": "3.0M",
+   "status": "archived",
+   "archive": "h100-private:~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-jund-ft-r8-jund-pilot-s8",
+   "ledger": "ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots",
    "ledger_id": "20261010-r9-jund-pilot",
    "kind": "train",
-   "notes": "Round 2 of the per-deck pilot league (planned; date is the planned launch day, fix it if the launch slips): continues r8-jund-pilot on all its pairings, with the other five decks played by their frozen round-1 finals (--opponent-models, --opponent-frac 1; mirrors stay self-play plus pool). Same flags and 3M games as round 1, launcher arms L-Q of tools/r8_campaign.py (arm L)."
+   "notes": "Round 2 per-deck pilot (all six decks; the other decks played by the frozen round-1 pilots, --opponent-models, --opponent-frac 1), 3.0M games, lr 1.5e-5 -> 1.5e-6 (relaunch; the first attempt at 7.5e-5 degraded the pilots and was stopped), code-r2 b33b6cd, final policy v01465. Head to head vs r8-jund-pilot, same deck, sampled +7.7 points mean over six opponents (6/6 clear of zero), greedy +5.1 (2/6). Bench and L1 are on jund_blue (round 1: 74.3 / 77.7, L1 148.4). Trained on h100-private; archived with its pool snapshots."
   },
   {
    "handle": "r9-blue-pilot",
@@ -1581,20 +1582,21 @@
    "seed_recorded": true,
    "legacy": [
     "r9-blue-pilot",
-    "round 2 blue"
+    "round 2 blue",
+    "r9bp2w2-20261010/r9-blue-pilot"
    ],
    "parent": "r8-blue-pilot",
-   "games": 0,
-   "bench_sampled": null,
-   "bench_greedy": null,
-   "l1": null,
-   "l1_at": null,
-   "status": "planned",
-   "archive": null,
-   "ledger": "",
+   "games": 3000320,
+   "bench_sampled": 0.729,
+   "bench_greedy": 0.73,
+   "l1": 177.8,
+   "l1_at": "3.0M",
+   "status": "archived",
+   "archive": "h100-private:~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-blue-ft-r8-blue-pilot-s8",
+   "ledger": "ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots",
    "ledger_id": "20261010-r9-blue-pilot",
    "kind": "train",
-   "notes": "Round 2 of the per-deck pilot league (planned; date is the planned launch day, fix it if the launch slips): continues r8-blue-pilot on all its pairings, with the other five decks played by their frozen round-1 finals (--opponent-models, --opponent-frac 1; mirrors stay self-play plus pool). Same flags and 3M games as round 1, launcher arms L-Q of tools/r8_campaign.py (arm M)."
+   "notes": "Round 2 per-deck pilot (all six decks; the other decks played by the frozen round-1 pilots, --opponent-models, --opponent-frac 1), 3.0M games, lr 1.5e-5 -> 1.5e-6 (relaunch; the first attempt at 7.5e-5 degraded the pilots and was stopped), code-r2 b33b6cd, final policy v01465. Head to head vs r8-blue-pilot, same deck, sampled +7.6 points mean over six opponents (6/6 clear of zero), greedy +4.5 (2/6). Bench/L1 are Jund vs the Blue bot, so they measure the retained Jund play, not this deck (round 1 77.0 / 78.8, L1 160.0). Trained on h100-private2; pool snapshots stay on h100-private2 (not copied)."
   },
   {
    "handle": "r9-madness-pilot",
@@ -1609,20 +1611,21 @@
    "seed_recorded": true,
    "legacy": [
     "r9-madness-pilot",
-    "round 2 madness"
+    "round 2 madness",
+    "r9bp2w3-20261010/r9-madness-pilot"
    ],
    "parent": "r8-madness-pilot",
-   "games": 0,
-   "bench_sampled": null,
-   "bench_greedy": null,
+   "games": 3000320,
+   "bench_sampled": 0.642,
+   "bench_greedy": 0.67,
    "l1": null,
    "l1_at": null,
-   "status": "planned",
-   "archive": null,
-   "ledger": "",
+   "status": "archived",
+   "archive": "h100-private:~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-madness-ft-r8-madness-pilot-s8",
+   "ledger": "ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots",
    "ledger_id": "20261010-r9-madness-pilot",
    "kind": "train",
-   "notes": "Round 2 of the per-deck pilot league (planned; date is the planned launch day, fix it if the launch slips): continues r8-madness-pilot on all its pairings, with the other five decks played by their frozen round-1 finals (--opponent-models, --opponent-frac 1; mirrors stay self-play plus pool). Same flags and 3M games as round 1, launcher arms L-Q of tools/r8_campaign.py (arm N)."
+   "notes": "Round 2 per-deck pilot (all six decks; the other decks played by the frozen round-1 pilots, --opponent-models, --opponent-frac 1), 3.0M games, lr 1.5e-5 -> 1.5e-6 (relaunch; the first attempt at 7.5e-5 degraded the pilots and was stopped), code-r2 b33b6cd, final policy v01465. Head to head vs r8-madness-pilot, same deck, sampled +5.8 points mean over six opponents (6/6 clear of zero), greedy +2.3 (1/6). Bench/L1 are Jund vs the Blue bot, so they measure the retained Jund play, not this deck (round 1 67.1 / 71.3). Trained on h100-private2; pool snapshots stay on h100-private2 (not copied)."
   },
   {
    "handle": "r9-affinity-pilot",
@@ -1637,20 +1640,21 @@
    "seed_recorded": true,
    "legacy": [
     "r9-affinity-pilot",
-    "round 2 affinity"
+    "round 2 affinity",
+    "r9bp1w1-20261010/r9-affinity-pilot"
    ],
    "parent": "r8-affinity-pilot",
-   "games": 0,
-   "bench_sampled": null,
-   "bench_greedy": null,
+   "games": 3000320,
+   "bench_sampled": 0.864,
+   "bench_greedy": 0.869,
    "l1": null,
    "l1_at": null,
-   "status": "planned",
-   "archive": null,
-   "ledger": "",
+   "status": "archived",
+   "archive": "h100-private:~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8",
+   "ledger": "ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots",
    "ledger_id": "20261010-r9-affinity-pilot",
    "kind": "train",
-   "notes": "Round 2 of the per-deck pilot league (planned; date is the planned launch day, fix it if the launch slips): continues r8-affinity-pilot on all its pairings, with the other five decks played by their frozen round-1 finals (--opponent-models, --opponent-frac 1; mirrors stay self-play plus pool). Same flags and 3M games as round 1, launcher arms L-Q of tools/r8_campaign.py (arm O)."
+   "notes": "Round 2 per-deck pilot (all six decks; the other decks played by the frozen round-1 pilots, --opponent-models, --opponent-frac 1), 3.0M games, lr 1.5e-5 -> 1.5e-6 (relaunch; the first attempt at 7.5e-5 degraded the pilots and was stopped), code-r2 b33b6cd, final policy v01465. Head to head vs r8-affinity-pilot, same deck, sampled +6.5 points mean over six opponents (6/6 clear of zero), greedy +3.5 (2/6). Bench/L1 are Jund vs the Blue bot, so they measure the retained Jund play, not this deck (round 1 85.9 / 87.4). Trained on h100-private; archived with its pool snapshots."
   },
   {
    "handle": "r9-elves-pilot",
@@ -1665,20 +1669,21 @@
    "seed_recorded": true,
    "legacy": [
     "r9-elves-pilot",
-    "round 2 elves"
+    "round 2 elves",
+    "r9bp2w1-20261010/r9-elves-pilot"
    ],
    "parent": "r8-elves-pilot",
-   "games": 0,
-   "bench_sampled": null,
-   "bench_greedy": null,
+   "games": 3000320,
+   "bench_sampled": 0.685,
+   "bench_greedy": 0.684,
    "l1": null,
    "l1_at": null,
-   "status": "planned",
-   "archive": null,
-   "ledger": "",
+   "status": "archived",
+   "archive": "h100-private:~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8",
+   "ledger": "ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots",
    "ledger_id": "20261010-r9-elves-pilot",
    "kind": "train",
-   "notes": "Round 2 of the per-deck pilot league (planned; date is the planned launch day, fix it if the launch slips): continues r8-elves-pilot on all its pairings, with the other five decks played by their frozen round-1 finals (--opponent-models, --opponent-frac 1; mirrors stay self-play plus pool). Same flags and 3M games as round 1, launcher arms L-Q of tools/r8_campaign.py (arm P)."
+   "notes": "Round 2 per-deck pilot (all six decks; the other decks played by the frozen round-1 pilots, --opponent-models, --opponent-frac 1), 3.0M games, lr 1.5e-5 -> 1.5e-6 (relaunch; the first attempt at 7.5e-5 degraded the pilots and was stopped), code-r2 b33b6cd, final policy v01465. Head to head vs r8-elves-pilot, same deck, sampled +5.1 points mean over six opponents (5/6 clear of zero), greedy +4.8 (2/6). Bench/L1 are Jund vs the Blue bot, so they measure the retained Jund play, not this deck (round 1 68.0 / 69.9). Trained on h100-private2; pool snapshots stay on h100-private2 (not copied)."
   },
   {
    "handle": "r9-tron-pilot",
@@ -1693,20 +1698,21 @@
    "seed_recorded": true,
    "legacy": [
     "r9-tron-pilot",
-    "round 2 tron"
+    "round 2 tron",
+    "r9bp2w1-20261010/r9-tron-pilot"
    ],
    "parent": "r8-tron-pilot",
-   "games": 0,
-   "bench_sampled": null,
-   "bench_greedy": null,
+   "games": 3000320,
+   "bench_sampled": 0.617,
+   "bench_greedy": 0.622,
    "l1": null,
    "l1_at": null,
-   "status": "planned",
-   "archive": null,
-   "ledger": "",
+   "status": "archived",
+   "archive": "h100-private:~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8",
+   "ledger": "ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots",
    "ledger_id": "20261010-r9-tron-pilot",
    "kind": "train",
-   "notes": "Round 2 of the per-deck pilot league (planned; date is the planned launch day, fix it if the launch slips): continues r8-tron-pilot on all its pairings, with the other five decks played by their frozen round-1 finals (--opponent-models, --opponent-frac 1; mirrors stay self-play plus pool). Same flags and 3M games as round 1, launcher arms L-Q of tools/r8_campaign.py (arm Q)."
+   "notes": "Round 2 per-deck pilot (all six decks; the other decks played by the frozen round-1 pilots, --opponent-models, --opponent-frac 1), 3.0M games, lr 1.5e-5 -> 1.5e-6 (relaunch; the first attempt at 7.5e-5 degraded the pilots and was stopped), code-r2 b33b6cd, final policy v01465. Head to head vs r8-tron-pilot, same deck, sampled +4.0 points mean over six opponents (4/6 clear of zero), greedy +5.4 (3/6). Bench/L1 are Jund vs the Blue bot, so they measure the retained Jund play, not this deck (round 1 61.1 / 63.3). Trained on h100-private2; pool snapshots stay on h100-private2 (not copied)."
   },
   {
    "handle": "r9-base-h256",
@@ -1781,28 +1787,28 @@
    "note": "Mirror vs the Jund specialist 83.0/88.5 (r7-lr075 57.8/68.5); forgets Blue"
   },
   "best/jund": {
-   "handle": "r8-jund-pilot",
-   "note": "Deck vs field; beats r7-lr075 as Jund in all six pairings on paired seeds (sampled +10.1 to +28.0, mean +18.0; greedy mean +13.8), ledger 20261010-r8-pilot-matrix"
+   "handle": "r9-jund-pilot",
+   "note": "Round 2 pilot: beats r8-jund-pilot as Jund in all six pairings on paired seeds (sampled +7.7 mean, greedy +5.1), L1 168.8 (round 1 148.4), ledger 20261010-r9-pilots"
   },
   "best/blue": {
-   "handle": "r7-lr075",
-   "note": "No deck-specific Blue model yet"
+   "handle": "r9-blue-pilot",
+   "note": "Round 2 pilot: beats r8-blue-pilot as Blue in all six pairings (sampled +7.6 mean, greedy +4.5), L1 177.8 (round 1 160.0), ledger 20261010-r9-pilots"
   },
   "best/madness": {
-   "handle": "r7-lr075",
-   "note": "rm-1m is a one-matchup baseline, not a full model"
+   "handle": "r9-madness-pilot",
+   "note": "Round 2 pilot: beats r8-madness-pilot (sampled +5.8 mean, 6/6; greedy +2.3, 1/6), ledger 20261010-r9-pilots"
   },
   "best/affinity": {
-   "handle": "r7-lr075",
-   "note": "Only full-matrix model"
+   "handle": "r9-affinity-pilot",
+   "note": "Round 2 pilot: beats r8-affinity-pilot (sampled +6.5 mean, 6/6; greedy +3.5, 2/6), ledger 20261010-r9-pilots"
   },
   "best/elves": {
-   "handle": "r7-lr075",
-   "note": "Only full-matrix model"
+   "handle": "r9-elves-pilot",
+   "note": "Round 2 pilot: beats r8-elves-pilot (sampled +5.1 mean, 5/6; greedy +4.8, 2/6), ledger 20261010-r9-pilots"
   },
   "best/tron": {
-   "handle": "r7-lr075",
-   "note": "Only full-matrix model; the trust test flags Tron as overrated"
+   "handle": "r9-tron-pilot",
+   "note": "Round 2 pilot: beats r8-tron-pilot (sampled +4.0 mean, 4/6; greedy +5.4, 3/6), a weak gain; the trust test still flags Tron as overrated (+0.124), ledger 20261010-r9-pilots"
   },
   "play/jund": {
    "handle": "r8-jund-pilot",
@@ -1834,11 +1840,6 @@
    "handle": "r8-belief",
    "vs": "r7-lr075",
    "question": "does feature set 8 plus the belief head beat the lr075 trajectory at matched games"
-  },
-  {
-   "handle": "r9-jund-pilot",
-   "vs": "r8-jund-pilot",
-   "question": "does a second round against frozen round-1 pilots (all six decks, same recipe) beat each round-1 pilot head to head and on the trust test"
   },
   {
    "handle": "r9-base-h256",
@@ -1899,6 +1900,42 @@
    "role": "play/tron",
    "handle": "r8-tron-pilot",
    "note": "Replaces r7-lr075 (the r7-tron opponent) on the play site: trained on all six Tron pairings; six-pilot trust test Tron bias +0.13; Tron audit (PR #108), game 1, 40 games each, Tron pilot win rate vs Jund 0.53, Blue 0.65, Madness 0.57, Affinity 0.75, Elves 0.35"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "best/jund",
+   "handle": "r9-jund-pilot",
+   "note": "Round 2 pilot: beats r8-jund-pilot as Jund in all six pairings on paired seeds (sampled +7.7 mean, greedy +5.1), L1 168.8 (round 1 148.4), ledger 20261010-r9-pilots"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "best/blue",
+   "handle": "r9-blue-pilot",
+   "note": "Round 2 pilot: beats r8-blue-pilot as Blue in all six pairings (sampled +7.6 mean, greedy +4.5), L1 177.8 (round 1 160.0), ledger 20261010-r9-pilots"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "best/madness",
+   "handle": "r9-madness-pilot",
+   "note": "Round 2 pilot: beats r8-madness-pilot (sampled +5.8 mean, 6/6; greedy +2.3, 1/6), ledger 20261010-r9-pilots"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "best/affinity",
+   "handle": "r9-affinity-pilot",
+   "note": "Round 2 pilot: beats r8-affinity-pilot (sampled +6.5 mean, 6/6; greedy +3.5, 2/6), ledger 20261010-r9-pilots"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "best/elves",
+   "handle": "r9-elves-pilot",
+   "note": "Round 2 pilot: beats r8-elves-pilot (sampled +5.1 mean, 5/6; greedy +4.8, 2/6), ledger 20261010-r9-pilots"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "best/tron",
+   "handle": "r9-tron-pilot",
+   "note": "Round 2 pilot: beats r8-tron-pilot (sampled +4.0 mean, 4/6; greedy +5.4, 3/6), a weak gain; the trust test still flags Tron as overrated (+0.124), ledger 20261010-r9-pilots"
   }
  ]
 }
