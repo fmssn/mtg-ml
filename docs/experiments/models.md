@@ -28,6 +28,7 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | in flight | compared against | question |
 |---|---|---|
 | `r8-belief` | `r7-lr075` | does feature set 8 plus the belief head beat the lr075 trajectory at matched games |
+| `r10-jund-pilot` | `r9-jund-pilot` | does a third round (frozen round-2 opponents, lr 1.5e-5 to 1.5e-6) beat each round-2 pilot head to head and on the trust test |
 | `r9-base-h256` | `r7-lr075` | does a 40M-game run with the anti-cycling mix (self-play 0.35, PFSP) keep climbing past r7-lr075 and stop the past-snapshots-beat-final cycling |
 | `r9-base-h512` | `r9-base-h256` | does h512 at lr 5e-5 beat h256 at equal games on the same recipe and seed |
 
@@ -61,6 +62,12 @@ Status: `running`, `stopped` (ended by hand), `finished` (ended, not yet archive
 | `r9-affinity-pilot` | `20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8` | `r9-affinity-pilot`, round 2 affinity, `r9bp1w1-20261010/r9-affinity-pilot` | `r8-affinity-pilot` | `dk-affinity` | 3.00M | 86.4 / 86.9 |  | archived | `20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8` | [entry](ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots) |
 | `r9-elves-pilot` | `20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8` | `r9-elves-pilot`, round 2 elves, `r9bp2w1-20261010/r9-elves-pilot` | `r8-elves-pilot` | `dk-elves` | 3.00M | 68.5 / 68.4 |  | archived | `20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8` | [entry](ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots) |
 | `r9-tron-pilot` | `20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8` | `r9-tron-pilot`, round 2 tron, `r9bp2w1-20261010/r9-tron-pilot` | `r8-tron-pilot` | `dk-tron` | 3.00M | 61.7 / 62.2 |  | archived | `20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8` | [entry](ledger.md#20261010-r9-pilots--round-2-per-deck-pilots-of-all-six-decks-fine-tuned-against-the-frozen-round-1-pilots) |
+| `r10-jund-pilot` | `20261010-r10-fs7h256-dk-jund-ft-r9-jund-pilot-s8` | `r10-jund-pilot`, round 3 jund | `r9-jund-pilot` | `dk-jund` |  |  |  | planned |  | planned |
+| `r10-blue-pilot` | `20261010-r10-fs7h256-dk-blue-ft-r9-blue-pilot-s8` | `r10-blue-pilot`, round 3 blue | `r9-blue-pilot` | `dk-blue` |  |  |  | planned |  | planned |
+| `r10-madness-pilot` | `20261010-r10-fs7h256-dk-madness-ft-r9-madness-pilot-s8` | `r10-madness-pilot`, round 3 madness | `r9-madness-pilot` | `dk-madness` |  |  |  | planned |  | planned |
+| `r10-affinity-pilot` | `20261010-r10-fs7h256-dk-affinity-ft-r9-affinity-pilot-s8` | `r10-affinity-pilot`, round 3 affinity | `r9-affinity-pilot` | `dk-affinity` |  |  |  | planned |  | planned |
+| `r10-elves-pilot` | `20261010-r10-fs7h256-dk-elves-ft-r9-elves-pilot-s8` | `r10-elves-pilot`, round 3 elves | `r9-elves-pilot` | `dk-elves` |  |  |  | planned |  | planned |
+| `r10-tron-pilot` | `20261010-r10-fs7h256-dk-tron-ft-r9-tron-pilot-s8` | `r10-tron-pilot`, round 3 tron | `r9-tron-pilot` | `dk-tron` |  |  |  | planned |  | planned |
 
 ### r9 base runs (running since 2026-10-10)
 

@@ -40,3 +40,23 @@ def test_round1_finals_are_checked_against_the_manifest(tmp_path):
     (tmp_path / "tron.pt").write_bytes(b"changed")
     with pytest.raises(ValueError):
         rc.round1_finals(tmp_path)
+
+
+FINALS2 = {deck: Path(f"/p/round2/{deck}.pt") for deck in rc.PILOT_MIX}
+ROUND2_OF = {"R": "L", "S": "M", "T": "N", "U": "O", "V": "P", "W": "Q"}
+
+
+@pytest.mark.parametrize("arm", sorted(rc.ROUND3))
+def test_round3_differs_from_round2_only_in_init_opponents_and_lr(arm):
+    r3, r2 = flags(arm, FINALS2), flags(ROUND2_OF[arm])
+    deck = rc.ROUND3[arm]
+    assert (r3.pop("ppo-lr"), r3.pop("ppo-lr-final")) == (1.5e-5, 1.5e-6)
+    assert (r2.pop("ppo-lr"), r2.pop("ppo-lr-final")) == (7.5e-5, 7.5e-6)
+    assert r3.pop("init") == f"/p/round2/{deck}.pt" and r2.pop("init") == f"/p/round1/{deck}.pt"
+    assert r3.pop("opponent-models") == r2.pop("opponent-models").replace("/round1/", "/round2/")
+    assert r3 == r2  # --ppo-epochs 4, minibatch 2048, mix, games, seed, slots unchanged
+    assert flags(arm, FINALS2)["ppo-epochs"] == 4 and flags(arm, FINALS2)["ppo-minibatch"] == 2048
+
+
+def test_round3_arms_are_named_by_the_scheme():
+    assert [rc.ARMS[a] for a in "RSTUVW"] == [f"r10-{d}-pilot" for d in ("jund", "blue", "madness", "affinity", "elves", "tron")]
