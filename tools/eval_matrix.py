@@ -100,6 +100,7 @@ def main(argv=None) -> None:
         ap.error("--games must be a multiple of 4 (4 games per seed: both starts, both seats) and at least 8")
     os.environ[ENV_VAR] = engine_name(args.engine)
     out = {
+        "deck": args.deck,
         "candidate": args.candidate,
         "baseline": args.baseline,
         "games": args.games,
