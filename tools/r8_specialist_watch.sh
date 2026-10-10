@@ -24,6 +24,8 @@ while true; do
         # policy/ keeps ~3 files at a 15-30 s cadence; the newest may still be written, so take the second newest if >20 s old
         policy=$(find "$run/policy" -name '*.pt' 2>/dev/null | sort | tail -n2 | head -n1)
         [ "$(find "$run/policy" -name '*.pt' 2>/dev/null | wc -l)" -ge 2 ] && [ -n "$policy" ] && [ -n "$(find "$policy" -mmin +0.3)" ] || policy=""
+        # fast runs rewrite policy/ every few seconds, so nothing is ever old enough there: fall back to the newest pool snapshot
+        [ -n "$policy" ] || policy=$(find "$run/pool" -name "*.pt" -mmin +0.3 2>/dev/null | sort | tail -n1)
         if [ -n "$policy" ]; then
             tag=$(printf '%09d' "$games")
             sha=$(sha256sum "$policy" | cut -c1-16)

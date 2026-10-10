@@ -28,6 +28,8 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | in flight | compared against | question |
 |---|---|---|
 | `r8-belief` | `r7-lr075` | does feature set 8 plus the belief head beat the lr075 trajectory at matched games |
+| `r9-base-h256` | `r7-lr075` | does a 40M-game run with the anti-cycling mix (self-play 0.35, PFSP) keep climbing past r7-lr075 and stop the past-snapshots-beat-final cycling |
+| `r9-base-h512` | `r9-base-h256` | does h512 at lr 5e-5 beat h256 at equal games on the same recipe and seed |
 | `r9-jund-pilot` | `r8-jund-pilot` | does a second round against frozen round-1 pilots (all six decks, same recipe) beat each round-1 pilot head to head and on the trust test |
 
 Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-pilot/policy` (the `r8-jund-pilot` opponent), `r8-jund-blue/policy` (the `r8-jund` opponent), `r8-blue-pilot/policy` (the `r8-blue-pilot` opponent), `r8-tron-pilot/policy` (the `r8-tron-pilot` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
@@ -60,6 +62,13 @@ Status: `running`, `stopped` (ended by hand), `finished` (ended, not yet archive
 | `r9-affinity-pilot` | `20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8` | `r9-affinity-pilot`, round 2 affinity | `r8-affinity-pilot` | `dk-affinity` |  |  |  | planned |  | planned |
 | `r9-elves-pilot` | `20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8` | `r9-elves-pilot`, round 2 elves | `r8-elves-pilot` | `dk-elves` |  |  |  | planned |  | planned |
 | `r9-tron-pilot` | `20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8` | `r9-tron-pilot`, round 2 tron | `r8-tron-pilot` | `dk-tron` |  |  |  | planned |  | planned |
+
+### r9 base runs (running since 2026-10-10)
+
+| handle | run ID | legacy names | parent | scope | games | bench s/g | L1 | status | archive (`h100-private3:~/mtg-ml-base/archive/`) | ledger |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `r9-base-h256` | `20261010-r9-fs7h256-all-scratch-base-s10` | `20261010-r9-base` |  | `all` | 0 |  |  | running | not archived yet | [entry](ledger.md#20261010-r9-base--two-long-base-model-runs-from-scratch-h256-and-h512-with-an-anti-cycling-opponent-mix) |
+| `r9-base-h512` | `20261010-r9-fs7h512-all-scratch-base-s10` | `20261010-r9-base` |  | `all` | 0 |  |  | running | not archived yet | [entry](ledger.md#20261010-r9-base--two-long-base-model-runs-from-scratch-h256-and-h512-with-an-anti-cycling-opponent-mix) |
 
 ### r7 and earlier, newest first
 
