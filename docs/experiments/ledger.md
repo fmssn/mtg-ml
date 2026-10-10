@@ -20,6 +20,65 @@ Machine: h100-private4 (8x H100, 128 CPUs), 2 GPUs and 32 CPUs per arm, arms run
 Reading: mb4096, mb8192, gru-bf16 and mb4096-gru are equal to base within noise on L1, head to head and benchmark. ep2 is clearly ahead at equal games (L1 +56, h2h +0.07, benchmark +7 points, ahead from the first evaluation at 250k games), consistent with the 4-epoch update over-fitting each batch. Caveats: one seed per arm; in the ep2 head to head the opponent-side cells fall (base plays the other decks worse against ep2). Replicate with a second seed (and ep3) before trusting +56 Elo as the effect size. PR #116 (featurize, +55% rollout) is merged, so the rollout gets faster and the update becomes the bound again; every update-side saving gains value. Production defaults are unchanged.
 
 Packing (h100-private3 next to `r9-base-h256` / `h512`, which were not touched): three runs per box fit with no measurable production loss when the third run's workers are pinned to idle cores; a fourth does not (details in throughput.md section 3).
+## 20261010-r9-pilots · round 2 per-deck pilots of all six decks, fine-tuned against the frozen round-1 pilots
+
+Question: does a second round of per-deck fine-tuning, each deck's pilot training against the five other decks played by the frozen round-1 pilots, beat its round-1 pilot head to head, and does it fix the round-1 trust test (8/14 pairings inside, Jund -0.09 and Tron +0.13 bias, one exploitable direction red_madness over elves)?
+
+- **Verdict: adopt all six round-2 pilots as `best/<deck>`** ([models.md](models.md)); Tron is the weakest case.
+  - Head to head against the round-1 pilot of the same deck, sampled: every deck is ahead, mean +4.0 (Tron) to +7.7 (Jund) points over the six opponent decks, 33 of 36 pairings clear of zero. Greedy has the same sign everywhere (mean +2.3 to +5.4) but only 12 of 36 pairings are clear.
+  - Trust test with the six round-2 pilots (same flags as round 1): per pairing 9/14 inside (round 1: 8/14), 2 above and 3 below (1 above, 5 below). Exploitability **passes**: the round-1 direction red_madness over elves fell from 0.775 to 0.575, no clearly exploitable direction, max pool win rate 0.600 (tron over affinity, not clear). The deck-bias check still fails because of Tron (+0.124, round 1 +0.129); Jund (-0.078, round 1 -0.091) is no longer flagged. Overall still FAIL.
+  - Caveat for the head to head: round 2 trained against the frozen round-1 pilots, so the test is on its training opponents; the other-seat delta (does the candidate also play the opposing deck better) is about zero, as expected, since that seat was not trained.
+- **Runs** (handle, run ID, machine): `r9-jund-pilot` `20261010-r9-fs7h256-dk-jund-ft-r8-jund-pilot-s8` and `r9-affinity-pilot` (`...dk-affinity-ft-r8-affinity-pilot-s8`) on h100-private (campaign `r9bp1w1-20261010`); `r9-elves-pilot`, `r9-tron-pilot` (`r9bp2w1-20261010`), `r9-blue-pilot` (`r9bp2w2-20261010`) and `r9-madness-pilot` (`r9bp2w3-20261010`) on h100-private2. Each is the fine-tune of its round-1 pilot (`--init ~/mtg-ml-r8/parents/round1/<deck>.pt`, the round-1 final checkpoints), seed 8, 3,000,320 games (1465 iterations), 2.1 to 6.1 hours.
+- **Flags and code**: code `~/mtg-ml-r8/code-r2` at `b33b6cd612f2a13b2c4c635fe908e47389d1a960`; the r8 pilot recipe (`tools/r8_campaign.py` flags, set 7, h256, 2048 games per iteration, bf16, capture 2, target KL 0.03, `--postboard-frac 0.2`, standard evaluation every 250k games) plus `--opponent-models jund_wildfire=...,mono_blue_terror=...,red_madness=...,grixis_affinity=...,elves=...,tron=... ` (the other five decks' round-1 pilots, the pilot's own deck excluded) and `--opponent-frac 1.0`; matchup mix `<deck>_<x>:1` over the six pairings; `--ppo-lr 1.5e-05 --ppo-lr-final 1.5e-06 --lr-anneal-games 3000000` (linear). Exact commands in each archive's `campaign.json` (launch.txt).
+- **lr relaunch**: the campaign was first launched at the round-1 lr (7.5e-5 -> 7.5e-6, `campaign.prepared.json`) and degraded the pilots. Jund (`r9p1w1-20261010`, h100-private): L1 148 at the parent, 18.1 at 252k games and -29.8 at 502k, benchmark 63.3 / 74.2 (parent 74.3 / 77.7), win rate against the frozen round-1 pilots 31% at the stop (643k games). Affinity stopped at 940k games with 33% against the frozen pilots. Elves and Tron (`r9p2w1-20261010`, h100-private2) were stopped at 1.30M and 1.07M games (48% and 52% against the frozen pilots). All four were killed by hand (exit 143) and relaunched at one fifth of the lr (`campaign.json` patch: `--ppo-lr 1.5e-5 --ppo-lr-final 1.5e-6`, note in the file; the original is in `campaign.prepared.json`, kept in each archive). There are no failed-attempt directories for Blue and Madness. The failed run directories stay on the boxes, not archived. Verdict on the 7.5e-5 attempt: **reject** (a full lr on top of an already annealed pilot undoes it; 1.5e-5 -> 1.5e-6 keeps it).
+- **Final numbers** (benchmark and L1 are the standing Jund-vs-Blue-bot ones, so for the five non-Jund pilots they show how much Jund play the checkpoint kept, not how well it plays its deck; 1,000 games per mode, last in-training evaluation at 3.0M, L1 only exists for the runs with the Jund ladder on):
+
+| pilot | bench sampled / greedy (round 1) | L1 (round 1) | win rate vs the frozen round-1 pilots, last iteration (training games) |
+|---|---|---|---|
+| `r9-jund-pilot` | 80.8 / 82.4 (74.3 / 77.7) | 168.8 (148.4) | 48.0% |
+| `r9-blue-pilot` | 72.9 / 73.0 (77.0 / 78.8) | 177.8 (160.0) | 58.5% |
+| `r9-madness-pilot` | 64.2 / 67.0 (67.1 / 71.3) | | 67.1% |
+| `r9-affinity-pilot` | 86.4 / 86.9 (85.9 / 87.4) | | 46.6% |
+| `r9-elves-pilot` | 68.5 / 68.4 (68.0 / 69.9) | | 61.1% |
+| `r9-tron-pilot` | 61.7 / 62.2 (61.1 / 63.3) | | 58.6% |
+
+- **Head to head, r9 pilot vs the round-1 pilot of the same deck** (the round-1 matrix protocol of `20261010-r8-pilot-matrix`, generalised to any deck by `--deck` in `tools/eval_matrix.py`, this PR). For each opponent deck X, three cells on the same seeds with every seed played 4 times (both starting players, both physical seats, game-1 decks, engine `native`): r9 pilot as the deck vs round-1 pilot as X, round-1 vs round-1 as reference, round-1 as the deck vs r9 as X. Cell values are the tested deck's score; the table shows the paired delta of the first two cells in points with its 95% half width. Sampled 800 games per cell (200 seeds), greedy 400 (100 seeds). Mirror = the opponent column of the deck itself.
+
+Sampled, delta in points (r9 minus round 1) by opponent deck:
+
+| deck | vs Jund | vs Blue | vs Madness | vs Affinity | vs Elves | vs Tron | mean | clear of 0 | mean score r9 / r8 |
+|---|---|---|---|---|---|---|---|---|---|
+| Jund | +8.8 ± 4.6 | +7.2 ± 4.0 | +7.6 ± 3.6 | +9.0 ± 3.5 | +6.5 ± 3.9 | +6.9 ± 3.9 | +7.7 | 6/6 | 51.1 / 43.5 |
+| Blue | +5.9 ± 3.9 | +9.1 ± 3.9 | +6.6 ± 4.2 | +6.2 ± 4.0 | +9.5 ± 3.9 | +8.1 ± 3.9 | +7.6 | 6/6 | 58.7 / 51.1 |
+| Madness | +4.9 ± 3.0 | +7.4 ± 3.8 | +9.4 ± 3.1 | +4.9 ± 3.4 | +4.5 ± 2.7 | +3.9 ± 3.1 | +5.8 | 6/6 | 68.4 / 62.6 |
+| Affinity | +7.5 ± 4.2 | +9.0 ± 4.3 | +6.6 ± 3.6 | +6.6 ± 3.4 | +4.6 ± 3.7 | +4.5 ± 3.3 | +6.5 | 6/6 | 49.0 / 42.5 |
+| Elves | +2.4 ± 3.6 | +6.0 ± 4.1 | +4.0 ± 3.1 | +6.9 ± 3.8 | +5.1 ± 3.8 | +6.1 ± 3.6 | +5.1 | 5/6 | 58.1 / 53.0 |
+| Tron | +4.0 ± 3.8 | +2.6 ± 4.0 | +3.0 ± 3.1 | +4.6 ± 3.0 | +5.9 ± 3.6 | +4.1 ± 4.0 | +4.0 | 4/6 | 61.6 / 57.6 |
+
+Greedy:
+
+| deck | vs Jund | vs Blue | vs Madness | vs Affinity | vs Elves | vs Tron | mean | clear of 0 | mean score r9 / r8 |
+|---|---|---|---|---|---|---|---|---|---|
+| Jund | +8.0 ± 4.1 | +7.8 ± 5.8 | +3.5 ± 5.0 | +2.2 ± 6.0 | +5.0 ± 5.4 | +4.0 ± 5.6 | +5.1 | 2/6 | 49.5 / 44.4 |
+| Blue | +4.2 ± 5.0 | +6.5 ± 4.1 | +4.0 ± 5.2 | +3.8 ± 5.0 | +1.2 ± 6.2 | +7.5 ± 4.5 | +4.5 | 2/6 | 57.0 / 52.5 |
+| Madness | +1.2 ± 3.3 | +2.8 ± 4.8 | +4.5 ± 3.3 | +2.8 ± 4.0 | +1.8 ± 3.6 | +0.8 ± 3.6 | +2.3 | 1/6 | 64.4 / 62.1 |
+| Affinity | +5.8 ± 4.9 | +0.2 ± 5.1 | +2.2 ± 4.9 | +7.0 ± 3.8 | +2.5 ± 5.4 | +3.5 ± 3.8 | +3.5 | 2/6 | 46.9 / 43.3 |
+| Elves | +3.5 ± 5.0 | +5.8 ± 5.1 | +3.2 ± 3.6 | +4.5 ± 4.5 | +3.8 ± 4.1 | +8.0 ± 4.4 | +4.8 | 2/6 | 57.6 / 52.8 |
+| Tron | +9.5 ± 5.4 | +5.0 ± 5.4 | +4.5 ± 4.1 | +3.5 ± 4.2 | +5.0 ± 5.0 | +5.0 ± 4.1 | +5.4 | 3/6 | 60.4 / 55.0 |
+
+- **Trust test, round 1 vs round 2** (200 matches per pairing, bo3, sampled, pool iter_00488/01708/02928/03904, fair contract; code `2d90f9dcdb`, `~/mtg-ml-eval/run_pilot_matrix.sh` with `CPUS=32-47 WORKERS=16`; round 1 in `~/mtg-ml-eval/results/trust-pilots-20261010T111705Z`, round 2 in `trust-pilots-20261010T192830Z`, copied into each r9 archive under `evals/`; round-2 pilot sha256 are in `trust.md`):
+
+| | round 1 | round 2 |
+|---|---|---|
+| pairings inside the Pauper-Research ranges | 8/14 (1 above, 5 below) | 9/14 (2 above, 3 below) |
+| per-deck bias Jund / Blue / Madness / Affinity / Elves / Tron | -0.091 / -0.015 / +0.065 / -0.042 / -0.026 / +0.129 | -0.078 / +0.011 / +0.051 / -0.048 / -0.044 / +0.124 |
+| flagged decks | Jund (under), Tron (over) | Tron (over) |
+| clearly exploitable directions | 1 (red_madness over elves, 0.775) | 0 (max 0.600) |
+
+  Pairings that moved: Jund vs Affinity (0.470 to 0.560) and Jund vs Tron (0.360 to 0.380) are now inside; Madness vs Elves went from inside to above (0.800 to 0.845, reference 0.718); Elves vs Tron stays below (not counted, 27 reference games). Still below: Jund vs Madness (0.185), Madness vs Tron (0.42), Affinity vs Tron (0.18). Tron is still overrated by about 0.12 and Jund underrated by 0.08, so a pilot-vs-pilot league alone does not fix the per-deck bias; those need other opponents or a Tron-specific look.
+- **Measured on**: h100-private (2x Xeon Platinum 8462Y+, 64 cores), CPUs 32-63 only, `nice -n 19`, no GPU, `OMP_NUM_THREADS=1`, 16 workers each for the trust test and the head-to-head jobs, which ran side by side. Head to head: `tools/eval_matrix.py --deck <deck> --candidate ~/mtg-ml-eval/ckpt/r9-<d>-pilot-final.pt --baseline ~/mtg-ml-eval/ckpt/r8-<d>-pilot-final.pt --games 800 --workers 16 --out h2h-<d>-sampled.json` and the same with `--games 400 --greedy`, launcher `~/mtg-ml-eval/r9/h2h.sh`, raw per-seed results `~/mtg-ml-eval/r9/h2h-<d>-{sampled,greedy}.json`. The r9 files are the final `policy/v01465.pt` of each run (the same weights as the archive's `policy.pt`); round 1 used `~/mtg-ml-eval/ckpt/r8-<d>-pilot-final.pt` (sha256 in the earlier trust test).
+- **Archives**: `~/mtg-ml-checkpoints/<run id>/` for all six on h100-private (`final.pt`, `policy.pt`, `metrics.jsonl`, `train.log`, `campaign.json`, `campaign.prepared.json`, `launch.txt`, `evals/`). The four runs trained on h100-private2 were copied to h100-private through the Mac (direct and forwarded ssh between the boxes were not available, about 1 MB/s) without their pool snapshots (1.8 GB each), which stay on h100-private2 under `~/mtg-ml-r8/campaigns/r9bp2w{1,2,3}-20261010/<run>/pool`; their archives hold no `snapshots/`. Jund and Affinity were archived in full.
+- **What it does not show**: strength against anything other than the round-1 pilots and their own pool (the head to head is on the training opponents); whether a round 3 would still gain (round-2 gains over round 1 are +4 to +8 points on sampled play, smaller than the +18 points of round 1 over lr075 for Jund); Elves, Tron and the greedy numbers are too noisy for per-deck claims. `play/*` roles and the play site pins are not changed by this entry.
 
 ## 20261010-r9-base · two long base-model runs from scratch (h256 and h512) with an anti-cycling opponent mix
 
