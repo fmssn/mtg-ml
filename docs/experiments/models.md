@@ -31,6 +31,7 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `r10-jund-pilot` | `r9-jund-pilot` | does a third round (frozen round-2 opponents, lr 1.5e-5 to 1.5e-6) beat each round-2 pilot head to head and on the trust test |
 | `r9-base-h256` | `r7-lr075` | does a 40M-game run with the anti-cycling mix (self-play 0.35, PFSP) keep climbing past r7-lr075 and stop the past-snapshots-beat-final cycling |
 | `r9-base-h512` | `r9-base-h256` | does h512 at lr 5e-5 beat h256 at equal games on the same recipe and seed |
+| `r10-base-h256-var` | `r9-base-h256` | does the varied-decklist, fast-recipe (ep2, 4x batch) base model on 8 GPUs match r9-base-h256 per game and play the held-out dev/test lists well |
 
 Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins the six `r9-<deck>-pilot/policy` checkpoints (the `r9-<deck>-pilot` opponents), `r8-jund-blue/policy` (the `r8-jund` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
 
@@ -75,6 +76,7 @@ Status: `running`, `stopped` (ended by hand), `finished` (ended, not yet archive
 |---|---|---|---|---|---|---|---|---|---|---|
 | `r9-base-h256` | `20261010-r9-fs7h256-all-scratch-base-s10` | `20261010-r9-base` |  | `all` | 0 |  |  | running | not archived yet | [entry](ledger.md#20261010-r9-base--two-long-base-model-runs-from-scratch-h256-and-h512-with-an-anti-cycling-opponent-mix) |
 | `r9-base-h512` | `20261010-r9-fs7h512-all-scratch-base-s10` | `20261010-r9-base` |  | `all` | 0 |  |  | running | not archived yet | [entry](ledger.md#20261010-r9-base--two-long-base-model-runs-from-scratch-h256-and-h512-with-an-anti-cycling-opponent-mix) |
+| `r10-base-h256-var` | `20261011-r10-fs7h256-all-scratch-var-s11` | `20261011-r10-base-var` |  | `all` | 0 |  |  | running | not archived yet | [entry](ledger.md#20261011-r10-base-var--base-model-from-scratch-on-all-8-gpus-of-h100-private4-varied-decklists-fast-recipe) |
 
 ### r7 and earlier, newest first
 

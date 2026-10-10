@@ -58,7 +58,7 @@ ssh = "h100-private4"
 role = "Optimization"
 color = "opt"
 cpu_label = "threads"
-runs = [{ glob = "~/mtg-ml/opt/ab/*" }, { glob = "~/mtg-ml/packing/*" }]
+runs = [{ glob = "~/mtg-ml/opt/ab/*" }, { glob = "~/mtg-ml/packing/*" }, { glob = "~/mtg-ml-base/campaigns/20261011-r10-base-var/*", color = "base" }]
 
 # Watchdog (python -m tools.fleet_board.watch). Every key is optional; these are the defaults.
 # Run scope: the machines' `runs` globs, unless [watch.runs] lists globs for a machine (replaces them).

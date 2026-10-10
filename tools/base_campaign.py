@@ -104,7 +104,7 @@ def prepare(args):
         f = arm_flags(key, run, root, rungs, offset, args.smoke_iters if args.smoke else None)
         command = [str(code / ".venv/bin/python"), "-m", "mtg_ml.rl.train"] + [p for k, v in f.items() for p in ("--" + k, str(v))]
         buses = list(VAR_BUSES) if var else [b0, b1]
-        env = dict(CUDA_VISIBLE_DEVICES=",".join(gpu[b] for b in buses), OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", MTG_ENGINE="native",
+        env = dict(CUDA_DEVICE_ORDER="PCI_BUS_ID", CUDA_VISIBLE_DEVICES=",".join(gpu[b] for b in buses), OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", MTG_ENGINE="native",
                    TORCHINDUCTOR_COMPILE_THREADS="1", MTG_EVAL_LOCK=str(run / "evaluation.lock"), PYTHONUNBUFFERED="1",
                    PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True")
         entries.append(dict(

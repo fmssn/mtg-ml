@@ -2,6 +2,17 @@
 
 Newest first. How to add an entry, and what the numbers mean: [README](README.md). Elo is on ladder L1 ([ladder.md](ladder.md)). Archive ids refer to `~/mtg-ml-checkpoints/<id>/` on h100-private. Benchmark = learner Jund vs blue bot, game 1, sampled / greedy.
 
+## 20261011-r10-base-var · base model from scratch on all 8 GPUs of h100-private4, varied decklists, fast recipe
+
+Status: **running** (launched 2026-10-11 on h100-private4; verdict at the evaluations).
+
+Question: does a base model trained on the registered variant 75s (`--variants train`, 92 lists; dev/test held out) with the fast recipe (`--ppo-epochs 2`, `--ppo-gru-precision bf16`) at 4x the batch on one whole box match `r9-base-h256` per game, and play unseen lists well?
+
+- **Run**: `r10-base-h256-var` = `20261011-r10-fs7h256-all-scratch-var-s11`, from scratch, seed 11, 40M games, lr 1.5e-4 -> 1.5e-5 linear over 40M.
+- **Recipe**: the `r9-base-h256` flags (`tools/base_campaign.py`, set 7, entity trunk + attention, GRU, shared value net, PFSP pool, self-play 0.35, recent 0.25, post-board 0.2, all 21 matchups, L1 ladder) with: `--variants train`; `--ppo-epochs 2`; `--ppo-gru-precision bf16`; 4 learner ranks (`--learner-devices cuda:0-3`, distributed learner, whole trajectories per rank) and 4 inference servers (`--server-devices cuda:4-7`); `--games-per-iter 8192` (x4); `--ppo-minibatch 8192`, which is the GLOBAL minibatch (each global minibatch is split into whole trajectories over the ranks), with lr x2 as in the mb8192 throughput arm; `--snapshot-every 30` (246k games, as 122 x 2048); 106 rollout workers.
+- **Machine and code**: h100-private4 (8x H100 80GB, 128 threads), fresh checkout `~/mtg-ml-r10/code` (own `.venv`) at the PR branch (default branch b30dc0b + the launcher arm), native engine. Campaign `~/mtg-ml-base/campaigns/20261011-r10-base-var/`, tmux `mtg-r10-<run id>` via `R8_PREFIX=mtg-r10 tools/r8_host.sh`, no restart.
+- **Layout**: learners on GPU buses 0A/18/2F/38 (node 0, CPUs 0-1, 2, 3, 4), servers on 87/90/BE/C7 (node 1, CPUs 32-35), evaluation CPUs 36-39, workers on 5-31, 40-63, 69-95, 100-127; SMT siblings of the driver CPUs stay idle.
+
 ## 20261010-throughput-ab · update-throughput A/Bs from the r7 lr075 parent (2M games each)
 
 Status: **done** (PR #112). Verdict: **ep2 (`--ppo-epochs 2`) is the candidate to adopt, pending a second seed**: in this single-seed test it was both the fastest and the strongest arm. `--ppo-minibatch 4096` (lr x sqrt 2) and `--ppo-gru-precision bf16` are speed-only knobs, equal to base within noise (adopt where the update is the bound and epochs stay at 4).
