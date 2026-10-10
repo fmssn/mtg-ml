@@ -11,8 +11,20 @@
 # opponent whose checkpoint is missing; a hosted server (mtg_ml.hosted) refuses
 # to start unless every one is present and matches (live.validate_offer).
 # Weights stay outside Git. Pin a fixed snapshot, never a trainer's latest.pt.
+#
+# Each [[opponents]] may also carry, all optional (older configs without them work):
+#   description  one or two plain sentences shown on the opponent picker
+#   tested       how well the opponent is tested: "well", "some" or "experimental"
+# `[recommended_matchup]` (optional) names two decks whose matchup the page
+# highlights, in either seat: decks = [a, b] and a short note.
 
 player_decks = ["jund_wildfire", "mono_blue_terror", "red_madness", "grixis_affinity", "elves", "tron"]
+
+# The most tested matchup: a standing benchmark with specialist and legacy bots,
+# ladder Elo, thousands of benchmark games and human playtests.
+[recommended_matchup]
+decks = ["jund_wildfire", "mono_blue_terror"]
+note = "Jund Wildfire vs Mono Blue Terror is the most tested matchup, with a standing benchmark and human playtests. Play it from either seat."
 
 [models."r7-lr075/policy"]
 sha256 = "672aaa0c2764f853198c44a6fa7847469e01d9767952ea3fb8e9d84e068f636e"
@@ -31,11 +43,30 @@ source = "h100-private:~/mtg-ml-eval/ckpt/r8-jund-blue-final.pt (copy of ~/mtg-m
 evaluation = "final r8 Jund vs Blue fine-tune (run 20261009-r8-fs7h256-mu-jund-blue-ft-r7-lr075-s8, 6.0M games); specialist benchmark, 100 blocks, --contract fair, on h100-private, sampled / greedy: jund_vs_sblue 75.2/79.0, blue_vs_sjund 83.8/84.0, jund_vs_sjund 58.3/62.7, blue_vs_sblue 65.2/66.0, jund_vs_lblue 82.0/84.8, blue_vs_ljund 92.7/92.7 (r4-control 64.0/65.5 and r7-lr075 46.3/49.0 on jund_vs_sblue)"
 trained_at = "889798b"  # training code
 
+[models."r8-jund-pilot/policy"]
+sha256 = "71c758dcf4513deb3bc7021652410d7c573c366c97d8c01a4da1b5f036078379"
+features = 7
+games = 3000320
+source = "h100-private:~/mtg-ml-checkpoints/20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8/policy-v01464.pt (the eval copy is ~/mtg-ml-eval/ckpt/r8-jund-pilot-final.pt)"
+evaluation = "final r8 Jund pilot (run 20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8, 3.0M games over all six Jund pairings); ledger 20261009-r8-results: specialist benchmark jund_vs_sblue 67.2/67.0, jund_vs_sjund 79.5/79.5 (sampled / greedy); ledger 20261010-r8-pilot-matrix: beats r7-lr075 as Jund in all six pairings head to head, sampled +10.1 to +28.0 (mean +18.0), greedy mean +13.8, 800 games per cell"
+trained_at = "889798b"  # training code
+
 [models."r4-control/policy"]
 sha256 = "cb19222d1868a72671c73c80268d75aea977e87758493804c80f895f85024f72"
 features = 3
 source = "h100-private:~/mtg-ml-checkpoints/20261007-r4-control/policy.pt"
 evaluation = "round 4 control (docs/experiments/ledger.md); legacy, kept for its sampled Delver play"
+
+# The default Jund opponent: trained on all six Jund pairings, greedy.
+[[opponents]]
+id = "r8-jund-pilot"
+label = "r8 · Jund Wildfire pilot"
+note = "r8 Jund pilot (3.0M games over all six Jund pairings, greedy) playing Jund Wildfire; beats r7 lr075 as Jund by +10 to +28 points in every pairing"
+description = "Trained on all six Jund matchups. Beats the r7 Jund by 10 to 28 points in every pairing. Wins 67% against the Blue specialist bot and 80% in the Jund mirror."
+tested = "well"
+model = "r8-jund-pilot/policy"
+deck = "jund_wildfire"
+greedy = true
 
 # r7 lr075, greedy, with every deck: 36 ordered pairs, mirrors included.
 [[opponents]]
@@ -45,6 +76,8 @@ note = "r8 Jund-vs-Blue fine-tune (6.0M games, greedy) playing Jund Wildfire; fi
 model = "r8-jund-blue/policy"
 deck = "jund_wildfire"
 greedy = true
+description = "The Jund vs Blue specialist. Wins 75 to 79% against the Blue specialist bot. Weaker against the other decks, because it forgot them in training."
+tested = "well"
 
 [[opponents]]
 id = "r7-jund"
@@ -53,6 +86,8 @@ note = "r7 lr075 final (8.35M self-play games, greedy) playing Jund Wildfire"
 model = "r7-lr075/policy"
 deck = "jund_wildfire"
 greedy = true
+description = "The older r7 Jund player, kept as a reference. Wins 49% against the Blue specialist bot."
+tested = "some"
 
 [[opponents]]
 id = "r7-blue"
@@ -61,6 +96,8 @@ note = "r7 lr075 final (8.35M self-play games, greedy) playing Mono Blue Terror"
 model = "r7-lr075/policy"
 deck = "mono_blue_terror"
 greedy = true
+description = "Mono Blue Terror from r7. Wins 76% against the Jund specialist bot. Part of the standing benchmark."
+tested = "well"
 
 [[opponents]]
 id = "r7-madness"
@@ -69,6 +106,8 @@ note = "r7 lr075 final (8.35M self-play games, greedy) playing Red Madness"
 model = "r7-lr075/policy"
 deck = "red_madness"
 greedy = true
+description = "Plays Red Madness. Experimental: only checked by the self-play trust test against Pauper research win rates. No specialist benchmark."
+tested = "experimental"
 
 [[opponents]]
 id = "r7-affinity"
@@ -77,6 +116,8 @@ note = "r7 lr075 final (8.35M self-play games, greedy) playing Grixis Affinity"
 model = "r7-lr075/policy"
 deck = "grixis_affinity"
 greedy = true
+description = "Plays Grixis Affinity. Experimental: only checked by the self-play trust test against Pauper research win rates. No specialist benchmark."
+tested = "experimental"
 
 [[opponents]]
 id = "r7-elves"
@@ -85,6 +126,8 @@ note = "r7 lr075 final (8.35M self-play games, greedy) playing Elves"
 model = "r7-lr075/policy"
 deck = "elves"
 greedy = true
+description = "Plays Elves. Experimental: only checked by the self-play trust test against Pauper research win rates. No specialist benchmark."
+tested = "experimental"
 
 [[opponents]]
 id = "r7-tron"
@@ -93,6 +136,8 @@ note = "r7 lr075 final (8.35M self-play games, greedy) playing Tron"
 model = "r7-lr075/policy"
 deck = "tron"
 greedy = true
+description = "Plays Tron. Experimental: only checked by the self-play trust test against Pauper research win rates. No specialist benchmark."
+tested = "experimental"
 
 [[opponents]]
 id = "delver"
@@ -101,3 +146,6 @@ note = "Legacy: the r4-control model (self-play RL, sampling) playing Mono Blue 
 model = "r4-control/policy"
 deck = "mono_blue_terror"
 greedy = false
+
+description = "The old r4 model, playing sampled moves. Legacy. It is the legacy Blue bot in the standing benchmark."
+tested = "some"

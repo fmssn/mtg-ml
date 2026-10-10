@@ -946,7 +946,7 @@
    "ledger": "ledger.md#20261009-r8-results--final-results-and-archives-of-r8-jund-blue-r8-jund-pilot-r8-jund-mirror",
    "ledger_id": "20261009-r8-jund-blue-ft",
    "kind": "train",
-   "notes": "Jund vs Blue fine-tune, 6M games, final policy v02930 (sha256 b2ca1763...9e71). Final specialist benchmark jund_vs_sblue 75.2/79.0, blue_vs_sjund 83.8/84.0 (ledger). Trust test FAIL: 3/14 pairings inside, Jund +0.27 and Blue +0.26 bias, 21 exploitable directions; strong forgetting of the other decks. A specialist; play/jund since PR #99. Run dir h100-private:~/mtg-ml-r8/campaigns/r8-20261009/r8-jund-blue-ft."
+   "notes": "Jund vs Blue fine-tune, 6M games, final policy v02930 (sha256 b2ca1763...9e71). Final specialist benchmark jund_vs_sblue 75.2/79.0, blue_vs_sjund 83.8/84.0 (ledger). Trust test FAIL: 3/14 pairings inside, Jund +0.27 and Blue +0.26 bias, 21 exploitable directions; strong forgetting of the other decks. A specialist; play/jund from PR #99 until the pilot replaced it, still offered as r8-jund. Run dir h100-private:~/mtg-ml-r8/campaigns/r8-20261009/r8-jund-blue-ft."
   },
   {
    "handle": "r8-jund-blue-s2",
@@ -1428,8 +1428,8 @@
    "note": "Only full-matrix model; the trust test flags Tron as overrated"
   },
   "play/jund": {
-   "handle": "r8-jund-blue",
-   "note": "Play site offer r8-jund, greedy (default Jund opponent); r7-jund stays as a fallback"
+   "handle": "r8-jund-pilot",
+   "note": "Play site offer r8-jund-pilot, greedy (default Jund opponent): beats r7-lr075 as Jund in all six pairings, 67% vs the Blue specialist, 80% in the mirror. r8-jund (the Jund vs Blue specialist) and r7-jund (legacy) stay offered"
   },
   "play/blue": {
    "handle": "r7-lr075",
@@ -1489,6 +1489,12 @@
    "role": "best/jund",
    "handle": "r8-jund-pilot",
    "note": "Replaces r7-lr075: paired head to head over the six Jund pairings (800 games per cell), delta +10.1 to +28.0 points, none worse; see ledger 20261010-r8-pilot-matrix"
+  },
+  {
+   "date": "2026-10-10",
+   "role": "play/jund",
+   "handle": "r8-jund-pilot",
+   "note": "Replaces r8-jund-blue as the default Jund opponent on the play site: trained on all six Jund pairings, +10 to +28 points over lr075 as Jund in every pairing, 67% vs the Blue specialist, 80% in the mirror; r8-jund-blue stays offered as the Jund vs Blue specialist"
   }
  ]
 }

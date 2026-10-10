@@ -86,6 +86,29 @@ def sha256_file(path: pathlib.Path) -> str:
     return h.hexdigest()
 
 
+TESTED_LEVELS = ("well", "some", "experimental")
+
+
+def offer_text_problems(config: dict) -> list[str]:
+    """Problems in the optional display fields of the play offer: an opponent's
+    `tested` and `description`, and `[recommended_matchup]`. Configs without
+    these fields have none."""
+    problems: list[str] = []
+    for o in config.get("opponents", []):
+        if "tested" in o and o["tested"] not in TESTED_LEVELS:
+            problems.append(f"opponent {o.get('id')}: tested must be one of {', '.join(TESTED_LEVELS)} (got {o['tested']!r})")
+        if "description" in o and not isinstance(o["description"], str):
+            problems.append(f"opponent {o.get('id')}: description must be a string")
+    rec = config.get("recommended_matchup")
+    if rec is not None:
+        decks = rec.get("decks") if isinstance(rec, dict) else None
+        if not (isinstance(decks, list) and len(decks) == 2 and decks[0] != decks[1] and all(d in DECK_TITLES for d in decks)):
+            problems.append("recommended_matchup.decks must be two different known decks")
+        if isinstance(rec, dict) and "note" in rec and not isinstance(rec["note"], str):
+            problems.append("recommended_matchup.note must be a string")
+    return problems
+
+
 def validate_offer(models_dir: pathlib.Path | None, config: dict, strict: bool = False) -> tuple[dict[str, dict], list[str]]:
     """Check the offered opponents' checkpoints against their pins
     (`[models."<name>"]` in the play config: sha256, features). Returns the
@@ -97,7 +120,7 @@ def validate_offer(models_dir: pathlib.Path | None, config: dict, strict: bool =
 
     pins, found = config.get("models", {}), ({} if models_dir is None else find_models(models_dir))
     ok: dict[str, dict] = {}
-    problems: list[str] = []
+    problems: list[str] = offer_text_problems(config)
     for name in dict.fromkeys(o.get("model") for o in config.get("opponents", [])):
         pin = pins.get(name)
         if pathlib.PurePosixPath(str(name)).name == "latest":
@@ -597,8 +620,14 @@ class LiveManager:
         out = {"mode": "dev" if self.scripted else "play" if self.config is not None else "open", "filing": self.filer is not None and self.filer.available()}
         if self.config is not None and not self.scripted:
             offer = self._offer()
-            out["player_decks"] = [{"deck": d, "title": DECK_TITLES[d], "opponents": [o["id"] for o in offer if matchup_for(d, o["deck"])]} for d in self.config.get("player_decks", [])]
-            out["opponents"] = [{"id": o["id"], "label": o["label"], "deck": o["deck"], "deck_title": DECK_TITLES[o["deck"]], "note": o.get("note", "")} for o in offer]
+            rec = self._recommended(offer)
+            out["player_decks"] = [{"deck": d, "title": DECK_TITLES[d], "opponents": [o["id"] for o in offer if matchup_for(d, o["deck"])],
+                                    "recommended": [o["id"] for o in offer if rec and d in rec and o["deck"] == rec[1 - rec.index(d)] and matchup_for(d, o["deck"])]}
+                                   for d in self.config.get("player_decks", [])]
+            out["opponents"] = [{"id": o["id"], "label": o["label"], "deck": o["deck"], "deck_title": DECK_TITLES[o["deck"]], "note": o.get("note", ""),
+                                 "description": o.get("description", ""), "tested": o["tested"] if o.get("tested") in TESTED_LEVELS else ""} for o in offer]
+            if rec:
+                out["recommended_matchup"] = {"decks": [{"deck": d, "title": DECK_TITLES[d]} for d in rec], "note": self.config["recommended_matchup"].get("note", "")}
             return out
         out.update({
             "models": sorted(self._models()) + ([SCRIPTED] if self.scripted else []),
@@ -606,6 +635,16 @@ class LiveManager:
             "matchups": {k: [DECK_TITLES[d] for d in v] for k, v in MATCHUPS.items()},
         })
         return out
+
+    def _recommended(self, offer: list[dict]) -> list[str] | None:
+        """The recommended matchup's two decks, when this server can play it
+        (a player deck of the pair has an offered opponent playing the other)."""
+        rec = (self.config.get("recommended_matchup") or {}).get("decks")
+        if not (isinstance(rec, list) and len(rec) == 2 and rec[0] != rec[1] and all(d in DECK_TITLES for d in rec)):
+            return None
+        mine = self.config.get("player_decks", [])
+        ok = any(a in mine and any(o["deck"] == b and matchup_for(a, b) for o in offer) for a, b in (rec, rec[::-1]))
+        return list(rec) if ok else None
 
     def _offer(self) -> list[dict]:
         """The configured opponents whose checkpoint this server has."""
