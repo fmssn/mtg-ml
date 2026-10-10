@@ -379,9 +379,10 @@ def load_checkpoint(path: str) -> PolicyNet:
 
 
 def run(net: PolicyNet, checkpoint: str, pool, workers: int, decks, chunks: int, games: int, norm: tuple[str, ...], engine: str | None = None,
-        max_turns: int = 100, seed: int = 0, cache: str | None = None, minibatch: int = 2048, threads: int = 1, log=print) -> dict:
-    """Collect, then measure; returns the tables as one JSON-able dict."""
-    cfg = replace(make_config(), minibatch=minibatch)
+        max_turns: int = 100, seed: int = 0, cache: str | None = None, minibatch: int = 2048, threads: int = 1, log=print, **coefs) -> dict:
+    """Collect, then measure; returns the tables as one JSON-able dict. `coefs`:
+    `PPOConfig` overrides (vf_coef, ent_coef) of the loss whose gradient is measured."""
+    cfg = replace(make_config(**coefs), minibatch=minibatch)
     results, specs = {d: [] for d in decks}, {d: [] for d in decks}
     t0 = time.time()
     for di, d in enumerate(decks):
@@ -496,6 +497,8 @@ def main(argv=None) -> None:
     ap.add_argument("--engine", default="native")
     ap.add_argument("--norm", default="global,per_deck", help="advantage normalisation(s): global (the trainer's: one per batch of all decks), per_deck")
     ap.add_argument("--minibatch", type=int, default=2048)
+    ap.add_argument("--vf-coef", type=float, default=PPOConfig.vf_coef, help="0 with --ent-coef 0: the pure policy gradient (no value or entropy term)")
+    ap.add_argument("--ent-coef", type=float, default=PPOConfig.ent_coef)
     ap.add_argument("--max-turns", type=int, default=100)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--cache", default="", help="directory for the collected rollouts (reused when the same chunk exists)")
@@ -515,9 +518,9 @@ def main(argv=None) -> None:
     t0 = time.time()
     torch.set_num_threads(1)  # rollouts first (the workers hold the cores), then the gradients on `--threads`
     out = run(net, os.path.abspath(args.checkpoint), pool, args.workers, decks, args.chunks, args.games_per_chunk, tuple(args.norm.split(",")), args.engine, args.max_turns, args.seed,
-              args.cache or None, args.minibatch, args.threads)
+              args.cache or None, args.minibatch, args.threads, vf_coef=args.vf_coef, ent_coef=args.ent_coef)
     pool.close()
-    cfg = make_config()
+    cfg = make_config(vf_coef=args.vf_coef, ent_coef=args.ent_coef)
     out["meta"] = {"checkpoint": os.path.abspath(args.checkpoint), "engine": engine_name(), "host": platform.node(), "python": platform.python_version(), "torch": torch.__version__,
                    "threads": args.threads, "seconds": time.time() - t0, "config": net.config, "minibatch": args.minibatch,
                    "ppo": {"clip": cfg.clip, "vf_coef": cfg.vf_coef, "ent_coef": cfg.ent_coef}}
