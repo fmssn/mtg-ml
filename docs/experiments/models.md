@@ -18,12 +18,12 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `best/affinity` | `r9-affinity-pilot` | Round 2 pilot: beats r8-affinity-pilot (sampled +6.5 mean, 6/6; greedy +3.5, 2/6), ledger 20261010-r9-pilots |
 | `best/elves` | `r9-elves-pilot` | Round 2 pilot: beats r8-elves-pilot (sampled +5.1 mean, 5/6; greedy +4.8, 2/6), ledger 20261010-r9-pilots |
 | `best/tron` | `r9-tron-pilot` | Round 2 pilot: beats r8-tron-pilot (sampled +4.0 mean, 4/6; greedy +5.4, 3/6), a weak gain; the trust test still flags Tron as overrated (+0.124), ledger 20261010-r9-pilots |
-| `play/jund` | `r8-jund-pilot` | Play site offer r8-jund-pilot, greedy (default Jund opponent): beats r7-lr075 as Jund in all six pairings, 67% vs the Blue specialist, 80% in the mirror. r8-jund (the Jund vs Blue specialist) and r7-jund (legacy) stay offered |
-| `play/blue` | `r8-blue-pilot` | Play site offer r8-blue-pilot, greedy (the only Blue opponent besides legacy Delver; replaces r7-blue): trained on all six Blue pairings, 74 to 77% against the Blue specialist bot in the mirror, 82% against the Jund specialist |
-| `play/madness` | `r7-lr075` | Play site offer r7-madness, greedy |
-| `play/affinity` | `r7-lr075` | Play site offer r7-affinity, greedy |
-| `play/elves` | `r7-lr075` | Play site offer r7-elves, greedy |
-| `play/tron` | `r8-tron-pilot` | Play site offer r8-tron-pilot, greedy (replaces r7-tron): trained on all six Tron pairings; trust test (six pilots) Tron bias +0.13; Tron audit (PR #108), game 1, 40 games each, win rate vs Jund 0.53, Blue 0.65, Madness 0.57, Affinity 0.75, Elves 0.35 |
+| `play/jund` | `r9-jund-pilot` | Play site offer r9-jund-pilot, greedy (default opponent): round 2 pilot, trained on all six pairings; beats r8-jund-pilot as Jund in all six pairings (sampled +7.7 mean, greedy +5.1), L1 168.8; 81% vs the Blue specialist bot (bench 80.8/82.4); ledger 20261010-r9-pilots (PR #117). r8-jund (the Jund vs Blue specialist) and legacy Delver stay offered. |
+| `play/blue` | `r9-blue-pilot` | Play site offer r9-blue-pilot, greedy (default opponent): round 2 pilot, trained on all six pairings; beats r8-blue-pilot as Blue in all six pairings (sampled +7.6 mean, greedy +4.5), L1 177.8; ledger 20261010-r9-pilots (PR #117). |
+| `play/madness` | `r9-madness-pilot` | Play site offer r9-madness-pilot, greedy: round 2 pilot, trained on all six pairings; beats r8-madness-pilot (sampled +5.8 mean, 6/6; greedy +2.3, 1/6); ledger 20261010-r9-pilots (PR #117). |
+| `play/affinity` | `r9-affinity-pilot` | Play site offer r9-affinity-pilot, greedy: round 2 pilot, trained on all six pairings; beats r8-affinity-pilot (sampled +6.5 mean, 6/6; greedy +3.5, 2/6); ledger 20261010-r9-pilots (PR #117). |
+| `play/elves` | `r9-elves-pilot` | Play site offer r9-elves-pilot, greedy: round 2 pilot, trained on all six pairings; beats r8-elves-pilot (sampled +5.1 mean, 5/6; greedy +4.8, 2/6); ledger 20261010-r9-pilots (PR #117). |
+| `play/tron` | `r9-tron-pilot` | Play site offer r9-tron-pilot, greedy: round 2 pilot, trained on all six pairings; beats r8-tron-pilot (sampled +4.0 mean, 4/6; greedy +5.4, 3/6), a weak gain; the trust test still rates Tron too high (+0.124 bias); ledger 20261010-r9-pilots (PR #117). |
 
 | in flight | compared against | question |
 |---|---|---|
@@ -32,7 +32,7 @@ Numbers: bench = learner Jund vs the legacy Blue bot, game 1, sampled / greedy (
 | `r9-base-h256` | `r7-lr075` | does a 40M-game run with the anti-cycling mix (self-play 0.35, PFSP) keep climbing past r7-lr075 and stop the past-snapshots-beat-final cycling |
 | `r9-base-h512` | `r9-base-h256` | does h512 at lr 5e-5 beat h256 at equal games on the same recipe and seed |
 
-Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins `r7-lr075/policy`, `r8-jund-pilot/policy` (the `r8-jund-pilot` opponent), `r8-jund-blue/policy` (the `r8-jund` opponent), `r8-blue-pilot/policy` (the `r8-blue-pilot` opponent), `r8-tron-pilot/policy` (the `r8-tron-pilot` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
+Roles are pointers: change them here and in `models.json` (`roles`, plus a line in `role_history`) when a better model is established, and say why in the ledger. Open: fs4-ft was never run against the Jund and Blue specialists (r8-jund-blue beats it on L1, 238.6 against 212.5, and r4-control on the specialist benchmark). The play site pins the six `r9-<deck>-pilot/policy` checkpoints (the `r9-<deck>-pilot` opponents), `r8-jund-blue/policy` (the `r8-jund` opponent) and the legacy `r4-control/policy` in `mtg_ml/play_config.toml`; those keys are not renamed.
 
 ## Registry
 

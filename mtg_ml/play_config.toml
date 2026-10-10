@@ -26,14 +26,54 @@ player_decks = ["jund_wildfire", "mono_blue_terror", "red_madness", "grixis_affi
 decks = ["jund_wildfire", "mono_blue_terror"]
 note = "Jund Wildfire vs Mono Blue Terror is the most tested matchup, with a standing benchmark and human playtests. Play it from either seat."
 
-[models."r7-lr075/policy"]
-sha256 = "672aaa0c2764f853198c44a6fa7847469e01d9767952ea3fb8e9d84e068f636e"
+[models."r9-jund-pilot/policy"]
+sha256 = "4ffe266218ee165f12950b620a79506fd6cc0f7114031ee688b4995c171d5bc9"
 features = 7
-games = 8353792
-source = "h100-private:~/mtg-ml-checkpoints/20261008-r7-fs7-h256-lr075/policy.pt"
-evaluation = "final r7 lr075 policy (iteration 4079, run stopped); ledger 20261009-specialist-benchmark (PR #72): greedy Jund 70.8% vs legacy Blue, 49.0% vs the Blue specialist, Blue 75.7% vs the Jund specialist"
-trained_at = "4a32795"  # training code (PR #68 head)
-runtime = "b06fac4"  # first default-branch commit that plays feature set 7 (#63); later revisions keep it
+games = 3000320
+source = "h100-private:~/mtg-ml-r8/parents/round2/jund.pt (the archive copy is ~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-jund-ft-r8-jund-pilot-s8/policy.pt)"
+evaluation = "final r9 jund pilot (run 20261010-r9-fs7h256-dk-jund-ft-r8-jund-pilot-s8, round 2: 3.0M games over all six Jund Wildfire pairings against the frozen round-1 pilots, lr 1.5e-5 to 1.5e-6); ledger 20261010-r9-pilots (PR #117): benchmark jund_vs_sblue 80.8/82.4 (sampled / greedy, 1,000 games), L1 168.8 (round 1 148.4); beats r8-jund-pilot as Jund in all six pairings on paired seeds, sampled +7.7 mean (6/6 clear), greedy +5.1; round-2 trust test 9 of 14 pairings inside, no exploitable direction"
+trained_at = "b33b6cd"  # training code (~/mtg-ml-r8/code-r2 on the boxes)
+
+[models."r9-blue-pilot/policy"]
+sha256 = "4ff018a63ea65175f6f8fe5313cbd26d70055882c5edc720f3c0050eeb24d92d"
+features = 7
+games = 3000320
+source = "h100-private:~/mtg-ml-r8/parents/round2/blue.pt (the archive copy is ~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-blue-ft-r8-blue-pilot-s8/policy.pt)"
+evaluation = "final r9 blue pilot (run 20261010-r9-fs7h256-dk-blue-ft-r8-blue-pilot-s8, round 2: 3.0M games over all six Mono Blue Terror pairings against the frozen round-1 pilots, lr 1.5e-5 to 1.5e-6); ledger 20261010-r9-pilots (PR #117): L1 177.8 (round 1 160.0); beats r8-blue-pilot as Blue in all six pairings on paired seeds, sampled +7.6 mean (6/6 clear), greedy +4.5; round-2 trust test 9 of 14 pairings inside, no exploitable direction"
+trained_at = "b33b6cd"  # training code (~/mtg-ml-r8/code-r2 on the boxes)
+
+[models."r9-madness-pilot/policy"]
+sha256 = "4dbb86c94df919c9b05d9f1e7d25a4b4dcda32a134575e201cda13596f96d117"
+features = 7
+games = 3000320
+source = "h100-private:~/mtg-ml-r8/parents/round2/madness.pt (the archive copy is ~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-madness-ft-r8-madness-pilot-s8/policy.pt)"
+evaluation = "final r9 madness pilot (run 20261010-r9-fs7h256-dk-madness-ft-r8-madness-pilot-s8, round 2: 3.0M games over all six Red Madness pairings against the frozen round-1 pilots, lr 1.5e-5 to 1.5e-6); ledger 20261010-r9-pilots (PR #117): beats r8-madness-pilot as Madness, sampled +5.8 mean (6/6 clear), greedy +2.3 (1/6 clear); round-2 trust test 9 of 14 pairings inside, no exploitable direction"
+trained_at = "b33b6cd"  # training code (~/mtg-ml-r8/code-r2 on the boxes)
+
+[models."r9-affinity-pilot/policy"]
+sha256 = "3b8478ef83c802bb8070d2de5b4b6f0f1864e6799121febeb04644dddbac771b"
+features = 7
+games = 3000320
+source = "h100-private:~/mtg-ml-r8/parents/round2/affinity.pt (the archive copy is ~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8/policy.pt)"
+evaluation = "final r9 affinity pilot (run 20261010-r9-fs7h256-dk-affinity-ft-r8-affinity-pilot-s8, round 2: 3.0M games over all six Grixis Affinity pairings against the frozen round-1 pilots, lr 1.5e-5 to 1.5e-6); ledger 20261010-r9-pilots (PR #117): beats r8-affinity-pilot as Affinity, sampled +6.5 mean (6/6 clear), greedy +3.5 (2/6 clear); round-2 trust test 9 of 14 pairings inside, no exploitable direction"
+trained_at = "b33b6cd"  # training code (~/mtg-ml-r8/code-r2 on the boxes)
+
+[models."r9-elves-pilot/policy"]
+sha256 = "7eb8c30aa0e4cfa1b11745cdae4ba84e8a51e481e69bacfb5460d971a889bf99"
+features = 7
+games = 3000320
+source = "h100-private:~/mtg-ml-r8/parents/round2/elves.pt (the archive copy is ~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8/policy.pt)"
+evaluation = "final r9 elves pilot (run 20261010-r9-fs7h256-dk-elves-ft-r8-elves-pilot-s8, round 2: 3.0M games over all six Elves pairings against the frozen round-1 pilots, lr 1.5e-5 to 1.5e-6); ledger 20261010-r9-pilots (PR #117): beats r8-elves-pilot as Elves, sampled +5.1 mean (5/6 clear), greedy +4.8 (2/6 clear); round-2 trust test 9 of 14 pairings inside, no exploitable direction"
+trained_at = "b33b6cd"  # training code (~/mtg-ml-r8/code-r2 on the boxes)
+
+[models."r9-tron-pilot/policy"]
+sha256 = "37e8622a0619964bd3483c4f550541fb0de98e586a8038f19e2edbfc484bd11c"
+features = 7
+games = 3000320
+source = "h100-private:~/mtg-ml-r8/parents/round2/tron.pt (the archive copy is ~/mtg-ml-checkpoints/20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8/policy.pt)"
+evaluation = "final r9 tron pilot (run 20261010-r9-fs7h256-dk-tron-ft-r8-tron-pilot-s8, round 2: 3.0M games over all six Tron pairings against the frozen round-1 pilots, lr 1.5e-5 to 1.5e-6); ledger 20261010-r9-pilots (PR #117): beats r8-tron-pilot as Tron, sampled +4.0 mean (4/6 clear), greedy +5.4 (3/6 clear), a weak gain; the trust test still rates Tron too high (+0.12 bias); round-2 trust test 9 of 14 pairings inside, no exploitable direction"
+trained_at = "b33b6cd"  # training code (~/mtg-ml-r8/code-r2 on the boxes)
+
 
 [models."r8-jund-blue/policy"]
 sha256 = "b2ca176382139cf5f6733937605e43b836af1973b18624e8ae19d68a850c9e71"
@@ -43,29 +83,6 @@ source = "h100-private:~/mtg-ml-eval/ckpt/r8-jund-blue-final.pt (copy of ~/mtg-m
 evaluation = "final r8 Jund vs Blue fine-tune (run 20261009-r8-fs7h256-mu-jund-blue-ft-r7-lr075-s8, 6.0M games); specialist benchmark, 100 blocks, --contract fair, on h100-private, sampled / greedy: jund_vs_sblue 75.2/79.0, blue_vs_sjund 83.8/84.0, jund_vs_sjund 58.3/62.7, blue_vs_sblue 65.2/66.0, jund_vs_lblue 82.0/84.8, blue_vs_ljund 92.7/92.7 (r4-control 64.0/65.5 and r7-lr075 46.3/49.0 on jund_vs_sblue)"
 trained_at = "889798b"  # training code
 
-[models."r8-jund-pilot/policy"]
-sha256 = "71c758dcf4513deb3bc7021652410d7c573c366c97d8c01a4da1b5f036078379"
-features = 7
-games = 3000320
-source = "h100-private:~/mtg-ml-checkpoints/20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8/policy-v01464.pt (the eval copy is ~/mtg-ml-eval/ckpt/r8-jund-pilot-final.pt)"
-evaluation = "final r8 Jund pilot (run 20261009-r8-fs7h256-dk-jund-ft-r7-lr075-s8, 3.0M games over all six Jund pairings); ledger 20261009-r8-results: specialist benchmark jund_vs_sblue 67.2/67.0, jund_vs_sjund 79.5/79.5 (sampled / greedy); ledger 20261010-r8-pilot-matrix: beats r7-lr075 as Jund in all six pairings head to head, sampled +10.1 to +28.0 (mean +18.0), greedy mean +13.8, 800 games per cell"
-trained_at = "889798b"  # training code
-
-[models."r8-blue-pilot/policy"]
-sha256 = "a69958a3e02e67718a9ab3e71e265d5f46a8d37bdd5b3a84584683ecd8cb41f6"
-features = 7
-games = 3000320
-source = "h100-private2:~/mtg-ml-r8/campaigns/r8g-20261010/r8-blue-pilot/policy/v01465.pt (a copy is at h100-private:~/mtg-ml-eval/ckpt/r8-blue-pilot-final.pt)"
-evaluation = "final r8 Blue pilot (run 20261010-r8-fs7h256-dk-blue-ft-r7-lr075-s8, 3.0M games over all six Blue pairings); final specialist benchmark, 100 blocks, measured on h100-private2, sampled / greedy: blue_vs_sblue 74.0/77.0, blue_vs_sjund 81.8/81.8, blue_vs_ljund 91.5/91.2, jund_vs_sblue 65.2/66.0; trust test (single model): 9 of 14 pairings inside, Tron bias +0.16, 4 exploitable directions"
-trained_at = "889798b"  # training code
-
-[models."r8-tron-pilot/policy"]
-sha256 = "5dee22e329d320d86a08f926181af42e0385c20986bd017af5bef18e96022564"
-features = 7
-games = 3000320
-source = "h100-private2:~/mtg-ml-r8/campaigns/r8h2-20261010/r8-tron-pilot/policy/v01465.pt (a copy is at h100-private:~/mtg-ml-eval/ckpt/r8-tron-pilot-final.pt)"
-evaluation = "final r8 Tron pilot (3.0M games over all six Tron pairings); six-pilot trust test (~/mtg-ml-eval/results/trust-pilots-20261010T111705Z on h100-private): Tron bias +0.13; Tron audit (PR #108), game 1, 40 games each, Tron pilot win rate vs each round-1 pilot: Jund 0.53, Blue 0.65, Madness 0.57, Affinity 0.75, Elves 0.35"
-trained_at = "889798b"  # training code
 
 [models."r4-control/policy"]
 sha256 = "cb19222d1868a72671c73c80268d75aea977e87758493804c80f895f85024f72"
@@ -73,18 +90,18 @@ features = 3
 source = "h100-private:~/mtg-ml-checkpoints/20261007-r4-control/policy.pt"
 evaluation = "round 4 control (docs/experiments/ledger.md); legacy, kept for its sampled Delver play"
 
-# The default Jund opponent: trained on all six Jund pairings, greedy.
+# The default Jund opponent: the round-2 Jund pilot, trained on all six Jund pairings, greedy.
 [[opponents]]
-id = "r8-jund-pilot"
-label = "r8 · Jund Wildfire pilot"
-note = "r8 Jund pilot (3.0M games over all six Jund pairings, greedy) playing Jund Wildfire; beats r7 lr075 as Jund by +10 to +28 points in every pairing"
-description = "Trained on all six Jund matchups. Beats the r7 Jund by 10 to 28 points in every pairing. Wins 67% against the Blue specialist bot and 80% in the Jund mirror."
+id = "r9-jund-pilot"
+label = "r9 · Jund Wildfire pilot"
+note = "r9 jund pilot (round 2, 3.0M games over all six Jund Wildfire pairings, greedy) playing Jund Wildfire"
+description = "Round 2 of the Jund pilot, trained on all six Jund matchups. Beats the r8 Jund pilot in every pairing and wins 81% against the Blue specialist bot."
 tested = "well"
-model = "r8-jund-pilot/policy"
+model = "r9-jund-pilot/policy"
 deck = "jund_wildfire"
 greedy = true
 
-# r7 lr075, greedy, with every deck except Blue and Tron (their pilots cover them): 36 ordered pairs, mirrors included.
+# The Jund vs Blue specialist (r8 fine-tune on that one matchup), greedy.
 [[opponents]]
 id = "r8-jund"
 label = "r8 · Jund Wildfire"
@@ -95,63 +112,55 @@ greedy = true
 description = "The Jund vs Blue specialist. Wins 75 to 79% against the Blue specialist bot. Weaker against the other decks, because it forgot them in training."
 tested = "well"
 
+# The default Blue opponent: the round-2 Blue pilot.
 [[opponents]]
-id = "r7-jund"
-label = "r7 · Jund Wildfire"
-note = "r7 lr075 final (8.35M self-play games, greedy) playing Jund Wildfire"
-model = "r7-lr075/policy"
-deck = "jund_wildfire"
-greedy = true
-description = "The older r7 Jund player, kept as a reference. Wins 49% against the Blue specialist bot."
-tested = "some"
-
-[[opponents]]
-id = "r8-blue-pilot"
-label = "r8 · Mono Blue Terror pilot"
-note = "r8 Blue pilot (3.0M games over all six Blue pairings, greedy) playing Mono Blue Terror"
-description = "Trained on all six Blue matchups. Beats the Blue specialist bot 74 to 77% in the mirror and the Jund specialist 82%."
+id = "r9-blue-pilot"
+label = "r9 · Mono Blue Terror pilot"
+note = "r9 blue pilot (round 2, 3.0M games over all six Mono Blue Terror pairings, greedy) playing Mono Blue Terror"
+description = "Round 2 of the Blue pilot, trained on all six Blue matchups. Beats the r8 Blue pilot in every pairing."
 tested = "well"
-model = "r8-blue-pilot/policy"
+model = "r9-blue-pilot/policy"
 deck = "mono_blue_terror"
 greedy = true
 
+# Round-2 pilots for the other four decks.
 [[opponents]]
-id = "r7-madness"
-label = "r7 · Red Madness"
-note = "r7 lr075 final (8.35M self-play games, greedy) playing Red Madness"
-model = "r7-lr075/policy"
+id = "r9-madness-pilot"
+label = "r9 · Red Madness pilot"
+note = "r9 madness pilot (round 2, 3.0M games over all six Red Madness pairings, greedy) playing Red Madness"
+description = "Round 2 of the Red Madness pilot, trained on all six matchups. Beats the r8 pilot by about 6 points. No specialist benchmark."
+tested = "some"
+model = "r9-madness-pilot/policy"
 deck = "red_madness"
 greedy = true
-description = "Plays Red Madness. Experimental: only checked by the self-play trust test against Pauper research win rates. No specialist benchmark."
-tested = "experimental"
 
 [[opponents]]
-id = "r7-affinity"
-label = "r7 · Grixis Affinity"
-note = "r7 lr075 final (8.35M self-play games, greedy) playing Grixis Affinity"
-model = "r7-lr075/policy"
+id = "r9-affinity-pilot"
+label = "r9 · Grixis Affinity pilot"
+note = "r9 affinity pilot (round 2, 3.0M games over all six Grixis Affinity pairings, greedy) playing Grixis Affinity"
+description = "Round 2 of the Grixis Affinity pilot, trained on all six matchups. Beats the r8 pilot by about 6 points. No specialist benchmark."
+tested = "some"
+model = "r9-affinity-pilot/policy"
 deck = "grixis_affinity"
 greedy = true
-description = "Plays Grixis Affinity. Experimental: only checked by the self-play trust test against Pauper research win rates. No specialist benchmark."
-tested = "experimental"
 
 [[opponents]]
-id = "r7-elves"
-label = "r7 · Elves"
-note = "r7 lr075 final (8.35M self-play games, greedy) playing Elves"
-model = "r7-lr075/policy"
+id = "r9-elves-pilot"
+label = "r9 · Elves pilot"
+note = "r9 elves pilot (round 2, 3.0M games over all six Elves pairings, greedy) playing Elves"
+description = "Round 2 of the Elves pilot, trained on all six matchups. Beats the r8 pilot by about 5 points. No specialist benchmark."
+tested = "some"
+model = "r9-elves-pilot/policy"
 deck = "elves"
 greedy = true
-description = "Plays Elves. Experimental: only checked by the self-play trust test against Pauper research win rates. No specialist benchmark."
-tested = "experimental"
 
 [[opponents]]
-id = "r8-tron-pilot"
-label = "r8 · Tron pilot"
-note = "r8 Tron pilot (3.0M games over all six Tron pairings, greedy) playing Tron"
-description = "Trained on all six Tron matchups. Strong: assembles Tron early. Beats most pilots, weakest against Elves."
+id = "r9-tron-pilot"
+label = "r9 · Tron pilot"
+note = "r9 tron pilot (round 2, 3.0M games over all six Tron pairings, greedy) playing Tron"
+description = "Round 2 of the Tron pilot, trained on all six matchups. A small gain over the r8 pilot, and still probably stronger than real Tron: self-play overrates it."
 tested = "some"
-model = "r8-tron-pilot/policy"
+model = "r9-tron-pilot/policy"
 deck = "tron"
 greedy = true
 

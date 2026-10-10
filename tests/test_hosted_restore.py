@@ -15,7 +15,7 @@ pytest.importorskip("torch")
 from mtg_ml.hosted.manager import HostedError, HostedManager  # noqa: E402
 from mtg_ml.live import LiveError, validate_offer  # noqa: E402
 from tests.test_live_proto import native_ok, prefer_plays  # noqa: E402
-from tests.test_play_offer import R7, r7_config, tiny7  # noqa: E402,F401 (fixture)
+from tests.test_play_offer import TINY, pilot_config, tiny7  # noqa: E402,F401 (fixture)
 
 ME = "alice@example.com"
 COMBAT = ("declare_attacker", "declare_blocker")
@@ -40,7 +40,7 @@ class Side:
 
     def __init__(self, root, models, engine, seeds, runtime="rev-1", pinned=None):
         self.root, self.models, self.engine, self.seeds, self.runtime = root, models, engine, seeds, runtime
-        self.config = r7_config(models)
+        self.config = pilot_config(models)
         self.pinned = pinned or validate_offer(models, self.config, strict=True)[0]
         self.mgr = None
         self.start()
@@ -154,7 +154,7 @@ def test_restart_mid_match_quick(tmp_path, tiny7, engine):  # noqa: F811
     seeds = [random.Random(s).getrandbits(63) for s in range(4)]
     a, b = Side(tmp_path / "a", tiny7, engine, seeds), Side(tmp_path / "b", tiny7, engine, seeds)
     ls = Lockstep(a, b, random.Random(3))
-    ls.new("elves", "r7-jund")
+    ls.new("elves", "r9-jund-pilot")
     b.restart()
     ls.same()
     for _ in range(12):
@@ -182,7 +182,7 @@ def test_restored_games_match_uninterrupted_ones(tmp_path, tiny7, engine):  # no
 
     torch.manual_seed(0)  # fixed weights: the same games every run
     config = {"hidden": 16, "memory": "gru", "trunk": "entity", "features": 7}
-    torch.save({"config": config, "model": PolicyNet(**config).state_dict()}, tiny7 / f"{R7}.pt")
+    torch.save({"config": config, "model": PolicyNet(**config).state_dict()}, tiny7 / f"{TINY}.pt")
     """Restarts at the mulligan, in combat, at sideboarding (between games 1
     and 2 and between games 2 and 3) and after the match: same frames, same
     log, same model choices, same replays."""
@@ -191,7 +191,7 @@ def test_restored_games_match_uninterrupted_ones(tmp_path, tiny7, engine):  # no
     ls = Lockstep(a, b, random.Random(1))
     seen = set()
     for _attempt in range(8):  # a match where the player wins game 2, so there is a game 3
-        ls.new("red_madness", "r8-tron-pilot")
+        ls.new("red_madness", "r9-tron-pilot")
         b.restart()  # at the mulligan
         assert b.restored == {"restored": 1, "unrecoverable": {}}
         ls.same()
@@ -223,7 +223,7 @@ def test_restored_games_match_uninterrupted_ones(tmp_path, tiny7, engine):  # no
 
 def test_retries_change_nothing(tmp_path, tiny7, engine):  # noqa: F811
     s = Side(tmp_path, tiny7, engine, [random.Random(9).getrandbits(63) for _ in range(9)])
-    v = s.call("h_new", {"deck": "elves", "opponent": "r7-elves"})
+    v = s.call("h_new", {"deck": "elves", "opponent": "r9-elves-pilot"})
     gid, tok = v["live"]["id"], v["live"]["token"]
     f = len(v["frames"]) - 1
     first = s.call("h_choose", gid, tok, {"frame": f, "index": 0, "since": 0})
@@ -250,11 +250,11 @@ def test_retries_change_nothing(tmp_path, tiny7, engine):  # noqa: F811
 @pytest.mark.parametrize("change", ["checkpoint", "runtime", "record"])
 def test_incompatible_recovery_is_reported(tmp_path, tiny7, engine, change):  # noqa: F811
     s = Side(tmp_path, tiny7, engine, [random.Random(5).getrandbits(63) for _ in range(4)])
-    v = s.call("h_new", {"deck": "tron", "opponent": "r8-tron-pilot"})
+    v = s.call("h_new", {"deck": "tron", "opponent": "r9-tron-pilot"})
     gid, tok = v["live"]["id"], v["live"]["token"]
     s.call("h_choose", gid, tok, {"frame": len(v["frames"]) - 1, "index": 0})
     if change == "checkpoint":
-        s.restart(pinned={R7: {**s.pinned[R7], "sha256": "0" * 64}})
+        s.restart(pinned={TINY: {**s.pinned[TINY], "sha256": "0" * 64}})
     elif change == "runtime":
         s.restart(runtime="rev-2")
     else:  # the record no longer matches what the model plays
@@ -270,4 +270,4 @@ def test_incompatible_recovery_is_reported(tmp_path, tiny7, engine, change):  # 
         s.call("h_view", gid, tok, 0)
     assert e.value.status == 409 and e.value.extra["unrecoverable"] and "cannot be resumed" in str(e.value)
     assert s.mgr.store.game(gid)["status"] == "unrecoverable"
-    s.call("h_new", {"deck": "tron", "opponent": "r8-tron-pilot"})  # it no longer takes a slot
+    s.call("h_new", {"deck": "tron", "opponent": "r9-tron-pilot"})  # it no longer takes a slot

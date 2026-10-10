@@ -1,4 +1,4 @@
-"""The play offer (mtg_ml/play_config.toml): r7 with all six decks, the legacy
+"""The play offer (mtg_ml/play_config.toml): the r9 pilots of all six decks, the legacy
 r4 Delver, pinned checkpoints (live.validate_offer), and every one of the 36
 ordered deck pairs as a playable best-of-three."""
 
@@ -15,34 +15,41 @@ from mtg_ml.match import matchup_decks
 from tests.test_live_proto import native_ok, play_out, prefer_plays
 
 DECKS6 = ["jund_wildfire", "mono_blue_terror", "red_madness", "grixis_affinity", "elves", "tron"]
-R7 = "r7-lr075/policy"
-BLUE_PILOT = "r8-blue-pilot/policy"
-TRON_PILOT = "r8-tron-pilot/policy"
+PILOTS = {d: f"r9-{d}-pilot" for d in ("jund", "blue", "madness", "affinity", "elves", "tron")}
+PILOT_DECKS = dict(zip(PILOTS.values(), DECKS6))
+TINY = "r9-jund-pilot/policy"  # the tiny test checkpoint is stored under this pinned name
+SHA256 = {
+    "jund": "4ffe266218ee165f12950b620a79506fd6cc0f7114031ee688b4995c171d5bc9",
+    "blue": "4ff018a63ea65175f6f8fe5313cbd26d70055882c5edc720f3c0050eeb24d92d",
+    "madness": "4dbb86c94df919c9b05d9f1e7d25a4b4dcda32a134575e201cda13596f96d117",
+    "affinity": "3b8478ef83c802bb8070d2de5b4b6f0f1864e6799121febeb04644dddbac771b",
+    "elves": "7eb8c30aa0e4cfa1b11745cdae4ba84e8a51e481e69bacfb5460d971a889bf99",
+    "tron": "37e8622a0619964bd3483c4f550541fb0de98e586a8038f19e2edbfc484bd11c",
+}
 
 
-def test_packaged_offer_pins_r7_on_every_deck_and_keeps_legacy_delver():
+def test_packaged_offer_pins_the_r9_pilot_of_every_deck_and_keeps_two_references():
     cfg = load_play_config()
     assert cfg["player_decks"] == DECKS6
-    r7 = [o for o in cfg["opponents"] if o["model"] == R7]
-    assert sorted(o["deck"] for o in r7) == sorted(set(DECKS6) - {"mono_blue_terror", "tron"}) and all(o["greedy"] for o in r7)
-    assert "r7-blue" not in {o["id"] for o in cfg["opponents"]}
-    blue = next(o for o in cfg["opponents"] if o["id"] == "r8-blue-pilot")
-    assert blue["model"] == BLUE_PILOT and blue["deck"] == "mono_blue_terror" and blue["greedy"] and blue["tested"] == "well"
-    pin = cfg["models"][BLUE_PILOT]
-    assert pin["sha256"] == "a69958a3e02e67718a9ab3e71e265d5f46a8d37bdd5b3a84584683ecd8cb41f6" and pin["features"] == 7 and pin["games"] == 3000320 and pin["trained_at"] == "889798b"
-    assert "r7-tron" not in {o["id"] for o in cfg["opponents"]}
-    tron = next(o for o in cfg["opponents"] if o["id"] == "r8-tron-pilot")
-    assert tron["model"] == TRON_PILOT and tron["deck"] == "tron" and tron["greedy"] and tron["tested"] == "some"
-    tpin = cfg["models"][TRON_PILOT]
-    assert tpin["sha256"] == "5dee22e329d320d86a08f926181af42e0385c20986bd017af5bef18e96022564" and tpin["features"] == 7 and tpin["games"] == 3000320 and tpin["trained_at"] == "889798b"
+    ids = {o["id"] for o in cfg["opponents"]}
+    assert ids == {*PILOTS.values(), "r8-jund", "delver"}  # no r7 or r8-pilot opponents are left
+    assert not [k for k in cfg["models"] if k.startswith(("r7-", "r8-jund-pilot", "r8-blue-pilot", "r8-tron-pilot"))]
+    for (name, deck), (k, sha) in zip(PILOT_DECKS.items(), SHA256.items()):
+        o = next(o for o in cfg["opponents"] if o["id"] == name)
+        assert o["model"] == f"{name}/policy" and o["deck"] == deck and o["greedy"] is True
+        pin = cfg["models"][o["model"]]
+        assert pin["sha256"] == sha and pin["features"] == 7 and pin["games"] == 3000320 and pin["trained_at"] == "b33b6cd"
+        assert "ledger 20261010-r9-pilots" in pin["evaluation"] and k in pin["source"]
     delver = next(o for o in cfg["opponents"] if o["id"] == "delver")
     assert delver["greedy"] is False and "legacy" in delver["label"].lower() and delver["deck"] == "mono_blue_terror"
+    spec = next(o for o in cfg["opponents"] if o["id"] == "r8-jund")
+    assert spec["model"] == "r8-jund-blue/policy" and spec["deck"] == "jund_wildfire"
     for o in cfg["opponents"]:
         pin = cfg["models"][o["model"]]
         assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"]) and isinstance(pin["features"], int) and pin["source"]
         assert not o["model"].endswith("latest")
-    assert cfg["models"][R7]["features"] == 7 and cfg["models"][R7]["games"] == 8353792
     assert len({o["id"] for o in cfg["opponents"]}) == len(cfg["opponents"])
+    assert set(cfg["models"]) == {o["model"] for o in cfg["opponents"]}  # nothing pinned that is not offered
 
 
 def test_every_ordered_pair_is_a_matchup_with_sideboard_plans():
@@ -59,14 +66,11 @@ def test_every_ordered_pair_is_a_matchup_with_sideboard_plans():
 def test_default_jund_opponent_is_the_pilot_and_testing_fields_are_valid():
     cfg = load_play_config()
     ids = [o["id"] for o in cfg["opponents"]]
-    assert ids[0] == "r8-jund-pilot" and {"r8-jund", "r7-jund"} <= set(ids)
-    pilot = cfg["models"]["r8-jund-pilot/policy"]
-    assert pilot["sha256"] == "71c758dcf4513deb3bc7021652410d7c573c366c97d8c01a4da1b5f036078379" and pilot["features"] == 7 and pilot["games"] == 3000320
-    assert pilot["trained_at"] == "889798b" and "ledger 20261010-r8-pilot-matrix" in pilot["evaluation"]
-    assert next(o for o in cfg["opponents"] if o["id"] == "r8-jund-pilot")["model"] == "r8-jund-pilot/policy"
+    assert ids[0] == "r9-jund-pilot" and "r8-jund" in ids
     for o in cfg["opponents"]:
         assert o["tested"] in TESTED_LEVELS and o["description"].strip(), o["id"]
-    assert {o["id"] for o in cfg["opponents"] if o["tested"] == "experimental"} == {"r7-madness", "r7-affinity", "r7-elves"}
+    assert {o["id"] for o in cfg["opponents"] if o["tested"] == "well"} == {"r9-jund-pilot", "r9-blue-pilot", "r8-jund"}
+    assert not [o for o in cfg["opponents"] if o["tested"] == "experimental"]
     assert sorted(cfg["recommended_matchup"]["decks"]) == ["jund_wildfire", "mono_blue_terror"]
     assert offer_text_problems(cfg) == []
 
@@ -82,66 +86,67 @@ def test_offer_text_problems():
 
 def test_options_carry_testing_and_recommendation():
     cfg = copy.deepcopy(load_play_config())
-    cfg["opponents"] = [o for o in cfg["opponents"] if o["model"] in (R7, BLUE_PILOT, TRON_PILOT)]
-    cfg["models"] = {k: cfg["models"][k] for k in (R7, BLUE_PILOT, TRON_PILOT)}
+    keep = [f"{PILOTS[d]}/policy" for d in ("jund", "blue", "tron")]
+    cfg["opponents"] = [o for o in cfg["opponents"] if o["model"] in keep]
+    cfg["models"] = {k: cfg["models"][k] for k in keep}
     m = LiveManager(None, None, config=cfg, pinned=cfg["models"])
     opt = m.options()
     assert opt["recommended_matchup"]["decks"] == [{"deck": "jund_wildfire", "title": "Jund Wildfire"}, {"deck": "mono_blue_terror", "title": "Mono Blue Terror"}]
     assert "most tested" in opt["recommended_matchup"]["note"]
     rec = {d["deck"]: d["recommended"] for d in opt["player_decks"]}
-    assert rec == {"jund_wildfire": ["r8-blue-pilot"], "mono_blue_terror": ["r7-jund"], "red_madness": [], "grixis_affinity": [], "elves": [], "tron": []}
+    assert rec == {"jund_wildfire": ["r9-blue-pilot"], "mono_blue_terror": ["r9-jund-pilot"], "red_madness": [], "grixis_affinity": [], "elves": [], "tron": []}
     by = {o["id"]: o for o in opt["opponents"]}
-    assert by["r8-blue-pilot"]["tested"] == "well" and by["r8-tron-pilot"]["tested"] == "some" and by["r7-madness"]["tested"] == "experimental" and "Experimental" in by["r7-madness"]["description"]
+    assert by["r9-blue-pilot"]["tested"] == "well" and by["r9-tron-pilot"]["tested"] == "some" and "overrates" in by["r9-tron-pilot"]["description"]
     # an older config without any of the fields still works
-    old = {"player_decks": cfg["player_decks"], "opponents": [{"id": "a", "label": "A", "model": R7, "deck": "elves"}]}
-    o2 = LiveManager(None, None, config=old, pinned={R7: {}}).options()
+    old = {"player_decks": cfg["player_decks"], "opponents": [{"id": "a", "label": "A", "model": TINY, "deck": "elves"}]}
+    o2 = LiveManager(None, None, config=old, pinned={TINY: {}}).options()
     assert "recommended_matchup" not in o2 and o2["opponents"][0]["tested"] == "" and o2["opponents"][0]["description"] == ""
     assert all(d["recommended"] == [] for d in o2["player_decks"])
     # a recommended matchup nobody can play here is not shown
     only = {**old, "recommended_matchup": {"decks": ["jund_wildfire", "mono_blue_terror"]}}
-    assert "recommended_matchup" not in LiveManager(None, None, config=only, pinned={R7: {}}).options()
+    assert "recommended_matchup" not in LiveManager(None, None, config=only, pinned={TINY: {}}).options()
 
 
 @pytest.fixture
 def tiny7(tmp_path):
-    """A tiny feature-set-7 checkpoint stored under the pinned r7 name."""
+    """A tiny feature-set-7 checkpoint stored under a pinned r9 name."""
     torch = pytest.importorskip("torch")
     from mtg_ml.rl.model import PolicyNet
 
     config = {"hidden": 16, "memory": "gru", "trunk": "entity", "features": 7}
-    path = tmp_path / "models" / f"{R7}.pt"
+    path = tmp_path / "models" / f"{TINY}.pt"
     path.parent.mkdir(parents=True)
     torch.save({"config": config, "model": PolicyNet(**config).state_dict()}, path)
     return tmp_path / "models"
 
 
-def r7_config(models, opponents=None) -> dict:
+def pilot_config(models, opponents=None) -> dict:
     cfg = copy.deepcopy(load_play_config())
     if opponents is None:
-        # the r8 Blue and Tron pilots are served from the same tiny test checkpoint
-        opponents = [{**o, "model": R7} for o in cfg["opponents"] if o["model"] in (R7, BLUE_PILOT, TRON_PILOT)]
+        # the six r9 pilots are served from the same tiny test checkpoint
+        opponents = [{**o, "model": TINY} for o in cfg["opponents"] if o["id"] in PILOT_DECKS]
     cfg["opponents"] = opponents
-    cfg["models"] = {R7: {**cfg["models"][R7], "sha256": sha256_file(models / f"{R7}.pt")}}
+    cfg["models"] = {TINY: {**cfg["models"][TINY], "sha256": sha256_file(models / f"{TINY}.pt")}}
     return cfg
 
 
 def test_validate_offer(tiny7):
-    cfg = r7_config(tiny7)
+    cfg = pilot_config(tiny7)
     ok, problems = validate_offer(tiny7, cfg, strict=True)
-    assert problems == [] and ok[R7]["features"] == 7
+    assert problems == [] and ok[TINY]["features"] == 7
     bad = copy.deepcopy(cfg)
-    bad["models"][R7]["sha256"] = "0" * 64
+    bad["models"][TINY]["sha256"] = "0" * 64
     assert "does not match" in validate_offer(tiny7, bad, strict=True)[1][0]
     assert validate_offer(tiny7, bad)[0] == {}  # a local server leaves it out
     bad = copy.deepcopy(cfg)
-    bad["models"][R7]["features"] = 6
+    bad["models"][TINY]["features"] = 6
     assert "feature set 7" in validate_offer(tiny7, bad, strict=True)[1][0]
     bad = copy.deepcopy(cfg)
-    del bad["models"][R7]
+    del bad["models"][TINY]
     assert "not pinned" in validate_offer(tiny7, bad, strict=True)[1][0]
-    assert R7 in validate_offer(tiny7, bad)[0]  # unpinned is fine locally
-    (tiny7 / "r7-lr075" / "latest.pt").write_bytes((tiny7 / f"{R7}.pt").read_bytes())
-    moving = {**cfg, "opponents": [{"id": "x", "label": "x", "model": "r7-lr075/latest", "deck": "elves"}]}
+    assert TINY in validate_offer(tiny7, bad)[0]  # unpinned is fine locally
+    (tiny7 / "r9-jund-pilot" / "latest.pt").write_bytes((tiny7 / f"{TINY}.pt").read_bytes())
+    moving = {**cfg, "opponents": [{"id": "x", "label": "x", "model": "r9-jund-pilot/latest", "deck": "elves"}]}
     assert "latest" in validate_offer(tiny7, moving, strict=True)[1][0]
     gone = {**cfg, "opponents": [{"id": "x", "label": "x", "model": "r9/model", "deck": "elves"}]}
     assert "no r9/model.pt" in validate_offer(tiny7, gone, strict=True)[1][0]
@@ -152,13 +157,13 @@ def test_validate_offer(tiny7):
 def offer(request, tiny7, tmp_path):
     if request.param == "native" and not native_ok():
         pytest.skip("native engine not built")
-    m = LiveManager(tiny7, tmp_path / "replays", engine=request.param, config=r7_config(tiny7), max_games=64)
+    m = LiveManager(tiny7, tmp_path / "replays", engine=request.param, config=pilot_config(tiny7), max_games=64)
     yield m
     m.close()
 
 
 def test_all_36_pairs_start_and_sideboard(offer):
-    """Every player deck against every r7 opponent: game 1 with the maindecks,
+    """Every player deck against every pilot opponent: game 1 with the maindecks,
     then game 2 sideboarded (the player's standard plan or the maindeck)."""
     opt = offer.options()
     assert {d["deck"]: sorted(d["opponents"]) for d in opt["player_decks"]} == {d: sorted(o["id"] for o in opt["opponents"]) for d in DECKS6}
@@ -179,7 +184,7 @@ def test_all_36_pairs_start_and_sideboard(offer):
 def test_representative_complete_games(offer):
     """A mirror, a cross matchup and a sideboarded game 2, played to the end."""
     rng = random.Random(7)
-    for mine, opp, plan in (("elves", "r7-elves", None), ("tron", "r7-madness", None), ("grixis_affinity", "r8-blue-pilot", "standard")):
+    for mine, opp, plan in (("elves", "r9-elves-pilot", None), ("tron", "r9-madness-pilot", None), ("grixis_affinity", "r9-blue-pilot", "standard")):
         view = offer.new({"deck": mine, "opponent": opp})
         if plan:
             offer.concede(view["live"]["id"])
