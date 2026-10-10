@@ -301,7 +301,7 @@ pub struct PendingTrigger {
     pub data: Data,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct Player {
     pub idx: u8,
     pub life: i32,
@@ -317,6 +317,37 @@ pub struct Player {
     pub landfall_turn: i32,
     /// The Undercity room (trigger index) their venture marker is in.
     pub dungeon_room: Option<usize>,
+}
+
+impl Clone for Player {
+    fn clone(&self) -> Self {
+        Player {
+            idx: self.idx,
+            life: self.life,
+            library: self.library.clone(),
+            hand: self.hand.clone(),
+            graveyard: self.graveyard.clone(),
+            exile: self.exile.clone(),
+            pool: self.pool.clone(),
+            drew_from_empty: self.drew_from_empty,
+            cards_drawn_this_turn: self.cards_drawn_this_turn,
+            landfall_turn: self.landfall_turn,
+            dungeon_room: self.dungeon_room,
+        }
+    }
+    fn clone_from(&mut self, o: &Self) {
+        self.idx = o.idx;
+        self.life = o.life;
+        self.library.clone_from(&o.library);
+        self.hand.clone_from(&o.hand);
+        self.graveyard.clone_from(&o.graveyard);
+        self.exile.clone_from(&o.exile);
+        self.pool.clone_from(&o.pool);
+        self.drew_from_empty = o.drew_from_empty;
+        self.cards_drawn_this_turn = o.cards_drawn_this_turn;
+        self.landfall_turn = o.landfall_turn;
+        self.dungeon_room = o.dungeon_room;
+    }
 }
 
 impl Player {
@@ -489,6 +520,10 @@ pub enum Stop {
 /// The resume input that makes a suspended `ask` return `Stop::Abort`.
 pub const ABORT: usize = usize::MAX;
 
+/// The resume input that makes a simulation copy suspended at the other
+/// player's priority pass for them and carry on (`Game::continue_pass`).
+pub const CONTINUE_PASS: usize = usize::MAX - 1;
+
 pub type R<T> = Result<T, Stop>;
 
 pub fn rules<T>(msg: impl Into<String>) -> R<T> {
@@ -564,10 +599,45 @@ pub struct Args {
 /// The data state at the start of a step, from which `Game::copy` restarts
 /// the engine (Python `_Snapshot`).
 pub struct Snap {
-    pub state: State,
+    /// Pooled box (returned to the pool when the snapshot is dropped).
+    pub state: Option<Box<State>>,
     pub step: &'static str,
     pub skip_draw: bool,
     pub n_actions: usize,
+    pub resume: Resume,
+}
+
+/// Where the engine restarts from a snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Resume {
+    /// At the step's start (before its pre-priority part).
+    StepStart,
+    /// In the step's priority round, at the top of its loop after state-based
+    /// actions and triggers: `p` has priority after `passes` passes in a row.
+    Priority { p: u8, passes: u8 },
+}
+
+impl Snap {
+    pub fn state(&self) -> &State {
+        self.state.as_ref().expect("snapshot state")
+    }
+}
+
+impl Drop for Snap {
+    fn drop(&mut self) {
+        if let Some(b) = self.state.take() {
+            State::recycle(b);
+        }
+    }
+}
+
+/// Finished games and dropped snapshots hand their `State` box to the next
+/// clone on the same thread (`State::boxed_clone`): the big vectors keep
+/// their allocations. Capped so idle memory stays small.
+const POOLED_STATES: usize = 64;
+
+thread_local! {
+    static STATES: std::cell::RefCell<Vec<Box<State>>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Cloning a `State` copies the whole game (cards, zones, stack, RNG); only
@@ -647,6 +717,15 @@ pub struct State {
     /// (`sim_viewer`, `sim_assume_pass`) a simulation copy takes on once its
     /// replay has consumed the last record (see `Game::copy_for_sim`).
     pub sim_after_replay: Option<(u8, bool)>,
+    /// `run_turn`'s `skip_draw` of the turn in progress (a priority snapshot
+    /// restarts the turn's remaining steps with it).
+    pub turn_skip_draw: bool,
+    /// Test hook: take step-start snapshots only (the reference behaviour the
+    /// equality tests compare priority snapshots against).
+    pub step_snapshots_only: bool,
+    /// Test hook: `pv:simp:` reruns the simulation instead of continuing the
+    /// first one (the reference behaviour).
+    pub no_continue_sim: bool,
 }
 
 /// One priority or payment decision: the chosen value and, when a player was asked, the
@@ -748,6 +827,9 @@ impl State {
             prio_replay: None,
             no_decision_replay: false,
             sim_after_replay: None,
+            turn_skip_draw: false,
+            step_snapshots_only: false,
+            no_continue_sim: false,
             shuffles: 0,
             witnessed: [vec![], vec![]],
             snapshots: false,
@@ -2479,14 +2561,149 @@ impl State {
     }
 
     /// `Game._take_snapshot`.
-    pub fn take_snapshot(&mut self, step: &'static str, skip_draw: bool) {
+    pub fn take_snapshot(&mut self, step: &'static str, skip_draw: bool, resume: Resume) {
         let old = self.snap.take(); // keep snapshots from chaining
         self.prio_log.clear();
-        let mut state = self.clone();
+        let mut state = Self::pooled_box(self);
         state.decision = None;
-        self.snap = Some(Rc::new(Snap { state, step, skip_draw, n_actions: self.actions.len() }));
+        self.snap = Some(Rc::new(Snap { state: Some(state), step, skip_draw, n_actions: self.actions.len(), resume }));
         self.edited = false;
         drop(old);
+    }
+
+    /// A box holding a copy of `src`, reusing a pooled one's allocations.
+    pub fn pooled_box(src: &State) -> Box<State> {
+        match STATES.try_with(|p| p.borrow_mut().pop()).ok().flatten() {
+            Some(mut b) => {
+                b.copy_from(src);
+                b
+            }
+            None => Box::new(src.clone()),
+        }
+    }
+
+    /// Return a box to the pool (dropping what it holds that must not be
+    /// kept alive: the snapshot, the replay record).
+    pub fn recycle(mut b: Box<State>) {
+        b.snap = None;
+        b.prio_replay = None;
+        b.decision = None;
+        let _ = STATES.try_with(|p| {
+            let mut p = p.borrow_mut();
+            if p.len() < POOLED_STATES {
+                p.push(b);
+            }
+        });
+    }
+
+    /// `*self = src.clone()` keeping this state's vector allocations. Every
+    /// field is listed (no `..`): adding one to `State` must break the build
+    /// here.
+    pub fn copy_from(&mut self, src: &State) {
+        let State {
+            args,
+            snapshots,
+            snap,
+            edited,
+            match_game,
+            rng,
+            auto_single,
+            auto_mana,
+            auto_pass,
+            max_turns,
+            logging,
+            log,
+            actions,
+            next_id,
+            cards,
+            players,
+            battlefield,
+            stack,
+            pending,
+            turn,
+            step_name,
+            lands_played,
+            spells_cast_this_turn,
+            initiative,
+            attackers,
+            blocked,
+            blocks,
+            winner,
+            over,
+            end_reason,
+            decision,
+            paying,
+            damage_allocation,
+            combat_subjects,
+            active,
+            starting_player,
+            skip_first_draw,
+            mulligan_phase,
+            mulligans_taken,
+            sim_viewer,
+            sim_assume_pass,
+            shuffles,
+            witnessed,
+            prio_log,
+            prio_replay,
+            no_decision_replay,
+            sim_after_replay,
+            turn_skip_draw,
+            step_snapshots_only,
+            no_continue_sim,
+        } = src;
+        self.args.clone_from(args);
+        self.snapshots = *snapshots;
+        self.snap.clone_from(snap);
+        self.edited = *edited;
+        self.match_game = *match_game;
+        self.rng.clone_from(rng);
+        self.auto_single = *auto_single;
+        self.auto_mana = *auto_mana;
+        self.auto_pass = *auto_pass;
+        self.max_turns = *max_turns;
+        self.logging = *logging;
+        self.log.clone_from(log);
+        self.actions.clone_from(actions);
+        self.next_id = *next_id;
+        self.cards.clone_from(cards);
+        for (d, s) in self.players.iter_mut().zip(players.iter()) {
+            d.clone_from(s);
+        }
+        self.battlefield.clone_from(battlefield);
+        self.stack.clone_from(stack);
+        self.pending.clone_from(pending);
+        self.turn = *turn;
+        self.step_name = step_name;
+        self.lands_played = *lands_played;
+        self.spells_cast_this_turn = *spells_cast_this_turn;
+        self.initiative = *initiative;
+        self.attackers.clone_from(attackers);
+        self.blocked.clone_from(blocked);
+        self.blocks.clone_from(blocks);
+        self.winner = *winner;
+        self.over = *over;
+        self.end_reason = end_reason;
+        self.decision.clone_from(decision);
+        self.paying.clone_from(paying);
+        self.damage_allocation.clone_from(damage_allocation);
+        self.combat_subjects.clone_from(combat_subjects);
+        self.active = *active;
+        self.starting_player = *starting_player;
+        self.skip_first_draw = *skip_first_draw;
+        self.mulligan_phase = *mulligan_phase;
+        self.mulligans_taken = *mulligans_taken;
+        self.sim_viewer = *sim_viewer;
+        self.sim_assume_pass = *sim_assume_pass;
+        self.shuffles = *shuffles;
+        self.witnessed.clone_from(witnessed);
+        self.prio_log.clone_from(prio_log);
+        self.prio_replay.clone_from(prio_replay);
+        self.no_decision_replay = *no_decision_replay;
+        self.sim_after_replay = *sim_after_replay;
+        self.turn_skip_draw = *turn_skip_draw;
+        self.step_snapshots_only = *step_snapshots_only;
+        self.no_continue_sim = *no_continue_sim;
     }
 
     /// `Game._state_edited`.
