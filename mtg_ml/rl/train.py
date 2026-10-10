@@ -186,6 +186,8 @@ class TrainConfig:
     pool_recent_frac: float = 0.5  # share of pool games against the newest snapshot
     pool_sampling: str = "uniform"  # the other pool games: "uniform" over the pool, or "pfsp": weighted (1 - learner's win rate vs it) ** pfsp_power
     opponent_pool: str = ""  # immutable external *.pt opponents, separate from this run's snapshot namespace
+    opponent_models: str = ""  # frozen per-deck opponents "deck=PATH,..." (match.DECKS names): in a non-mirror matchup the seat of a listed deck is played by that checkpoint, the learner takes the other deck
+    opponent_frac: float = 1.0  # share of the games of such a matchup that use --opponent-models (the rest follow the usual self-play / bot / pool mix)
     pfsp_power: float = 2.0
     pfsp_ema: float = 0.05  # per-game step of the running win rate vs each pool opponent (starts at 0.5)
     init: str = ""  # a new run starts from these weights (a policy file or checkpoint; fresh optimizer): its architecture, with --value-bound, --entity-attn and --features on top (new attention layers start as the identity)
@@ -372,6 +374,7 @@ class Trainer:
         self.pool: list[str] = imported + sorted(os.path.join(pool_dir, f) for f in os.listdir(pool_dir) if f.startswith("iter_") and f.endswith(".pt"))
         # a resumed run's snapshots that record no version are the run's own from before --features stamped it (docs/features.md): its version
         self.pool_features = {p: self.net.features for p in self.pool if "features" not in checkpoint_config(p)} if ck is not None and self.net.features != 1 else {}
+        self.frozen = self._frozen_opponents()
         weights = self._weights()
         self._publish(weights)
         if not self.pool:
@@ -422,6 +425,31 @@ class Trainer:
             raise ValueError(f"--init {path}: its network {ck['config']} does not fit {self.net.config}")
         new = load_partial(self.net, ck["model"])
         print(f"initialised from {path}" + (f"; new layers at their identity init: {', '.join(new)}" if new else ""), flush=True)
+
+    def _frozen_opponents(self) -> dict[str, str]:
+        """--opponent-models as {deck: absolute checkpoint path}, validated: known decks,
+        existing files, the learner's feature set, and no matchup with both decks listed
+        (which one would the learner play?)."""
+        c, out = self.cfg, {}
+        if not 0.0 <= c.opponent_frac <= 1.0:
+            raise ValueError(f"--opponent-frac must be in [0, 1], not {c.opponent_frac}")
+        for part in filter(None, (x.strip() for x in c.opponent_models.split(","))):
+            deck, _, path = part.partition("=")
+            if deck not in DECK_KEYS or not path or deck in out:
+                raise ValueError(f"--opponent-models {c.opponent_models!r}: expected unique deck=PATH pairs, deck one of {sorted(DECK_KEYS)}")
+            if not os.path.isfile(path):
+                raise FileNotFoundError(f"--opponent-models {deck}={path}: no such checkpoint")
+            f = checkpoint_config(path).get("features", 1)
+            if f != self.net.features:
+                raise ValueError(f"--opponent-models {deck}={path}: feature set {f}, but this run's is {self.net.features}; frozen opponents must share it")
+            out[deck] = os.path.abspath(path)
+        if out and c.exploit:
+            raise ValueError("--opponent-models does not combine with exploiter mode")
+        for m, _ in self.matchups:
+            a, b = matchup_decks(m)
+            if a != b and a in out and b in out:
+                raise ValueError(f"--opponent-models lists both decks of matchup {m}: list only the opponents, not the learner's deck")
+        return out
 
     def _collector(self):
         c, lay = self.cfg, self.layout
@@ -591,6 +619,10 @@ class Trainer:
                 matchup = self.rng.choices([m for m, _ in self.matchups], [w for _, w in self.matchups])[0]
                 for seed in ([game_seed(base + k, n) for n in (1, 2, 3)] if c.match_rollouts else [base + k]):
                     self.spec_matchup[seed] = matchup
+            if self.frozen:  # the listed deck's seat is played by its frozen checkpoint; only the learner's seat is recorded
+                a, b = matchup_decks(matchup)
+                if a != b and (a in self.frozen or b in self.frozen) and (c.opponent_frac >= 1 or self.rng.random() < c.opponent_frac):
+                    seats = (self.frozen[a], LEARNER) if a in self.frozen else (LEARNER, self.frozen[b])
             swap = self.rng.random() < 0.5 if self.net.features >= 7 else False
             variants = None
             if c.variants:
@@ -774,7 +806,7 @@ class Trainer:
                     "game_turns": sum(g[3] for g in data.games) / max(len(data.games), 1),
                     "draws": sum(g[1] is None for g in data.games) / max(len(data.games), 1),
                     "jund_wins_selfplay": _rate([g for g in data.games if g[0] == (LEARNER, LEARNER)], 0),
-                    **rollout_stats(data.games, data.kinds),
+                    **rollout_stats(data.games, data.kinds, {p: d for d, p in self.frozen.items()}),
                     "shaping": roll.shaping,
                     "lr": lr,
                     "pool_size": len(self.pool),
@@ -938,7 +970,7 @@ def _amend(path: str, iteration: int, values: dict) -> None:
     _append(path, {"iteration": iteration, **values})
 
 
-def rollout_stats(games: list, kinds) -> dict:
+def rollout_stats(games: list, kinds, frozen: dict | None = None) -> dict:
     """Row statistics of a training rollout from its `Result.games` rows
     (seats, winner, end reason, turns, decisions, seed) and recorded decision
     kinds: the learner's win rate against pool checkpoints (`win_vs_pool`;
@@ -946,8 +978,12 @@ def rollout_stats(games: list, kinds) -> dict:
     (`win_vs_pool_by_opp`: {snapshot name: [win rate, learner games]}),
     against the scripted bots (`win_vs_bot`), decisions per game (every
     seat's, forced moves included) and the share of the recorded learner
-    decisions that are mana payments (`pay_mana_share`)."""
+    decisions that are mana payments (`pay_mana_share`). `frozen` ({checkpoint
+    path: deck}, --opponent-models): those games leave the pool statistics and
+    are reported as `win_vs_frozen` and `win_vs_frozen_by_deck`
+    ({deck: [win rate, learner games]})."""
     by_opp: dict[str, list[int]] = {}
+    by_deck: dict[str, list[int]] = {}
     pool_won = pool_n = bot_won = bot_n = 0
     for g in games:
         for s in (0, 1):
@@ -958,12 +994,22 @@ def rollout_stats(games: list, kinds) -> dict:
             if opp == BOT:
                 bot_won, bot_n = bot_won + won, bot_n + 1
                 continue
+            if frozen and opp in frozen:
+                w = by_deck.setdefault(frozen[opp], [0, 0])
+                w[0] += won
+                w[1] += 1
+                continue
             pool_won, pool_n = pool_won + won, pool_n + 1
             w = by_opp.setdefault(os.path.basename(opp).removesuffix(".pt"), [0, 0])
             w[0] += won
             w[1] += 1
     pay = KIND_ID["pay_mana"]
+    extra = {}
+    if frozen:
+        extra = {"win_vs_frozen": sum(w for w, _ in by_deck.values()) / max(sum(n for _, n in by_deck.values()), 1),
+                 "win_vs_frozen_by_deck": {k: [round(w / n, 4), n] for k, (w, n) in sorted(by_deck.items())}}
     return {
+        **extra,
         "win_vs_pool": pool_won / max(pool_n, 1),
         "win_vs_pool_by_opp": {k: [round(w / n, 4), n] for k, (w, n) in sorted(by_opp.items())},
         "win_vs_bot": bot_won / max(bot_n, 1),

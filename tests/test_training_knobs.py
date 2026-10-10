@@ -214,7 +214,7 @@ def test_annealed_lr_does_not_recapture(ckpt):
 def _bare_trainer(*args):
     t = Trainer.__new__(Trainer)
     t.cfg = _cfg("unused", *args)
-    t.rng, t.pool, t.pfsp, t.games_total, t.lr_origin = random.Random(0), [], {}, 0, 0
+    t.rng, t.pool, t.pfsp, t.games_total, t.lr_origin, t.frozen = random.Random(0), [], {}, 0, 0, {}
     t.matchups, t.spec_matchup = parse_matchups(t.cfg.matchup), {}
     t.net = SimpleNamespace(features=t.cfg.features or FEATURES)
     return t
@@ -277,6 +277,57 @@ def test_pfsp_tracks_win_rates_and_prefers_opponents_that_win():
     assert n[a] < n[c] < n[b]
     t.pfsp = {os.path.basename(p): 1.0 for p in t.pool}
     assert t._pfsp_weights() is None  # all zero: uniform
+
+
+def test_frozen_opponents_play_their_deck_and_only_the_learner_is_recorded(tmp_path):
+    t = _bare_trainer("--matchup", "jund_blue,jund_madness,jund_mirror", "--games-per-iter", "300", "--features", "7")
+    t.pool = ["/p/iter_0.pt"]
+    t.frozen = {"mono_blue_terror": "/b.pt", "red_madness": "/r.pt"}
+    specs = t._train_specs(0)
+    by = {m: {sp.seats for sp in specs if sp.matchup == m} for m in ("jund_blue", "jund_madness", "jund_mirror")}
+    assert by["jund_blue"] == {(LEARNER, "/b.pt")} and by["jund_madness"] == {(LEARNER, "/r.pt")}  # Jund is seat 0 in both
+    assert len(by["jund_mirror"]) > 1 and all("/b.pt" not in s and "/r.pt" not in s for s in by["jund_mirror"])  # mirrors: the usual mix
+    t.matchups, t.frozen = parse_matchups("jund_blue"), {"jund_wildfire": "/j.pt"}
+    t.pool = ["/p/iter_0.pt"]
+    assert {sp.seats for sp in t._train_specs(0) if sp.matchup == "jund_blue"} == {("/j.pt", LEARNER)}  # listed deck in seat 0
+
+
+def test_opponent_frac_mixes_frozen_and_usual_games():
+    t = _bare_trainer("--matchup", "jund_blue", "--games-per-iter", "1000", "--self-play-frac", "1", "--opponent-frac", "0.3")
+    t.frozen = {"mono_blue_terror": "/b.pt"}
+    n = sum(sp.seats == (LEARNER, "/b.pt") for sp in t._train_specs(0))
+    assert 230 < n < 370
+    t = _bare_trainer("--matchup", "jund_blue", "--games-per-iter", "50", "--self-play-frac", "1")  # no flag: the old stream
+    assert {sp.seats for sp in t._train_specs(0)} == {(LEARNER, LEARNER)}
+
+
+def test_rollout_stats_splits_frozen_games_from_the_pool():
+    from mtg_ml.rl.train import rollout_stats
+
+    games = [((LEARNER, "/b.pt"), 0, None, 5, 3, 1), (("/b.pt", LEARNER), 0, None, 5, 3, 2), ((LEARNER, "/p/iter_1.pt"), 0, None, 5, 3, 3)]
+    row = rollout_stats(games, [], {"/b.pt": "mono_blue_terror"})
+    assert row["win_vs_frozen_by_deck"] == {"mono_blue_terror": [0.5, 2]} and row["win_vs_frozen"] == 0.5 and row["win_vs_pool"] == 1.0
+    assert "win_vs_frozen" not in rollout_stats(games, [])
+
+
+def test_opponent_models_are_validated_and_played_end_to_end(tmp_path, in_process):  # noqa: F811
+    def save(name, **kw):
+        torch.manual_seed(1)
+        net = PolicyNet(hidden=16, **kw)
+        torch.save({"config": net.config, "model": net.state_dict()}, tmp_path / name)
+        return str(tmp_path / name)
+
+    good, other = save("blue.pt", features=7), save("old.pt", features=6)
+    flags = ["--hidden", "16", "--features", "7", "--matchup", "jund_blue,jund_mirror", "--games-per-iter", "16", "--iterations", "1", *IN_PROCESS, *NO_EVAL]
+    for bad in (f"mono_blue_terror={other}", f"mono_blue_terror={good},jund_wildfire={good}", f"nope={good}", f"mono_blue_terror={tmp_path}/missing.pt"):
+        with pytest.raises((ValueError, FileNotFoundError)):
+            Trainer(_cfg(tmp_path / "bad", "--opponent-models", bad, *flags))
+    run = tmp_path / "ok"
+    Trainer(_cfg(run, "--opponent-models", f"mono_blue_terror={good}", *flags)).train()
+    train = [g for r in in_process if r.train for g in r.games]
+    assert any("blue.pt" in seats for _, seats, _ in train)
+    row = _rows(run)[-1]
+    assert row["win_vs_frozen_by_deck"]["mono_blue_terror"][1] > 0
 
 
 def test_exploiter_trains_one_deck_against_the_frozen_main_policy(tmp_path, in_process):  # noqa: F811
